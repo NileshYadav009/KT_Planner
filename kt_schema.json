@@ -1,0 +1,28 @@
+{
+  "sections": [
+    {
+      "id": "system_overview",
+      "title": "System Overview",
+      "required": true,
+      "hints": ["architecture", "services", "components", "data flow"]
+    },
+    {
+      "id": "deployment",
+      "title": "Deployment",
+      "required": true,
+      "hints": ["deploy", "ci cd", "pipeline", "release"]
+    },
+    {
+      "id": "rollback",
+      "title": "Rollback",
+      "required": true,
+      "hints": ["rollback", "revert", "previous version"]
+    },
+    {
+      "id": "danger_zones",
+      "title": "Danger Zones",
+      "required": true,
+      "hints": ["risk", "failure", "outage", "incident"]
+    }
+  ]
+}
