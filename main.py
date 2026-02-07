@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 import whisper
 import ffmpeg
 import tempfile
@@ -15,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-model = whisper.load_model("base")
+MODEL = None
 
 with open("kt_schema.json") as f:
     SCHEMA = json.load(f)["sections"]

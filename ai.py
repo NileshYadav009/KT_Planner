@@ -2,13 +2,14 @@ import json
 import re
 from sentence_transformers import SentenceTransformer, util
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
 with open("kt_schema.json") as f:
     SCHEMA = json.load(f)["sections"]
 
-SECTION_EMBEDS = {
-    s["id"]: model.encode(" ".join(s["hints"]), convert_to_tensor=True)
+MODEL = None
+SECTION_EMBEDS = None
+
+SECTION_HINTS = {
+    s["id"]: {hint.lower() for hint in s["hints"]}
     for s in SCHEMA
 }
 
@@ -26,6 +27,7 @@ def chunk_text(text, size=250):
 
 def classify_transcript(transcript: str, *, similarity_threshold: float = 0.35):
     coverage = {s["id"]: [] for s in SCHEMA}
+    section_embeds = get_section_embeds()
 
     for chunk in chunk_text(transcript):
         emb = model.encode(chunk, convert_to_tensor=True)
