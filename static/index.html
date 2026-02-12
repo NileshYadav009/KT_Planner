@@ -210,7 +210,9 @@
       }
 
       // make custom file label show chosen filename
-      document.querySelector('.fileLabel').addEventListener('click', ()=>document.getElementById('file').click());
+      // The label element already uses `for="file"` which opens the file picker.
+      // Avoid programmatically calling `.click()` to prevent double file dialogs
+      // in some browsers/environments.
       fileInput.addEventListener('change', (e)=>{
         const f = e.target.files[0];
         const lbl = document.querySelector('.fileLabel');
