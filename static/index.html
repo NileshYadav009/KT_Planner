@@ -181,7 +181,9 @@
               const cov = data.coverage || {};
               for(const [id, info] of Object.entries(cov)){
                 const div = document.createElement('div');
-                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${info.content.map(c=>`<p>${c}</p>`).join('')}</div>`;
+                const contentArray = (info && info.content && Array.isArray(info.content)) ? info.content : [];
+                const contentHtml = contentArray.map(c=>`<p>${c}</p>`).join('');
+                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}</div>`;
                 coverageEl.appendChild(div);
               }
               // render screenshots

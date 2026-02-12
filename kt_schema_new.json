@@ -1,6 +1,46 @@
 {
   "template_name": "PROJECT KT & HANDOVER DOCUMENT",
   "version": "1.0",
+  "organization_configurable": true,
+  "multi_tenant": { "enabled": true },
+  "rbac": {
+    "roles": [
+      { "id": "admin", "can_lock": true, "can_approve": true, "editable_sections": ["*"] },
+      { "id": "manager", "can_lock": false, "can_approve": true, "editable_sections": ["*"] },
+      { "id": "devops", "can_lock": false, "can_approve": false, "editable_sections": ["deployment_and_rollback", "common_failures", "danger_zones", "ownership_escalation"] },
+      { "id": "auditor", "can_lock": false, "can_approve": false, "editable_sections": [] }
+    ]
+  },
+  "governance": {
+    "template_locking": true,
+    "audit_logs": true,
+    "manager_signoff_required": true,
+    "escalate_if_mandatory_missing": true
+  },
+  "data_controls": {
+    "encryption_at_rest": true,
+    "encryption_in_transit": true,
+    "region_storage": ["us", "eu", "apac"],
+    "pii_detection_enabled": true,
+    "pii_redaction_enabled": true
+  },
+  "states": ["Draft", "In Progress", "Pending Review", "Completed", "Completed with Risk", "Rejected"],
+  "completion_rules": {
+    "allow_complete_with_risk": true,
+    "risk_requires_manager_signoff": true
+  },
+  "templates": [
+    { "id": "default", "title": "Default KT Template", "extends": null, "business_unit": "global" },
+    { "id": "devops_handover", "title": "DevOps Handover", "extends": "default", "business_unit": "platform" },
+    { "id": "payments_kt", "title": "Payments KT", "extends": "default", "business_unit": "payments" }
+  ],
+  "extensions": {
+    "enabled": true,
+    "registry": [
+      { "id": "fintech", "title": "Fintech Extension", "toggle_per_project": true },
+      { "id": "healthcare", "title": "Healthcare Extension", "toggle_per_project": true }
+    ]
+  },
   "sections": [
     {
       "id": "system_overview",
