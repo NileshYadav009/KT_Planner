@@ -1,0 +1,482 @@
+{
+  "template_name": "PROJECT KT & HANDOVER DOCUMENT",
+  "version": "1.0",
+  "sections": [
+    {
+      "id": "system_overview",
+      "title": "SYSTEM OVERVIEW",
+      "required": true,
+      "hints": [
+        "system name",
+        "what does this system do",
+        "who uses it",
+        "users",
+        "b2b",
+        "b2c",
+        "internal",
+        "critical time",
+        "business hours",
+        "business impact",
+        "compliance",
+        "worst case failure",
+        "system in 5 lines",
+        "business purpose",
+        "problem this system solves",
+        "why does the business depend on it",
+        "business criticality",
+        "impact if system is down",
+        "what breaks",
+        "who is affected",
+        "environments",
+        "prod",
+        "staging",
+        "qa",
+        "dev",
+        "key technologies",
+        "cloud",
+        "tools",
+        "platforms",
+        "aws",
+        "kubernetes",
+        "terraform",
+        "jenkins",
+        "architecture reference",
+        "architecture documentation",
+        "last updated",
+        "verified by incoming owner",
+        "plain-english notes",
+        "tribal knowledge",
+        "shortcuts",
+        "sharp edges",
+        "history"
+      ],
+      "fields": [
+        {
+          "id": "system_name",
+          "label": "System Name",
+          "description": "Example: Payments Platform, CI/CD Infrastructure, Core Backend Services",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "system_in_5_lines",
+          "label": "System in 5 Lines",
+          "type": "group",
+          "required": true,
+          "fields": [
+            { "id": "what_it_does", "label": "What does this system do (non-technical)?", "type": "text", "required": true },
+            { "id": "users", "label": "Who uses it?", "type": "multi_select", "options": ["B2B", "B2C", "Internal"], "required": true },
+            { "id": "critical_time", "label": "When is it most critical?", "type": "text", "required": true },
+            { "id": "business_impact", "label": "Business / revenue / compliance impact if down?", "type": "text", "required": true },
+            { "id": "worst_case", "label": "One-line worst-case failure scenario", "type": "text", "required": true }
+          ]
+        },
+        {
+          "id": "business_purpose",
+          "label": "Business Purpose",
+          "type": "group",
+          "fields": [
+            { "id": "problem_solved", "label": "What problem does this system solve?", "type": "text", "required": true },
+            { "id": "business_dependency", "label": "Why does the business depend on it?", "type": "text", "required": true }
+          ]
+        },
+        {
+          "id": "business_criticality",
+          "label": "Business Criticality",
+          "type": "single_select",
+          "options": ["High", "Medium", "Low"],
+          "required": true
+        },
+        {
+          "id": "impact_if_down",
+          "label": "Impact if System is Down",
+          "type": "group",
+          "fields": [
+            { "id": "what_breaks", "label": "What breaks?", "type": "text", "required": true },
+            { "id": "who_affected", "label": "Who is affected?", "type": "text", "required": true }
+          ]
+        },
+        {
+          "id": "environments",
+          "label": "Environments",
+          "type": "group",
+          "fields": [
+            { "id": "environment_list", "label": "Available Environments", "type": "multi_select", "options": ["Prod", "Staging", "QA", "Dev", "Other"], "required": true },
+            { "id": "ownership_split", "label": "Which environments DevOps owns vs supports?", "type": "text", "required": true }
+          ]
+        },
+        {
+          "id": "key_technologies",
+          "label": "Key Technologies",
+          "description": "Cloud, tools, platforms (AWS, Kubernetes, Terraform, Jenkins, etc.)",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "architecture_reference",
+      "title": "Architecture Reference",
+      "required": true,
+      "hints": [
+        "architecture reference",
+        "architecture documentation",
+        "last updated",
+        "verified by incoming owner"
+      ],
+      "fields": [
+        { "id": "architecture_link", "label": "Link to detailed architecture documentation", "type": "url", "required": true },
+        { "id": "last_updated", "label": "Last Updated", "type": "date", "required": true },
+        { "id": "verified_by_incoming_owner", "label": "Verified by Incoming Owner", "type": "boolean", "required": true }
+      ]
+    },
+    {
+      "id": "plain_english_notes",
+      "title": "Plain-English Notes",
+      "description": "Tribal knowledge, shortcuts, sharp edges, history",
+      "type": "text",
+      "required": false
+    },
+    {
+      "id": "day1_survival_checklist",
+      "title": "DAY-1 SURVIVAL CHECKLIST",
+      "required": true,
+      "hints": [
+        "required access",
+        "tools",
+        "cloud console",
+        "git repository",
+        "ci/cd tool",
+        "monitoring",
+        "secrets location",
+        "safe on day-1",
+        "first safe actions",
+        "read-only checks",
+        "dry-runs",
+        "pipeline view",
+        "dashboard review",
+        "actions not to perform",
+        "must not be touched",
+        "first few days"
+      ],
+      "fields": [
+        {
+          "id": "required_access",
+          "label": "Required Access & Tools",
+          "type": "table",
+          "columns": ["Item", "Required", "Location/Link", "Safe on Day-1", "Notes"],
+          "columns_type": ["text", "boolean", "url", "boolean", "text"],
+          "rows": [
+            "Cloud Console",
+            "Git Repository",
+            "CI/CD Tool",
+            "Monitoring",
+            "Secrets Location"
+          ]
+        },
+        {
+          "id": "first_safe_actions",
+          "label": "First Safe Actions",
+          "description": "Read-only checks, dry-runs, pipeline view, dashboard review",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "actions_not_to_perform",
+          "label": "Actions NOT to Perform Initially",
+          "type": "text",
+          "required": false,
+          "hints": [
+            "tribal knowledge",
+            "shortcuts",
+            "sharp edges",
+            "history",
+            "pitfalls",
+            "known workarounds",
+            "gotchas"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deployment_and_rollback",
+      "title": "DEPLOYMENT & ROLLBACK",
+      "required": true,
+      "hints": [
+        "normal deployment process",
+        "exact steps",
+        "steps",
+        "action",
+        "tool",
+        "command",
+        "expected result",
+        "repo link",
+        "pipeline link",
+        "trigger type",
+        "manual",
+        "auto",
+        "deployment window",
+        "pre-deployment checks",
+        "post-deployment validation",
+        "rollback procedure",
+        "what to do if something goes wrong",
+        "rollback action",
+        "risk level",
+        "rollback trigger",
+        "who approves rollback",
+        "expected rollback time"
+      ],
+      "fields": [
+        {
+          "id": "deployment_steps",
+          "label": "Normal Deployment Process",
+          "type": "table",
+          "columns": ["Step", "Action", "Tool/Command", "Expected Result"],
+          "min_rows": 3,
+          "required": true
+        },
+        { "id": "repo_link", "label": "Repo Link", "type": "url", "required": true },
+        { "id": "pipeline_link", "label": "Pipeline Link", "type": "url", "required": true },
+        { "id": "trigger_type", "label": "Trigger Type", "type": "single_select", "options": ["Manual", "Auto"], "required": true },
+        { "id": "deployment_window", "label": "Deployment Window", "type": "text", "required": true },
+        { "id": "pre_deployment_checks", "label": "Pre-deployment Checks", "type": "text", "required": true },
+        { "id": "post_deployment_validation", "label": "Post-deployment Validation", "type": "text", "required": true },
+        {
+          "id": "rollback_procedure",
+          "label": "Rollback Procedure",
+          "type": "group",
+          "fields": [
+            { "id": "rollback_scenarios", "type": "table", "columns": ["Scenario", "Rollback Action", "Risk Level"], "required": true },
+            { "id": "rollback_trigger", "label": "Rollback Trigger", "type": "text", "required": true },
+            { "id": "rollback_approval", "label": "Who approves rollback?", "type": "text", "required": true },
+            { "id": "rollback_time", "label": "Expected rollback time", "type": "text", "required": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "common_failures",
+      "title": "COMMON FAILURES & FIXES",
+      "required": true,
+      "hints": [
+        "issue",
+        "symptom",
+        "likely cause",
+        "how to fix",
+        "frequency",
+        "high",
+        "medium",
+        "low",
+        "keda",
+        "ticket link",
+        "known bad days",
+        "windows",
+        "high-traffic periods",
+        "month-end",
+        "eod",
+        "audit windows",
+        "times when deployments must be avoided"
+      ],
+      "type": "table",
+      "columns": ["Issue/Symptom", "Likely Cause", "How to Fix", "Frequency", "KEDB / Ticket Link"]
+    },
+    {
+      "id": "known_bad_days",
+      "title": "KNOWN BAD DAYS / WINDOWS",
+      "required": true,
+      "hints": [
+        "known bad days",
+        "windows",
+        "high-traffic periods",
+        "month-end",
+        "eod",
+        "audit windows",
+        "times when deployments must be avoided"
+      ],
+      "fields": [
+        { "id": "high_traffic_periods", "type": "text" },
+        { "id": "month_end_windows", "type": "text" },
+        { "id": "deployment_blackout_times", "type": "text" }
+      ]
+    },
+    {
+      "id": "danger_zones",
+      "title": "DANGER ZONES (DO NOT TOUCH)",
+      "required": true,
+      "hints": [
+        "danger zones",
+        "do not touch",
+        "area",
+        "action",
+        "why dangerous",
+        "approval required",
+        "emergency only",
+        "if unsure do not proceed",
+        "escalate"
+      ],
+      "type": "table",
+      "columns": ["Area/Action", "Why Dangerous", "Approval Required", "Emergency Only"],
+      "columns_type": ["text", "text", "boolean", "boolean"]
+    },
+    {
+      "id": "ownership_escalation",
+      "title": "OWNERSHIP & ESCALATION",
+      "required": true,
+      "hints": [
+        "ownership",
+        "escalation",
+        "component",
+        "area",
+        "owner",
+        "team",
+        "when to contact",
+        "escalation channel"
+      ],
+      "type": "table",
+      "columns": ["Component / Area", "Owner / Team", "When to Contact", "Escalation Channel"],
+      "columns_type": ["text", "text", "text", "text"]
+    },
+    {
+      "id": "first_30_day_plan",
+      "title": "FIRST 30-DAY OWNERSHIP PLAN",
+      "required": true,
+      "hints": [
+        "first 30-day",
+        "week 1",
+        "observe",
+        "shadow",
+        "read-only",
+        "week 2",
+        "non-prod changes",
+        "week 3",
+        "prod deployment with supervision",
+        "week 4",
+        "independent ownership"
+      ],
+      "fields": [
+        { "id": "week1", "label": "Week 1", "value": "Observe, shadow, read-only" },
+        { "id": "week2", "label": "Week 2", "value": "Non-prod changes" },
+        { "id": "week3", "label": "Week 3", "value": "Prod deployment with supervision" },
+        { "id": "week4", "label": "Week 4", "value": "Independent ownership" }
+      ]
+    },
+    {
+      "id": "open_responsibilities",
+      "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+      "required": true,
+      "hints": [
+        "open responsibilities",
+        "transition plan",
+        "rules",
+        "existing tasks",
+        "in-progress tasks",
+        "recurring tasks",
+        "no new initiatives",
+        "context",
+        "priority",
+        "approval",
+        "incoming owner can accept defer reject",
+        "open tasks",
+        "responsibilities",
+        "task type",
+        "ops",
+        "project",
+        "automation",
+        "compliance",
+        "current status",
+        "not started",
+        "in progress",
+        "blocked",
+        "business impact",
+        "knowledge transfer done",
+        "partial",
+        "recommendation",
+        "continue",
+        "pause",
+        "escalate",
+        "incoming owner decision",
+        "critical recurring responsibilities",
+        "activity",
+        "frequency",
+        "trigger",
+        "owner before",
+        "owner after"
+      ],
+      "fields": [
+        {
+          "id": "rules",
+          "type": "list",
+          "items": [
+            "Only existing, in-progress, or recurring tasks allowed",
+            "No new initiatives or future roadmap items",
+            "Each task must have context, priority, and approval",
+            "Incoming owner can accept / defer / reject"
+          ]
+        },
+        {
+          "id": "open_tasks",
+          "type": "table",
+          "columns": [
+            "Task / Responsibility",
+            "Type",
+            "Current Status",
+            "Business Impact",
+            "Knowledge Transfer Done",
+            "Recommendation",
+            "Incoming Owner Decision"
+          ]
+        },
+        {
+          "id": "recurring_responsibilities",
+          "type": "table",
+          "columns": ["Activity", "Frequency", "Trigger", "Owner Before", "Owner After"]
+        }
+      ]
+    },
+    {
+      "id": "handover_completion",
+      "title": "HANDOVER COMPLETION CHECK",
+      "required": true,
+      "hints": [
+        "handover completion check",
+        "replacement can deploy safely",
+        "replacement understands rollback",
+        "replacement knows danger zones",
+        "escalation paths are clear",
+        "architecture verified by new owner",
+        "kt status",
+        "complete",
+        "needs follow-up"
+      ],
+      "fields": [
+        { "id": "can_deploy", "label": "Replacement can deploy safely", "type": "boolean" },
+        { "id": "understands_rollback", "type": "boolean" },
+        { "id": "knows_danger_zones", "type": "boolean" },
+        { "id": "escalation_clear", "type": "boolean" },
+        { "id": "architecture_verified", "type": "boolean" },
+        { "id": "kt_status", "type": "single_select", "options": ["Complete", "Needs Follow-up"] }
+      ],
+      "hints": [
+        "replacement can deploy safely",
+        "rollback",
+        "danger zones",
+        "escalation",
+        "architecture verified",
+        "kt status",
+        "sign off"
+      ]
+    },
+    {
+      "id": "signoff",
+      "title": "Sign-off",
+      "required": true,
+      "hints": ["outgoing owner", "incoming owner", "sign-off date", "approved"],
+      "fields": [
+        { "id": "outgoing_owner", "type": "text" },
+        { "id": "incoming_owner", "type": "text" },
+        { "id": "date", "type": "date" },
+        { "id": "approved", "label": "Approved by incoming owner", "type": "boolean" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Continumm KT Planner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root{--bg:#f6f8fb;--card:#ffffff;--muted:#6b7280;--primary:#0a66c2;--accent:#0b8a72}
+      html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overflow-x:hidden}
+      body{background:linear-gradient(180deg,#f7fafc 0%,var(--bg) 100%);padding:28px;box-sizing:border-box}
+      .app{max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box}
+      header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+      .brand{display:flex;align-items:center;gap:14px}
+      .logo{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--primary),#2a9df4);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:18px}
+      .brand h1{margin:0;font-size:20px;letter-spacing:0.4px}
+      .brand p{margin:0;color:var(--muted);font-size:13px}
+
+      .card{background:var(--card);box-shadow:0 8px 30px rgba(13,20,30,0.06);border-radius:12px;padding:22px;box-sizing:border-box;width:100%;overflow-x:hidden}
+      .controls{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;min-width:0}
+      input[type=file]{display:none}
+      .fileLabel{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:9px;background:linear-gradient(180deg,#fff,#fafbff);border:1px solid #e6eefc;color:var(--primary);cursor:pointer}
+      button.primary{background:var(--primary);color:white;border:none;padding:10px 14px;border-radius:9px;cursor:pointer;font-weight:600;white-space:nowrap}
+      button.ghost{background:transparent;border:1px solid #e6eefc;padding:8px 12px;border-radius:8px;color:var(--primary);cursor:pointer;white-space:nowrap}
+
+      .row{display:grid;grid-template-columns:1fr 340px;gap:18px;width:100%;box-sizing:border-box}
+      .panel{background:linear-gradient(180deg,rgba(255,255,255,0.6),#fff);border-radius:10px;padding:14px;border:1px solid #f0f4ff;word-wrap:break-word;overflow-wrap:break-word;width:100%;box-sizing:border-box;overflow-x:hidden}
+      .progressWrap{display:flex;align-items:center;gap:12px}
+      .progress{flex:1;height:12px;background:#eef3ff;border-radius:999px;overflow:hidden}
+      .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--primary))}
+      .meta{color:var(--muted);font-size:13px}
+
+      pre#transcript{background:#0f1724;color:#e6fffb;padding:12px;border-radius:8px;max-height:260px;overflow:auto;word-wrap:break-word;word-break:break-word;width:100%;white-space:pre-wrap}
+      pre#missing{word-wrap:break-word;word-break:break-word;white-space:pre-wrap;width:100%;box-sizing:border-box}
+      #coverage{max-height:300px;overflow-y:auto;overflow-x:hidden;width:100%;word-wrap:break-word;word-break:break-word}
+      #coverage > div{word-wrap:break-word;word-break:break-word;line-height:1.5}
+      #coverage > div p{margin:6px 0;word-break:break-word}
+      #screenshots img{border-radius:8px;box-shadow:0 6px 18px rgba(12,20,30,0.08);margin-right:8px}
+
+      h2.sectionTitle{margin-top:18px;margin-bottom:8px}
+
+      /* Form styles */
+      #form section{padding:12px;border-radius:8px;background:#fbfdff;margin-bottom:10px;border:1px solid #f1f7ff;box-sizing:border-box;width:100%}
+      label{display:block;font-weight:600;margin-bottom:6px}
+      input[type=text], select, textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eefc;background:white;box-sizing:border-box;word-break:break-word}
+      input[type=checkbox]{transform:scale(1.15)}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      table td{word-wrap:break-word}
+      th,td{padding:8px;border:1px solid #eef5ff}
+
+      .actions{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+
+      @media(max-width:1200px){
+        .row{grid-template-columns:1fr 280px}
+        #screenshots img{max-width:85px}
+      }
+      @media(max-width:900px){
+        .row{grid-template-columns:1fr}
+        .brand p{display:none}
+        .controls{flex-wrap:wrap;gap:8px}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand">
+          <div class="logo">C</div>
+          <div>
+            <h1>Continumm</h1>
+            <p>Knowledge Transfer Planner</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <a href="/docs" class="meta">API Docs</a>
+        </div>
+      </header>
+
+      <div class="card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap">
+          <div style="flex:1;min-width:260px">
+            <h2 style="margin:0 0 8px 0">Upload Video / Audio</h2>
+            <p class="meta">Upload a KT recording and let Continumm transcribe and map content into your template.</p>
+          </div>
+          <div class="controls">
+            <label class="fileLabel" for="file">Choose file</label>
+            <input id="file" type="file" accept="audio/*,video/*" />
+            <button id="upload" class="primary">Upload & Process</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <div>
+            <div class="panel">
+              <div class="progressWrap">
+                <div style="flex:1">
+                  <div class="progress"><div id="bar" class="bar"></div></div>
+                </div>
+                <div style="width:70px;text-align:right"><span id="progressText">0%</span></div>
+              </div>
+              <div style="margin-top:12px;display:flex;gap:12px;align-items:center">
+                <div style="flex:1">
+                  <h3 style="margin:0;font-size:15px">Transcript</h3>
+                  <p class="meta" style="margin:4px 0 8px 0">Auto-generated transcript from the uploaded media.</p>
+                  <pre id="transcript">(no transcript yet)</pre>
+                </div>
+              </div>
+            </div>
+
+            <h2 class="sectionTitle">Coverage</h2>
+            <div id="coverage" class="panel" style="min-height:120px"></div>
+
+            <h2 class="sectionTitle">Missing Required</h2>
+            <pre id="missing" class="panel">[]</pre>
+          </div>
+
+          <aside>
+            <div class="panel">
+              <h3 style="margin-top:0">Screenshots</h3>
+              <div id="screenshots" style="display:flex;flex-wrap:wrap"></div>
+            </div>
+
+            <div style="height:14px"></div>
+
+            <div class="panel">
+              <h3 style="margin-top:0">Actions</h3>
+              <div class="actions">
+                <button id="applyJob" class="primary">Apply job results to form</button>
+                <button id="downloadJson" class="ghost">Download filled JSON</button>
+              </div>
+              <div style="font-size:12px;color:var(--muted)">Use Apply to populate the editable KT form below.</div>
+            </div>
+          </aside>
+        </div>
+
+        <h2 style="margin-top:18px">KT Form (editable)</h2>
+        <div id="form"></div>
+      </div>
+
+    <script>
+      const uploadBtn = document.getElementById('upload');
+      const fileInput = document.getElementById('file');
+      const transcriptEl = document.getElementById('transcript');
+      const coverageEl = document.getElementById('coverage');
+      const missingEl = document.getElementById('missing');
+      const bar = document.getElementById('bar');
+      const progressText = document.getElementById('progressText');
+
+      let currentJobId = null;
+      let pollInterval = null;
+
+      function setProgress(p){
+        bar.style.width = p + '%';
+        progressText.textContent = p + '%';
+      }
+
+      function pollJobStatus(jobId) {
+        if (pollInterval) clearInterval(pollInterval);
+        
+        pollInterval = setInterval(async () => {
+          try {
+            const resp = await fetch(`/status/${jobId}`);
+            if (!resp.ok) {
+              alert('Status check failed');
+              clearInterval(pollInterval);
+              return;
+            }
+            
+            const data = await resp.json();
+            
+            if (data.status === 'processing') {
+              setProgress(Math.min(50, (data.progress || 0)));
+            } else if (data.status === 'completed') {
+              setProgress(100);
+              clearInterval(pollInterval);
+              
+              transcriptEl.textContent = data.transcript || '(none)';
+              missingEl.textContent = JSON.stringify(data.missing_required || [], null, 2);
+              
+              coverageEl.innerHTML = '';
+              const cov = data.coverage || {};
+              for(const [id, info] of Object.entries(cov)){
+                const div = document.createElement('div');
+                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${info.content.map(c=>`<p>${c}</p>`).join('')}</div>`;
+                coverageEl.appendChild(div);
+              }
+              // render screenshots
+              const shots = data.screenshots || [];
+              const shotsEl = document.getElementById('screenshots');
+              shotsEl.innerHTML = '';
+              for(const s of shots){
+                const img = document.createElement('img');
+                img.src = s;
+                img.style.maxWidth = '200px';
+                img.style.margin = '6px';
+                shotsEl.appendChild(img);
+              }
+            } else if (data.status === 'failed') {
+              alert('Processing failed: ' + (data.error || 'Unknown error'));
+              setProgress(0);
+              clearInterval(pollInterval);
+            }
+          } catch (err) {
+            alert('Poll error: ' + err);
+            clearInterval(pollInterval);
+          }
+        }, 2000);  // Poll every 2 seconds
+      }
+
+      // make custom file label show chosen filename
+      document.querySelector('.fileLabel').addEventListener('click', ()=>document.getElementById('file').click());
+      fileInput.addEventListener('change', (e)=>{
+        const f = e.target.files[0];
+        const lbl = document.querySelector('.fileLabel');
+        lbl.textContent = f ? (f.name.length>28?f.name.slice(0,24)+'...':f.name) : 'Choose file';
+      });
+
+      uploadBtn.addEventListener('click', async ()=>{
+        const f = fileInput.files[0];
+        if(!f){alert('Choose a file first');return}
+
+        setProgress(5);
+        const fd = new FormData();
+        fd.append('file', f);
+
+        setProgress(10);
+        try{
+          const resp = await fetch('/upload', {method:'POST', body:fd});
+          if(!resp.ok){
+            const text = await resp.text();
+            alert('Upload failed: ' + resp.status + ' ' + text);
+            setProgress(0);
+            return;
+          }
+
+          setProgress(20);
+          const data = await resp.json();
+          currentJobId = data.job_id;
+          
+          if (data.status === 'processing') {
+            transcriptEl.textContent = 'Processing... Please wait.';
+            coverageEl.innerHTML = '<p>Processing... This may take several minutes for large files.</p>';
+            missingEl.textContent = '[]';
+            
+            // Start polling for status
+            pollJobStatus(currentJobId);
+          }
+        }catch(err){
+          alert('Error: '+err);
+          setProgress(0);
+        }
+      });
+
+      // --- Schema-driven form rendering ---
+      let SCHEMA = null;
+
+      async function loadSchema(){
+        try{
+          const r = await fetch('/schema');
+          if(!r.ok) throw new Error('Failed to load schema');
+          const j = await r.json();
+          SCHEMA = j.sections;
+          renderForm(SCHEMA);
+        }catch(e){
+          console.error('Schema load error', e);
+        }
+      }
+
+      function createInput(field, sectionId){
+        const wrapper = document.createElement('div');
+        wrapper.style.marginBottom = '8px';
+        const label = document.createElement('label');
+        label.textContent = field.label || field.id || '';
+        wrapper.appendChild(label);
+
+        if(field.type === 'text' || field.type === undefined){
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.dataset.section = sectionId;
+          inp.dataset.field = field.id || '';
+          inp.style.width = '100%';
+          wrapper.appendChild(inp);
+          return wrapper;
+        }
+
+        if(field.type === 'boolean'){
+          const inp = document.createElement('input');
+          inp.type = 'checkbox';
+          inp.dataset.section = sectionId;
+          inp.dataset.field = field.id || '';
+          wrapper.appendChild(inp);
+          return wrapper;
+        }
+
+        if(field.type === 'single_select' || field.type === 'multi_select'){
+          const sel = document.createElement('select');
+          sel.dataset.section = sectionId;
+          sel.dataset.field = field.id || '';
+          if(field.type === 'multi_select') sel.multiple = true;
+          (field.options || []).forEach(opt=>{
+            const o = document.createElement('option'); o.value = opt; o.textContent = opt; sel.appendChild(o);
+          });
+          wrapper.appendChild(sel);
+          return wrapper;
+        }
+
+        if(field.type === 'table'){
+          const tbl = document.createElement('table');
+          tbl.style.width = '100%';
+          tbl.style.borderCollapse = 'collapse';
+          const thead = document.createElement('thead');
+          const tr = document.createElement('tr');
+          (field.columns || []).forEach((c, idx)=>{
+            const th = document.createElement('th'); th.textContent = c; th.style.border='1px solid #ddd'; th.style.padding='6px'; tr.appendChild(th);
+          });
+          thead.appendChild(tr); tbl.appendChild(thead);
+          const tbody = document.createElement('tbody');
+          tbody.dataset.section = sectionId; tbody.dataset.field = field.id || '';
+          tbl.appendChild(tbody);
+          // add one empty row
+          addTableRow(tbody, field);
+          wrapper.appendChild(tbl);
+          return wrapper;
+        }
+
+        // fallback
+        const inp2 = document.createElement('input'); inp2.type='text'; wrapper.appendChild(inp2); return wrapper;
+      }
+
+      function addTableRow(tbody, field, values){
+        const tr = document.createElement('tr');
+        (field.columns || []).forEach((col, idx)=>{
+          const td = document.createElement('td'); td.style.border='1px solid #ddd'; td.style.padding='6px';
+          const colType = (field.columns_type && field.columns_type[idx]) || 'text';
+          if(colType === 'boolean'){
+            const cb = document.createElement('input'); cb.type='checkbox'; td.appendChild(cb);
+          } else {
+            const input = document.createElement('input'); input.type='text'; input.style.width='100%'; input.value = (values && values[idx])||''; td.appendChild(input);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+
+      function renderForm(schema){
+        const form = document.getElementById('form'); form.innerHTML = '';
+        for(const sec of schema){
+          const sDiv = document.createElement('section');
+          sDiv.style.borderTop = '1px solid #eee'; sDiv.style.paddingTop='8px';
+          const h = document.createElement('h3'); h.textContent = sec.title || sec.id; sDiv.appendChild(h);
+          const note = document.createElement('div'); note.style.color='#666'; note.textContent = sec.hints?('Hints: '+sec.hints.join(', ')) : ''; sDiv.appendChild(note);
+          for(const field of (sec.fields||[])){
+            const fEl = createInput(field, sec.id);
+            sDiv.appendChild(fEl);
+          }
+          form.appendChild(sDiv);
+        }
+      }
+
+      // Apply job results into form using coverage mapping
+      document.getElementById('applyJob').addEventListener('click', async ()=>{
+        if(!currentJobId){ alert('No job selected'); return; }
+        const r = await fetch(`/status/${currentJobId}`);
+        if(!r.ok){ alert('Job fetch failed'); return; }
+        const j = await r.json();
+        const cov = j.coverage || {};
+
+        // cov entries may be objects: { title, status, content: [..] }
+        for(const [secId, info] of Object.entries(cov)){
+          const contentArr = Array.isArray(info) ? info : (info && info.content) ? info.content : [];
+          const texts = (contentArr || []).join('\n');
+
+          // fill inputs belonging to this section
+          document.querySelectorAll(`[data-section="${secId}"]`).forEach(el=>{
+            const field = el.dataset.field;
+            if(!field) return;
+            if(el.tagName === 'INPUT' && el.type === 'text') {
+              el.value = texts;
+              return;
+            }
+
+            if(el.tagName === 'SELECT'){
+              for(const opt of Array.from(el.options)){
+                if(texts && opt.value && texts.toLowerCase().includes(opt.value.toLowerCase())) opt.selected = true;
+              }
+              return;
+            }
+
+            if(el.tagName === 'TBODY'){
+              el.innerHTML='';
+              const fieldDef = (SCHEMA && SCHEMA.find(s=>s.id===secId) && SCHEMA.find(s=>s.id===secId).fields.find(f=>f.id===el.dataset.field)) || null;
+              const rows = contentArr || [];
+              if(rows.length>0){
+                for(const rowText of rows){
+                  addTableRow(el, fieldDef, [rowText]);
+                }
+              } else {
+                addTableRow(el, fieldDef);
+              }
+              return;
+            }
+
+            if(el.tagName === 'INPUT' && el.type === 'checkbox'){
+              el.checked = texts.length>0;
+              return;
+            }
+          });
+        }
+
+        // apply mapped fields if available (more precise per-field autofill)
+        const mapped = j.mapped_fields || {};
+        for(const [secId, fields] of Object.entries(mapped)){
+          for(const [fid, info] of Object.entries(fields)){
+            const els = document.querySelectorAll(`[data-section="${secId}"][data-field="${fid}"]`);
+            for(const el of els){
+              const val = info.value || '';
+              if(el.tagName==='INPUT' && el.type==='text') el.value = val;
+              else if(el.tagName==='INPUT' && el.type==='checkbox') el.checked = !!val;
+              else if(el.tagName==='SELECT'){
+                for(const opt of Array.from(el.options)){
+                  if(val && opt.value && val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected = true;
+                }
+              } else if(el.tagName==='TBODY'){
+                el.innerHTML = '';
+                const fieldDef = (SCHEMA && SCHEMA.find(s=>s.id===secId) && SCHEMA.find(s=>s.id===secId).fields.find(f=>f.id===fid)) || null;
+                addTableRow(el, fieldDef, [val]);
+              }
+            }
+          }
+        }
+      });
+
+      // Download filled JSON
+      document.getElementById('downloadJson').addEventListener('click', ()=>{
+        if(!SCHEMA) return alert('Schema not loaded');
+        const out = { template_name: 'PROJECT KT & HANDOVER DOCUMENT', sections: [] };
+        for(const sec of SCHEMA){
+          const entry = { id: sec.id, title: sec.title, fields: {} };
+          // collect inputs
+          document.querySelectorAll(`[data-section="${sec.id}"]`).forEach(el=>{
+            const fid = el.dataset.field; if(!fid) return;
+            if(el.tagName==='INPUT' && el.type==='text') entry.fields[fid]=el.value;
+            else if(el.tagName==='INPUT' && el.type==='checkbox') entry.fields[fid]=el.checked;
+            else if(el.tagName==='SELECT' && el.multiple) entry.fields[fid]=Array.from(el.selectedOptions).map(o=>o.value);
+            else if(el.tagName==='SELECT') entry.fields[fid]=el.value;
+            else if(el.tagName==='TBODY'){
+              // table rows
+              const rows = [];
+              for(const tr of Array.from(el.children)){
+                const cols = Array.from(tr.children).map(td=>{
+                  const input = td.querySelector('input'); if(!input) return '';
+                  if(input.type==='checkbox') return input.checked;
+                  return input.value;
+                });
+                rows.push(cols);
+              }
+              entry.fields[fid]=rows;
+            }
+          });
+          out.sections.push(entry);
+        }
+        const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download='kt_filled.json'; a.click(); URL.revokeObjectURL(url);
+      });
+
+      loadSchema();
+    </script>
+  </body>
+</html>

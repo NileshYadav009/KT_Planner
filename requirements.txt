@@ -5,3 +5,4 @@ pydantic
 openai-whisper
 sentence-transformers
 ffmpeg-python
+numpy
