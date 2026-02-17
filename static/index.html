@@ -10,6 +10,10 @@
       html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overflow-x:hidden}
       body{background:linear-gradient(180deg,#f7fafc 0%,var(--bg) 100%);padding:28px;box-sizing:border-box}
       .app{max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box}
+      
+      /* Form visibility toggle */
+      #formContainer{display:none !important;margin-top:20px;opacity:0;visibility:hidden;transition:opacity 0.3s ease-in-out,display 0s linear 0.3s}
+      #formContainer.visible{display:block !important;opacity:1;visibility:visible;transition:opacity 0.3s ease-in-out}
       header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
       .brand{display:flex;align-items:center;gap:14px}
       .logo{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--primary),#2a9df4);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:18px}
@@ -39,16 +43,56 @@
 
       h2.sectionTitle{margin-top:18px;margin-bottom:8px}
 
-      /* Form styles */
-      #form section{padding:12px;border-radius:8px;background:#fbfdff;margin-bottom:10px;border:1px solid #f1f7ff;box-sizing:border-box;width:100%}
-      label{display:block;font-weight:600;margin-bottom:6px}
-      input[type=text], select, textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eefc;background:white;box-sizing:border-box;word-break:break-word}
-      input[type=checkbox]{transform:scale(1.15)}
-      table{width:100%;border-collapse:collapse;table-layout:fixed}
-      table td{word-wrap:break-word}
-      th,td{padding:8px;border:1px solid #eef5ff}
+      /* Form styles - minimalistic and classy */
+      #formContainer{border-radius:12px;background:linear-gradient(180deg,#fafbff 0%,#ffffff 100%);padding:0;overflow:hidden;box-shadow:0 12px 40px rgba(13,20,30,0.08)}
+      #formContainer .formHeader{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #f0f4ff;background:#ffffff}
+      #formContainer .formHeader h2{margin:0;font-size:18px;font-weight:600;color:#0f1724}
+      #formContainer .closeForm{background:transparent;border:none;font-size:24px;cursor:pointer;color:#6b7280;padding:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:all 0.2s}
+      #formContainer .closeForm:hover{background:#f1f5ff;color:#0a66c2}
+      
+      #form{padding:24px}
+      #form section{padding:18px;border-radius:10px;background:#f9fafc;margin-bottom:14px;border:1px solid #f0f4ff;box-sizing:border-box;width:100%;transition:all 0.3s}
+      #form section:hover{background:#ffffff;box-shadow:0 4px 12px rgba(13,20,30,0.04)}
+      #form section h3{margin:0 0 12px 0;font-size:16px;font-weight:600;color:#0f1724}
+      #form section > div{color:var(--muted);font-size:13px;margin-bottom:12px;font-style:italic}
+      label{display:block;font-weight:600;margin-bottom:8px;color:#0f1724;font-size:14px}
+      input[type=text], select, textarea{width:100%;padding:12px;border-radius:8px;border:1px solid #e6eefc;background:#ffffff;box-sizing:border-box;word-break:break-word;font-family:inherit;font-size:14px;transition:all 0.2s;margin-bottom:12px}
+      input[type=text]:focus, select:focus, textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,102,194,0.1);background:#ffffff}
+      input[type=checkbox]{transform:scale(1.15);cursor:pointer;margin-right:8px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e6eefc}
+      table thead{background:#f9fafc;border-bottom:1px solid #e6eefc}
+      th,td{padding:12px;border:none;text-align:left;font-size:14px}
+      th{font-weight:600;color:#0f1724}
+      td{color:var(--muted);border-bottom:1px solid #f1f5ff}
+      table tbody tr:hover{background:#f9fafc}
 
       .actions{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+
+      /* Sentence list styles */
+      .sentence-row{display:flex;align-items:flex-start;gap:8px;padding:8px;border-bottom:1px solid #f1f5f9}
+      .sentence-text{flex:1;font-size:14px}
+      .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef6ff;color:#0a66c2;font-weight:600;font-size:12px;margin-right:6px}
+      .small-muted{font-size:12px;color:#6b7280}
+
+      /* Edit Sentence Modal */
+      #editModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center}
+      #editModal.open{display:flex}
+      .editModalContent{background:#fff;border-radius:12px;padding:24px;box-shadow:0 12px 40px rgba(13,20,30,0.2);max-width:500px;width:90%;max-height:90vh;overflow-auto}
+      .editModalContent h3{margin:0 0 16px 0;font-size:18px;color:#0f1724}
+      .editModalContent .sentence-preview{background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;color:#374151;border-left:3px solid var(--primary)}
+      .editModalContent label{display:block;font-weight:600;margin-bottom:8px;color:#0f1724;font-size:14px}
+      .editModalContent select{width:100%;padding:10px;border-radius:8px;border:1px solid #e5e7eb;font-size:14px;margin-bottom:16px;box-sizing:border-box}
+      .editModalContent select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,102,194,0.1)}
+      .editModalActions{display:flex;gap:10px;justify-content:flex-end}
+      .editModalActions button{padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;transition:all 0.2s}
+      .editModalActions .confirm{background:var(--primary);color:white}
+      .editModalActions .confirm:hover{opacity:0.9;box-shadow:0 4px 12px rgba(10,102,194,0.3)}
+      .editModalActions .cancel{background:#f3f4f6;color:#374151;border:1px solid #e5e7eb}
+      .editModalActions .cancel:hover{background:#e5e7eb}
+
+      /* Toasts */
+      #toasts{position:fixed;right:18px;bottom:18px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+      .toast{background:#0f1724;color:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 6px 18px rgba(12,20,30,0.12);opacity:0.98}
 
       @media(max-width:1200px){
         .row{grid-template-columns:1fr 280px}
@@ -133,9 +177,28 @@
           </aside>
         </div>
 
-        <h2 style="margin-top:18px">KT Form (editable)</h2>
-        <div id="form"></div>
+        <div id="formContainer" class="card">
+          <div class="formHeader">
+            <h2>Knowledge Transfer Form</h2>
+            <button class="closeForm" onclick="document.getElementById('formContainer').classList.remove('visible')">✕</button>
+          </div>
+          <div id="form"></div>
+        </div>
       </div>
+
+    <!-- Edit Sentence Modal -->
+    <div id="editModal">
+      <div class="editModalContent">
+        <h3>Correct Sentence Classification</h3>
+        <div class="sentence-preview" id="sentencePreview"></div>
+        <label for="sectionSelect">Select the correct section:</label>
+        <select id="sectionSelect"></select>
+        <div class="editModalActions">
+          <button class="cancel" onclick="closeEditModal()">Cancel</button>
+          <button class="confirm" onclick="confirmEditSentence()">Confirm</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const uploadBtn = document.getElementById('upload');
@@ -161,11 +224,11 @@
           try {
             const resp = await fetch(`/status/${jobId}`);
             if (!resp.ok) {
-              alert('Status check failed');
+              showToast('Status check failed');
               clearInterval(pollInterval);
               return;
             }
-            
+
             const data = await resp.json();
             
             if (data.status === 'processing') {
@@ -186,6 +249,42 @@
                 div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}</div>`;
                 coverageEl.appendChild(div);
               }
+              
+              // Build per-sentence list aggregated from coverage.sentences
+              const sentencesPanel = document.createElement('div');
+              sentencesPanel.style.marginTop = '12px';
+              const flatSentences = [];
+              for(const [secId, info] of Object.entries(cov)){
+                const sentObjs = info.sentences || [];
+                for(const s of sentObjs){
+                  flatSentences.push({
+                    text: s.text,
+                    start: s.start,
+                    end: s.end,
+                    audio_confidence: s.audio_confidence,
+                    assigned_sections: s.assigned_sections || [secId]
+                  });
+                }
+              }
+
+              if(flatSentences.length>0){
+                const header = document.createElement('h3'); header.textContent = 'Sentence Assignments'; sentencesPanel.appendChild(header);
+                for(let i=0;i<flatSentences.length;i++){
+                  const s = flatSentences[i];
+                  const row = document.createElement('div'); row.className = 'sentence-row';
+                  const txt = document.createElement('div'); txt.className = 'sentence-text'; txt.textContent = s.text;
+                  const meta = document.createElement('div'); meta.style.minWidth='160px'; meta.style.textAlign='right';
+                  const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `t:${s.start.toFixed(1)}s • conf:${(s.audio_confidence||0).toFixed(2)}`;
+                  const tags = document.createElement('div'); tags.style.marginTop='6px';
+                  for(const as of s.assigned_sections){ const t = document.createElement('span'); t.className='tag'; t.textContent=as; tags.appendChild(t); }
+                  const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Edit'; editBtn.style.marginLeft='8px';
+                  editBtn.onclick = ()=>{ promptEditSentence(i, s); };
+                  meta.appendChild(conf); meta.appendChild(tags); meta.appendChild(editBtn);
+                  row.appendChild(txt); row.appendChild(meta);
+                  sentencesPanel.appendChild(row);
+                }
+                coverageEl.appendChild(sentencesPanel);
+              }
               // render screenshots
               const shots = data.screenshots || [];
               const shotsEl = document.getElementById('screenshots');
@@ -198,12 +297,12 @@
                 shotsEl.appendChild(img);
               }
             } else if (data.status === 'failed') {
-              alert('Processing failed: ' + (data.error || 'Unknown error'));
+              showToast('Processing failed: ' + (data.error || 'Unknown error'));
               setProgress(0);
               clearInterval(pollInterval);
             }
           } catch (err) {
-            alert('Poll error: ' + err);
+            showToast('Poll error: ' + err);
             clearInterval(pollInterval);
           }
         }, 2000);  // Poll every 2 seconds
@@ -221,7 +320,7 @@
 
       uploadBtn.addEventListener('click', async ()=>{
         const f = fileInput.files[0];
-        if(!f){alert('Choose a file first');return}
+        if(!f){ showToast('Choose a file first'); return }
 
         setProgress(5);
         const fd = new FormData();
@@ -232,7 +331,7 @@
           const resp = await fetch('/upload', {method:'POST', body:fd});
           if(!resp.ok){
             const text = await resp.text();
-            alert('Upload failed: ' + resp.status + ' ' + text);
+            showToast('Upload failed: ' + resp.status + ' ' + text);
             setProgress(0);
             return;
           }
@@ -250,9 +349,92 @@
             pollJobStatus(currentJobId);
           }
         }catch(err){
-          alert('Error: '+err);
+          showToast('Error: '+err);
           setProgress(0);
         }
+      });
+
+      // Simple toast system
+      const toastsEl = document.createElement('div'); toastsEl.id='toasts'; document.body.appendChild(toastsEl);
+      function showToast(msg, timeout=5000){
+        const t = document.createElement('div'); t.className='toast'; t.textContent = msg; toastsEl.appendChild(t);
+        setTimeout(()=>{ t.style.opacity='0'; try{ t.remove(); }catch(e){} }, timeout);
+      }
+
+      // Global state for edit modal
+      let editState = {
+        sentenceIndex: null,
+        sentenceObj: null
+      };
+
+      // Prompt edit for sentence -> send feedback (IMPROVED with dropdown)
+      async function promptEditSentence(sentenceIndex, sentenceObj){
+        // Store state for confirmation
+        editState.sentenceIndex = sentenceIndex;
+        editState.sentenceObj = sentenceObj;
+        
+        // Show sentence preview
+        document.getElementById('sentencePreview').textContent = sentenceObj.text;
+        
+        // Populate dropdown with available sections
+        const dropdown = document.getElementById('sectionSelect');
+        dropdown.innerHTML = '';
+        if(SCHEMA){
+          for(const sec of SCHEMA){
+            const opt = document.createElement('option');
+            opt.value = sec.id;
+            opt.textContent = sec.title || sec.id;
+            // Pre-select current section
+            if(sentenceObj.assigned_sections && sentenceObj.assigned_sections.includes(sec.id)){
+              opt.selected = true;
+            }
+            dropdown.appendChild(opt);
+          }
+        }
+        
+        // Show modal
+        document.getElementById('editModal').classList.add('open');
+      }
+
+      function closeEditModal(){
+        document.getElementById('editModal').classList.remove('open');
+        editState = {sentenceIndex: null, sentenceObj: null};
+      }
+
+      async function confirmEditSentence(){
+        const dropdown = document.getElementById('sectionSelect');
+        const correctedSection = dropdown.value;
+        
+        if(!correctedSection || editState.sentenceIndex === null){
+          showToast('Please select a section');
+          return;
+        }
+        
+        // POST feedback
+        try{
+          const body = {
+            job_id: currentJobId,
+            sentence_id: editState.sentenceIndex,
+            corrected_classification: correctedSection,
+            user: 'local_user',
+            feedback_notes: 'UI correction via dropdown'
+          };
+          const r = await fetch('/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+          if(!r.ok){ showToast('Feedback failed'); return; }
+          const j = await r.json(); 
+          showToast('Feedback recorded for: ' + correctedSection);
+          closeEditModal();
+        }catch(e){ showToast('Feedback error: '+e); }
+      }
+
+      // Close modal on Escape key
+      document.addEventListener('keydown', (e)=>{
+        if(e.key === 'Escape') closeEditModal();
+      });
+
+      // Close modal when clicking outside
+      document.getElementById('editModal').addEventListener('click', (e)=>{
+        if(e.target.id === 'editModal') closeEditModal();
       });
 
       // --- Schema-driven form rendering ---
@@ -264,7 +446,7 @@
           if(!r.ok) throw new Error('Failed to load schema');
           const j = await r.json();
           SCHEMA = j.sections;
-          renderForm(SCHEMA);
+          // Don't render form on load - only render when user clicks "Apply"
         }catch(e){
           console.error('Schema load error', e);
         }
@@ -363,9 +545,15 @@
 
       // Apply job results into form using coverage mapping
       document.getElementById('applyJob').addEventListener('click', async ()=>{
-        if(!currentJobId){ alert('No job selected'); return; }
+        if(!currentJobId){ showToast('No job selected'); return; }
+        
+        // Render form template if not already rendered
+        if(!document.querySelector('#form section')) {
+          renderForm(SCHEMA);
+        }
+
         const r = await fetch(`/status/${currentJobId}`);
-        if(!r.ok){ alert('Job fetch failed'); return; }
+        if(!r.ok){ showToast('Job fetch failed'); return; }
         const j = await r.json();
         const cov = j.coverage || {};
 
@@ -432,11 +620,20 @@
             }
           }
         }
+
+        // Show the form with smooth animation
+        const formContainer = document.getElementById('formContainer');
+        formContainer.classList.add('visible');
+        setTimeout(() => {
+          formContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 50);
+
+        showToast('Form populated with job results!');
       });
 
       // Download filled JSON
       document.getElementById('downloadJson').addEventListener('click', ()=>{
-        if(!SCHEMA) return alert('Schema not loaded');
+        if(!SCHEMA) return showToast('Schema not loaded');
         const out = { template_name: 'PROJECT KT & HANDOVER DOCUMENT', sections: [] };
         for(const sec of SCHEMA){
           const entry = { id: sec.id, title: sec.title, fields: {} };

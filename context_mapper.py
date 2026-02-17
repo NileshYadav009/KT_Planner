@@ -108,6 +108,38 @@ def segment_sentences(
     
     # Split by sentence endings
     sentence_texts = re.split(r"(?<=[.!?])\s+", full_text.strip())
+
+    # If some sentences are extremely long (e.g., long monologue without punctuation),
+    # further split them on commas or after a max length to ensure every word gets a mapping.
+    refined_sentences = []
+    MAX_SENT_LEN = 240
+    for st in sentence_texts:
+        if len(st) > MAX_SENT_LEN:
+            # Try splitting by commas conservatively
+            parts = [p.strip() for p in st.split(',') if p.strip()]
+            if len(parts) > 1:
+                # Recombine into manageable chunks
+                temp = []
+                cur = ''
+                for p in parts:
+                    if len(cur) + len(p) + 2 <= MAX_SENT_LEN:
+                        cur = (cur + ' ' + p).strip()
+                    else:
+                        if cur:
+                            temp.append(cur)
+                        cur = p
+                if cur:
+                    temp.append(cur)
+                refined_sentences.extend(temp)
+                continue
+            else:
+                # Hard split by max length
+                for i in range(0, len(st), MAX_SENT_LEN):
+                    refined_sentences.append(st[i:i+MAX_SENT_LEN].strip())
+                continue
+        refined_sentences.append(st)
+
+    sentence_texts = refined_sentences
     
     current_pos = 0
     for sent_text in sentence_texts:
@@ -204,14 +236,14 @@ class ClassifiedSentence:
     human_feedback: Optional[HumanFeedback] = None
     
     def __post_init__(self):
-        # Build multi-section assignment from primary + secondary
+        # Build multi-section assignment from primary ONLY
+        # Do NOT add secondary classifications to prevent duplicate sentences across sections
         if self.multi_section_assignments is None:
             self.multi_section_assignments = []
             if self.primary_classification:
                 self.multi_section_assignments.append(self.primary_classification.section_id)
-            for sec in self.secondary_classifications:
-                if sec.section_id not in self.multi_section_assignments:
-                    self.multi_section_assignments.append(sec.section_id)
+            # Skip secondary classifications to avoid duplication across sections
+            # (keeping this comment for clarity on design decision)
     
 
 class ContextClassifier:
@@ -256,7 +288,7 @@ class ContextClassifier:
                 "description": description
             }
     
-    def classify_sentence(self, sentence: Sentence) -> ClassifiedSentence:
+    def classify_sentence(self, sentence: Sentence, sent_embedding=None, neighbor_embeddings: List = None, top_k: int = 3, alpha: float = 0.7, beta: float = 0.3) -> ClassifiedSentence:
         """
         Classify sentence against all schema sections.
         
@@ -271,35 +303,56 @@ class ContextClassifier:
                 is_unassigned=True
             )
         
-        # Embed sentence
-        sent_embedding = self.model.encode(sentence.text, convert_to_tensor=True)
-        
+        # Embed sentence (reuse precomputed embedding when available)
+        if sent_embedding is None:
+            sent_embedding = self.model.encode(sentence.text, convert_to_tensor=True)
+
         # Compute similarities to all sections
         classifications = []
         for sec_id, sec_embedding in self.section_embeddings.items():
-            sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
-            
-            if sim >= self.similarity_threshold:
-                classifications.append(Classification(
-                    section_id=sec_id,
-                    section_title=self.section_metadata[sec_id]["title"],
-                    confidence=sim,
-                    similarity_score=sim,
-                    reason=f"Semantic match (similarity={sim:.3f})"
-                ))
+            base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
+
+            # Incorporate neighbor context similarity when provided
+            context_sim = 0.0
+            if neighbor_embeddings:
+                sims = [float(util.cos_sim(nb, sec_embedding)[0][0]) for nb in neighbor_embeddings]
+                if sims:
+                    context_sim = float(np.mean(sims))
+
+            # Combined score — prefer sentence-level similarity but allow context to influence
+            combined = float(alpha * base_sim + beta * context_sim)
+
+            # Always consider top candidates, thresholding later
+            classifications.append(Classification(
+                section_id=sec_id,
+                section_title=self.section_metadata[sec_id]["title"],
+                confidence=combined,
+                similarity_score=base_sim,
+                reason=f"Combined semantic score (base={base_sim:.3f}, ctx={context_sim:.3f}, combined={combined:.3f})"
+            ))
         
-        # Sort by confidence
+        # Sort by combined confidence and take top_k
         classifications.sort(key=lambda x: x.confidence, reverse=True)
-        
-        primary = classifications[0] if classifications else None
-        secondary = classifications[1:] if len(classifications) > 1 else []
+        # Filter by a relaxed threshold for secondary candidates
+        primary = None
+        secondary = []
+        filtered = [c for c in classifications if c.confidence >= (self.similarity_threshold * 0.6)]
+        if filtered:
+            primary = filtered[0]
+            secondary = filtered[1:top_k]
+        else:
+            # If none passed relaxed threshold, still keep top candidate as low-confidence primary
+            if classifications:
+                primary = classifications[0]
+                secondary = classifications[1:top_k]
+
         is_unassigned = primary is None
         
         # Build explainability log
         explanation = ""
         alternatives = []
         if primary:
-            explanation = f"Matched '{sentence.text[:60]}' to '{primary.section_title}' (similarity={primary.confidence:.3f})"
+            explanation = f"Matched '{sentence.text[:60]}' to '{primary.section_title}' (score={primary.confidence:.3f})"
             alternatives = [c.section_id for c in secondary[:2]] if secondary else []
         else:
             explanation = f"No section matched above threshold {self.similarity_threshold} for: {sentence.text[:60]}"
@@ -510,9 +563,12 @@ class ContextRepair:
         
         try:
             # This would be called asynchronously in production
-            # For now, just return None (no-op)
-            # In production: result = await self.llm_fallback_fn(original, context, section_id)
-            return None
+            # Delegate to provided LLM hook with conservative settings
+            # The llm_fallback_fn should accept (text, context_text, section_id, temperature)
+            context_text = ' '.join([c.sentence.text for c in context]) if context else ''
+            # Low temperature to avoid hallucination
+            result = self.llm_fallback_fn(original, context_text, section_id, temperature=0.2)
+            return result
         except Exception:
             return None
 
@@ -555,18 +611,27 @@ def detect_gaps(
         sec_title = sec.get("title", sec_id)
         sec_required = sec.get("required", False)
         
-        # Find all sentences mapped to this section
-        sentences = [
-            cs.sentence for cs in classified_sentences
-            if cs.primary_classification and cs.primary_classification.section_id == sec_id
-        ]
+        # Find all sentences mapped to this section (use unique normalized text)
+        mapped_texts = []
+        unique_texts = set()
+        mapped_sentences = []
+        for cs in classified_sentences:
+            if cs.primary_classification and cs.primary_classification.section_id == sec_id:
+                text = (cs.sentence.text or '').strip()
+                key = re.sub(r"\s+", " ", text).lower()
+                if key not in unique_texts:
+                    unique_texts.add(key)
+                    mapped_texts.append(text)
+                    mapped_sentences.append(cs.sentence)
+        sentences = mapped_sentences
         
         # Determine status
-        if len(sentences) == 0:
+        unique_count = len(mapped_texts)
+        if unique_count == 0:
             status = "missing"
             confidence = 0.0
             risk = 1.0 if sec_required else 0.5
-        elif len(sentences) <= weak_threshold:
+        elif unique_count <= weak_threshold:
             status = "weak"
             confidence = np.mean([cs.sentence.audio_confidence for cs in classified_sentences 
                                  if cs.primary_classification and cs.primary_classification.section_id == sec_id])
@@ -582,7 +647,7 @@ def detect_gaps(
             section_title=sec_title,
             required=sec_required,
             status=status,
-            sentence_count=len(sentences),
+            sentence_count=unique_count,
             confidence_score=float(confidence),
             risk_score=float(risk),
             sentences=sentences
@@ -728,42 +793,65 @@ def assemble_kt(
     unassigned = []
     missing_required = []
     
-    for cs in classified_sentences:
+    # Track seen sentences per section to avoid duplicates caused by transcript repetition
+    seen_texts_per_section: Dict[str, set] = {}
+
+    for idx, cs in enumerate(classified_sentences):
         # Build enhanced text
-        idx = classified_sentences.index(cs)
         enhanced_text, repair_action = repaired_map.get(idx, (cs.sentence.text, None))
         
         if cs.is_unassigned:
-            unassigned.append(cs.sentence)
+            # Deduplicate unassigned sentences as well
+            norm = (cs.sentence.text or '').strip()
+            if norm and norm not in [s.text for s in unassigned]:
+                unassigned.append(cs.sentence)
         elif cs.primary_classification:
-            sec_id = cs.primary_classification.section_id
-            if sec_id not in section_content:
-                section_content[sec_id] = {
-                    "section_id": sec_id,
-                    "section_title": cs.primary_classification.section_title,
-                    "sentences": [],
-                    "enhanced_texts": [],
-                    "repair_actions": [],
-                    "screenshots": [],
-                    "confidence": 0.0,
-                    "sentence_count": 0
-                }
-            
-            section_content[sec_id]["sentences"].append({
-                "text": cs.sentence.text,
-                "start": cs.sentence.start,
-                "end": cs.sentence.end,
-                "speaker": cs.sentence.speaker,
-                "audio_confidence": cs.sentence.audio_confidence
-            })
-            section_content[sec_id]["enhanced_texts"].append(enhanced_text)
-            
-            if repair_action:
-                section_content[sec_id]["repair_actions"].append({
-                    "reason": repair_action.reason,
-                    "original": repair_action.original,
-                    "improved": repair_action.improved
+            # Place sentence into all assigned sections (multi-label support)
+            assigned_secs = cs.multi_section_assignments or []
+            if not assigned_secs:
+                # fallback to primary only
+                assigned_secs = [cs.primary_classification.section_id]
+
+            for sec_id in assigned_secs:
+                if sec_id not in section_content:
+                    # find section title if available
+                    title = cs.primary_classification.section_title if cs.primary_classification and cs.primary_classification.section_id == sec_id else sec_id
+                    section_content[sec_id] = {
+                        "section_id": sec_id,
+                        "section_title": title,
+                        "sentences": [],
+                        "enhanced_texts": [],
+                        "repair_actions": [],
+                        "screenshots": [],
+                        "confidence": 0.0,
+                        "sentence_count": 0
+                    }
+                    seen_texts_per_section[sec_id] = set()
+
+                # Deduplicate based on normalized text
+                norm_text = (cs.sentence.text or '').strip()
+                norm_key = re.sub(r"\s+", " ", norm_text).lower()
+                if norm_key in seen_texts_per_section.get(sec_id, set()):
+                    # Skip duplicate repeated sentence
+                    continue
+                seen_texts_per_section.setdefault(sec_id, set()).add(norm_key)
+
+                section_content[sec_id]["sentences"].append({
+                    "text": cs.sentence.text,
+                    "start": cs.sentence.start,
+                    "end": cs.sentence.end,
+                    "speaker": cs.sentence.speaker,
+                    "audio_confidence": cs.sentence.audio_confidence,
+                    "assigned_sections": list(cs.multi_section_assignments or [])
                 })
+                section_content[sec_id]["enhanced_texts"].append(enhanced_text)
+
+                if repair_action:
+                    section_content[sec_id]["repair_actions"].append({
+                        "reason": repair_action.reason,
+                        "original": repair_action.original,
+                        "improved": repair_action.improved
+                    })
     
     # Compute section confidences
     for sec_id, content in section_content.items():
@@ -850,7 +938,19 @@ class ContextMappingPipeline:
         logger.info(f"Stage 2: Segmented into {len(sentences)} sentences")
         
         # STAGE 3: Classify sentences
-        classified_sentences = [self.classifier.classify_sentence(s) for s in sentences]
+        # Precompute embeddings for sentences to allow context-aware scoring
+        texts = [s.text for s in sentences]
+        embeddings = self.classifier.model.encode(texts, convert_to_tensor=True)
+
+        classified_sentences = []
+        for i, s in enumerate(sentences):
+            # Build neighbor embeddings (fixed window)
+            window = 3
+            start = max(0, i - window)
+            end = min(len(sentences), i + window + 1)
+            neighbor_embs = [embeddings[j] for j in range(start, end) if j != i]
+            cs = self.classifier.classify_sentence(s, sent_embedding=embeddings[i], neighbor_embeddings=neighbor_embs)
+            classified_sentences.append(cs)
         logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences")
         
         # STAGE 4: Repair low-confidence sentences
@@ -899,7 +999,7 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
                 "section_title": cov.section_title,
                 "status": cov.status,
                 "required": cov.required,
-                "sentence_count": cov.sentence_count,
+                "sentence_count": kt.section_content.get(sec_id, {}).get("sentence_count", cov.sentence_count),
                 "confidence": cov.confidence_score,
                 "risk": cov.risk_score
             }
@@ -917,7 +1017,7 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
         },
         "unassigned_sentences": [
             {"text": s.text, "start": s.start, "end": s.end}
-            for s in kt.unassigned_sentences[:5]
+            for s in (list({(re.sub(r"\s+"," ", u.text.strip()).lower()): u for u in kt.unassigned_sentences}.values()))[:5]
         ],
         "assets": [
             {
