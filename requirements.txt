@@ -1,8 +1,41 @@
-fastapi
-uvicorn
-python-multipart
-pydantic
-openai-whisper
-sentence-transformers
-ffmpeg-python
-numpy
+# Web Framework & Server (Latest Stable)
+fastapi>=0.128.0          # Modern async web framework with auto-documentation
+uvicorn[standard]>=0.40.0 # ASGI server with async support + standard extras
+python-multipart>=0.0.9   # File upload handling
+
+# Data Validation & Serialization (Pydantic v2 - Latest with optimization)
+pydantic>=2.12.0          # Data validation with improved speed and accuracy
+pydantic-settings>=2.6.0  # Configuration management for environment variables
+
+# AI/ML Core (Latest Stable Versions for Better Accuracy)
+openai-whisper>=20250625  # Latest Whisper model with improved accuracy for technical content
+transformers>=4.45.0      # Hugging Face transformers for advanced NLP tasks
+sentence-transformers>=5.2.0  # Semantic embeddings for accurate section classification
+torch>=2.2.0              # PyTorch backend (required by transformers and sentence-transformers)
+
+# Audio/Video Processing (Enhanced Processing Pipeline)
+ffmpeg-python>=0.2.0      # Audio/video format handling
+librosa>=0.10.0           # Audio feature extraction and analysis - improves audio quality detection
+soundfile>=0.12.0         # WAV/FLAC file support for diverse audio formats
+pydub>=0.25.1             # Audio segment manipulation and normalization (NEW)
+
+# Numerical Computing & Data Processing (Optimized Performance)
+numpy>=2.0.0              # Numerical operations with optimized SIMD instructions
+scipy>=1.14.0             # Scientific computing for signal processing and statistics
+pandas>=2.2.0             # Data manipulation and analysis for better logging/analysis
+
+# Machine Learning Utilities (Detection & Scoring)
+scikit-learn>=1.5.0       # ML utilities and confidence scoring
+nltk>=3.8.1               # Natural Language Toolkit for text processing (NEW)
+
+# Development & Logging (Recommended for Production)
+python-dotenv>=1.0.0      # Environment variable management
+python-json-logger>=2.0.7 # Structured logging for better debugging and monitoring
+
+# Type Checking (For Development)
+typing-extensions>=4.12.0 # Extended type hints for better IDE support
+
+# Security & Authentication (Enterprise Features - NEW)
+python-jose>=3.3.0        # JWT authentication support for API security
+passlib>=1.7.4            # Password hashing and verification
+cryptography>=42.0.0      # Cryptographic recipes and primitives

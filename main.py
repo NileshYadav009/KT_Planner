@@ -3,24 +3,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import whisper
 import ffmpeg
 import tempfile
 import os
 import json
 import uuid
-import numpy as np
 from threading import Lock
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
-from sentence_transformers import util
 from context_mapper import (
     ContextMappingPipeline, serialize_kt, merge_incremental_kt,
     apply_human_feedback, HumanFeedback
 )
 from enterprise_semantic_mapper import (
-    EnterpriseSemanticMapper, create_semantic_mapper,
-    ExpertCorrection, SentenceAssignment
+    create_semantic_mapper
 )
 from devops_transcription import (
     apply_devops_corrections, correct_transcript, 

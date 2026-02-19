@@ -14,7 +14,32 @@ except Exception:
             b_norm = b / (np.linalg.norm(b, axis=-1, keepdims=True) + 1e-9)
             return np.dot(a_norm, b_norm.T)
     util = _Util()
-from typing import Dict, List, Optional
+
+# Enhanced modules for better accuracy
+try:
+    import librosa
+    from librosa import feature as librosa_feature
+    HAS_LIBROSA = True
+except ImportError:
+    HAS_LIBROSA = False
+
+try:
+    from scipy import signal
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
+    import nltk
+    nltk.download('punkt', quiet=True)
+    nltk.download('stopwords', quiet=True)
+    from nltk.tokenize import sent_tokenize
+    from nltk.corpus import stopwords
+    HAS_NLTK = True
+except ImportError:
+    HAS_NLTK = False
+
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 with open("kt_schema_new.json") as f:
@@ -22,6 +47,7 @@ with open("kt_schema_new.json") as f:
 
 SENT_MODEL: Optional[SentenceTransformer] = None
 SECTION_EMBEDS: Optional[Dict[str, np.ndarray]] = None
+CONFIDENCE_THRESHOLD = 0.65  # Minimum confidence for auto-classification
 
 def _build_section_hints():
     hints_map = {}
@@ -54,6 +80,116 @@ def _build_section_hints():
 SECTION_HINTS = _build_section_hints()
 
 WORD_RE = re.compile(r"\b\w+\b")
+
+def assess_audio_quality(audio_path: str) -> Dict[str, float]:
+    """
+    Analyze audio quality metrics before transcription.
+    Helps predict transcription accuracy and suggest improvements.
+    
+    Returns metrics for quality assessment (NEW in upgraded modules).
+    """
+    if not HAS_LIBROSA:
+        return {"status": "librosa_not_available", "score": 0.0}
+    
+    try:
+        y, sr = librosa.load(audio_path, sr=16000)
+        
+        # Compute energy and zero-crossing rate
+        rms = librosa_feature.rms(y=y)[0]
+        zcr = librosa_feature.zero_crossing_rate(y)[0]
+        
+        # Detect silence regions
+        S = librosa.feature.melspectrogram(y=y, sr=sr)
+        S_db = librosa.power_to_db(S, ref=np.max)
+        silence_frames = np.sum(S_db < -40) / S_db.shape[1]
+        
+        avg_energy = float(np.mean(rms))
+        avg_zcr = float(np.mean(zcr))
+        
+        # Quality score (0-100)
+        quality_score = (
+            min(avg_energy * 100, 50) +  # Energy contribution
+            min(avg_zcr * 10, 30) +       # Voice activity contribution
+            max(0, 20 - silence_frames * 100)  # Silence penalty
+        )
+        
+        return {
+            "score": float(quality_score),
+            "energy": avg_energy,
+            "voice_activity": avg_zcr,
+            "silence_ratio": float(silence_frames),
+            "recommendation": "good" if quality_score > 60 else "fair" if quality_score > 40 else "poor"
+        }
+    except Exception as e:
+        return {"error": str(e), "score": 0.0}
+
+def classify_with_confidence(sentence: str, section_embeddings: Dict[str, np.ndarray], 
+                            section_ids: List[str]) -> Dict:
+    """
+    Enhanced classification with confidence scores.
+    Returns section assignment with confidence level (IMPROVED).
+    """
+    model = get_sentence_model()
+    if model is None:
+        return {"error": "Model not loaded", "section": None, "confidence": 0.0}
+    
+    sent_embed = model.encode(sentence, normalize_embeddings=True)
+    
+    # Compute cosine similarities
+    similarities = util.cos_sim([sent_embed], list(section_embeddings.values()))[0]
+    similarities = similarities.cpu().numpy() if hasattr(similarities, 'cpu') else similarities
+    
+    # Get top matches
+    top_indices = np.argsort(similarities)[-3:][::-1]
+    
+    return {
+        "section": section_ids[int(top_indices[0])],
+        "confidence": float(similarities[int(top_indices[0])]),
+        "alternatives": [
+            {"section": section_ids[int(idx)], "score": float(similarities[int(idx)])}
+            for idx in top_indices[1:] if similarities[int(idx)] > CONFIDENCE_THRESHOLD * 0.8
+        ],
+        "requires_review": float(similarities[int(top_indices[0])]) < CONFIDENCE_THRESHOLD
+    }
+
+def validate_sentence_quality(sentence: str) -> Dict[str, any]:
+    """
+    Validate sentence quality using NLP metrics (NEW).
+    Detects potential transcription errors.
+    """
+    if not HAS_NLTK:
+        return {"status": "nltk_not_available", "quality_score": 0.0}
+    
+    try:
+        words = sentence.split()
+        word_count = len(words)
+        
+        # Basic metrics
+        avg_word_length = np.mean([len(w) for w in words]) if words else 0
+        
+        # Check for common transcription errors
+        quality_issues = []
+        if word_count < 3:
+            quality_issues.append("too_short")
+        if word_count > 100:
+            quality_issues.append("too_long")
+        if avg_word_length > 20:
+            quality_issues.append("unusual_word_length")
+        
+        # Scoring
+        score = 100
+        if quality_issues:
+            score -= len(quality_issues) * 10
+        
+        return {
+            "quality_score": max(0, score),
+            "word_count": word_count,
+            "avg_word_length": float(avg_word_length),
+            "issues": quality_issues,
+            "status": "acceptable" if score > 70 else "warning" if score > 40 else "review_needed"
+        }
+    except Exception as e:
+        return {"error": str(e), "quality_score": 0.0}
 
 def get_sentence_model(model_name: str = "all-MiniLM-L6-v2") -> Optional[SentenceTransformer]:
     global SENT_MODEL
