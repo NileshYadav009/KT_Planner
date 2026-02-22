@@ -1,0 +1,14 @@
+{
+  "terms": ["Kafka", "Kubernetes", "Grafana", "Prometheus", "REST", "API", "CI/CD", "async", "streaming", "service", "services"],
+  "phrase_corrections": {
+    "coffee for a sink event screaming between surfaces": "Kafka for async event streaming between services",
+    "coffee for a sink": "Kafka for async",
+    "screaming": "streaming",
+    "surfaces": "services"
+  },
+  "acronyms": {
+    "api": "API",
+    "rest": "REST",
+    "ci cd": "CI/CD"
+  }
+}

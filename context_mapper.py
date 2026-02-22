@@ -22,10 +22,66 @@ from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
+import importlib.util
+import os
+from policy import (
+    CONFIDENCE_ACCEPT_THRESHOLD,
+    IMPLEMENTATION_INDICATORS,
+    CONCEPTUAL_SECTIONS
+)
+
+from runtime_policy import load_policy
+
+# Detect if sentence_transformers package is installed but avoid importing it at module import time.
+# Only use the real heavy model when the environment variable USE_REAL_EMBEDDINGS is set to true.
+_SENT_TRANS_SPEC = importlib.util.find_spec("sentence_transformers")
+_USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "").lower() in ("1", "true", "yes"))
+
+# Fallback: simple token-set embedding + Jaccard similarity to avoid heavy deps at module import time
+if not _USE_REAL_EMBEDDINGS:
+    import statistics as np
+
+    class SimpleEmbedding:
+        def __init__(self, text: str):
+            self.words = set(re.findall(r"\w+", text.lower()))
+
+    class SentenceTransformer:
+        def __init__(self, model_name=None):
+            pass
+        def encode(self, texts, convert_to_tensor=False):
+            single = isinstance(texts, str)
+            items = [texts] if single else texts
+            embs = [SimpleEmbedding(t) for t in items]
+            return embs[0] if single else embs
+
+    class util:
+        @staticmethod
+        def cos_sim(a, b):
+            if not hasattr(a, 'words') or not hasattr(b, 'words'):
+                return [[0.0]]
+            inter = a.words.intersection(b.words)
+            union = a.words.union(b.words)
+            score = float(len(inter) / len(union)) if union else 0.0
+            return [[score]]
+else:
+    # Real modules will be imported lazily inside ContextClassifier to avoid heavy startup costs
+    util = None
+
+# Ensure `np.mean` is available for segmentation even when sentence-transformers
+# is present; prefer numpy when installed, otherwise fall back to statistics
+try:
+    import numpy as np
+except Exception:
+    import statistics as np
 
 logger = logging.getLogger(__name__)
+
+# Glossary-based conservative corrections for technical terms
+try:
+    from glossary import apply_glossary_corrections, detect_ambiguous_usage, GLOSSARY
+except Exception:
+    def apply_glossary_corrections(text, conf, min_confidence_for_correction=0.6):
+        return text, False
 
 # ============================================================================
 # STAGE 1: Audio Confidence Validation
@@ -244,6 +300,12 @@ class ClassifiedSentence:
                 self.multi_section_assignments.append(self.primary_classification.section_id)
             # Skip secondary classifications to avoid duplication across sections
             # (keeping this comment for clarity on design decision)
+        # Explicit evidence extracted from sentence (e.g., 'connection pool', 'timeout')
+        if getattr(self, 'explicit_evidence', None) is None:
+            self.explicit_evidence = []
+        # Whether the sentence's assigned cause is inferred (no explicit evidence)
+        if getattr(self, 'is_inferred', None) is None:
+            self.is_inferred = False
     
 
 class ContextClassifier:
@@ -257,25 +319,43 @@ class ContextClassifier:
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        similarity_threshold: float = 0.30
+        similarity_threshold: float = 0.15
     ):
         """
         Args:
             model_name: HuggingFace model for embeddings
             similarity_threshold: Minimum cosine similarity for assignment
         """
+        # Lazily import heavy dependencies if configured to use real embeddings
+        if _USE_REAL_EMBEDDINGS:
+            try:
+                st = __import__("sentence_transformers")
+                # Import numpy when using real model
+                import numpy as _np
+                globals()['np'] = _np
+                globals()['SentenceTransformer'] = st.SentenceTransformer
+                globals()['util'] = st.util
+            except Exception:
+                # Fall back to lightweight implementations
+                pass
+
         self.model = SentenceTransformer(model_name)
         self.similarity_threshold = similarity_threshold
         self.section_embeddings = {}
         self.section_metadata = {}
+        self._section_hints = {}  # Initialize for keyword matching
     
     def index_schema(self, schema_sections: List[Dict]) -> None:
         """Index schema sections for fast lookup."""
+        self._section_hints = {}  # Store hints for keyword matching
         for sec in schema_sections:
             sec_id = sec.get("id")
             title = sec.get("title", sec_id)
             description = sec.get("description", "")
-            keywords = sec.get("keywords", [])
+            keywords = sec.get("hints", [])  # Use 'hints' from schema
+            
+            # Store hints for keyword-based boosting in classify_sentence
+            self._section_hints[sec_id] = keywords
             
             # Build rich section text
             section_text = f"{title} {description} {' '.join(keywords)}"
@@ -291,6 +371,9 @@ class ContextClassifier:
     def classify_sentence(self, sentence: Sentence, sent_embedding=None, neighbor_embeddings: List = None, top_k: int = 3, alpha: float = 0.7, beta: float = 0.3) -> ClassifiedSentence:
         """
         Classify sentence against all schema sections.
+        
+        Uses semantic similarity boosted by keyword matching to prevent misplacement
+        while allowing lower thresholds for better coverage.
         
         Returns:
             ClassifiedSentence with primary + secondary classifications
@@ -309,6 +392,8 @@ class ContextClassifier:
 
         # Compute similarities to all sections
         classifications = []
+        sent_text_lower = (sentence.text or "").lower()
+        
         for sec_id, sec_embedding in self.section_embeddings.items():
             base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
 
@@ -319,8 +404,19 @@ class ContextClassifier:
                 if sims:
                     context_sim = float(np.mean(sims))
 
-            # Combined score — prefer sentence-level similarity but allow context to influence
-            combined = float(alpha * base_sim + beta * context_sim)
+            # Keyword matching boost: if hints match, boost the score
+            keyword_boost = 0.0
+            if sec_id in self.section_metadata:
+                # Get hints from schema (already loaded during index_schema)
+                # Compute keyword match score
+                hints = getattr(self, '_section_hints', {}).get(sec_id, [])
+                if hints:
+                    matching_hints = sum(1 for h in hints if h.lower() in sent_text_lower)
+                    if matching_hints > 0:
+                        keyword_boost = min(0.3, 0.05 * matching_hints)  # Cap boost at 0.3
+
+            # Combined score — prefer sentence-level similarity but allow context and keywords to influence
+            combined = float(alpha * base_sim + beta * context_sim + keyword_boost)
 
             # Always consider top candidates, thresholding later
             classifications.append(Classification(
@@ -328,7 +424,7 @@ class ContextClassifier:
                 section_title=self.section_metadata[sec_id]["title"],
                 confidence=combined,
                 similarity_score=base_sim,
-                reason=f"Combined semantic score (base={base_sim:.3f}, ctx={context_sim:.3f}, combined={combined:.3f})"
+                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}"
             ))
         
         # Sort by combined confidence and take top_k
@@ -368,14 +464,28 @@ class ContextClassifier:
             confidence=primary.confidence if primary else 0.0,
             alternatives=alternatives
         )
-        
-        return ClassifiedSentence(
+        # Glossary ambiguity detection: do not change classification decision
+        # but attach warnings for human review if ambiguous usage detected.
+        try:
+            warnings = detect_ambiguous_usage(sentence.text)
+        except Exception:
+            warnings = []
+
+        cs = ClassifiedSentence(
             sentence=sentence,
             primary_classification=primary,
             secondary_classifications=secondary,
             is_unassigned=is_unassigned,
             explainability_log=explainability
         )
+
+        if warnings:
+            # attach warnings and note them in explainability
+            cs.glossary_warnings = warnings
+            # Append to reasoning for transparency
+            cs.explainability_log.reasoning = cs.explainability_log.reasoning + " | GLOSSARY_WARNINGS: " + ", ".join(warnings)
+
+        return cs
 
 
 # ============================================================================
@@ -469,12 +579,24 @@ class ContextRepair:
             (improved_text, repair_record)
         """
         original = classified.sentence.text
+        # If sentence is protected (failures, rollback, recovery, security), do not modify
+        if is_protected_sentence(original):
+            return original, None
         improved = original
         repair_record = None
         
         # Stage 1: Basic grammar fixes
         improved = self._basic_grammar_fix(improved)
-        
+
+        # Stage 1.5: Glossary-based conservative corrections (apply when audio confidence low)
+        try:
+            glossary_improved, did_change = apply_glossary_corrections(improved, classified.sentence.audio_confidence)
+            if did_change:
+                improved = glossary_improved
+        except Exception:
+            # Any glossary failures should not break pipeline
+            pass
+
         # Stage 2: Context-based inference (within bounds)
         if classified.primary_classification and classified.primary_classification.confidence < 0.5:
             # Try to improve using surrounding context
@@ -680,6 +802,59 @@ KNOWN_DASHBOARDS = {
 }
 
 
+# Evidence keywords for extracting explicit mentions of root causes
+EVIDENCE_KEYWORDS = [
+    r"connection pool", r"connection pool exhausted", r"connection refused", r"timeout", r"deadlock", r"out of connections",
+    r"db", r"database", r"sql", r"connection leak", r"max_connections", r"too many connections"
+]
+
+
+def extract_explicit_evidence(text: str):
+    """Return list of evidence phrases found in text (case-insensitive)."""
+    found = []
+    if not text:
+        return found
+    t = text.lower()
+    for kw in EVIDENCE_KEYWORDS:
+        try:
+            if re.search(kw, t):
+                found.append(kw)
+        except Exception:
+            # fallback literal check
+            if kw in t:
+                found.append(kw)
+    return found
+
+
+def is_causal_statement(text: str) -> bool:
+    if not text:
+        return False
+    return re.search(r"\b(when|because|due to|caused by|after|once|as a result|lead to|leads to)\b", text.lower()) is not None
+
+
+# Protected content keywords: never summarize or alter these
+PROTECTED_KEYWORDS = [
+    r"critical failure", r"failure", r"failures", r"rollback", r"rollback plan",
+    r"restore", r"recovery", r"recovery procedure", r"backup", r"backup strategy",
+    r"security", r"vulnerability", r"breach", r"incident response"
+]
+
+
+def is_protected_sentence(text: str) -> bool:
+    """Return True if sentence contains terms that must be preserved verbatim."""
+    if not text:
+        return False
+    t = text.lower()
+    for kw in PROTECTED_KEYWORDS:
+        try:
+            if re.search(kw, t):
+                return True
+        except Exception:
+            if kw in t:
+                return True
+    return False
+
+
 def extract_urls_and_assets(
     sentences: List[Sentence],
     video_path: Optional[str] = None,
@@ -723,16 +898,17 @@ def extract_urls_and_assets(
             ))
     
     # Detect dashboard mentions in sentence text
-    for sent in sentences:
-        for dash_name, dash_pattern in KNOWN_DASHBOARDS.items():
-            if re.search(dash_pattern, sent.text, re.IGNORECASE):
-                assets.append(ExtractedAsset(
-                    asset_type="screenshot_candidate",
-                    content=f"dashboard:{dash_name}",
-                    sentence_ids=[],
-                    detected_component=dash_name,
-                    timestamp=sent.start
-                ))
+    # NOTE: Screenshot extraction/asset capture disabled by request.
+    # for sent in sentences:
+    #     for dash_name, dash_pattern in KNOWN_DASHBOARDS.items():
+    #         if re.search(dash_pattern, sent.text, re.IGNORECASE):
+    #             assets.append(ExtractedAsset(
+    #                 asset_type="screenshot_candidate",
+    #                 content=f"dashboard:{dash_name}",
+    #                 sentence_ids=[],
+    #                 detected_component=dash_name,
+    #                 timestamp=sent.start
+    #             ))
     
     # OCR-based URL detection (optional, enterprise feature)
     if enable_ocr and video_path:
@@ -768,6 +944,7 @@ class StructuredKT:
     explainability_logs: Optional[List[ExplainabilityLog]] = None
     human_feedback: Optional[List[HumanFeedback]] = None
     parent_job_id: Optional[str] = None  # For incremental KT (session 2+)
+    cross_references: Optional[List[Dict[str, Any]]] = None
 
 
 def assemble_kt(
@@ -792,6 +969,7 @@ def assemble_kt(
     section_content = {}
     unassigned = []
     missing_required = []
+    cross_refs = []
     
     # Track seen sentences per section to avoid duplicates caused by transcript repetition
     seen_texts_per_section: Dict[str, set] = {}
@@ -800,11 +978,73 @@ def assemble_kt(
         # Build enhanced text
         enhanced_text, repair_action = repaired_map.get(idx, (cs.sentence.text, None))
         
+        # Detect referential sentences like "as I mentioned earlier", "this connects to..."
+        def is_referential_sentence(text: str) -> bool:
+            if not text:
+                return False
+            patterns = [
+                r"\bas i mentioned\b",
+                r"\bas noted earlier\b",
+                r"\bas stated earlier\b",
+                r"\bthis connects to\b",
+                r"\bsee above\b",
+                r"\brefer to the previous\b",
+                r"\b(as described|as explained) earlier\b",
+                r"\b(as I said|as I mentioned)\b"
+            ]
+            t = text.lower()
+            for p in patterns:
+                if re.search(p, t):
+                    return True
+            return False
+
+        referential = is_referential_sentence(cs.sentence.text)
+
         if cs.is_unassigned:
             # Deduplicate unassigned sentences as well
             norm = (cs.sentence.text or '').strip()
             if norm and norm not in [s.text for s in unassigned]:
                 unassigned.append(cs.sentence)
+            continue
+        # Handle referential sentences: link to previous relevant section and avoid duplication
+        if referential and cs.primary_classification:
+            # Try to find prior sentence in same section or best match
+            target_section = cs.primary_classification.section_id
+            found = None
+            # search backwards for a sentence already placed in that section
+            for j in range(idx - 1, -1, -1):
+                prev = classified_sentences[j]
+                if prev.primary_classification and prev.primary_classification.section_id == target_section:
+                    found = prev
+                    break
+            # fallback: find any earlier sentence with significant token overlap
+            if not found:
+                cur_words = set(re.findall(r"\w+", (cs.sentence.text or '').lower()))
+                for j in range(idx - 1, -1, -1):
+                    prev = classified_sentences[j]
+                    prev_words = set(re.findall(r"\w+", (prev.sentence.text or '').lower()))
+                    if not cur_words or not prev_words:
+                        continue
+                    inter = cur_words.intersection(prev_words)
+                    if len(inter) >= max(1, min(5, int(0.3 * len(cur_words)))):
+                        found = prev
+                        break
+
+            if found:
+                # Record a cross-reference entry under the found section
+                dest_sec = found.primary_classification.section_id if found.primary_classification else target_section
+                entry = {
+                    "from_sentence": cs.sentence.text,
+                    "from_index": idx,
+                    "to_section": dest_sec,
+                    "to_sentence": found.sentence.text,
+                    "note": "referential_link"
+                }
+                cross_refs.append(entry)
+                # Also annotate target section content if present
+                if dest_sec in section_content:
+                    section_content[dest_sec].setdefault("cross_references", []).append(entry)
+                continue
         elif cs.primary_classification:
             # Place sentence into all assigned sections (multi-label support)
             assigned_secs = cs.multi_section_assignments or []
@@ -832,7 +1072,23 @@ def assemble_kt(
                 norm_text = (cs.sentence.text or '').strip()
                 norm_key = re.sub(r"\s+", " ", norm_text).lower()
                 if norm_key in seen_texts_per_section.get(sec_id, set()):
-                    # Skip duplicate repeated sentence
+                    # Already present — avoid duplicating content; add cross-reference
+                    # Find original text index (best-effort)
+                    original_text = None
+                    for s in section_content.get(sec_id, {}).get("sentences", []):
+                        ot = s.get("text", "").strip()
+                        if re.sub(r"\s+", " ", ot).lower() == norm_key:
+                            original_text = ot
+                            break
+                    cref = {
+                        "from_sentence": cs.sentence.text,
+                        "from_index": idx,
+                        "to_section": sec_id,
+                        "to_sentence": original_text,
+                        "note": "duplicate_reference"
+                    }
+                    cross_refs.append(cref)
+                    section_content[sec_id].setdefault("cross_references", []).append(cref)
                     continue
                 seen_texts_per_section.setdefault(sec_id, set()).add(norm_key)
 
@@ -842,7 +1098,8 @@ def assemble_kt(
                     "end": cs.sentence.end,
                     "speaker": cs.sentence.speaker,
                     "audio_confidence": cs.sentence.audio_confidence,
-                    "assigned_sections": list(cs.multi_section_assignments or [])
+                    "assigned_sections": list(cs.multi_section_assignments or []),
+                    "preserve_verbatim": bool(is_protected_sentence(cs.sentence.text))
                 })
                 section_content[sec_id]["enhanced_texts"].append(enhanced_text)
 
@@ -882,6 +1139,8 @@ def assemble_kt(
         overall_coverage_percent=float(overall_coverage),
         overall_risk_score=float(overall_risk),
         timestamp=datetime.utcnow().isoformat() + "Z"
+        ,
+        cross_references=cross_refs or []
     )
 
 
@@ -952,6 +1211,87 @@ class ContextMappingPipeline:
             cs = self.classifier.classify_sentence(s, sent_embedding=embeddings[i], neighbor_embeddings=neighbor_embs)
             classified_sentences.append(cs)
         logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences")
+
+        # Load runtime policy and enforce policies before repair
+        policy = load_policy()
+        CONFIDENCE_ACCEPT_THRESHOLD = float(policy.get("confidence_accept_threshold", 0.8))
+        IMPLEMENTATION_INDICATORS = [i.lower() for i in policy.get("implementation_indicators", [])]
+        CONCEPTUAL_SECTIONS = [c.lower() for c in policy.get("conceptual_sections", [])]
+
+        def _is_implementation_step(text: str) -> bool:
+            t = (text or "").lower()
+            for ind in IMPLEMENTATION_INDICATORS:
+                if ind in t:
+                    return True
+            if "`" in (text or "") or "->" in (text or ""):
+                return True
+            return False
+
+        conceptual_set = set(CONCEPTUAL_SECTIONS)
+
+        for idx, cs in enumerate(classified_sentences):
+            # If no primary classification -> mark review
+            if not cs.primary_classification:
+                cs.is_unassigned = True
+                cs.explainability_log = ExplainabilityLog(
+                    action="policy",
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    sentence_id=idx,
+                    section_id="review_required",
+                    reasoning="No primary classification",
+                    confidence=0.0
+                )
+                continue
+
+            sec_title = (cs.primary_classification.section_title or "").lower()
+            conf = cs.primary_classification.confidence or 0.0
+
+            # Enforce configured confidence acceptance
+            if conf < CONFIDENCE_ACCEPT_THRESHOLD:
+                cs.is_unassigned = True
+                cs.explainability_log = ExplainabilityLog(
+                    action="policy",
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    sentence_id=idx,
+                    section_id="review_required",
+                    reasoning=f"Low semantic confidence ({conf:.2f})",
+                    confidence=conf
+                )
+                continue
+
+            # Implementation detection + conceptual placement check
+            if _is_implementation_step(cs.sentence.text) and any(c in sec_title for c in conceptual_set):
+                cs.is_unassigned = True
+                cs.explainability_log = ExplainabilityLog(
+                    action="policy",
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    sentence_id=idx,
+                    section_id="review_required",
+                    reasoning=f"Implementation step detected but classified to conceptual section '{cs.primary_classification.section_title}'",
+                    confidence=conf
+                )
+                continue
+
+            # Extract explicit evidence for root-cause assertions
+            evidence = extract_explicit_evidence(cs.sentence.text)
+            cs.explicit_evidence = evidence
+
+            # If sentence reads as a causal statement but lacks explicit evidence,
+            # flag it as inferred. Do not change classification, only mark inference.
+            if is_causal_statement(cs.sentence.text) and not evidence:
+                cs.is_inferred = True
+                # annotate explainability log
+                if cs.explainability_log:
+                    cs.explainability_log.reasoning = (cs.explainability_log.reasoning or "") + " [INFERRED]"
+                else:
+                    cs.explainability_log = ExplainabilityLog(
+                        action="inference",
+                        timestamp=datetime.utcnow().isoformat() + "Z",
+                        sentence_id=idx,
+                        section_id=cs.primary_classification.section_id if cs.primary_classification else None,
+                        reasoning="Causal statement without explicit evidence [INFERRED]",
+                        confidence=conf
+                    )
         
         # STAGE 4: Repair low-confidence sentences
         repaired_map = {}
@@ -980,6 +1320,155 @@ class ContextMappingPipeline:
 
 def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
     """Convert StructuredKT to JSON-serializable dict."""
+    def _desired_order_keywords():
+        return [
+            ("System Overview", ["overview", "system", "summary", "introduction", "context"]),
+            ("Architecture Components", ["arch", "architecture", "component", "service"]),
+            ("Data Flow", ["flow", "data flow", "pipeline", "request", "message", "event"]),
+            ("Deployment Process", ["deploy", "deployment", "kubernetes", "kubectl", "helm", "docker", "ci/cd"]),
+            ("Monitoring Strategy", ["monitor", "monitoring", "metrics", "alert", "logging", "tracing"]),
+            ("Known Issues", ["issue", "problem", "error", "fail", "bug", "troubleshoot", "troubleshooting"])
+        ]
+
+    def compute_flow_coherence(kt_obj: StructuredKT) -> Tuple[float, List[str]]:
+        """Compute a simple flow coherence score (0.0-1.0) and list flow issues.
+
+        Score = fraction of sections that appear in non-decreasing bucket order
+        relative to desired flow. Provides quick signal if ordering is scrambled.
+        """
+        desired = _desired_order_keywords()
+        bucket_names = [name for name, _ in desired]
+
+        # Map section to bucket index
+        mapping = {}
+        for sec_id, content in kt_obj.section_content.items():
+            title = (content.get("section_title") or sec_id).lower()
+            placed = False
+            for idx, (name, keywords) in enumerate(desired):
+                for kw in keywords:
+                    if kw in title or kw in sec_id.lower():
+                        mapping[sec_id] = idx
+                        placed = True
+                        break
+                if placed:
+                    break
+            if not placed:
+                # Unknown sections go to Known Issues bucket
+                mapping[sec_id] = bucket_names.index("Known Issues")
+
+        # Build sequence in original appearance order
+        seq = [mapping.get(sid, len(bucket_names)-1) for sid in kt_obj.section_content.keys()]
+        if not seq:
+            return 1.0, []
+
+        good = 1
+        issues = []
+        prev = seq[0]
+        for i, cur in enumerate(seq[1:], start=1):
+            if cur < prev:
+                # out of order
+                sid = list(kt_obj.section_content.keys())[i]
+                issues.append(f"Section '{sid}' appears out of flow (bucket {cur} < prev {prev})")
+            else:
+                good += 1
+            prev = cur
+
+        score = float(good) / len(seq) if seq else 1.0
+        return score, issues
+
+    def export_kt_markdown(kt_obj: StructuredKT) -> str:
+        """Generate a simple ordered Markdown representation of the KT.
+
+        Sections are presented in the desired logical flow; unmatched sections
+        are appended under 'Known Issues'.
+        """
+        desired = _desired_order_keywords()
+        buckets = {name: [] for name, _ in desired}
+        unmatched = []
+
+        for sec_id, content in kt_obj.section_content.items():
+            title = (content.get("section_title") or sec_id)
+            placed = False
+            for name, keywords in desired:
+                for kw in keywords:
+                    if kw in title.lower() or kw in sec_id.lower():
+                        buckets[name].append((sec_id, content))
+                        placed = True
+                        break
+                if placed:
+                    break
+            if not placed:
+                unmatched.append((sec_id, content))
+
+        markdown_lines = [f"# KT Report - {kt_obj.job_id}", ""]
+        for name, _ in desired:
+            items = buckets.get(name, [])
+            if not items:
+                continue
+            markdown_lines.append(f"## {name}")
+            for sec_id, content in items:
+                markdown_lines.append(f"### {content.get('section_title', sec_id)}")
+                for s in content.get('sentences', []):
+                    markdown_lines.append(f"- {s.get('text')}")
+                markdown_lines.append("")
+
+        if unmatched:
+            markdown_lines.append("## Known Issues")
+            for sec_id, content in unmatched:
+                markdown_lines.append(f"### {content.get('section_title', sec_id)}")
+                for s in content.get('sentences', []):
+                    markdown_lines.append(f"- {s.get('text')}")
+                markdown_lines.append("")
+
+        return "\n".join(markdown_lines)
+
+    # Build ordered_section_content for consumers that want ordered sections
+    desired = _desired_order_keywords()
+    raw_sections = []
+    for sec_id, content in kt.section_content.items():
+        title = content.get("section_title") or sec_id
+        raw_sections.append({
+            "section_id": sec_id,
+            "section_title": title,
+            "content": content
+        })
+
+    buckets = {name: [] for name, _ in desired}
+    unmatched = []
+    for sec in raw_sections:
+        placed = False
+        lower_title = (sec.get("section_title") or "").lower()
+        sec_id_lower = (sec.get("section_id") or "").lower()
+        for name, keywords in desired:
+            for kw in keywords:
+                if kw in lower_title or kw in sec_id_lower:
+                    buckets[name].append(sec)
+                    placed = True
+                    break
+            if placed:
+                break
+        if not placed:
+            unmatched.append(sec)
+
+    if unmatched:
+        buckets["Known Issues"].extend(unmatched)
+
+    ordered_section_content = []
+    for name, _ in desired:
+        for sec in buckets.get(name, []):
+            sec_id = sec["section_id"]
+            content = kt.section_content.get(sec_id, {})
+            ordered_section_content.append({
+                "section_id": sec_id,
+                "section_title": sec.get("section_title"),
+                "sentence_count": content.get("sentence_count", 0),
+                "confidence": content.get("confidence", 0.0),
+                "sentences_preview": [s["text"][:100] for s in content.get("sentences", [])[:5]],
+                "sentences": content.get("sentences", [])
+            })
+
+    flow_score, flow_issues = compute_flow_coherence(kt)
+
     return {
         "job_id": kt.job_id,
         "parent_job_id": kt.parent_job_id,
@@ -1015,9 +1504,31 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
             }
             for sec_id, content in kt.section_content.items()
         },
+        "ordered_section_content": ordered_section_content,
         "unassigned_sentences": [
             {"text": s.text, "start": s.start, "end": s.end}
             for s in (list({(re.sub(r"\s+"," ", u.text.strip()).lower()): u for u in kt.unassigned_sentences}.values()))[:5]
+        ],
+        "review_required_sentences": [
+            {
+                "text": s.text,
+                "start": s.start,
+                "end": s.end,
+                "explainability": next(({
+                    "action": log.action,
+                    "section_id": log.section_id,
+                    "reasoning": log.reasoning,
+                    "confidence": log.confidence
+                } for log in (kt.explainability_logs or []) if log.sentence_id == i), None)
+            }
+            for i, s in enumerate(kt.unassigned_sentences)
+        ],
+        "evidence": [
+            {
+                "text": s.text,
+                "evidence": getattr(s, 'explicit_evidence', []) if hasattr(s, 'explicit_evidence') else []
+            }
+            for s in kt.sentences[:10]
         ],
         "assets": [
             {
@@ -1037,6 +1548,12 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
             }
             for log in (kt.explainability_logs or [])[:5]
         ]
+        ,
+        "flow_coherence_score": flow_score,
+        "flow_issues": flow_issues,
+        "ordered_markdown": export_kt_markdown(kt)
+        ,
+        "cross_references": kt.cross_references if getattr(kt, 'cross_references', None) else []
     }
 
 

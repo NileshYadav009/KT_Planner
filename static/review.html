@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KT Review Triage</title>
+</head>
+<body>
+  <h2>Review Required - KT Triage</h2>
+  <label>Job ID: <input id="job" /></label>
+  <button id="load">Load</button>
+  <ul id="items"></ul>
+
+  <script>
+    document.getElementById('load').onclick = async () => {
+      const job = document.getElementById('job').value.trim();
+      if (!job) return alert('Enter job id');
+      const res = await fetch(`/reviews/${job}`);
+      if (!res.ok) return alert('Failed to load');
+      const data = await res.json();
+      const list = document.getElementById('items'); list.innerHTML = '';
+      (data.review_required || []).forEach((s, idx) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<div><strong>${s.text}</strong></div>`;
+        const sel = document.createElement('input'); sel.placeholder = 'target section id'
+        const btn = document.createElement('button'); btn.textContent = 'Assign';
+        btn.onclick = async () => {
+          const section = sel.value.trim();
+          if (!section) return alert('enter section id');
+          const resp = await fetch(`/reviews/${job}/apply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sentence_text: s.text, corrected_section: section, user: 'web'})});
+          if (resp.ok) { alert('Assigned'); li.remove(); }
+          else alert('Failed');
+        }
+        li.appendChild(sel); li.appendChild(btn);
+        list.appendChild(li);
+      })
+    }
+  </script>
+</body>
+</html>

@@ -23,6 +23,14 @@ from devops_transcription import (
     apply_devops_corrections, correct_transcript, 
     get_model_recommendation, score_transcription_confidence
 )
+import logging
+
+# Structured-ish logging setup for the API process
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.add_middleware(
@@ -236,22 +244,26 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 85
 
-        # Screenshot capture for detected assets
-        screenshots = []
-        screenshots_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
-        os.makedirs(screenshots_dir, exist_ok=True)
-
-        max_screens = min(len(kt.assets), 5)  # Capture up to 5 related screenshots
-        for i, asset in enumerate(kt.assets[:max_screens]):
-            if asset.asset_type == "screenshot_candidate":
-                try:
-                    timestamp = asset.timestamp or 0.0
-                    img_name = f"{job_id}_{asset.detected_component}_{i}.jpg"
-                    img_path = os.path.join(screenshots_dir, img_name)
-                    ffmpeg.input(input_path, ss=timestamp).output(img_path, vframes=1).run(quiet=True, overwrite_output=True)
-                    screenshots.append(f"/static/screenshots/{img_name}")
-                except Exception:
-                    pass
+        # Screenshot capture for detected assets (DISABLED)
+        # The screenshot extraction was disabled per user request because
+        # assets and screenshots are currently not needed and caused
+        # clutter in the repository. To re-enable, remove these comments
+        # and ensure `ffmpeg-python` is available and safe to run in this env.
+        # screenshots = []
+        # screenshots_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
+        # os.makedirs(screenshots_dir, exist_ok=True)
+        #
+        # max_screens = min(len(kt.assets), 5)  # Capture up to 5 related screenshots
+        # for i, asset in enumerate(kt.assets[:max_screens]):
+        #     if asset.asset_type == "screenshot_candidate":
+        #         try:
+        #             timestamp = asset.timestamp or 0.0
+        #             img_name = f"{job_id}_{asset.detected_component}_{i}.jpg"
+        #             img_path = os.path.join(screenshots_dir, img_name)
+        #             ffmpeg.input(input_path, ss=timestamp).output(img_path, vframes=1).run(quiet=True, overwrite_output=True)
+        #             screenshots.append(f"/static/screenshots/{img_name}")
+        #         except Exception:
+        #             pass
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
@@ -396,6 +408,229 @@ async def list_jobs(limit: int = 20):
                 "transcript_preview": (job.get("transcript") or '')[:200]
             })
     return {"jobs": items}
+
+
+@app.get("/reviews/{job_id}")
+async def get_reviews(job_id: str):
+    """Return review-required (low-confidence or policy-flagged) sentences for a job."""
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+
+    kt = job.get("kt_structured")
+    if not kt:
+        raise HTTPException(status_code=404, detail="Structured KT not found for job.")
+
+    # Return serialized review-required sentences if present
+    review_items = kt.get("review_required_sentences") if isinstance(kt, dict) else None
+    if review_items is None:
+        # Fallback: return unassigned sentences
+        review_items = kt.get("unassigned_sentences") if isinstance(kt, dict) else []
+
+    return {"job_id": job_id, "review_required": review_items}
+
+
+@app.post("/reviews/{job_id}/apply")
+async def apply_review_correction(job_id: str, payload: Dict):
+    """Apply a human correction for a review-required sentence.
+
+    Payload keys:
+      - `sentence_text` (or `sentence_index`): identifies the sentence
+      - `corrected_section`: target section id
+      - `user`: user id or name
+    """
+    sentence_text = payload.get("sentence_text")
+    sentence_index = payload.get("sentence_index")
+    corrected_section = payload.get("corrected_section")
+    user = payload.get("user", "unknown")
+    evidence = payload.get("evidence")
+
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        kt = job.get("kt_structured")
+        if not kt or not isinstance(kt, dict):
+            raise HTTPException(status_code=400, detail="Structured KT not available for job")
+
+        # Find unassigned sentence by text or index
+        target = None
+        target_idx = None
+        if sentence_index is not None:
+            try:
+                idx = int(sentence_index)
+                if 0 <= idx < len(kt.get("unassigned_sentences", [])):
+                    target = kt["unassigned_sentences"][idx]
+                    target_idx = idx
+            except Exception:
+                pass
+
+        if target is None and sentence_text:
+            for i, s in enumerate(kt.get("unassigned_sentences", [])):
+                if sentence_text.strip().lower() == (s.get("text","") or "").strip().lower():
+                    target = s
+                    target_idx = i
+                    break
+
+        if not target:
+            raise HTTPException(status_code=404, detail="Unassigned sentence not found")
+
+        # Remove from unassigned list
+        removed = kt["unassigned_sentences"].pop(target_idx)
+
+        # Ensure section bucket exists
+        if "section_content" not in kt:
+            kt["section_content"] = {}
+
+        if corrected_section not in kt["section_content"]:
+            kt["section_content"][corrected_section] = {
+                "section_id": corrected_section,
+                "section_title": corrected_section,
+                "sentences": [],
+                "enhanced_texts": [],
+                "repair_actions": [],
+                "screenshots": [],
+                "confidence": 1.0,
+                "sentence_count": 0
+            }
+
+        # Append corrected sentence
+        kt["section_content"][corrected_section]["sentences"].append({
+            "text": removed.get("text"),
+            "start": removed.get("start"),
+            "end": removed.get("end"),
+            "speaker": removed.get("speaker"),
+            "audio_confidence": removed.get("audio_confidence", 1.0),
+            "assigned_sections": [corrected_section]
+        })
+        kt["section_content"][corrected_section]["enhanced_texts"].append(removed.get("text"))
+
+        # Update counts
+        kt["section_content"][corrected_section]["sentence_count"] = len(kt["section_content"][corrected_section]["sentences"])
+
+        # Record human feedback
+        if "human_feedback" not in job or job.get("human_feedback") is None:
+            job["human_feedback"] = []
+        job["human_feedback"].append({
+            "user": user,
+            "corrected_section": corrected_section,
+            "sentence": removed.get("text"),
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        })
+
+        # Attach evidence if provided (to sentence and top-level evidence list)
+        if evidence:
+            # Normalize to list
+            ev_list = evidence if isinstance(evidence, list) else [evidence]
+            # Attach to the last appended sentence in section_content
+            sec_sentences = kt["section_content"][corrected_section]["sentences"]
+            if sec_sentences:
+                if "evidence" not in sec_sentences[-1]:
+                    sec_sentences[-1]["evidence"] = []
+                sec_sentences[-1]["evidence"].extend(ev_list)
+
+            # Ensure top-level evidence list exists
+            if "evidence" not in kt:
+                kt["evidence"] = []
+            kt["evidence"].append({
+                "sentence": removed.get("text"),
+                "evidence": ev_list,
+                "user": user,
+                "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z"
+            })
+
+        # Recompute simple coverage summary from serialized KT and SCHEMA
+        coverage_resp = {}
+        missing_required = []
+        for sec in SCHEMA:
+            sec_id = sec.get("id")
+            title = sec.get("title")
+            required = sec.get("required", False)
+            sec_content = kt.get("section_content", {}).get(sec_id, {})
+            sentences = sec_content.get("sentences", [])
+            sentence_texts = [s.get("text", "") for s in sentences]
+            count = len(sentence_texts)
+
+            # estimate confidence from audio_confidence values if present
+            conf_vals = [s.get("audio_confidence", 0.5) for s in sentences if s.get("audio_confidence") is not None]
+            confidence = float(sum(conf_vals) / len(conf_vals)) if conf_vals else 0.0
+
+            if count == 0:
+                status = "missing"
+                if required:
+                    missing_required.append(sec_id)
+                risk = 1.0 if required else 0.5
+            elif count < 2:
+                status = "weak"
+                risk = 0.6 if required else 0.2
+            else:
+                status = "covered"
+                risk = 0.0 if confidence > 0.7 else 0.1
+
+            coverage_resp[sec_id] = {
+                "title": title,
+                "status": status,
+                "required": required,
+                "sentence_count": count,
+                "confidence": confidence,
+                "risk": risk,
+                "content": sentence_texts,
+                "sentences": sentences
+            }
+
+        # Persist updates back to job queue
+        JOB_QUEUE[job_id]["kt_structured"] = kt
+        JOB_QUEUE[job_id]["coverage"] = coverage_resp
+        JOB_QUEUE[job_id]["missing_required"] = missing_required
+
+        # Record human feedback entry already appended above
+        JOB_QUEUE[job_id] = job
+
+    return {"status": "ok", "job_id": job_id, "moved_to": corrected_section, "missing_required": missing_required}
+
+
+@app.get("/policy")
+async def get_policy():
+    try:
+        from runtime_policy import load_policy
+        return load_policy()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load policy")
+
+
+@app.get("/glossary")
+async def get_glossary():
+    try:
+        from glossary import GLOSSARY
+        return GLOSSARY
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load glossary")
+
+
+@app.post("/glossary")
+async def set_glossary(payload: Dict):
+    try:
+        from glossary import save_glossary
+        ok = save_glossary(payload)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to save glossary")
+        return {"status": "saved"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save glossary")
+
+
+@app.post("/policy")
+async def set_policy(payload: Dict):
+    try:
+        from runtime_policy import save_policy
+        ok = save_policy(payload)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to save policy")
+        return {"status": "saved"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save policy")
 
 
 @app.post("/feedback")

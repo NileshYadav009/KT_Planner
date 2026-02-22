@@ -1,0 +1,9 @@
+{
+  "confidence_accept_threshold": 0.8,
+  "implementation_indicators": [
+    "kubectl","docker","compose","helm","apply -f","systemctl","service",
+    "install ","pip install","npm install","sh ","bash ","curl ",".yaml",".yml",
+    "deployment.yaml","step ","1.","2.","run ","execute ","sudo "
+  ],
+  "conceptual_sections": ["overview","architecture","data flow","monitoring","risks","faqs"]
+}
