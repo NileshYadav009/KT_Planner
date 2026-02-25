@@ -10,6 +10,7 @@ import tempfile
 import os
 import json
 import uuid
+import numpy as np
 from threading import Lock
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
 from context_mapper import (
@@ -17,7 +18,7 @@ from context_mapper import (
     apply_human_feedback, HumanFeedback
 )
 from enterprise_semantic_mapper import (
-    create_semantic_mapper
+    create_semantic_mapper, ExpertCorrection
 )
 from devops_transcription import (
     apply_devops_corrections, correct_transcript, 
@@ -240,6 +241,12 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         
         kt = MAPPER_PIPELINE.process(job_id, transcript, segments)
 
+        # Diagnostic logging
+        logger.info(f"Coverage sections: {list(kt.coverage.keys())}")
+        logger.info(f"Section content keys: {list(kt.section_content.keys())}")
+        for sec_id, content in kt.section_content.items():
+            logger.info(f"  {sec_id}: {len(content.get('sentences', []))} sentences")
+
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 85
@@ -271,24 +278,41 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 JOB_QUEUE[job_id]["progress"] = 100
                 JOB_QUEUE[job_id]["transcript"] = kt.transcript
                 
+                # Screenshot capture for detected assets (DISABLED)
+                screenshots = []
+                
                 # Build coverage response with sentence content
                 coverage_resp = {}
                 for sec_id, cov in kt.coverage.items():
                     # Get sentence texts from section_content
                     content_list = []
-                    if sec_id in kt.section_content:
-                        content_list = [s.get("text", "") for s in kt.section_content[sec_id].get("sentences", [])]
+                    sentences_data = []
                     
-                        coverage_resp[sec_id] = {
-                            "title": cov.section_title,
-                            "status": cov.status,
-                            "required": cov.required,
-                            "sentence_count": cov.sentence_count,
-                            "confidence": cov.confidence_score,
-                            "risk": cov.risk_score,
-                            "content": content_list,  # Add sentence content for frontend
-                            "sentences": kt.section_content.get(sec_id, {}).get("sentences", [])
-                        }
+                    # Try to get content from section_content first
+                    if sec_id in kt.section_content:
+                        sec_content = kt.section_content[sec_id]
+                        sentences_data = sec_content.get("sentences", [])
+                        content_list = [s.get("text", "") for s in sentences_data]
+                        logger.info(f"Section {sec_id}: found {len(sentences_data)} sentences in section_content")
+                    elif cov.sentence_count > 0:
+                        # Section shows content in coverage but not in section_content
+                        # This indicates a mismatch - log it for debugging
+                        logger.warning(f"Section {sec_id} has {cov.sentence_count} sentences in coverage but not in section_content!")
+                        # Use coverage sentence objects as fallback
+                        if cov.sentences:
+                            sentences_data = [{"text": s.text, "start": s.start, "end": s.end} for s in cov.sentences]
+                            content_list = [s.text for s in cov.sentences]
+                    
+                    coverage_resp[sec_id] = {
+                        "title": cov.section_title,
+                        "status": cov.status,
+                        "required": cov.required,
+                        "sentence_count": max(cov.sentence_count, len(sentences_data)),
+                        "confidence": cov.confidence_score,
+                        "risk": cov.risk_score,
+                        "content": content_list,
+                        "sentences": sentences_data
+                    }
                 
                 JOB_QUEUE[job_id]["coverage"] = coverage_resp
                 JOB_QUEUE[job_id]["missing_required"] = kt.missing_required_sections
