@@ -236,11 +236,13 @@ def get_section_embeds() -> Dict[str, np.ndarray]:
             parts.extend(collect_field_text(field))
 
         text = "\n".join([p for p in parts if p])
-        # Convert to numpy for vectorized operations
         if model is not None:
-            embeds[s["id"]] = model.encode(text, convert_to_tensor=False)
+            vec = model.encode(text, convert_to_tensor=False, normalize_embeddings=True)
+            embeds[s["id"]] = np.asarray(vec, dtype=np.float32)
         else:
-            embeds[s["id"]] = np.random.rand(384)
+            v = np.random.rand(384).astype(np.float32)
+            v /= (np.linalg.norm(v) + 1e-9)
+            embeds[s["id"]] = v
 
     SECTION_EMBEDS = embeds
     return SECTION_EMBEDS
@@ -268,21 +270,19 @@ def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
     
     # Batch encode all chunks at once (much faster than one-by-one)
     if model is not None:
-        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=32)
+        bs = max(8, min(64, len(chunks)))
+        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=bs, normalize_embeddings=True)
+        chunk_embeddings = np.asarray(chunk_embeddings, dtype=np.float32)
     else:
-        chunk_embeddings = np.random.rand(len(chunks), 384)
+        chunk_embeddings = np.random.rand(len(chunks), 384).astype(np.float32)
+        chunk_embeddings /= (np.linalg.norm(chunk_embeddings, axis=1, keepdims=True) + 1e-9)
     
     # Vectorized cosine similarity computation
     section_ids = list(section_embeds.keys())
-    section_emb_list = np.array([section_embeds[sid] for sid in section_ids])
+    section_emb_list = np.array([section_embeds[sid] for sid in section_ids], dtype=np.float32)
     
     # Compute similarity matrix: (num_chunks, num_sections)
     similarities = np.dot(chunk_embeddings, section_emb_list.T)
-    
-    # Normalize by magnitudes for cosine similarity
-    chunk_norms = np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
-    section_norms = np.linalg.norm(section_emb_list, axis=1, keepdims=True).T
-    similarities = similarities / (chunk_norms * section_norms + 1e-9)
     
     # Assign each chunk to best matching section (deduplication)
     lower_chunks = [c.lower() for c in chunks]
@@ -351,15 +351,15 @@ def analyze_transcript(transcript: str, *, similarity_threshold: float = 0.20, m
 
     # encode chunks and compute similarities
     if model is not None:
-        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=32)
+        bs = max(8, min(64, len(chunks)))
+        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=bs, normalize_embeddings=True)
+        chunk_embeddings = np.asarray(chunk_embeddings, dtype=np.float32)
     else:
-        chunk_embeddings = np.random.rand(len(chunks), 384)
+        chunk_embeddings = np.random.rand(len(chunks), 384).astype(np.float32)
+        chunk_embeddings /= (np.linalg.norm(chunk_embeddings, axis=1, keepdims=True) + 1e-9)
     section_ids = list(section_embeds.keys())
-    section_emb_list = np.array([section_embeds[sid] for sid in section_ids])
+    section_emb_list = np.array([section_embeds[sid] for sid in section_ids], dtype=np.float32)
     sims = np.dot(chunk_embeddings, section_emb_list.T)
-    chunk_norms = np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
-    section_norms = np.linalg.norm(section_emb_list, axis=1, keepdims=True).T
-    sims = sims / (chunk_norms * section_norms + 1e-9)
 
     # Assign each chunk to BEST matching section (deduplicated)
     results = {sec_id: {'matched_chunks': [], 'matched_scores': []} for sec_id in section_ids}
@@ -445,7 +445,7 @@ def map_analysis_to_fields(analysis: dict, schema: list, *, min_similarity: floa
 
         # encode all chunks for this section
         if model is not None:
-            chunk_embs = model.encode(chunks, convert_to_tensor=True)
+            chunk_embs = model.encode(chunks, convert_to_tensor=True, normalize_embeddings=True)
         else:
             chunk_embs = np.random.rand(len(chunks), 384)
 
@@ -466,7 +466,7 @@ def map_analysis_to_fields(analysis: dict, schema: list, *, min_similarity: floa
             if not field_text.strip():
                 continue
             if model is not None:
-                field_emb = model.encode(field_text, convert_to_tensor=True)
+                field_emb = model.encode(field_text, convert_to_tensor=True, normalize_embeddings=True)
             else:
                 field_emb = np.random.rand(384)
 
