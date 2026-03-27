@@ -122,10 +122,13 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         audio_to_use = input_path
         try:
             # Try to extract audio as WAV (more compatible than MP3)
-            audio_path_wav = f"{input_path}.wav"
-            ffmpeg.input(input_path).output(
-                audio_path_wav, acodec="pcm_s16le", ac=1, ar=16000
-            ).overwrite_output().run(quiet=True, stderr=None, stdout=None)
+audio_path_wav = f"{input_path}.wav"
+            if not input_path.lower().endswith(('.wav', '.mp3')):
+                ffmpeg.input(input_path).output(
+                    audio_path_wav, acodec="pcm_s16le", ac=1, ar=16000
+                ).overwrite_output().run(quiet=True, stderr=None, stdout=None)
+            else:
+                audio_path_wav = input_path
             if os.path.exists(audio_path_wav) and os.path.getsize(audio_path_wav) > 0:
                 audio_to_use = audio_path_wav
         except Exception as e:
@@ -159,7 +162,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         analysis = classify_transcript(transcript) if False else None
         try:
             from ai import analyze_transcript
-            analysis = analyze_transcript(transcript, similarity_threshold=0.30)  # raised threshold for selectivity
+similarity_threshold=0.45
             # Deduplicate to prevent same chunks appearing in multiple sections
             analysis = deduplicate_analysis(analysis)
         except Exception:
@@ -211,7 +214,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         os.makedirs(screenshots_dir, exist_ok=True)
 
         sentence_model = get_sentence_model()
-        max_screens = 5
+max_screens = 2
         for seg in segments:
             seg_text = seg.get('text', '').strip()
             start_t = seg.get('start', 0)

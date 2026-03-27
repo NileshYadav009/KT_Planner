@@ -140,7 +140,7 @@ def classify_with_confidence(sentence: str, section_embeddings: Dict[str, np.nda
     similarities = similarities.cpu().numpy() if hasattr(similarities, 'cpu') else similarities
     
     # Get top matches
-    top_indices = np.argsort(similarities)[-3:][::-1]
+top_indices = np.argsort(similarities)[-1:][::-1]
     
     return {
         "section": section_ids[int(top_indices[0])],
@@ -247,7 +247,7 @@ def get_section_embeds() -> Dict[str, np.ndarray]:
     SECTION_EMBEDS = embeds
     return SECTION_EMBEDS
 
-def chunk_text(text: str, size: int = 120):
+def chunk_text(text: str, size: int = 200):
     """Yield chunks of approximately `size` words (smaller chunks improve matching)."""
     words = text.split()
     for i in range(0, len(words), size):
