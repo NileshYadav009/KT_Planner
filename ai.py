@@ -251,11 +251,12 @@ def chunk_text(text: str, size: int = 120):
     for i in range(0, len(words), size):
         yield " ".join(words[i:i + size])
 
-def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
+def classify_transcript(transcript: str, *, similarity_threshold: float = -0.05):
     """Classify transcript chunks into KT sections (deduplicating across sections).
     
     Each chunk is assigned to its best-matching section (prevents duplication).
     Optimized: batch encodes chunks, uses vectorized numpy operations, deduplicates.
+    IMPROVED: Lower threshold + better hint matching = better coverage.
     """
     coverage = {s["id"]: [] for s in SCHEMA}
     section_embeds = get_section_embeds()
@@ -291,31 +292,55 @@ def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
         chunk_tokens = {token.lower() for token in WORD_RE.findall(chunk)}
         
         best_sec_idx = -1
-        best_score = similarity_threshold - 0.01
-        best_has_hint = False
+        best_score = similarity_threshold - 1.0  # Lower baseline so we accept more matches
+        best_hint_strength = 0
         
         # Find the BEST matching section for this chunk
         for sec_idx, sec_id in enumerate(section_ids):
             score = float(similarities[chunk_idx, sec_idx])
             hints = SECTION_HINTS.get(sec_id, set())
-            has_token_hint = bool(chunk_tokens & hints)
-            has_substr_hint = any(h in chunk_lower for h in hints)
-            has_hint = has_token_hint or has_substr_hint
             
-            # Prefer high scores; break ties using hint presence
+            # Multiple levels of hint matching (stronger = more trustworthy)
+            hint_strength = 0
+            
+            # Level 3: Exact phrase match (highest confidence)
+            for h in hints:
+                if h in chunk_lower:
+                    hint_strength = 3
+                    break
+            
+            # Level 2: Token match at word boundaries
+            if hint_strength < 2:
+                for h in hints:
+                    if len(h) > 2 and h in chunk_tokens:
+                        hint_strength = 2
+                        break
+            
+            # Level 1: Partial token match (any hint word appears)
+            if hint_strength < 1:
+                for h in hints:
+                    h_words = set(h.split())
+                    if h_words & chunk_tokens:
+                        hint_strength = 1
+                        break
+            
+            # Decision: prefer higher hint_strength; break ties with similarity score
             should_update = False
-            if has_hint and not best_has_hint:
-                should_update = True  # hint match beats no-hint match
-            elif has_hint == best_has_hint and score > best_score:
-                should_update = True  # better score when hint status is same
+            if hint_strength > best_hint_strength:
+                should_update = True  # Better hint match wins
+            elif hint_strength == best_hint_strength and hint_strength > 0 and score > best_score:
+                should_update = True  # Same hint level, better score wins
+            elif hint_strength == 0 and best_hint_strength == 0 and score > best_score:
+                should_update = True  # No hints, just use similarity
             
             if should_update:
                 best_sec_idx = sec_idx
                 best_score = score
-                best_has_hint = has_hint
+                best_hint_strength = hint_strength
         
         # Assign chunk only to best section (no duplication)
-        if best_sec_idx >= 0:
+        # Lower bar: only require some hint match or positive similarity
+        if best_sec_idx >= 0 and (best_hint_strength > 0 or best_score > -0.2):
             coverage[section_ids[best_sec_idx]].append(chunk)
     
     return coverage

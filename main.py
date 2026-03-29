@@ -3,13 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict, List, Optional
 import whisper
 import ffmpeg
 import tempfile
 import os
 import json
 import uuid
+import numpy as np
 from threading import Lock
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
 from context_mapper import (
@@ -24,13 +25,28 @@ from devops_transcription import (
     get_model_recommendation, score_transcription_confidence
 )
 import logging
+import warnings
 
-# Structured-ish logging setup for the API process
+# Suppress verbose logs from HuggingFace, httpx, and other libraries
+os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('huggingface_hub').setLevel(logging.WARNING)
+logging.getLogger('transformers').setLevel(logging.WARNING)
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
+warnings.filterwarnings('ignore', category=UserWarning)
+
+# Suppress tqdm progress bars
+from tqdm import tqdm
+tqdm.disable = True
+
+# Structured-ish logging setup for the API process (minimal)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(name)s - %(message)s'
+    format='%(asctime)s %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+# Only show errors and critical info for the app
+logger.setLevel(logging.WARNING)
 
 app = FastAPI()
 app.add_middleware(
@@ -240,6 +256,18 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         
         kt = MAPPER_PIPELINE.process(job_id, transcript, segments)
 
+        # Initialize Sentence Processor for advanced features
+        try:
+            from sentence_processor import SentenceProcessor
+            processor = SentenceProcessor(job_id)
+            processor.process_segments(segments, transcript)
+            
+            with JOB_LOCK:
+                SENTENCE_PROCESSORS[job_id] = processor
+        except Exception as e:
+            # Log error but don't fail the job - sentence processor is optional
+            logger.warning(f"Failed to initialize sentence processor for {job_id}: {str(e)}")
+        
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 85
@@ -249,7 +277,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         # assets and screenshots are currently not needed and caused
         # clutter in the repository. To re-enable, remove these comments
         # and ensure `ffmpeg-python` is available and safe to run in this env.
-        # screenshots = []
+        screenshots = []  # Initialize empty list for disabled screenshot feature
         # screenshots_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
         # os.makedirs(screenshots_dir, exist_ok=True)
         #
@@ -276,19 +304,22 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 for sec_id, cov in kt.coverage.items():
                     # Get sentence texts from section_content
                     content_list = []
+                    sentences_list = []
                     if sec_id in kt.section_content:
-                        content_list = [s.get("text", "") for s in kt.section_content[sec_id].get("sentences", [])]
+                        sentences_list = kt.section_content[sec_id].get("sentences", [])
+                        content_list = [s.get("text", "") for s in sentences_list]
                     
-                        coverage_resp[sec_id] = {
-                            "title": cov.section_title,
-                            "status": cov.status,
-                            "required": cov.required,
-                            "sentence_count": cov.sentence_count,
-                            "confidence": cov.confidence_score,
-                            "risk": cov.risk_score,
-                            "content": content_list,  # Add sentence content for frontend
-                            "sentences": kt.section_content.get(sec_id, {}).get("sentences", [])
-                        }
+                    # Always add section to coverage, even if empty/missing
+                    coverage_resp[sec_id] = {
+                        "title": cov.section_title,
+                        "status": cov.status if content_list else "missing",  # Override status if no content
+                        "required": cov.required,
+                        "sentence_count": len(content_list),
+                        "confidence": cov.confidence_score,
+                        "risk": cov.risk_score,
+                        "content": content_list,  # Sentence texts for display
+                        "sentences": sentences_list  # Full sentence objects for manual mapping
+                    }
                 
                 JOB_QUEUE[job_id]["coverage"] = coverage_resp
                 JOB_QUEUE[job_id]["missing_required"] = kt.missing_required_sections
@@ -662,6 +693,92 @@ async def submit_human_feedback(feedback: HumanFeedbackInput):
     }
 
 
+@app.post("/manual-assign/{job_id}")
+async def manually_assign_sentence(job_id: str, sentence_text: str, target_section: str, user: str = "user"):
+    """Manually assign a sentence to a section (for coverage mapping)."""
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        kt = job.get("kt_structured")
+        if not kt or not isinstance(kt, dict):
+            raise HTTPException(status_code=400, detail="KT data not available")
+    
+    # Find the sentence in any section or unassigned
+    found_sentence = None
+    found_in_section = None
+    
+    # Search in section_content
+    section_content = kt.get("section_content", {})
+    for sec_id, sec_data in section_content.items():
+        for sentence in sec_data.get("sentences", []):
+            if sentence.get("text", "").strip().lower() == sentence_text.strip().lower():
+                found_sentence = sentence
+                found_in_section = sec_id
+                break
+        if found_sentence:
+            break
+    
+    # Search in unassigned
+    if not found_sentence:
+        for sentence in kt.get("unassigned_sentences", []):
+            if sentence.get("text", "").strip().lower() == sentence_text.strip().lower():
+                found_sentence = sentence
+                break
+    
+    if not found_sentence:
+        raise HTTPException(status_code=404, detail="Sentence not found in KT")
+    
+    # Remove from old location if needed
+    if found_in_section:
+        kt["section_content"][found_in_section]["sentences"] = [
+            s for s in kt["section_content"][found_in_section]["sentences"]
+            if s.get("text", "").strip().lower() != sentence_text.strip().lower()
+        ]
+    else:
+        kt["unassigned_sentences"] = [
+            s for s in kt.get("unassigned_sentences", [])
+            if s.get("text", "").strip().lower() != sentence_text.strip().lower()
+        ]
+    
+    # Add to target section
+    if target_section not in section_content:
+        section_content[target_section] = {
+            "section_id": target_section,
+            "section_title": target_section,
+            "sentences": [],
+            "enhanced_texts": [],
+            "repair_actions": [],
+            "screenshots": [],
+            "confidence": 1.0,
+            "sentence_count": 0
+        }
+    
+    section_content[target_section]["sentences"].append(found_sentence)
+    section_content[target_section]["enhanced_texts"].append(found_sentence.get("text", ""))
+    
+    # Persist changes
+    with JOB_LOCK:
+        JOB_QUEUE[job_id]["kt_structured"] = kt
+        job["human_feedback"] = job.get("human_feedback", [])
+        job["human_feedback"].append({
+            "type": "manual_assignment",
+            "sentence": sentence_text[:100],
+            "target_section": target_section,
+            "user": user,
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat()
+        })
+        JOB_QUEUE[job_id] = job
+    
+    return {
+        "status": "assigned",
+        "sentence_text": sentence_text[:100],
+        "target_section": target_section,
+        "message": f"Sentence successfully assigned to {target_section}"
+    }
+
+
 @app.post("/incremental-kt")
 async def merge_incremental_kt_sessions(request: IncrementalKTRequest):
     """Merge follow-up KT session (session 2+) with parent session."""
@@ -935,9 +1052,435 @@ async def get_transcript_model_info():
         }
     }
 
+
+# ============================================================================
+# NEW ADVANCED FEATURES ENDPOINTS (v2.0)
+# ============================================================================
+
+# Global sentence processor instances
+SENTENCE_PROCESSORS = {}  # job_id -> SentenceProcessor
+
+class DragDropRequest(BaseModel):
+    job_id: str
+    sentence_id: str
+    target_section: str
+    user: str = "user"
+
+class EditSentenceRequest(BaseModel):
+    job_id: str
+    sentence_id: str
+    new_text: str
+    user: str = "user"
+
+class LinkCodeRequest(BaseModel):
+    job_id: str
+    sentence_id: str
+    code_block: str
+    file_name: str
+    language: str = "text"
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+
+class ExportRequest(BaseModel):
+    job_id: str
+    formats: List[str] = ['markdown', 'json', 'sop']
+
+
+@app.get("/sentences/{job_id}")
+async def get_sentence_metadata(job_id: str):
+    """Get rich metadata for all sentences in job."""
+    with JOB_LOCK:
+        if job_id not in JOB_QUEUE:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Sentence metadata not available yet")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        stats = processor.get_stats()
+        
+        sentence_list = []
+        for sent_id, metadata in processor.sentences.items():
+            sentence_list.append({
+                "id": sent_id,
+                "text": metadata.text,
+                "confidence": metadata.confidence_score,
+                "predicted_section": metadata.predicted_section,
+                "alternatives": metadata.alternatives,
+                "importance": metadata.importance_weight,
+                "quality": metadata.quality_score,
+                "status": metadata.status.value,
+                "is_confusing": metadata.is_confusing,
+                "confusion_reasons": metadata.confusion_reasons,
+                "audio_start": metadata.audio_start,
+                "audio_end": metadata.audio_end,
+                "assigned_sections": metadata.assigned_sections
+            })
+        
+        return {
+            "job_id": job_id,
+            "total_sentences": stats['total_sentences'],
+            "sentences": sentence_list,
+            "statistics": stats
+        }
+
+
+@app.post("/sentences/{job_id}/drag-drop")
+async def drag_drop_sentence(job_id: str, request: DragDropRequest):
+    """Drag and drop sentence to section."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        if request.sentence_id not in processor.sentences:
+            raise HTTPException(status_code=404, detail="Sentence not found")
+        
+        # Assign sentence
+        sentence = processor.sentences[request.sentence_id]
+        sentence.assign_section(request.target_section, user=request.user)
+        
+        # Learn pattern for AI improvement
+        keywords = sentence.text.split()[:3]  # First 3 keywords
+        for kw in keywords:
+            processor.learn_mapping_pattern(request.target_section, kw.lower())
+    
+    return {
+        "status": "assigned",
+        "sentence_id": request.sentence_id,
+        "section": request.target_section,
+        "user": request.user
+    }
+
+
+@app.post("/sentences/{job_id}/edit")
+async def edit_sentence(job_id: str, request: EditSentenceRequest):
+    """Edit sentence text inline."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        if request.sentence_id not in processor.sentences:
+            raise HTTPException(status_code=404, detail="Sentence not found")
+        
+        sentence = processor.sentences[request.sentence_id]
+        old_text = sentence.text
+        sentence.update_text(request.new_text, user=request.user)
+    
+    return {
+        "status": "edited",
+        "sentence_id": request.sentence_id,
+        "old_text": old_text,
+        "new_text": request.new_text,
+        "user": request.user
+    }
+
+
+@app.get("/sentences/{job_id}/confusion")
+async def get_confusing_sentences(job_id: str):
+    """Get sentences marked as confusing or requiring clarification."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        
+        confusing = []
+        clarification_needed = []
+        
+        for sent_id, sent in processor.sentences.items():
+            if sent.is_confusing:
+                confusing.append({
+                    "id": sent_id,
+                    "text": sent.text,
+                    "reasons": sent.confusion_reasons,
+                    "confidence": sent.confidence_score
+                })
+            
+            if sent.needs_clarification:
+                clarification_needed.append({
+                    "id": sent_id,
+                    "text": sent.text,
+                    "question": sent.clarification_requested
+                })
+        
+        return {
+            "job_id": job_id,
+            "confusing_sentences": confusing,
+            "clarification_needed": clarification_needed,
+            "total_confusing": len(confusing),
+            "total_needing_clarification": len(clarification_needed)
+        }
+
+
+@app.post("/sentences/{job_id}/clarify")
+async def request_clarification(job_id: str, sentence_id: str, question: str, user: str = "user"):
+    """Mark sentence as needing clarification."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        processor.request_clarification(sentence_id, question, user)
+    
+    return {
+        "status": "clarification_requested",
+        "sentence_id": sentence_id,
+        "question": question
+    }
+
+
+@app.post("/sentences/{job_id}/mark-confusing")
+async def mark_sentence_confusing(job_id: str, sentence_id: str, user: str = "user"):
+    """Mark sentence as confusing."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        processor.mark_confusing(sentence_id, user)
+    
+    return {
+        "status": "marked_confusing",
+        "sentence_id": sentence_id
+    }
+
+
+@app.post("/sentences/{job_id}/link-code")
+async def link_code_to_sentence(job_id: str, request: LinkCodeRequest):
+    """Link code/log snippet to sentence."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        
+        # Add code reference
+        ref = processor.add_code_reference(
+            code_block=request.code_block,
+            file_name=request.file_name,
+            language=request.language,
+            line_start=request.line_start,
+            line_end=request.line_end
+        )
+        
+        # Link to sentence
+        processor.link_code_to_sentence(request.sentence_id, ref.id)
+    
+    return {
+        "status": "linked",
+        "reference_id": ref.id,
+        "sentence_id": request.sentence_id,
+        "file_name": request.file_name
+    }
+
+
+@app.get("/sentences/{job_id}/code-references")
+async def get_code_references(job_id: str):
+    """Get all code references for job."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        refs = [r.to_dict() for r in processor.code_references.values()]
+    
+    return {
+        "job_id": job_id,
+        "code_references": refs,
+        "total": len(refs)
+    }
+
+
+@app.get("/sentences/{job_id}/suggest-mapping")
+async def suggest_improved_mapping(job_id: str, sentence_id: str):
+    """Get improved mapping suggestions based on learned patterns."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        if sentence_id not in processor.sentences:
+            raise HTTPException(status_code=404, detail="Sentence not found")
+        
+        suggestions = processor.suggest_improved_mapping(sentence_id)
+    
+    return {
+        "sentence_id": sentence_id,
+        "suggestions": suggestions,
+        "learned_patterns": len(processor.mapping_patterns)
+    }
+
+
+@app.post("/sentences/{job_id}/version-create")
+async def create_version(job_id: str, user: str = "user", change_summary: str = ""):
+    """Create version snapshot."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        version = processor.create_version(user=user, change_summary=change_summary)
+    
+    return {
+        "status": "version_created",
+        "version_id": version.version_id,
+        "timestamp": version.timestamp,
+        "summary": version.change_summary
+    }
+
+
+@app.get("/sentences/{job_id}/versions")
+async def get_versions(job_id: str):
+    """Get version history."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        versions = processor.get_version_history()
+    
+    return {
+        "job_id": job_id,
+        "versions": versions,
+        "total": len(versions)
+    }
+
+
+@app.post("/sentences/{job_id}/undo")
+async def undo_changes(job_id: str):
+    """Undo last change."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        success = processor.undo()
+    
+    return {
+        "status": "undone" if success else "nothing_to_undo",
+        "job_id": job_id
+    }
+
+
+@app.post("/sentences/{job_id}/redo")
+async def redo_changes(job_id: str):
+    """Redo last undone change."""
+    with JOB_LOCK:
+        if job_id not in SENTENCE_PROCESSORS:
+            raise HTTPException(status_code=400, detail="Job not ready")
+        
+        processor = SENTENCE_PROCESSORS[job_id]
+        success = processor.redo()
+    
+    return {
+        "status": "redone" if success else "nothing_to_redo",
+        "job_id": job_id
+    }
+
+
+@app.get("/export/{job_id}/list-formats")
+async def list_export_formats(job_id: str):
+    """Get available export formats."""
+    return {
+        "available_formats": {
+            "markdown": "Clean documentation format",
+            "json": "Complete structured export with all metadata",
+            "sop": "Standard Operating Procedure / Runbook",
+            "html": "Interactive HTML report",
+            "checklist": "Coverage improvement checklist"
+        }
+    }
+
+
+@app.post("/export/{job_id}")
+async def export_kt(job_id: str, request: ExportRequest):
+    """Export KT in multiple formats."""
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        kt_data = job.get("kt_structured")
+        if not kt_data:
+            raise HTTPException(status_code=400, detail="KT data not available")
+    
+    try:
+        from output_generator import StructuredOutputGenerator
+        
+        transcript = job.get("transcript", "")
+        generator = StructuredOutputGenerator(job_id, transcript, kt_data)
+        
+        exports = {}
+        
+        if 'markdown' in request.formats:
+            exports['markdown'] = generator.generate_markdown_documentation()
+        
+        if 'json' in request.formats:
+            exports['json'] = generator.generate_json_export()
+        
+        if 'sop' in request.formats:
+            exports['sop'] = generator.generate_sop_runbook()
+        
+        if 'html' in request.formats:
+            exports['html'] = generator.generate_html_report()
+        
+        if 'checklist' in request.formats:
+            exports['checklist'] = generator.generate_coverage_checklist()
+        
+        return {
+            "job_id": job_id,
+            "formats_generated": list(exports.keys()),
+            "exports": exports
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@app.post("/export/{job_id}/save")
+async def save_exports(job_id: str, output_dir: str = None):
+    """Save all exports to disk."""
+    if not output_dir:
+        output_dir = f"./exports/{job_id}"
+    
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        kt_data = job.get("kt_structured")
+        if not kt_data:
+            raise HTTPException(status_code=400, detail="KT data not available")
+    
+    try:
+        from output_generator import StructuredOutputGenerator
+        
+        transcript = job.get("transcript", "")
+        generator = StructuredOutputGenerator(job_id, transcript, kt_data)
+        paths = generator.save_all_formats(output_dir)
+        
+        return {
+            "status": "saved",
+            "output_directory": output_dir,
+            "files": paths
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
+
+
 @app.get("/")
 async def root():
+    # Serve the classic UI with integrated v2.0 features
     index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return HTMLResponse(content="KT Planner API is running. Use /docs for the API docs.")
+
+@app.get("/enhanced")
+async def enhanced_ui():
+    """Serve the new split-screen v2.0 UI."""
+    enhanced_path = os.path.join(os.path.dirname(__file__), "static", "enhanced.html")
+    if os.path.exists(enhanced_path):
+        return FileResponse(enhanced_path)
+    return HTMLResponse(content="Enhanced UI not available.")

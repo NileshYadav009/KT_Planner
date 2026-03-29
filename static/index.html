@@ -77,6 +77,8 @@
       /* Edit Sentence Modal */
       #editModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center}
       #editModal.open{display:flex}
+      #manualAssignModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center}
+      #manualAssignModal.open{display:flex}
       .editModalContent{background:#fff;border-radius:12px;padding:24px;box-shadow:0 12px 40px rgba(13,20,30,0.2);max-width:500px;width:90%;max-height:90vh;overflow-auto}
       .editModalContent h3{margin:0 0 16px 0;font-size:18px;color:#0f1724}
       .editModalContent .sentence-preview{background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;color:#374151;border-left:3px solid var(--primary)}
@@ -172,6 +174,19 @@
                 <button id="applyJob" class="primary">Apply job results to form</button>
                 <button id="downloadJson" class="ghost">Download filled JSON</button>
               </div>
+              
+              <!-- v2.0 Features -->
+              <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e6eefc">
+                <h4 style="margin:0 0 8px 0;font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Advanced Features</h4>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                  <button id="exportBtn" class="ghost" style="font-size:12px" disabled>📥 Export</button>
+                  <button id="versionBtn" class="ghost" style="font-size:12px" disabled>💾 Version</button>
+                  <button id="confusionBtn" class="ghost" style="font-size:12px" disabled>🔍 Confusion</button>
+                  <button id="codeBtn" class="ghost" style="font-size:12px" disabled>💻 Code Link</button>
+                </div>
+              </div>
+              
               <div style="font-size:12px;color:var(--muted)">Use Apply to populate the editable KT form below.</div>
             </div>
           </aside>
@@ -196,6 +211,20 @@
         <div class="editModalActions">
           <button class="cancel" onclick="closeEditModal()">Cancel</button>
           <button class="confirm" onclick="confirmEditSentence()">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual Assign Modal -->
+    <div id="manualAssignModal">
+      <div class="editModalContent">
+        <h3>Assign Sentences to Section</h3>
+        <p id="assignSectionName" style="color:#6b7280;margin:8px 0"></p>
+        <label for="sentenceToAssign">Select sentence to assign:</label>
+        <select id="sentenceToAssign" style="max-height:150px;overflow-y:auto"></select>
+        <div class="editModalActions">
+          <button class="cancel" onclick="closeManualAssignModal()">Cancel</button>
+          <button class="confirm" onclick="confirmManualAssign()">Assign</button>
         </div>
       </div>
     </div>
@@ -267,23 +296,102 @@
                 }
               }
 
+              // Show coverage statistics
+              const covHeader = document.createElement('div');
+              covHeader.style.marginBottom = '12px';
+              const covered = Object.values(cov).filter(c => c.status === 'covered').length;
+              const weak = Object.values(cov).filter(c => c.status === 'weak').length;
+              const missing = Object.values(cov).filter(c => c.status === 'missing').length;
+              const required_missing = Object.values(cov).filter(c => c.status === 'missing' && c.required).length;
+              
+              const stats = document.createElement('div');
+              stats.style.fontSize='13px';
+              stats.style.color='#6b7280';
+              stats.innerHTML = `<strong>Coverage:</strong> 
+                <span style="color:#059669">✓ ${covered} covered</span> | 
+                <span style="color:#d97706">⚠ ${weak} weak</span> | 
+                <span style="color:#dc2626">✗ ${missing} missing</span>
+                ${required_missing > 0 ? `<br/><span style="color:#dc2626;font-weight:bold">⚠ ${required_missing} REQUIRED sections missing!</span>` : ''}`;
+              covHeader.appendChild(stats);
+              coverageEl.appendChild(covHeader);
+
+              // Render each section with status indicator
+              const header = document.createElement('h3'); header.textContent = 'Sections Overview'; header.style.marginTop='16px'; coverageEl.appendChild(header);
+              
+              for(const [secId, info] of Object.entries(cov)){
+                const secDiv = document.createElement('div');
+                secDiv.style.marginBottom = '12px';
+                secDiv.style.padding = '10px';
+                secDiv.style.borderRadius = '6px';
+                secDiv.style.border = '1px solid #e5e7eb';
+                secDiv.style.backgroundColor = info.status === 'missing' ? '#fef2f2' : (info.status === 'weak' ? '#fffbeb' : '#f0fdf4');
+                
+                const titleDiv = document.createElement('div');
+                titleDiv.style.fontWeight = '600';
+                titleDiv.style.marginBottom = '6px';
+                const icon = info.status === 'covered' ? '✓' : (info.status === 'weak' ? '⚠' : '✗');
+                const color = info.status === 'covered' ? '#059669' : (info.status === 'weak' ? '#d97706' : '#dc2626');
+                titleDiv.innerHTML = `<span style="color:${color};font-weight:bold">${icon}</span> ${info.title} (${info.sentence_count} sentences)`;
+                if(info.required) titleDiv.innerHTML += ' <span style="color:#dc2626;font-weight:bold">[REQUIRED]</span>';
+                secDiv.appendChild(titleDiv);
+                
+                if(info.content && info.content.length > 0){
+                  const contentDiv = document.createElement('div');
+                  contentDiv.style.fontSize = '13px';
+                  contentDiv.style.color = '#6b7280';
+                  info.content.slice(0, 2).forEach(text => {
+                    const p = document.createElement('p');
+                    p.style.margin = '4px 0';
+                    p.textContent = text.substring(0, 80) + (text.length > 80 ? '...' : '');
+                    contentDiv.appendChild(p);
+                  });
+                  if(info.content.length > 2){
+                    const more = document.createElement('p');
+                    more.style.margin = '4px 0';
+                    more.style.fontStyle = 'italic';
+                    more.textContent = `+${info.content.length - 2} more...`;
+                    contentDiv.appendChild(more);
+                  }
+                  secDiv.appendChild(contentDiv);
+                } else {
+                  const emptyDiv = document.createElement('div');
+                  emptyDiv.style.fontSize = '13px';
+                  emptyDiv.style.color = '#9ca3af';
+                  emptyDiv.style.fontStyle = 'italic';
+                  emptyDiv.textContent = 'No content assigned to this section yet.';
+                  
+                  // Add button to manually assign sentences
+                  const assignBtn = document.createElement('button');
+                  assignBtn.className = 'ghost';
+                  assignBtn.textContent = '+ Assign Sentences';
+                  assignBtn.style.marginTop = '6px';
+                  assignBtn.style.fontSize = '12px';
+                  assignBtn.onclick = () => {
+                    showManualAssignModal(secId, info.title, flatSentences);
+                  };
+                  emptyDiv.appendChild(assignBtn);
+                  secDiv.appendChild(emptyDiv);
+                }
+                
+                coverageEl.appendChild(secDiv);
+              }
+
               if(flatSentences.length>0){
-                const header = document.createElement('h3'); header.textContent = 'Sentence Assignments'; sentencesPanel.appendChild(header);
+                const header2 = document.createElement('h3'); header2.textContent = 'All Assigned Sentences'; header2.style.marginTop='20px'; coverageEl.appendChild(header2);
                 for(let i=0;i<flatSentences.length;i++){
                   const s = flatSentences[i];
                   const row = document.createElement('div'); row.className = 'sentence-row';
                   const txt = document.createElement('div'); txt.className = 'sentence-text'; txt.textContent = s.text;
                   const meta = document.createElement('div'); meta.style.minWidth='160px'; meta.style.textAlign='right';
-                  const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `t:${s.start.toFixed(1)}s • conf:${(s.audio_confidence||0).toFixed(2)}`;
+                  const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `conf:${(s.audio_confidence||0).toFixed(2)}`;
                   const tags = document.createElement('div'); tags.style.marginTop='6px';
                   for(const as of s.assigned_sections){ const t = document.createElement('span'); t.className='tag'; t.textContent=as; tags.appendChild(t); }
-                  const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Edit'; editBtn.style.marginLeft='8px';
+                  const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Move'; editBtn.style.marginLeft='8px'; editBtn.style.fontSize='12px';
                   editBtn.onclick = ()=>{ promptEditSentence(i, s); };
                   meta.appendChild(conf); meta.appendChild(tags); meta.appendChild(editBtn);
                   row.appendChild(txt); row.appendChild(meta);
-                  sentencesPanel.appendChild(row);
+                  coverageEl.appendChild(row);
                 }
-                coverageEl.appendChild(sentencesPanel);
               }
               // render screenshots
               const shots = data.screenshots || [];
@@ -344,6 +452,12 @@
             transcriptEl.textContent = 'Processing... Please wait.';
             coverageEl.innerHTML = '<p>Processing... This may take several minutes for large files.</p>';
             missingEl.textContent = '[]';
+            
+            // Enable new feature buttons once a job is active
+            document.getElementById('exportBtn').disabled = false;
+            document.getElementById('versionBtn').disabled = false;
+            document.getElementById('confusionBtn').disabled = false;
+            document.getElementById('codeBtn').disabled = false;
             
             // Start polling for status
             pollJobStatus(currentJobId);
@@ -666,6 +780,228 @@
       });
 
       loadSchema();
+
+      // ============= v2.0 FEATURES =============
+
+      // Export handler
+      document.getElementById('exportBtn').addEventListener('click', async ()=>{
+        if(!currentJobId){ showToast('No job selected'); return; }
+        
+        try {
+          const response = await fetch(`/export/${currentJobId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              job_id: currentJobId,
+              formats: ['markdown', 'json', 'sop', 'html', 'checklist']
+            })
+          });
+          
+          if(!response.ok) throw new Error(await response.text());
+          const data = await response.json();
+          
+          showToast(`✨ Generated ${data.formats_generated.length} export formats`);
+          
+          // Save exports to disk
+          const saveResp = await fetch(`/export/${currentJobId}/save`, {method: 'POST'});
+          if(saveResp.ok) {
+            const saveData = await saveResp.json();
+            showToast(`💾 Exports saved to ${saveData.output_directory}`);
+          }
+        } catch(err) {
+          showToast('Export failed: ' + err);
+        }
+      });
+
+      // Confusion/Review handler
+      document.getElementById('confusionBtn').addEventListener('click', async ()=>{
+        if(!currentJobId){ showToast('No job selected'); return; }
+        
+        try {
+          const response = await fetch(`/sentences/${currentJobId}/confusion`);
+          if(!response.ok) throw new Error('Failed to fetch confusion data');
+          
+          const data = await response.json();
+          const confusing = data.confusing_sentences || [];
+          
+          if(confusing.length === 0) {
+            showToast('✅ No confusing sentences detected!');
+            return;
+          }
+          
+          let msg = `⚠️ Found ${confusing.length} confusing sentences:\n\n`;
+          confusing.slice(0, 3).forEach(s => {
+            msg += `• "${s.text.substring(0, 60)}..."\n  Reasons: ${s.reasons.join(', ')}\n\n`;
+          });
+          
+          showToast(msg);
+        } catch(err) {
+          showToast('Error: ' + err);
+        }
+      });
+
+      // Versioning handler
+      document.getElementById('versionBtn').addEventListener('click', async ()=>{
+        if(!currentJobId){ showToast('No job selected'); return; }
+        
+        const action = prompt('Version actions:\n1 = Create version\n2 = View history\n3 = Undo\n4 = Redo\n\nEnter 1-4:');
+        
+        try {
+          if(action === '1') {
+            const summary = prompt('Brief change summary:') || 'Manual version';
+            const response = await fetch(`/sentences/${currentJobId}/version-create`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({user: 'local_user', change_summary: summary})
+            });
+            if(response.ok) {
+              const data = await response.json();
+              showToast(`💾 Version created: ${data.version_id}`);
+            }
+          } else if(action === '2') {
+            const response = await fetch(`/sentences/${currentJobId}/versions`);
+            if(response.ok) {
+              const data = await response.json();
+              let msg = `Found ${data.total} versions:\n\n`;
+              data.versions.slice(0, 3).forEach(v => {
+                msg += `• ${v.summary} (${v.user})\n`;
+              });
+              showToast(msg);
+            }
+          } else if(action === '3') {
+            const response = await fetch(`/sentences/${currentJobId}/undo`, {method: 'POST'});
+            if(response.ok) showToast('↩️ Changes undone');
+          } else if(action === '4') {
+            const response = await fetch(`/sentences/${currentJobId}/redo`, {method: 'POST'});
+            if(response.ok) showToast('↪️ Changes redone');
+          }
+        } catch(err) {
+          showToast('Version error: ' + err);
+        }
+      });
+
+      // Code linking handler
+      document.getElementById('codeBtn').addEventListener('click', async ()=>{
+        if(!currentJobId){ showToast('No job selected'); return; }
+        
+        showToast('📝 Open browser console to use this feature\nExample: linkCodeToSentence(0, "deployment.yaml", "yaml", "1-10")');
+      });
+
+      // Helper function for code linking (can be called from console)
+      async function linkCodeToSentence(sentenceIndex, fileName, language, lineRange) {
+        const code = prompt(`Paste ${fileName} code:`);
+        if(!code) return;
+        
+        try {
+          const response = await fetch(`/sentences/${currentJobId}/link-code`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              job_id: currentJobId,
+              sentence_id: `sent_${sentenceIndex}`,
+              code_block: code,
+              file_name: fileName,
+              language: language
+            })
+          });
+          if(response.ok) showToast(`🔗 Code linked to sentence ${sentenceIndex}`);
+        } catch(err) {
+          showToast('Code linking failed: ' + err);
+        }
+      }
+
+      window.linkCodeToSentence = linkCodeToSentence;
+
+      // ============= MANUAL ASSIGN MODAL =============
+      
+      let manualAssignState = {
+        sectionId: null,
+        sectionTitle: null,
+        sentences: []
+      };
+
+      function showManualAssignModal(sectionId, sectionTitle, allSentences) {
+        manualAssignState.sectionId = sectionId;
+        manualAssignState.sectionTitle = sectionTitle;
+        manualAssignState.sentences = allSentences || [];
+        
+        // Update UI
+        document.getElementById('assignSectionName').textContent = `Assigning to: ${sectionTitle}`;
+        
+        const dropdown = document.getElementById('sentenceToAssign');
+        dropdown.innerHTML = '';
+        
+        if(allSentences && allSentences.length > 0){
+          allSentences.forEach((s, idx) => {
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = `${idx+1}. ${s.text.substring(0, 60)}${s.text.length > 60 ? '...' : ''}`;
+            dropdown.appendChild(opt);
+          });
+        } else {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No sentences available';
+          opt.disabled = true;
+          dropdown.appendChild(opt);
+        }
+        
+        // Show modal
+        document.getElementById('manualAssignModal').classList.add('open');
+      }
+
+      function closeManualAssignModal(){
+        document.getElementById('manualAssignModal').classList.remove('open');
+        manualAssignState = { sectionId: null, sectionTitle: null, sentences: [] };
+      }
+
+      async function confirmManualAssign(){
+        const dropdown = document.getElementById('sentenceToAssign');
+        const selectedIdx = parseInt(dropdown.value);
+        
+        if(selectedIdx === null || selectedIdx === '' || !manualAssignState.sentences[selectedIdx]){
+          showToast('Please select a sentence');
+          return;
+        }
+        
+        const sentence = manualAssignState.sentences[selectedIdx];
+        
+        try {
+          const response = await fetch(`/manual-assign/${currentJobId}?sentence_text=${encodeURIComponent(sentence.text)}&target_section=${encodeURIComponent(manualAssignState.sectionId)}&user=ui_user`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+          });
+          
+          if(!response.ok) throw new Error(await response.text());
+          const data = await response.json();
+          
+          showToast(`✅ Assigned to ${manualAssignState.sectionTitle}`);
+          closeManualAssignModal();
+          
+          // Refresh coverage display
+          if(currentJobId){
+            const statusResp = await fetch(`/status/${currentJobId}`);
+            if(statusResp.ok){
+              const status = await statusResp.json();
+              console.log('Updated job status:', status);
+            }
+          }
+        } catch(err) {
+          showToast('Assignment failed: ' + err);
+        }
+      }
+
+      // Close modal on Escape
+      document.addEventListener('keydown', (e)=>{
+        if(e.key === 'Escape') closeManualAssignModal();
+      });
+
+      // Close modal on outside click
+      if(document.getElementById('manualAssignModal')){
+        document.getElementById('manualAssignModal').addEventListener('click', (e)=>{
+          if(e.target.id === 'manualAssignModal') closeManualAssignModal();
+        });
+      }
     </script>
   </body>
 </html>

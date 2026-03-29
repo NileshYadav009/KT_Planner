@@ -137,10 +137,11 @@ def segment_sentences(
     """
     STAGE 2: Segment transcript into sentences.
     
-    Maintains:
-    - Timestamp mapping
-    - Speaker continuity
-    - Raw vs cleaned versions
+    Strategy:
+    1. If Whisper segments have punctuation: split by punctuation marks
+    2. If no punctuation: treat each Whisper segment as its own sentence
+    
+    This ensures unpunctuated Whisper output still produces multiple sentences.
     
     Args:
         audio_segments: List of Whisper segments
@@ -149,7 +150,32 @@ def segment_sentences(
     Returns:
         List of Sentence objects
     """
-    # Concatenate all segments preserving timing
+    # Check if any segments have sentence-ending punctuation
+    has_punctuation = any(re.search(r"[.!?]", seg.text) for seg in audio_segments)
+    
+    # If no punctuation in any segment, use each segment as a separate sentence
+    # This is the natural unit from Whisper transcription
+    if not has_punctuation and len(audio_segments) > 1:
+        sentences = []
+        for i, seg in enumerate(audio_segments):
+            cleaned = seg.text.strip()
+            if not cleaned:
+                continue
+            cleaned = re.sub(r"\s+", " ", cleaned)
+            
+            sent = Sentence(
+                text=cleaned,
+                start=seg.start,
+                end=seg.end,
+                speaker=seg.speaker,
+                raw_text=seg.text,
+                audio_confidence=float(seg.confidence_score()),
+                segment_ids=[i]
+            )
+            sentences.append(sent)
+        return sentences
+    
+    # Otherwise, concatenate and split by punctuation as before
     full_text = " ".join(seg.text for seg in audio_segments)
     sentences = []
     
