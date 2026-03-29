@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Continuum KT Planner</title>
+    <style>
+      :root {
+        --primary: #0B5ED7;
+        --accent: #0D6EFD;
+        --success: #198754;
+        --warning: #FFC107;
+        --danger: #DC3545;
+        --muted: #6C757D;
+        --light: #F8F9FA;
+        --border: #DEE2E6;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: linear-gradient(135deg, #F5F7FA 0%, #F9FAFB 100%);
+        color: #172B4D;
+      }
+
+      .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+      
+      header {
+        background: white;
+        border-bottom: 1px solid var(--border);
+        padding: 16px 0;
+        margin-bottom: 24px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+      }
+
+      header h1 { margin: 0; font-size: 24px; font-weight: 600; }
+      header p { margin: 4px 0 0 0; color: var(--muted); font-size: 14px; }
+
+      .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+      .card {
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        transition: box-shadow 0.2s;
+      }
+
+      .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+      .card h2 { margin: 0 0 12px 0; font-size: 16px; font-weight: 600; }
+      .card h3 { margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+
+      .section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+      .section-icon { font-size: 20px; }
+
+      input[type="file"] { display: none; }
+      .file-input-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: var(--light);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        color: var(--primary);
+        transition: all 0.2s;
+      }
+
+      .file-input-label:hover { background: var(--primary); color: white; }
+
+      button {
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: white;
+      }
+
+      .btn-primary:hover { background: #0B5ED7; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11, 94, 215, 0.3); }
+      .btn-secondary {
+        background: var(--light);
+        color: var(--primary);
+        border: 1px solid var(--border);
+      }
+
+      .btn-secondary:hover { background: #E9ECEF; }
+
+      .progress-bar {
+        height: 6px;
+        background: var(--light);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary), var(--accent));
+        width: 0%;
+        transition: width 0.3s ease-out;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .status-processing { background: #D1ECF1; color: #0C5460; }
+      .status-completed { background: #D4EDDA; color: #155724; }
+      .status-failed { background: #F8D7DA; color: #721C24; }
+
+      pre, textarea {
+        background: #F8F9FA;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        max-height: 300px;
+        overflow-y: auto;
+        margin: 8px 0;
+      }
+
+      textarea {
+        width: 100%;
+        resize: vertical;
+      }
+
+      .sentence-item {
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: #F9FAFB;
+      }
+
+      .sentence-item:last-child { border-bottom: none; }
+      .sentence-text { font-size: 14px; line-height: 1.5; margin: 0 0 6px 0; }
+      .sentence-meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        background: #E7F3FF;
+        color: var(--primary);
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 32px;
+        color: var(--muted);
+      }
+
+      .empty-state-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+
+      @media (max-width: 768px) {
+        .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        .section-header { flex-wrap: wrap; }
+      }
+
+      .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 12px; }
+      .stat { background: var(--light); padding: 12px; border-radius: 6px; text-align: center; }
+      .stat-value { font-size: 18px; font-weight: 700; color: var(--primary); }
+      .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <h1>🎯 Continuum KT Planner</h1>
+        <p>Transform audio/video knowledge transfer into structured documentation</p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <!-- UPLOAD SECTION -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="section-header">
+            <span class="section-icon">📤</span>
+            <h2>Upload Media</h2>
+          </div>
+          <p style="margin: 0 0 12px 0; color: var(--muted); font-size: 14px;">
+            MP3, WAV, MP4, or any audio format
+          </p>
+          <label class="file-input-label">
+            📁 Choose File
+            <input id="file" type="file" accept="audio/*,video/*" />
+          </label>
+          <button class="btn-primary" id="upload" style="margin-left: 8px;">
+            ⚡ Upload & Process
+          </button>
+          <p id="statusMsg" style="margin-top: 12px; font-size: 13px; color: var(--muted);">
+            Select a file and click Upload
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <span class="section-icon">📊</span>
+            <h2>Processing Status</h2>
+          </div>
+          <div>
+            <div style="margin-bottom: 12px;">
+              <h3>Progress</h3>
+              <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+              <div style="font-size: 12px; color: var(--muted); margin-top: 6px;">
+                <span id="progressText">0%</span> · Job: <strong><span id="jobId">—</span></strong>
+              </div>
+            </div>
+            <div>
+              <h3>Status</h3>
+              <span id="statusBadge" class="status-badge" style="background: var(--light); color: var(--muted);">IDLE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTENT SECTIONS -->
+      <div class="grid-2" style="margin-top: 20px;">
+        <div class="card">
+          <div class="section-header">
+            <span class="section-icon">📝</span>
+            <h2>Transcript</h2>
+          </div>
+          <pre id="transcript" style="margin: 0;">Waiting for upload...</pre>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <span class="section-icon">📋</span>
+            <h2>Coverage Analysis</h2>
+          </div>
+          <div id="coverage" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-state">
+              <div class="empty-state-icon">📭</div>
+              <p style="margin: 0;">No data yet</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENTERPRISE SENTENCES -->
+      <div class="card" style="margin-top: 20px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>Enterprise Sentences</h2>
+          </div>
+          <button class="btn-secondary" id="refreshBtn" onclick="loadEnterpriseSentences()">
+            🔄 Refresh
+          </button>
+        </div>
+        <div id="sentencesPanel" style="max-height: 400px; overflow-y: auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">⏳</div>
+            <p style="margin: 0;">Upload and process to see sentences</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="card" style="margin-top: 20px;">
+        <h2 style="margin-top: 0;">Quick Actions</h2>
+        <div class="actions">
+          <button class="btn-primary" id="downloadBtn" onclick="downloadJson()">💾 Download JSON</button>
+          <button class="btn-secondary" id="markFirstBtn" onclick="markFirstConfusing()">⚠️ Mark First Confusing</button>
+          <button class="btn-secondary" onclick="reloadUI()">🔄 Reload</button>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      const fileInput = document.getElementById('file');
+      const uploadBtn = document.getElementById('upload');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const statusMsg = document.getElementById('statusMsg');
+      const statusBadge = document.getElementById('statusBadge');
+      const jobIdEl = document.getElementById('jobId');
+      const progressText = document.getElementById('progressText');
+      const progressFill = document.getElementById('progressFill');
+      const transcriptEl = document.getElementById('transcript');
+      const coverageEl = document.getElementById('coverage');
+      const sentencesPanel = document.getElementById('sentencesPanel');
+
+      let currentJobId = null;
+      let pollInterval = null;
+
+      async function uploadFile() {
+        if (!fileInput.files.length) {
+          statusMsg.textContent = '❌ Select a file first';
+          return;
+        }
+
+        const file = fileInput.files[0];
+        const fd = new FormData();
+        fd.append('file', file);
+
+        statusMsg.textContent = '⏳ Uploading...';
+        statusBadge.textContent = 'UPLOADING';
+        statusBadge.className = 'status-badge status-processing';
+
+        try {
+          const res = await fetch('/upload', {method: 'POST', body: fd});
+          if (!res.ok) throw new Error('Upload failed');
+
+          const data = await res.json();
+          currentJobId = data.job_id;
+          jobIdEl.textContent = currentJobId;
+          statusMsg.textContent = '✅ Processing started...';
+
+          if (pollInterval) clearInterval(pollInterval);
+          pollInterval = setInterval(() => pollStatus(currentJobId), 2500);
+        } catch (e) {
+          statusMsg.textContent = '❌ ' + e.message;
+          statusBadge.textContent = 'FAILED';
+          statusBadge.className = 'status-badge status-failed';
+        }
+      }
+
+      async function pollStatus(jobId) {
+        try {
+          const res = await fetch('/status/' + jobId);
+          if (!res.ok) return;
+          const data = await res.json();
+
+          const p = Math.min(100, data.progress || 0);
+          progressText.textContent = p + '%';
+          progressFill.style.width = p + '%';
+
+          if (data.transcript) transcriptEl.textContent = data.transcript;
+
+          if (data.status === 'completed') {
+            statusBadge.textContent = 'COMPLETED';
+            statusBadge.className = 'status-badge status-completed';
+            statusMsg.textContent = '✅ Processing complete';
+            clearInterval(pollInterval);
+
+            displayCoverage(data.coverage || {});
+            loadEnterpriseSentences();
+          } else if (data.status === 'failed') {
+            statusBadge.textContent = 'FAILED';
+            statusBadge.className = 'status-badge status-failed';
+            statusMsg.textContent = '❌ ' + (data.error || 'Processing failed');
+            clearInterval(pollInterval);
+          } else {
+            statusBadge.textContent = 'PROCESSING';
+            statusBadge.className = 'status-badge status-processing';
+            statusMsg.textContent = '⏳ ' + (data.status || 'Processing');
+          }
+        } catch (e) {
+          console.error('Poll error:', e);
+        }
+      }
+
+      function displayCoverage(coverage) {
+        coverageEl.innerHTML = Object.entries(coverage).map(([id, info]) => `
+          <div style="padding: 12px; border-bottom: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <strong style="color: var(--primary);">${info.title || id}</strong>
+              <span class="status-badge ${info.status === 'covered' ? 'status-completed' : info.status === 'partial' ? 'status-processing' : 'status-failed'}">
+                ${info.status.toUpperCase()}
+              </span>
+            </div>
+            <div style="font-size: 12px; color: var(--muted);">
+              Confidence: ${Math.round((info.confidence || 0) * 100)}% · Items: ${(info.content || []).length}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      async function loadEnterpriseSentences() {
+        try {
+          const res = await fetch('/api/v1/sentences');
+          if (!res.ok) throw new Error('Failed');
+          const list = await res.json();
+
+          if (!Array.isArray(list) || !list.length) {
+            sentencesPanel.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p style="margin: 0;">No sentences yet</p></div>';
+            return;
+          }
+
+          sentencesPanel.innerHTML = list.map(s => `
+            <div class="sentence-item">
+              <p class="sentence-text">${s.text}</p>
+              <div class="sentence-meta">
+                <span class="tag">${s.status}</span>
+                <span>💪 ${Math.round(s.confidence * 100)}%</span>
+                <span>📍 ${s.assigned_section || 'unmapped'}</span>
+              </div>
+            </div>
+          `).join('');
+        } catch (e) {
+          sentencesPanel.innerHTML = '<div class="empty-state"><p style="margin: 0; color: #DC3545;">Error loading sentences</p></div>';
+        }
+      }
+
+      async function markFirstConfusing() {
+        const res = await fetch('/api/v1/sentences');
+        if (!res.ok) return;
+        const list = await res.json();
+        if (!Array.isArray(list) || !list.length) return;
+
+        const id = list[0].id;
+        await fetch('/api/v1/sentences/' + id + '/reviews', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sentence_id: id, comment: 'manual-mark'})
+        });
+        statusMsg.textContent = '✅ First sentence marked as confusing';
+        loadEnterpriseSentences();
+      }
+
+      function downloadJson() {
+        if (!currentJobId) {
+          statusMsg.textContent = '❌ Process a file first';
+          return;
+        }
+        // Placeholder - full implementation in production
+        statusMsg.textContent = '✅ Download feature coming soon';
+      }
+
+      function reloadUI() {
+        location.reload();
+      }
+
+      uploadBtn.addEventListener('click', uploadFile);
+      fileInput.addEventListener('change', () => {
+        statusMsg.textContent = '📁 ' + fileInput.files[0].name;
+      });
+
+      // Initial load
+      loadEnterpriseSentences();
+    </script>
+  </body>
+</html>
+

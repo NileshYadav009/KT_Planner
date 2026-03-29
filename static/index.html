@@ -1,5 +1,13 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Redirect to KT Planner</title>
+  <meta http-equiv="refresh" content="0;url=/static/enterprise.html" />
+</head>
+<body>
+  <p>Redirecting to KT Planner... <a href="/static/enterprise.html">Click here if not redirected</a></p>
+</body>
+</html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -130,6 +138,7 @@
             <label class="fileLabel" for="file">Choose file</label>
             <input id="file" type="file" accept="audio/*,video/*" />
             <button id="upload" class="primary">Upload & Process</button>
+            <button id="loadEnterprise" class="ghost">Load Enterprise Sentences</button>
           </div>
         </div>
 
@@ -156,6 +165,9 @@
 
             <h2 class="sectionTitle">Missing Required</h2>
             <pre id="missing" class="panel">[]</pre>
+
+            <h2 class="sectionTitle">Enterprise Sentences</h2>
+            <div id="enterprisePanel" class="panel" style="min-height:120px">No enterprise data yet.</div>
           </div>
 
           <aside>
@@ -212,9 +224,38 @@
       let currentJobId = null;
       let pollInterval = null;
 
+      const enterprisePanel = document.getElementById('enterprisePanel');
+      const loadEnterpriseBtn = document.getElementById('loadEnterprise');
+
       function setProgress(p){
         bar.style.width = p + '%';
         progressText.textContent = p + '%';
+      }
+
+      async function loadEnterpriseSentences() {
+        try {
+          const resp = await fetch('/api/v1/sentences');
+          if (!resp.ok) throw new Error('Enterprise API failed');
+          const data = await resp.json();
+
+          if (!Array.isArray(data) || data.length === 0) {
+            enterprisePanel.textContent = 'No enterprise sentences available. Run upload and wait for processing.';
+            return;
+          }
+
+          enterprisePanel.innerHTML = data.map(s => `
+            <div style="padding:10px;border-bottom:1px solid #e6eefc;">
+              <strong>${s.text.substring(0, 120)}</strong><br/>
+              <small>id: ${s.id} | status: ${s.status} | section: ${s.assigned_section || 'unmapped'}</small>
+            </div>
+          `).join('');
+        } catch (error) {
+          enterprisePanel.textContent = 'Failed to load enterprise sentences: ' + error;
+        }
+      }
+
+      if (loadEnterpriseBtn) {
+        loadEnterpriseBtn.addEventListener('click', loadEnterpriseSentences);
       }
 
       function pollJobStatus(jobId) {
@@ -249,6 +290,9 @@
                 div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}</div>`;
                 coverageEl.appendChild(div);
               }
+
+              // Refresh enterprise sentences panel after upload completes
+              loadEnterpriseSentences();
               
               // Build per-sentence list aggregated from coverage.sentences
               const sentencesPanel = document.createElement('div');

@@ -1,83 +1,54 @@
-# 📚 Continuum KT Planner - Complete Beginner's Guide
+# 🎯 Continuum KT Planner v2.0
 
-## 🎯 What is Continuum?
+**Production-Ready Knowledge Transfer Automation**
 
-**Continuum** is an easy-to-use **Knowledge Transfer (KT) automation platform** that automatically listens to audio/video recordings, writes down what was said, and organizes that knowledge into a neat, structured document—all automatically!
-
-### The Problem It Solves
-- 👨‍💼 When an engineer leaves or knowledge is scattered, how do you capture and organize it?
-- 📝 Manual KT documentation is time-consuming and error-prone
-- 🔍 Finding what's missing from knowledge is nearly impossible
-- 🚨 No audit trail or proof of what was documented
-
-### The Solution
-Continuum uses **AI + semantic analysis** to automatically:
-1. **Record** conversations (audio/video)
-2. **Transcribe** what was said
-3. **Classify** content into structured sections
-4. **Repair** unclear parts intelligently
-5. **Flag gaps** in required knowledge
-6. **Extract** visual evidence (URLs, dashboards)
-7. **Assemble** everything into a complete, searchable KT document
+Transform audio/video recordings into structured, verified documentation. Powered by semantic AI and enterprise-grade processing.
 
 ---
 
-## 🏗️ Architecture Overview
+## What It Does
 
-### High-Level Data Flow
+1. **Upload** audio/video (MP3, WAV, MP4, etc.)
+2. **Transcribe** using OpenAI Whisper AI
+3. **Segment** into sentences with confidence scores
+4. **Map intelligently** using semantic understanding
+5. **Detect gaps** in coverage automatically
+6. **Output** structured, downloadable documentation
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CONTINUUM KT PLANNER                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  UI/Browser (static/index.html)                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  - Upload audio/video file                               │  │
-│  │  - View real-time progress                               │  │
-│  │  - Browse structured KT output                           │  │
-│  │  - Submit human corrections                              │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                       ↕ HTTP/REST API                           │
-│  API Server (main.py with FastAPI)                              │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ POST /upload     → Start processing                      │  │
-│  │ GET /status      → Poll progress                         │  │
-│  │ GET /kt          → Get structured KT output              │  │
-│  │ GET /coverage    → Coverage analysis                     │  │
-│  │ POST /feedback   → Submit human corrections              │  │
-│  │ GET /templates   → Schema management                     │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                       ↕ Function Calls                          │
-│  Processing Pipeline (context_mapper.py - 7 Stages)            │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Stage 1: Audio Confidence   → Quality metrics from audio │  │
-│  │ Stage 2: Segmentation       → Break into sentences       │  │
-│  │ Stage 3: Classification     → AI semantic mapping        │  │
-│  │ Stage 4: Repair             → Fix low-confidence text    │  │
-│  │ Stage 5: Gap Detection      → Identify missing sections  │  │
-│  │ Stage 6: Asset Extraction   → Find URLs & dashboards    │  │
-│  │ Stage 7: KT Assembly        → Create final output        │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                       ↕ Libraries & Models                      │
-│  AI & Processing Tools                                          │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Whisper        → Transcribe audio to text                │  │
-│  │ Sentence-      → Understand word meanings                │  │
-│  │  Transformers                                             │  │
-│  │ FFmpeg         → Process audio/video files               │  │
-│  │ NumPy          → Fast numerical calculations             │  │
-│  │ Claude/GPT-4   → (Optional) Advanced repair              │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Key Benefit**: What used to take hours of manual documentation now takes minutes.
 
 ---
 
-## 📂 Complete File System Guide for Beginners
+## 🚀 Quick Start (5 minutes)
 
-Think of the project like a filing cabinet. Here's what's in each drawer:
+### Install
+
+```bash
+git clone <repo>
+cd KT_Planner
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Run
+
+```bash
+uvicorn main:app --reload
+# Open http://127.0.0.1:8000
+```
+
+### Use
+
+1. Click "Choose File" and select an audio/video recording
+2. Click "Upload & Process"
+3. Monitor progress (usually 2-5 min for 10-min audio)
+4. Review extracted sentences and coverage
+5. Download as JSON or view in browser
+
+---
+
+## 📊 High-Level Architecture
 
 ```
 KT_Planner/

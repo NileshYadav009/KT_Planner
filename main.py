@@ -1,3 +1,10 @@
+"""
+Continuum KT Planner - Production Server
+========================================
+Clean, modular FastAPI server for Knowledge Transfer document processing.
+Handles audio/video uploads, transcription, and intelligent section mapping.
+"""
+
 from fastapi import FastAPI, HTTPException, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -9,10 +16,30 @@ import os
 import json
 import uuid
 from threading import Lock
+from typing import Dict, Optional
+
+# Core modules
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
 from sentence_transformers import util
 
-app = FastAPI()
+# Enterprise features
+try:
+    import enterprise_features as ent
+    from enterprise_api_routes import create_enterprise_router
+    HAS_ENTERPRISE = True
+except ImportError:
+    HAS_ENTERPRISE = False
+
+# ============================================================================
+# APP INITIALIZATION
+# ============================================================================
+
+app = FastAPI(
+    title="Continuum KT Planner",
+    description="Knowledge Transfer document processor with intelligent section mapping",
+    version="2.0"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,15 +47,24 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Serve the frontend static files
+# Include enterprise router if available
+if HAS_ENTERPRISE:
+    app.include_router(create_enterprise_router())
+
+# Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ============================================================================
+# INITIALIZATION & MODELS
+# ============================================================================
+
 MODEL = None
-JOB_QUEUE = {}  # job_id -> {status, transcript, coverage, missing_required, progress, error}
+JOB_QUEUE: Dict = {}
 JOB_LOCK = Lock()
 
 with open("kt_schema_new.json") as f:
     SCHEMA = json.load(f)["sections"]
+
 
 
 @app.on_event("startup")
@@ -122,7 +158,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         audio_to_use = input_path
         try:
             # Try to extract audio as WAV (more compatible than MP3)
-audio_path_wav = f"{input_path}.wav"
+            audio_path_wav = f"{input_path}.wav"
             if not input_path.lower().endswith(('.wav', '.mp3')):
                 ffmpeg.input(input_path).output(
                     audio_path_wav, acodec="pcm_s16le", ac=1, ar=16000
@@ -162,7 +198,7 @@ audio_path_wav = f"{input_path}.wav"
         analysis = classify_transcript(transcript) if False else None
         try:
             from ai import analyze_transcript
-similarity_threshold=0.45
+            similarity_threshold=0.45
             # Deduplicate to prevent same chunks appearing in multiple sections
             analysis = deduplicate_analysis(analysis)
         except Exception:
@@ -214,7 +250,7 @@ similarity_threshold=0.45
         os.makedirs(screenshots_dir, exist_ok=True)
 
         sentence_model = get_sentence_model()
-max_screens = 2
+        max_screens = 2
         for seg in segments:
             seg_text = seg.get('text', '').strip()
             start_t = seg.get('start', 0)
@@ -265,6 +301,11 @@ max_screens = 2
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 85
 
+        # Run enterprise sentence segmentation/mapping so /api/v1/sentences has data
+        try:
+            ent.segment_and_analyze_transcript(transcript, project_id=job_id)
+        except Exception as e:
+            print('enterprise segment_and_analyze_transcript failed:', e)
 
         # Attempt to map analyzed chunks into concrete schema fields
         try:
@@ -347,7 +388,12 @@ async def get_status(job_id: str):
 
 @app.get("/")
 async def root():
+    enterprise_path = os.path.join(os.path.dirname(__file__), "static", "enterprise.html")
+    if os.path.exists(enterprise_path):
+        return FileResponse(enterprise_path)
+
     index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
+
     return HTMLResponse(content="KT Planner API is running. Use /docs for the API docs.")
