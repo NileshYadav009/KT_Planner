@@ -10,6 +10,7 @@ import json
 import uuid
 from threading import Lock
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
+from context_mapper import ContextMappingPipeline, serialize_kt
 from sentence_transformers import util
 
 app = FastAPI()
@@ -24,7 +25,8 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 MODEL = None
-JOB_QUEUE = {}  # job_id -> {status, transcript, coverage, missing_required, progress, error}
+MAPPER_PIPELINE = None
+JOB_QUEUE = {}  # job_id -> {status, transcript, coverage, missing_required, progress, error, kt_structured}
 JOB_LOCK = Lock()
 
 with open("kt_schema_new.json") as f:
@@ -34,10 +36,12 @@ with open("kt_schema_new.json") as f:
 @app.on_event("startup")
 def load_models():
     """Load heavy models on startup so endpoints can use them."""
-    global MODEL
+    global MODEL, MAPPER_PIPELINE
     if MODEL is None:
         # Use 'tiny' model for ~4x speedup over 'small'; good accuracy/speed tradeoff
         MODEL = whisper.load_model("tiny")
+    if MAPPER_PIPELINE is None:
+        MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA)
 
 def build_coverage(classified):
     coverage = {}
@@ -158,44 +162,43 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         if not transcript:
             raise ValueError("No speech detected in the uploaded file.")
 
-        # Analyze transcript to produce structured KT coverage
-        analysis = classify_transcript(transcript) if False else None
-        try:
-            from ai import analyze_transcript
-            # Deduplicate to prevent same chunks appearing in multiple sections
-            analysis = deduplicate_analysis(analysis)
-        except Exception:
-            # fallback to old classifier (mapping only)
-            classified = classify_transcript(transcript)
-            coverage, missing_required, progress = build_coverage(classified)
-            analysis = {k: {"status": ("covered" if v else "missing"), "confidence": 0.0, "extracted_text": "\n".join(v), "chunks": v, "scores": []} for k, v in classified.items()}
+        # Process transcript with the full 7-stage context mapping pipeline
+        if MAPPER_PIPELINE is None:
+            raise RuntimeError("Context mapping pipeline not initialized")
 
-        # build missing_required and progress from analysis and schema
+        kt = MAPPER_PIPELINE.process(job_id, transcript, result.get('segments', []))
+
         coverage = {}
-        missing_required = []
-        for sec in SCHEMA:
-            sid = sec['id']
-            a = analysis.get(sid, {"status": "missing", "confidence": 0.0, "extracted_text": "", "chunks": []})
-            coverage[sid] = {
-                'title': sec.get('title', sid),
-                'status': a['status'],
-                'confidence': a.get('confidence', 0.0),
-                'content': a.get('chunks', []),
-                'extracted_text': a.get('extracted_text', ''),
-                'chunks': a.get('chunks', [])
+        missing_required = kt.missing_required_sections or []
+        for sec_id, cov in kt.coverage.items():
+            coverage_sentences = []
+            for s in getattr(cov, 'sentences', []) or []:
+                coverage_sentences.append({
+                    'text': getattr(s, 'text', ''),
+                    'start': getattr(s, 'start', 0.0),
+                    'end': getattr(s, 'end', 0.0),
+                    'speaker': getattr(s, 'speaker', None),
+                    'audio_confidence': getattr(s, 'audio_confidence', 0.0),
+                    'assigned_sections': [sec_id]
+                })
+            if not coverage_sentences:
+                section_content = kt.section_content.get(sec_id, {})
+                coverage_sentences = section_content.get('sentences', []) if isinstance(section_content, dict) else []
+
+            coverage[sec_id] = {
+                'title': cov.section_title,
+                'status': cov.status,
+                'required': cov.required,
+                'sentence_count': cov.sentence_count,
+                'confidence': cov.confidence_score,
+                'risk': cov.risk_score,
+                'content': [s.get('text', '') for s in coverage_sentences],
+                'sentences': coverage_sentences
             }
-            if a['status'] == 'missing' and sec.get('required'):
-                missing_required.append(sid)
 
-        covered_sections = sum(1 for s in coverage.values() if s['status'] in {'covered', 'partial'})
-        progress = int(100 * covered_sections / len(coverage)) if coverage else 0
-
-        # Rebuild missing_required
-        missing_required = []
-        for sec in SCHEMA:
-            a = coverage.get(sec['id'], {})
-            if a.get('status') == 'missing' and sec.get('required'):
-                missing_required.append(sec['id'])
+        progress = int(round(kt.overall_coverage_percent or 0))
+        transcript = kt.transcript
+        kt_structured = serialize_kt(kt)
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
@@ -269,12 +272,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 JOB_QUEUE[job_id]["progress"] = 85
 
 
-        # Attempt to map analyzed chunks into concrete schema fields
-        try:
-            mapped_fields = map_analysis_to_fields(analysis, SCHEMA, min_similarity=0.25)
-        except Exception as e:
-            mapped_fields = {}
-            print('map_analysis_to_fields failed:', e)
+        mapped_fields = {}
 
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {
@@ -285,6 +283,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 "missing_required": missing_required,
                 "progress": progress,
                 "screenshots": screenshots,
+                "kt_structured": kt_structured,
                 "error": None
             }
     except Exception as e:

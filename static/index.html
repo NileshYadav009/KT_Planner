@@ -246,7 +246,10 @@
                 const div = document.createElement('div');
                 const contentArray = (info && info.content && Array.isArray(info.content)) ? info.content : [];
                 const contentHtml = contentArray.map(c=>`<p>${c}</p>`).join('');
-                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}</div>`;
+                const note = (contentArray.length === 0 && info.status !== 'missing')
+                  ? `<p class="small-muted">No explicit sentence text is available for this section; coverage is inferred from semantic/contextual analysis.</p>`
+                  : '';
+                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}${note}</div>`;
                 coverageEl.appendChild(div);
               }
               
