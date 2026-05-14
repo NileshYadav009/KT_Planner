@@ -140,7 +140,7 @@ def classify_with_confidence(sentence: str, section_embeddings: Dict[str, np.nda
     similarities = similarities.cpu().numpy() if hasattr(similarities, 'cpu') else similarities
     
     # Get top matches
-top_indices = np.argsort(similarities)[-1:][::-1]
+    top_indices = np.argsort(similarities)[-1:][::-1]
     
     return {
         "section": section_ids[int(top_indices[0])],
