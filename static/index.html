@@ -6,93 +6,137 @@
     <title>Continumm KT Planner</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-      :root{--bg:#f6f8fb;--card:#ffffff;--muted:#6b7280;--primary:#0a66c2;--accent:#0b8a72}
+      :root{
+        --bg:#f8fafc;
+        --card:#ffffff;
+        --muted:#64748b;
+        --primary:#1e40af;
+        --primary-light:#3b82f6;
+        --accent:#059669;
+        --accent-light:#10b981;
+        --border:#e2e8f0;
+        --shadow:0 10px 25px rgba(0,0,0,0.08);
+        --shadow-hover:0 20px 40px rgba(0,0,0,0.12);
+      }
       html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overflow-x:hidden}
-      body{background:linear-gradient(180deg,#f7fafc 0%,var(--bg) 100%);padding:28px;box-sizing:border-box}
-      .app{max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box}
-      
+      body{background:linear-gradient(135deg,var(--bg) 0%,#f1f5f9 100%);padding:32px;box-sizing:border-box;color:#1e293b}
+      .app{max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box}
+
       /* Form visibility toggle */
       #formContainer{display:none !important;margin-top:20px;opacity:0;visibility:hidden;transition:opacity 0.3s ease-in-out,display 0s linear 0.3s}
       #formContainer.visible{display:block !important;opacity:1;visibility:visible;transition:opacity 0.3s ease-in-out}
-      header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
-      .brand{display:flex;align-items:center;gap:14px}
-      .logo{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--primary),#2a9df4);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:18px}
-      .brand h1{margin:0;font-size:20px;letter-spacing:0.4px}
-      .brand p{margin:0;color:var(--muted);font-size:13px}
+      header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+      .brand{display:flex;align-items:center;gap:16px}
+      .logo{width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;box-shadow:0 8px 20px rgba(30,64,175,0.3)}
+      .brand h1{margin:0;font-size:24px;letter-spacing:0.4px;color:#0f172a;font-weight:700}
+      .brand p{margin:0;color:var(--muted);font-size:14px;font-weight:500}
 
-      .card{background:var(--card);box-shadow:0 8px 30px rgba(13,20,30,0.06);border-radius:12px;padding:22px;box-sizing:border-box;width:100%;overflow-x:hidden}
-      .controls{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;min-width:0}
+      .card{background:var(--card);box-shadow:var(--shadow);border-radius:16px;padding:28px;box-sizing:border-box;width:100%;overflow-x:hidden;border:1px solid var(--border);transition:box-shadow 0.3s ease}
+      .card:hover{box-shadow:var(--shadow-hover)}
+      .controls{display:flex;gap:14px;align-items:center;margin-bottom:16px;flex-wrap:wrap;min-width:0}
       input[type=file]{display:none}
-      .fileLabel{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:9px;background:linear-gradient(180deg,#fff,#fafbff);border:1px solid #e6eefc;color:var(--primary);cursor:pointer}
-      button.primary{background:var(--primary);color:white;border:none;padding:10px 14px;border-radius:9px;cursor:pointer;font-weight:600;white-space:nowrap}
-      button.ghost{background:transparent;border:1px solid #e6eefc;padding:8px 12px;border-radius:8px;color:var(--primary);cursor:pointer;white-space:nowrap}
+      .fileLabel{display:inline-flex;align-items:center;gap:12px;padding:12px 18px;border-radius:10px;background:linear-gradient(135deg,#ffffff,#f8fafc);border:1px solid var(--border);color:var(--primary);cursor:pointer;font-weight:600;transition:all 0.2s}
+      .fileLabel:hover{background:linear-gradient(135deg,#f8fafc,#ffffff);border-color:var(--primary-light);transform:translateY(-1px)}
+      button.primary{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;border:none;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:600;white-space:nowrap;box-shadow:0 4px 12px rgba(30,64,175,0.3);transition:all 0.2s}
+      button.primary:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(30,64,175,0.4)}
+      button.ghost{background:transparent;border:1px solid var(--border);padding:10px 16px;border-radius:10px;color:var(--primary);cursor:pointer;white-space:nowrap;font-weight:600;transition:all 0.2s}
+      button.ghost:hover{background:var(--primary);color:white;border-color:var(--primary)}
 
-      .row{display:grid;grid-template-columns:1fr 340px;gap:18px;width:100%;box-sizing:border-box}
-      .panel{background:linear-gradient(180deg,rgba(255,255,255,0.6),#fff);border-radius:10px;padding:14px;border:1px solid #f0f4ff;word-wrap:break-word;overflow-wrap:break-word;width:100%;box-sizing:border-box;overflow-x:hidden}
-      .progressWrap{display:flex;align-items:center;gap:12px}
-      .progress{flex:1;height:12px;background:#eef3ff;border-radius:999px;overflow:hidden}
-      .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--primary))}
-      .meta{color:var(--muted);font-size:13px}
+      .layout{display:grid;grid-template-columns:280px minmax(0,1fr) 340px;gap:24px;width:100%;box-sizing:border-box;align-items:start}
+      .sidebar, .asidePanel{display:flex;flex-direction:column;gap:20px}
+      .sidebar{position:sticky;top:32px;align-self:flex-start}
+      .sidebar h3, .asidePanel h3{margin-top:0;font-size:16px;letter-spacing:0.02em;text-transform:uppercase;color:#0f172a;font-weight:700;border-bottom:2px solid var(--primary);padding-bottom:8px}
+      .navList{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+      .navList li a{display:block;padding:14px 16px;border-radius:12px;background:#f8fafc;color:#1e293b;text-decoration:none;font-weight:600;border:1px solid var(--border);transition:all 0.2s}
+      .navList li a:hover{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;border-color:var(--primary);transform:translateY(-1px);box-shadow:0 4px 12px rgba(30,64,175,0.2)}
+      .mainPanel{display:flex;flex-direction:column;gap:20px}
+      .summaryGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:20px}
+      .summaryCard{padding:16px;border-radius:16px;background:linear-gradient(135deg,#ffffff,#f8fafc);border:1px solid var(--border);box-shadow:0 6px 16px rgba(0,0,0,0.06);transition:all 0.3s;min-height:80px;display:flex;flex-direction:column;justify-content:flex-start;aspect-ratio:1/1}
+      .summaryCard:hover{transform:translateY(-4px);box-shadow:0 12px 24px rgba(0,0,0,0.1)}
+      .summaryCard h4{margin:0 0 6px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--primary);font-weight:700}
+      .summaryCard p{margin:0;font-size:16px;font-weight:800;color:#0f172a;word-break:break-word;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+      .sectionHeader{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+      .sectionHeader h2{margin:0;font-size:20px;color:#0f172a;font-weight:700}
+      .sectionHeader small{color:var(--muted);font-size:14px;font-weight:500}
+      .collapsible{cursor:pointer;border-radius:12px;padding:16px;background:#f8fafc;border:1px solid var(--border);transition:all 0.2s}
+      .collapsible:hover{background:#f1f5f9}
+      .collapsibleContent{max-height:0;overflow:hidden;transition:max-height 0.3s ease}
+      .collapsible.open .collapsibleContent{max-height:1000px}
+      .panel{background:linear-gradient(135deg,rgba(255,255,255,0.9),#ffffff);border-radius:16px;padding:24px;border:1px solid var(--border);word-wrap:break-word;overflow-wrap:break-word;width:100%;box-sizing:border-box;overflow-x:hidden;box-shadow:0 8px 20px rgba(0,0,0,0.06);transition:box-shadow 0.3s ease}
+      .panel:hover{box-shadow:0 12px 28px rgba(0,0,0,0.08)}
+      .panel h3{margin-top:0;font-size:18px;color:#0f172a;font-weight:700}
+      .panel p{margin:0;color:#374151}
+      .statusBadge{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:20px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em}
+      .statusBadge.covered{background:linear-gradient(135deg,#dcfce7,#bbf7d0);color:#166534;border:1px solid #86efac}
+      .statusBadge.weak{background:linear-gradient(135deg,#fef3c7,#fde68a);color:#92400e;border:1px solid #fcd34d}
+      .statusBadge.missing{background:linear-gradient(135deg,#fef2f2,#fecaca);color:#991b1b;border:1px solid #fca5a5}
+      .progressWrap{display:flex;align-items:center;gap:16px}
+      .progress{flex:1;height:14px;background:#e2e8f0;border-radius:20px;overflow:hidden}
+      .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:20px;transition:width 0.3s ease}
+      .meta{color:var(--muted);font-size:14px;font-weight:500}
 
-      pre#transcript{background:#0f1724;color:#e6fffb;padding:12px;border-radius:8px;max-height:260px;overflow:auto;word-wrap:break-word;word-break:break-word;width:100%;white-space:pre-wrap}
-      pre#missing{word-wrap:break-word;word-break:break-word;white-space:pre-wrap;width:100%;box-sizing:border-box}
-      #coverage{max-height:300px;overflow-y:auto;overflow-x:hidden;width:100%;word-wrap:break-word;word-break:break-word}
-      #coverage > div{word-wrap:break-word;word-break:break-word;line-height:1.5}
-      #coverage > div p{margin:6px 0;word-break:break-word}
-      #screenshots img{border-radius:8px;box-shadow:0 6px 18px rgba(12,20,30,0.08);margin-right:8px}
+      pre#transcript{background:#0f172a;color:#e6fffb;padding:16px;border-radius:12px;max-height:300px;overflow:auto;word-wrap:break-word;word-break:break-word;width:100%;white-space:pre-wrap;font-family:'Monaco','Menlo','Ubuntu Mono',monospace;font-size:14px;border:1px solid var(--border)}
+      #coverage{max-height:400px;overflow-y:auto;overflow-x:hidden;width:100%;word-wrap:break-word;word-break:break-word}
+      #coverage > div{word-wrap:break-word;word-break:break-word;line-height:1.6;padding:12px;border-radius:8px;margin-bottom:8px;background:#f8fafc;border:1px solid var(--border)}
+      #coverage > div p{margin:8px 0;word-break:break-word;color:#374151}
+      #screenshots img{border-radius:12px;box-shadow:0 8px 16px rgba(0,0,0,0.1);margin-right:12px;transition:transform 0.2s}
+      #screenshots img:hover{transform:scale(1.05)}
 
-      h2.sectionTitle{margin-top:18px;margin-bottom:8px}
+      h2.sectionTitle{margin-top:20px;margin-bottom:12px;color:#0f172a;font-weight:700}
 
       /* Form styles - minimalistic and classy */
-      #formContainer{border-radius:12px;background:linear-gradient(180deg,#fafbff 0%,#ffffff 100%);padding:0;overflow:hidden;box-shadow:0 12px 40px rgba(13,20,30,0.08)}
-      #formContainer .formHeader{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #f0f4ff;background:#ffffff}
-      #formContainer .formHeader h2{margin:0;font-size:18px;font-weight:600;color:#0f1724}
-      #formContainer .closeForm{background:transparent;border:none;font-size:24px;cursor:pointer;color:#6b7280;padding:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:all 0.2s}
-      #formContainer .closeForm:hover{background:#f1f5ff;color:#0a66c2}
-      
-      #form{padding:24px}
-      #form section{padding:18px;border-radius:10px;background:#f9fafc;margin-bottom:14px;border:1px solid #f0f4ff;box-sizing:border-box;width:100%;transition:all 0.3s}
-      #form section:hover{background:#ffffff;box-shadow:0 4px 12px rgba(13,20,30,0.04)}
-      #form section h3{margin:0 0 12px 0;font-size:16px;font-weight:600;color:#0f1724}
-      #form section > div{color:var(--muted);font-size:13px;margin-bottom:12px;font-style:italic}
-      label{display:block;font-weight:600;margin-bottom:8px;color:#0f1724;font-size:14px}
-      input[type=text], select, textarea{width:100%;padding:12px;border-radius:8px;border:1px solid #e6eefc;background:#ffffff;box-sizing:border-box;word-break:break-word;font-family:inherit;font-size:14px;transition:all 0.2s;margin-bottom:12px}
-      input[type=text]:focus, select:focus, textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,102,194,0.1);background:#ffffff}
-      input[type=checkbox]{transform:scale(1.15);cursor:pointer;margin-right:8px}
-      table{width:100%;border-collapse:collapse;table-layout:fixed;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e6eefc}
-      table thead{background:#f9fafc;border-bottom:1px solid #e6eefc}
-      th,td{padding:12px;border:none;text-align:left;font-size:14px}
-      th{font-weight:600;color:#0f1724}
-      td{color:var(--muted);border-bottom:1px solid #f1f5ff}
+      #formContainer{border-radius:16px;background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);padding:0;overflow:hidden;box-shadow:var(--shadow);border:1px solid var(--border)}
+      #formContainer .formHeader{display:flex;align-items:center;justify-content:space-between;padding:24px 28px;border-bottom:1px solid var(--border);background:#ffffff}
+      #formContainer .formHeader h2{margin:0;font-size:20px;font-weight:700;color:#0f172a}
+      #formContainer .closeForm{background:transparent;border:none;font-size:28px;cursor:pointer;color:#64748b;padding:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:all 0.2s}
+      #formContainer .closeForm:hover{background:#f1f5f9;color:var(--primary)}
+
+      #form{padding:28px}
+      #form section{padding:20px;border-radius:12px;background:#f9fafc;margin-bottom:16px;border:1px solid var(--border);box-sizing:border-box;width:100%;transition:all 0.3s}
+      #form section:hover{background:#ffffff;box-shadow:0 6px 16px rgba(0,0,0,0.06)}
+      #form section h3{margin:0 0 14px 0;font-size:18px;font-weight:700;color:#0f172a}
+      #form section > div{color:var(--muted);font-size:14px;margin-bottom:14px;font-style:italic}
+      label{display:block;font-weight:600;margin-bottom:10px;color:#0f172a;font-size:15px}
+      input[type=text], select, textarea{width:100%;padding:14px;border-radius:10px;border:1px solid var(--border);background:#ffffff;box-sizing:border-box;word-break:break-word;font-family:inherit;font-size:15px;transition:all 0.2s;margin-bottom:14px}
+      input[type=text]:focus, select:focus, textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(30,64,175,0.1);background:#ffffff}
+      input[type=checkbox]{transform:scale(1.2);cursor:pointer;margin-right:10px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.04)}
+      table thead{background:#f8fafc;border-bottom:1px solid var(--border)}
+      th,td{padding:14px;border:none;text-align:left;font-size:15px}
+      th{font-weight:700;color:#0f172a}
+      td{color:#374151;border-bottom:1px solid #f1f5f9}
       table tbody tr:hover{background:#f9fafc}
 
-      .actions{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+      .actions{display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap}
 
       /* Sentence list styles */
-      .sentence-row{display:flex;align-items:flex-start;gap:8px;padding:8px;border-bottom:1px solid #f1f5f9}
-      .sentence-text{flex:1;font-size:14px}
-      .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef6ff;color:#0a66c2;font-weight:600;font-size:12px;margin-right:6px}
-      .small-muted{font-size:12px;color:#6b7280}
+      .sentence-row{display:flex;align-items:flex-start;gap:10px;padding:12px;border-bottom:1px solid #f1f5f9;border-radius:8px;margin-bottom:4px;background:#ffffff;transition:background 0.2s}
+      .sentence-row:hover{background:#f8fafc}
+      .sentence-text{flex:1;font-size:15px;color:#1e293b}
+      .tag{display:inline-block;padding:6px 10px;border-radius:16px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;font-weight:600;font-size:12px;margin-right:8px}
+      .small-muted{font-size:13px;color:#64748b;font-weight:500}
+
 
       /* Edit Sentence Modal */
-      #editModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center}
+      #editModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
       #editModal.open{display:flex}
-      .editModalContent{background:#fff;border-radius:12px;padding:24px;box-shadow:0 12px 40px rgba(13,20,30,0.2);max-width:500px;width:90%;max-height:90vh;overflow-auto}
-      .editModalContent h3{margin:0 0 16px 0;font-size:18px;color:#0f1724}
-      .editModalContent .sentence-preview{background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;color:#374151;border-left:3px solid var(--primary)}
-      .editModalContent label{display:block;font-weight:600;margin-bottom:8px;color:#0f1724;font-size:14px}
-      .editModalContent select{width:100%;padding:10px;border-radius:8px;border:1px solid #e5e7eb;font-size:14px;margin-bottom:16px;box-sizing:border-box}
-      .editModalContent select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,102,194,0.1)}
-      .editModalActions{display:flex;gap:10px;justify-content:flex-end}
-      .editModalActions button{padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;transition:all 0.2s}
-      .editModalActions .confirm{background:var(--primary);color:white}
-      .editModalActions .confirm:hover{opacity:0.9;box-shadow:0 4px 12px rgba(10,102,194,0.3)}
-      .editModalActions .cancel{background:#f3f4f6;color:#374151;border:1px solid #e5e7eb}
-      .editModalActions .cancel:hover{background:#e5e7eb}
+      .editModalContent{background:#ffffff;border-radius:16px;padding:28px;box-shadow:var(--shadow-hover);max-width:520px;width:90%;max-height:90vh;overflow-auto;border:1px solid var(--border)}
+      .editModalContent h3{margin:0 0 20px 0;font-size:20px;color:#0f172a;font-weight:700}
+      .editModalContent .sentence-preview{background:#f8fafc;padding:16px;border-radius:12px;margin-bottom:20px;font-size:15px;color:#374151;border-left:4px solid var(--primary);border:1px solid var(--border)}
+      .editModalContent label{display:block;font-weight:600;margin-bottom:12px;color:#0f172a;font-size:15px}
+      .editModalContent select{width:100%;padding:14px;border-radius:10px;border:1px solid var(--border);font-size:15px;margin-bottom:20px;box-sizing:border-box;background:#ffffff;transition:all 0.2s}
+      .editModalContent select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(30,64,175,0.1)}
+      .editModalActions{display:flex;gap:12px;justify-content:flex-end}
+      .editModalActions button{padding:12px 20px;border-radius:10px;border:none;cursor:pointer;font-weight:600;transition:all 0.2s;font-size:15px}
+      .editModalActions .confirm{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;box-shadow:0 4px 12px rgba(30,64,175,0.3)}
+      .editModalActions .confirm:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(30,64,175,0.4)}
+      .editModalActions .cancel{background:#f1f5f9;color:#64748b;border:1px solid var(--border)}
+      .editModalActions .cancel:hover{background:#e2e8f0}
 
       /* Toasts */
       #toasts{position:fixed;right:18px;bottom:18px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-      .toast{background:#0f1724;color:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 6px 18px rgba(12,20,30,0.12);opacity:0.98}
+      .toast{background:#0f172a;color:#e6fffb;padding:14px 18px;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,0.15);opacity:0.98;border:1px solid var(--border);font-weight:500}
+      #toasts{position:fixed;top:32px;right:32px;z-index:1000;display:flex;flex-direction:column;gap:12px;max-width:400px}
 
       @media(max-width:1200px){
         .row{grid-template-columns:1fr 280px}
@@ -120,70 +164,126 @@
         </div>
       </header>
 
-      <div class="card">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap">
-          <div style="flex:1;min-width:260px">
-            <h2 style="margin:0 0 8px 0">Upload Video / Audio</h2>
-            <p class="meta">Upload a KT recording and let Continumm transcribe and map content into your template.</p>
-          </div>
-          <div class="controls">
-            <label class="fileLabel" for="file">Choose file</label>
-            <input id="file" type="file" accept="audio/*,video/*" />
-            <button id="upload" class="primary">Upload & Process</button>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top:14px">
+      <div class="layout">
+        <aside class="sidebar card">
           <div>
-            <div class="panel">
-              <div class="progressWrap">
-                <div style="flex:1">
-                  <div class="progress"><div id="bar" class="bar"></div></div>
-                </div>
-                <div style="width:70px;text-align:right"><span id="progressText">0%</span></div>
+            <h3>Workspace</h3>
+            <p class="meta">Enterprise KT dashboard with workflow navigation and insights.</p>
+          </div>
+          <ul class="navList">
+            <li><a href="#">Dashboard</a></li>
+            <li><a href="#">Uploads</a></li>
+            <li><a href="#coverage">Coverage</a></li>
+            <li><a href="#">Architecture</a></li>
+            <li><a href="#">Troubleshooting</a></li>
+            <li><a href="#">Runbooks</a></li>
+            <li><a href="#">AI Insights</a></li>
+            <li><a href="#">Exports</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </aside>
+
+        <main class="mainPanel">
+          <div class="card">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap">
+              <div style="flex:1;min-width:260px">
+                <h2 style="margin:0 0 8px 0">Upload Recording</h2>
+                <p class="meta">Start a new KT session by uploading audio or video. The system will transcribe, classify, and summarize automatically.</p>
               </div>
-              <div style="margin-top:12px;display:flex;gap:12px;align-items:center">
-                <div style="flex:1">
-                  <h3 style="margin:0;font-size:15px">Transcript</h3>
-                  <p class="meta" style="margin:4px 0 8px 0">Auto-generated transcript from the uploaded media.</p>
+              <div class="controls">
+                <label class="fileLabel" for="file">Choose file</label>
+                <input id="file" type="file" accept="audio/*,video/*" />
+                <button id="upload" class="primary">Upload & Process</button>
+              </div>
+            </div>
+
+            <div class="progressWrap" id="progressWrap" style="display:none;margin-top:16px">
+              <div class="progress">
+                <div class="bar" id="bar"></div>
+              </div>
+              <span class="meta" id="progressText">0%</span>
+            </div>
+
+            <div class="summaryGrid" id="summaryGrid">
+              <div class="summaryCard">
+                <h4>Coverage</h4>
+                <p id="summaryCoverage">0/0</p>
+              </div>
+              <div class="summaryCard">
+                <h4>Missing</h4>
+                <p id="summaryMissing">0</p>
+              </div>
+              <div class="summaryCard">
+                <h4>Weak</h4>
+                <p id="summaryWeak">0</p>
+              </div>
+              <div class="summaryCard">
+                <h4>Confidence</h4>
+                <p id="summaryConfidence">N/A</p>
+              </div>
+            </div>
+
+            <div class="panel" style="margin-top:20px">
+              <div class="sectionHeader">
+                <div>
+                  <h2>AI Summary</h2>
+                  <small>High-level insights, missing KT gaps, and session health.</small>
+                </div>
+                <button id="toggleTranscript" class="ghost">Show transcript</button>
+              </div>
+              <div id="aiSummary" style="display:grid;gap:12px"></div>
+              <div id="transcriptCard" class="collapsible" style="margin-top:16px;">
+                <div class="collapsibleContent">
                   <pre id="transcript">(no transcript yet)</pre>
                 </div>
               </div>
             </div>
-
-            <h2 class="sectionTitle">Coverage</h2>
-            <div id="coverage" class="panel" style="min-height:120px"></div>
-
-            <h2 class="sectionTitle">Missing Required</h2>
-            <pre id="missing" class="panel">[]</pre>
           </div>
 
-          <aside>
-            <div class="panel">
-              <h3 style="margin-top:0">Screenshots</h3>
-              <div id="screenshots" style="display:flex;flex-wrap:wrap"></div>
-            </div>
-
-            <div style="height:14px"></div>
-
-            <div class="panel">
-              <h3 style="margin-top:0">Actions</h3>
-              <div class="actions">
-                <button id="applyJob" class="primary">Apply job results to form</button>
-                <button id="downloadJson" class="ghost">Download filled JSON</button>
+          <div class="card" id="coverageSection">
+            <div class="sectionHeader">
+              <div>
+                <h2>Coverage Details</h2>
+                <small id="coverageSummaryText">Section-level coverage and evidence.</small>
               </div>
-              <div style="font-size:12px;color:var(--muted)">Use Apply to populate the editable KT form below.</div>
             </div>
-          </aside>
-        </div>
-
-        <div id="formContainer" class="card">
-          <div class="formHeader">
-            <h2>Knowledge Transfer Form</h2>
-            <button class="closeForm" onclick="document.getElementById('formContainer').classList.remove('visible')">✕</button>
+            <div id="coverage"></div>
           </div>
-          <div id="form"></div>
-        </div>
+
+          <div class="card" style="display:none" id="formContainer">
+            <div class="formHeader">
+              <h2>Knowledge Transfer Form</h2>
+              <button class="closeForm" onclick="document.getElementById('formContainer').classList.remove('visible')">✕</button>
+            </div>
+            <div id="form"></div>
+          </div>
+        </main>
+
+        <aside class="asidePanel">
+          <div class="panel">
+            <h3>Session Health</h3>
+            <div style="display:grid;gap:12px">
+              <div><strong>Processed Job:</strong> <span id="sessionJob">None</span></div>
+              <div><strong>Overall Coverage:</strong> <span id="sessionCoverage">0%</span></div>
+              <div><strong>Missing Required:</strong> <span id="sessionMissing">0</span></div>
+              <div><strong>Weak Sections:</strong> <span id="sessionWeak">0</span></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Visual Evidence</h3>
+            <div id="screenshots" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Actions</h3>
+            <div class="actions" style="flex-direction:column;align-items:stretch">
+              <button id="applyJob" class="primary">Apply results</button>
+              <button id="downloadJson" class="ghost">Export JSON</button>
+            </div>
+            <div class="small-muted" style="margin-top:12px">Use Apply to map coverage into the KT form.</div>
+          </div>
+        </aside>
       </div>
 
     <!-- Edit Sentence Modal -->
@@ -205,9 +305,20 @@
       const fileInput = document.getElementById('file');
       const transcriptEl = document.getElementById('transcript');
       const coverageEl = document.getElementById('coverage');
-      const missingEl = document.getElementById('missing');
       const bar = document.getElementById('bar');
       const progressText = document.getElementById('progressText');
+      const summaryCoverage = document.getElementById('summaryCoverage');
+      const summaryMissing = document.getElementById('summaryMissing');
+      const summaryWeak = document.getElementById('summaryWeak');
+      const summaryConfidence = document.getElementById('summaryConfidence');
+      const aiSummaryEl = document.getElementById('aiSummary');
+      const transcriptCard = document.getElementById('transcriptCard');
+      const toggleTranscript = document.getElementById('toggleTranscript');
+      const sessionJob = document.getElementById('sessionJob');
+      const sessionCoverage = document.getElementById('sessionCoverage');
+      const sessionMissing = document.getElementById('sessionMissing');
+      const sessionWeak = document.getElementById('sessionWeak');
+      const progressWrap = document.getElementById('progressWrap');
 
       let currentJobId = null;
       let pollInterval = null;
@@ -216,6 +327,69 @@
         bar.style.width = p + '%';
         progressText.textContent = p + '%';
       }
+
+      function renderSummary(data){
+        const cov = data.coverage || {};
+        const sections = Object.keys(cov);
+        const covered = sections.filter(id => cov[id].status === 'covered').length;
+        const weak = sections.filter(id => cov[id].status === 'weak').length;
+        const missing = sections.filter(id => cov[id].status === 'missing').length;
+        const total = sections.length;
+        const coveragePercent = total ? Math.round((covered + weak) / total * 100) : 0;
+
+        summaryCoverage.textContent = `${covered + weak}/${total}`;
+        summaryWeak.textContent = `${weak}`;
+        summaryMissing.textContent = `${data.missing_required?.length || missing}`;
+        summaryConfidence.textContent = data.overall_coverage_percent ? `${Math.round(data.overall_coverage_percent)}%` : 'N/A';
+
+        sessionJob.textContent = data.job_id || 'None';
+        sessionCoverage.textContent = `${coveragePercent}%`;
+        sessionMissing.textContent = `${data.missing_required?.length || missing}`;
+        sessionWeak.textContent = `${weak}`;
+
+        const missingList = data.missing_required || [];
+        const weakList = sections.filter(id => cov[id].status === 'weak');
+        aiSummaryEl.innerHTML = '';
+
+        const summaryItems = [
+          {label:'Expected Sections', value:`${total}`},
+          {label:'Covered Sections', value:`${covered}`},
+          {label:'Weak Sections', value:`${weak}`},
+          {label:'Missing Required', value:`${missingList.length}`}
+        ];
+        const grid = document.createElement('div');
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = 'repeat(2,minmax(0,1fr))';
+        grid.style.gap='12px';
+        summaryItems.forEach(item=>{
+          const card = document.createElement('div');
+          card.style.background='#f8fafc';
+          card.style.border='1px solid #e3e8ff';
+          card.style.borderRadius='12px';
+          card.style.padding='14px';
+          card.innerHTML = `<strong style="display:block;margin-bottom:6px;color:#0f1724;">${item.label}</strong><span style="font-size:18px;font-weight:700;color:#111827;">${item.value}</span>`;
+          grid.appendChild(card);
+        });
+        aiSummaryEl.appendChild(grid);
+
+        if(missingList.length){
+          const missingBlock = document.createElement('div');
+          missingBlock.innerHTML = `<strong>Missing critical coverage:</strong> ${missingList.join(', ')}`;
+          missingBlock.style.color='#92400e';
+          aiSummaryEl.appendChild(missingBlock);
+        }
+        if(weakList.length){
+          const weakBlock = document.createElement('div');
+          weakBlock.innerHTML = `<strong>Weak coverage sections:</strong> ${weakList.join(', ')}`;
+          weakBlock.style.color='#1f2937';
+          aiSummaryEl.appendChild(weakBlock);
+        }
+      }
+
+      toggleTranscript.addEventListener('click', ()=>{
+        const open = transcriptCard.classList.toggle('open');
+        toggleTranscript.textContent = open ? 'Hide transcript' : 'Show transcript';
+      });
 
       function pollJobStatus(jobId) {
         if (pollInterval) clearInterval(pollInterval);
@@ -236,9 +410,9 @@
             } else if (data.status === 'completed') {
               setProgress(100);
               clearInterval(pollInterval);
-              
+              progressWrap.style.display = 'none';
+              renderSummary(data);
               transcriptEl.textContent = data.transcript || '(none)';
-              missingEl.textContent = JSON.stringify(data.missing_required || [], null, 2);
               
               coverageEl.innerHTML = '';
               const cov = data.coverage || {};
@@ -302,6 +476,7 @@
             } else if (data.status === 'failed') {
               showToast('Processing failed: ' + (data.error || 'Unknown error'));
               setProgress(0);
+              progressWrap.style.display = 'none';
               clearInterval(pollInterval);
             }
           } catch (err) {
@@ -325,6 +500,8 @@
         const f = fileInput.files[0];
         if(!f){ showToast('Choose a file first'); return }
 
+        // Show progress bar
+        progressWrap.style.display = 'flex';
         setProgress(5);
         const fd = new FormData();
         fd.append('file', f);
@@ -336,6 +513,7 @@
             const text = await resp.text();
             showToast('Upload failed: ' + resp.status + ' ' + text);
             setProgress(0);
+            progressWrap.style.display = 'none';
             return;
           }
 
@@ -346,7 +524,11 @@
           if (data.status === 'processing') {
             transcriptEl.textContent = 'Processing... Please wait.';
             coverageEl.innerHTML = '<p>Processing... This may take several minutes for large files.</p>';
-            missingEl.textContent = '[]';
+            aiSummaryEl.innerHTML = '<p class="small-muted">Waiting for analysis results...</p>';
+            sessionJob.textContent = currentJobId;
+            sessionCoverage.textContent = 'Pending';
+            sessionMissing.textContent = 'Pending';
+            sessionWeak.textContent = 'Pending';
             
             // Start polling for status
             pollJobStatus(currentJobId);
@@ -354,6 +536,7 @@
         }catch(err){
           showToast('Error: '+err);
           setProgress(0);
+          progressWrap.style.display = 'none';
         }
       });
 
