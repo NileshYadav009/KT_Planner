@@ -29,6 +29,7 @@ MANIFEST
 # Virtual Environment
 venv/
 .venv
+.venv-1/
 env/
 
 # IDE
@@ -45,12 +46,35 @@ env/
 *.tmp
 tmp/
 temp/
+tempfiles/
+*_temp/
+
+# Media files (audio, video - often too large to commit)
+*.mp3
+*.wav
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.flac
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Output files
 Output_*.txt
 test_output.log
 coverage.xml
 .coverage
+
+# Screenshots and generated content
+static/screenshots/
+static/*.jpg
+static/*.png
+kt_output.md
+server_output.log
 
 # OS
 .DS_Store
@@ -60,3 +84,9 @@ Thumbs.db
 .env
 config.local.json
 *.bak
+.cache/
+*.zip
+*.tar
+*.tar.gz
+job_queue_state.json
+session_state.json

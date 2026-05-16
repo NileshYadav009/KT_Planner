@@ -205,68 +205,68 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 60
 
-        # Post-process segments: autofill low-confidence segments and capture screenshots
+        # Post-process segments: disabled screenshot capture for now
         screenshots = []
-        try:
-            segments = result.get('segments', [])
-        except Exception:
-            segments = []
-
-        # Ensure screenshots directory
-        screenshots_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
-        os.makedirs(screenshots_dir, exist_ok=True)
-
-        try:
-            sentence_model = get_sentence_model()
-        except Exception:
-            sentence_model = None
-
-        max_screens = 2
-        for seg in segments:
-            seg_text = seg.get('text', '').strip()
-            start_t = seg.get('start', 0)
-            avg_logprob = seg.get('avg_logprob', None)
-
-            low_conf = False
-            if avg_logprob is not None:
-                # threshold heuristic: very low average logprob indicates low confidence
-                if avg_logprob < -1.0 or len(seg_text) < 10:
-                    low_conf = True
-
-            if low_conf:
-                # build context from nearby segments
-                context = seg_text
-                # find best hint across all SECTION_HINTS using sentence-transformers
-                hints = []
-                for sec_id, hint_set in SECTION_HINTS.items():
-                    for h in hint_set:
-                        hints.append((sec_id, h))
-                if hints:
-                    texts = [h for (_, h) in hints]
-                    emb_ctx = sentence_model.encode(context or ' '.join(texts[:1]), convert_to_tensor=True)
-                    emb_hints = sentence_model.encode(texts, convert_to_tensor=True, batch_size=64)
-                    sims = util.cos_sim(emb_ctx, emb_hints)[0]
-                    best_idx = int(sims.argmax())
-                    guessed = texts[best_idx]
-                else:
-                    guessed = '[inaudible]'
-
-                # append guessed note into transcript and coverage (simple approach)
-                transcript += f"\n[inaudible - guessed: {guessed}]"
-
-            # Capture screenshot for segments that likely map to a section
-            if len(screenshots) < max_screens and len(seg_text) > 10:
-                sec_class = classify_transcript(seg_text)
-                # if any section matched, capture a frame
-                if any(len(v) > 0 for v in sec_class.values()):
-                    img_name = f"{job_id}_{int(start_t*1000)}.jpg"
-                    img_path = os.path.join(screenshots_dir, img_name)
-                    try:
-                        # extract single frame at time 'start_t'
-                        ffmpeg.input(input_path, ss=start_t).output(img_path, vframes=1).run(quiet=True, overwrite_output=True)
-                        screenshots.append(f"/static/screenshots/{img_name}")
-                    except Exception:
-                        pass
+        # try:
+        #     segments = result.get('segments', [])
+        # except Exception:
+        #     segments = []
+        #
+        # # Ensure screenshots directory
+        # screenshots_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
+        # os.makedirs(screenshots_dir, exist_ok=True)
+        #
+        # try:
+        #     sentence_model = get_sentence_model()
+        # except Exception:
+        #     sentence_model = None
+        #
+        # max_screens = 2
+        # for seg in segments:
+        #     seg_text = seg.get('text', '').strip()
+        #     start_t = seg.get('start', 0)
+        #     avg_logprob = seg.get('avg_logprob', None)
+        #
+        #     low_conf = False
+        #     if avg_logprob is not None:
+        #         # threshold heuristic: very low average logprob indicates low confidence
+        #         if avg_logprob < -1.0 or len(seg_text) < 10:
+        #             low_conf = True
+        #
+        #     if low_conf:
+        #         # build context from nearby segments
+        #         context = seg_text
+        #         # find best hint across all SECTION_HINTS using sentence-transformers
+        #         hints = []
+        #         for sec_id, hint_set in SECTION_HINTS.items():
+        #             for h in hint_set:
+        #                 hints.append((sec_id, h))
+        #         if hints:
+        #             texts = [h for (_, h) in hints]
+        #             emb_ctx = sentence_model.encode(context or ' '.join(texts[:1]), convert_to_tensor=True)
+        #             emb_hints = sentence_model.encode(texts, convert_to_tensor=True, batch_size=64)
+        #             sims = util.cos_sim(emb_ctx, emb_hints)[0]
+        #             best_idx = int(sims.argmax())
+        #             guessed = texts[best_idx]
+        #         else:
+        #             guessed = '[inaudible]'
+        #
+        #         # append guessed note into transcript and coverage (simple approach)
+        #         transcript += f"\n[inaudible - guessed: {guessed}]"
+        #
+        #     # Capture screenshot for segments that likely map to a section
+        #     if len(screenshots) < max_screens and len(seg_text) > 10:
+        #         sec_class = classify_transcript(seg_text)
+        #         # if any section matched, capture a frame
+        #         if any(len(v) > 0 for v in sec_class.values()):
+        #             img_name = f"{job_id}_{int(start_t*1000)}.jpg"
+        #             img_path = os.path.join(screenshots_dir, img_name)
+        #             try:
+        #                 # extract single frame at time 'start_t'
+        #                 ffmpeg.input(input_path, ss=start_t).output(img_path, vframes=1).run(quiet=True, overwrite_output=True)
+        #                 screenshots.append(f"/static/screenshots/{img_name}")
+        #             except Exception:
+        #                 pass
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
