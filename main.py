@@ -9,6 +9,7 @@ import os
 import json
 import uuid
 from threading import Lock
+from datetime import datetime
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
 from context_mapper import ContextMappingPipeline, serialize_kt
 from sentence_transformers import util
@@ -353,3 +354,112 @@ async def root():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return HTMLResponse(content="KT Planner API is running. Use /docs for the API docs.")
+
+
+@app.post('/feedback')
+async def receive_feedback(payload: dict):
+    """Accept human feedback from the UI, apply correction to coverage, and return updated state.
+
+    Expected payload keys: job_id, sentence_id, corrected_classification, user, feedback_notes
+    """
+    job_id = payload.get('job_id')
+    if not job_id:
+        raise HTTPException(status_code=400, detail='job_id is required')
+
+    sentence_id = payload.get('sentence_id')
+    corrected_section = payload.get('corrected_classification')
+    if sentence_id is None or not corrected_section:
+        raise HTTPException(status_code=400, detail='sentence_id and corrected_classification required')
+
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail='Job not found')
+
+        # Record feedback
+        fb = {
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'sentence_id': sentence_id,
+            'corrected_classification': corrected_section,
+            'user': payload.get('user', 'unknown'),
+            'notes': payload.get('feedback_notes', '')
+        }
+        job.setdefault('human_feedback', []).append(fb)
+
+        # Apply correction to coverage data
+        coverage = job.get('coverage', {})
+        
+        # Find the sentence in the flat list across all sections
+        sentence_found = False
+        for sec_id, sec_info in coverage.items():
+            sentences = sec_info.get('sentences', [])
+            for idx, sent in enumerate(sentences):
+                # Match by sentence text or by index
+                if idx == sentence_id or (isinstance(sentence_id, str) and sent.get('text') == sentence_id):
+                    # Remove sentence from old sections and add to new section
+                    old_sections = sent.get('assigned_sections', [])
+                    
+                    # Update the sentence's assigned_sections
+                    sent['assigned_sections'] = [corrected_section]
+                    
+                    # Move sentence content to the correct section
+                    sentence_text = sent.get('text', '')
+                    
+                    # Remove from old sections' content list
+                    for old_sec_id in old_sections:
+                        if old_sec_id in coverage and old_sec_id != corrected_section:
+                            old_content = coverage[old_sec_id].get('content', [])
+                            if sentence_text in old_content:
+                                old_content.remove(sentence_text)
+                            coverage[old_sec_id]['content'] = old_content
+                            coverage[old_sec_id]['sentence_count'] = len(coverage[old_sec_id].get('sentences', []))
+                    
+                    # Add to new section's content list
+                    if corrected_section not in coverage:
+                        coverage[corrected_section] = {
+                            'title': corrected_section,
+                            'status': 'covered',
+                            'sentence_count': 0,
+                            'confidence': 0.85,
+                            'risk': 0.0,
+                            'content': [],
+                            'sentences': []
+                        }
+                    if sentence_text not in coverage[corrected_section].get('content', []):
+                        coverage[corrected_section]['content'].append(sentence_text)
+                    if sent not in coverage[corrected_section].get('sentences', []):
+                        coverage[corrected_section]['sentences'].append(sent)
+                    
+                    # Recalculate section metrics
+                    for sec_data in coverage.values():
+                        sent_count = len(sec_data.get('sentences', []))
+                        sec_data['sentence_count'] = sent_count
+                        if sent_count >= 2:
+                            sec_data['status'] = 'covered'
+                        elif sent_count == 1:
+                            sec_data['status'] = 'weak'
+                        else:
+                            sec_data['status'] = 'missing'
+                    
+                    sentence_found = True
+                    break
+            if sentence_found:
+                break
+
+        # Recalculate missing_required and progress
+        missing_required = [sec_id for sec_id, info in coverage.items() if info.get('status') == 'missing' and info.get('required')]
+        covered_sections = sum(1 for info in coverage.values() if info.get('status') in {'covered', 'weak'})
+        progress = int(100 * covered_sections / len(coverage)) if coverage else 0
+
+        job['coverage'] = coverage
+        job['missing_required'] = missing_required
+        job['progress'] = progress
+
+    return JSONResponse({
+        'status': 'ok',
+        'message': 'feedback applied',
+        'feedback': fb,
+        'coverage': coverage,
+        'missing_required': missing_required,
+        'progress': progress
+    })

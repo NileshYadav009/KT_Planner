@@ -1,5 +1,7 @@
 # 📚 Continuum Enterprise v2.0 - Complete Documentation Index
 
+> Note: legacy / deep-dive docs have been moved to the `archive/` folder to keep the active setup clean.
+>
 ## Welcome to Continuum Enterprise Semantic Mapper
 
 Your one-stop reference for everything about the new enterprise-grade semantic placement engine.
@@ -11,8 +13,8 @@ Your one-stop reference for everything about the new enterprise-grade semantic p
 ### 👤 **I'm a Business User / Knowledge Transfer Manager**
 Start here:
 1. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - 5-minute overview
-2. [ENTERPRISE_SEMANTIC_UPGRADE.md](ENTERPRISE_SEMANTIC_UPGRADE.md) - Full feature guide
-3. [README.md](README.md) - System overview
+2. [README.md](README.md) - System overview
+3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Full feature guide (archived)
 
 **Key Points:**
 - ✅ Zero duplication guaranteed
@@ -39,7 +41,7 @@ Start here:
 ### 👨‍💻 **I'm a Developer / Engineer**
 Start here:
 1. [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md) - Complete technical guide
-2. [ENTERPRISE_SEMANTIC_UPGRADE.md](ENTERPRISE_SEMANTIC_UPGRADE.md#-system-architecture) - Architecture
+2. [README.md](README.md) - Architecture overview
 3. `enterprise_semantic_mapper.py` - Source code with comments
 
 **Your Job:**
@@ -66,9 +68,9 @@ Start here:
 
 ### 📊 **I'm Project Manager / Executive**
 Start here:
-1. [ENTERPRISE_SEMANTIC_UPGRADE.md](ENTERPRISE_SEMANTIC_UPGRADE.md) - Feature overview
-2. [QUICK_REFERENCE.md](QUICK_REFERENCE.md#-expected-improvement-curve) - Improvement curve
-3. [TESTING_AND_VALIDATION.md](TESTING_AND_VALIDATION.md#-validation-report-template) - Validation metrics
+1. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Feature overview
+2. [TESTING_AND_VALIDATION.md](TESTING_AND_VALIDATION.md#-validation-report-template) - Validation metrics
+3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Deep feature guide (archived)
 
 **Key Metrics to Track:**
 - Duplicate rate (0.0% ✓)
@@ -86,9 +88,9 @@ Start here:
 |------|---------|----------|-----------|
 | **README.md** | System overview & setup | Everyone | 15 min |
 | **QUICK_REFERENCE.md** | One-page quick start | Business/Managers | 5 min |
-| **ENTERPRISE_SEMANTIC_UPGRADE.md** | Complete feature guide | Everyone | 20 min |
-| **TESTING_AND_VALIDATION.md** | Testing procedures | QA/Developers | 30 min |
 | **DEVELOPERS_GUIDE.md** | Technical deep-dive | Developers/DevOps | 40 min |
+| **TESTING_AND_VALIDATION.md** | Testing procedures | QA/Developers | 30 min |
+| **REQUIREMENTS_AUDIT.md** | Dependency list | DevOps | 15 min |
 
 ### Additional Resources
 
@@ -118,7 +120,7 @@ Start here:
 ### Path 2: Master the Features (1 hour)
 ```
 1. Read: QUICK_REFERENCE.md (5 min)
-2. Read: ENTERPRISE_SEMANTIC_UPGRADE.md (20 min)
+2. Review: README.md or DEVELOPERS_GUIDE.md (20 min)
 3. Try: All 5 API endpoints (20 min)
 4. Test: Expert correction workflow (10 min)
 5. Review: Quality metrics system (5 min)
@@ -274,7 +276,7 @@ New Way:
 ### "I have a question about..."
 
 **Feature Usage:**
-→ QUICK_REFERENCE.md or ENTERPRISE_SEMANTIC_UPGRADE.md
+→ QUICK_REFERENCE.md or [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md)
 
 **Testing/Validation:**
 → TESTING_AND_VALIDATION.md
@@ -405,6 +407,6 @@ We believe Continuum Enterprise will transform how you manage knowledge transfer
 
 **Questions?** Start with the documentation for your role above.
 **Ready to begin?** Head to QUICK_REFERENCE.md for a 5-minute start.
-**Want deep knowledge?** ENTERPRISE_SEMANTIC_UPGRADE.md has everything.
+**Want deep knowledge?** [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) has everything.
 
 **Happy knowledge transferring! 🚀**

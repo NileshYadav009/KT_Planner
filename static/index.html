@@ -608,7 +608,77 @@
           const r = await fetch('/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
           if(!r.ok){ showToast('Feedback failed'); return; }
           const j = await r.json(); 
-          showToast('Feedback recorded for: ' + correctedSection);
+          
+          // Update UI with new coverage data returned from server
+          if(j.coverage){
+            // Re-render coverage details
+            coverageEl.innerHTML = '';
+            for(const [id, info] of Object.entries(j.coverage)){
+              const div = document.createElement('div');
+              const contentArray = (info && info.content && Array.isArray(info.content)) ? info.content : [];
+              const contentHtml = contentArray.map(c=>`<p>${c}</p>`).join('');
+              const note = (contentArray.length === 0 && info.status !== 'missing')
+                ? `<p class="small-muted">No explicit sentence text is available for this section; coverage is inferred from semantic/contextual analysis.</p>`
+                : '';
+              div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}${note}</div>`;
+              coverageEl.appendChild(div);
+            }
+            
+            // Rebuild sentence list from updated coverage
+            const sentencesPanel = document.createElement('div');
+            sentencesPanel.style.marginTop = '12px';
+            const flatSentences = [];
+            for(const [secId, info] of Object.entries(j.coverage)){
+              const sentObjs = info.sentences || [];
+              for(const s of sentObjs){
+                flatSentences.push({
+                  text: s.text,
+                  start: s.start,
+                  end: s.end,
+                  audio_confidence: s.audio_confidence,
+                  assigned_sections: s.assigned_sections || [secId]
+                });
+              }
+            }
+
+            if(flatSentences.length>0){
+              const header = document.createElement('h3'); header.textContent = 'Sentence Assignments'; sentencesPanel.appendChild(header);
+              for(let i=0;i<flatSentences.length;i++){
+                const s = flatSentences[i];
+                const row = document.createElement('div'); row.className = 'sentence-row';
+                const txt = document.createElement('div'); txt.className = 'sentence-text'; txt.textContent = s.text;
+                const meta = document.createElement('div'); meta.style.minWidth='160px'; meta.style.textAlign='right';
+                const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `t:${s.start.toFixed(1)}s • conf:${(s.audio_confidence||0).toFixed(2)}`;
+                const tags = document.createElement('div'); tags.style.marginTop='6px';
+                for(const as of s.assigned_sections){ const t = document.createElement('span'); t.className='tag'; t.textContent=as; tags.appendChild(t); }
+                const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Edit'; editBtn.style.marginLeft='8px';
+                editBtn.onclick = ()=>{ promptEditSentence(i, s); };
+                meta.appendChild(conf); meta.appendChild(tags); meta.appendChild(editBtn);
+                row.appendChild(txt); row.appendChild(meta);
+                sentencesPanel.appendChild(row);
+              }
+              coverageEl.appendChild(sentencesPanel);
+            }
+            
+            // Update summary metrics
+            const cov = j.coverage || {};
+            const sections = Object.keys(cov);
+            const covered = sections.filter(id => cov[id].status === 'covered').length;
+            const weak = sections.filter(id => cov[id].status === 'weak').length;
+            const missing = sections.filter(id => cov[id].status === 'missing').length;
+            const total = sections.length;
+            const coveragePercent = total ? Math.round((covered + weak) / total * 100) : 0;
+
+            summaryCoverage.textContent = `${covered + weak}/${total}`;
+            summaryWeak.textContent = `${weak}`;
+            summaryMissing.textContent = `${j.missing_required?.length || missing}`;
+            
+            sessionCoverage.textContent = `${j.progress || coveragePercent}%`;
+            sessionMissing.textContent = `${j.missing_required?.length || missing}`;
+            sessionWeak.textContent = `${weak}`;
+          }
+          
+          showToast('Feedback recorded for: ' + correctedSection + ' ✓');
           closeEditModal();
         }catch(e){ showToast('Feedback error: '+e); }
       }
