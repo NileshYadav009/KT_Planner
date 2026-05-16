@@ -41,6 +41,7 @@ except ImportError:
 
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 
 with open("kt_schema_new.json") as f:
     SCHEMA = json.load(f)["sections"]
@@ -248,96 +249,84 @@ def get_section_embeds() -> Dict[str, np.ndarray]:
     return SECTION_EMBEDS
 
 def chunk_text(text: str, size: int = 200):
-    """Yield chunks of approximately `size` words (smaller chunks improve matching)."""
+    """Legacy chunking helper.
+
+    This remains available for backward compatibility but is no longer used
+    for section classification. Sentence-level classification from
+    context_mapper is preferred.
+    """
     words = text.split()
     for i in range(0, len(words), size):
         yield " ".join(words[i:i + size])
 
-def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
-    """Classify transcript chunks into KT sections (deduplicating across sections).
-    
-    Each chunk is assigned to its best-matching section (prevents duplication).
-    Optimized: batch encodes chunks, uses vectorized numpy operations, deduplicates.
-    """
-    coverage = {s["id"]: [] for s in SCHEMA}
-    section_embeds = get_section_embeds()
-    model = get_sentence_model()
-    
-    # Collect all chunks first
-    chunks = list(chunk_text(transcript))
-    if not chunks:
-        return coverage
-    
-    # Batch encode all chunks at once (much faster than one-by-one)
-    if model is not None:
-        bs = max(8, min(64, len(chunks)))
-        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=bs, normalize_embeddings=True)
-        chunk_embeddings = np.asarray(chunk_embeddings, dtype=np.float32)
+
+CONTEXT_CLASSIFIER: Optional[ContextClassifier] = None
+
+
+def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassifier:
+    global CONTEXT_CLASSIFIER
+    if CONTEXT_CLASSIFIER is None:
+        CONTEXT_CLASSIFIER = ContextClassifier(similarity_threshold=similarity_threshold)
+        CONTEXT_CLASSIFIER.index_schema(SCHEMA)
     else:
-        chunk_embeddings = np.random.rand(len(chunks), 384).astype(np.float32)
-        chunk_embeddings /= (np.linalg.norm(chunk_embeddings, axis=1, keepdims=True) + 1e-9)
-    
-    # Vectorized cosine similarity computation
-    section_ids = list(section_embeds.keys())
-    section_emb_list = np.array([section_embeds[sid] for sid in section_ids], dtype=np.float32)
-    
-    # Compute similarity matrix: (num_chunks, num_sections)
-    similarities = np.dot(chunk_embeddings, section_emb_list.T)
-    
-    # Assign each chunk to best matching section (deduplication)
-    lower_chunks = [c.lower() for c in chunks]
-    for chunk_idx, chunk in enumerate(chunks):
-        chunk_lower = lower_chunks[chunk_idx]
-        chunk_tokens = {token.lower() for token in WORD_RE.findall(chunk)}
-        
-        best_sec_idx = -1
-        best_score = similarity_threshold - 0.01
-        best_has_hint = False
-        
-        # Find the BEST matching section for this chunk
-        for sec_idx, sec_id in enumerate(section_ids):
-            score = float(similarities[chunk_idx, sec_idx])
-            hints = SECTION_HINTS.get(sec_id, set())
-            has_token_hint = bool(chunk_tokens & hints)
-            has_substr_hint = any(h in chunk_lower for h in hints)
-            has_hint = has_token_hint or has_substr_hint
-            
-            # Prefer high scores; break ties using hint presence
-            should_update = False
-            if has_hint and not best_has_hint:
-                should_update = True  # hint match beats no-hint match
-            elif has_hint == best_has_hint and score > best_score:
-                should_update = True  # better score when hint status is same
-            
-            if should_update:
-                best_sec_idx = sec_idx
-                best_score = score
-                best_has_hint = has_hint
-        
-        # Assign chunk only to best section (no duplication)
-        if best_sec_idx >= 0:
-            coverage[section_ids[best_sec_idx]].append(chunk)
-    
+        CONTEXT_CLASSIFIER.similarity_threshold = similarity_threshold
+    return CONTEXT_CLASSIFIER
+
+
+def _prepare_sentences(transcript: str):
+    """Segment transcript into sentence objects using context_mapper."""
+    audio_seg = AudioSegment(text=transcript, start=0.0, end=0.0, avg_logprob=-1.0)
+    return segment_sentences([audio_seg])
+
+
+def _classify_transcript_sentences(transcript: str, similarity_threshold: float = 0.20):
+    """Classify transcript at sentence granularity with neighbor-aware embeddings."""
+    sentences = _prepare_sentences(transcript)
+    if not sentences:
+        return []
+
+    classifier = get_context_classifier(similarity_threshold)
+    texts = [s.text for s in sentences]
+    embeddings = classifier.model.encode(texts, convert_to_tensor=True)
+
+    classified_sentences = []
+    for idx, sentence in enumerate(sentences):
+        window = 3
+        start = max(0, idx - window)
+        end = min(len(sentences), idx + window + 1)
+        neighbor_embeddings = [embeddings[j] for j in range(start, end) if j != idx]
+        classified_sentence = classifier.classify_sentence(
+            sentence,
+            sent_embedding=embeddings[idx],
+            neighbor_embeddings=neighbor_embeddings
+        )
+        classified_sentences.append(classified_sentence)
+    return classified_sentences
+
+
+def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
+    """Classify transcript at sentence level into KT sections."""
+    coverage = {s["id"]: [] for s in SCHEMA}
+    classified_sentences = _classify_transcript_sentences(transcript, similarity_threshold=similarity_threshold)
+
+    for classified in classified_sentences:
+        if classified.is_unassigned or classified.primary_classification is None:
+            continue
+        confidence = classified.primary_classification.confidence or 0.0
+        if confidence < similarity_threshold:
+            continue
+        section_id = classified.primary_classification.section_id
+        coverage[section_id].append(classified.sentence.text)
+
     return coverage
 
 
 def analyze_transcript(transcript: str, *, similarity_threshold: float = 0.20, min_chunks_for_covered: int = 2):
-    """Produce structured KT coverage per section (using deduplicated chunks).
+    """Produce structured KT coverage per section using sentence-level classification."""
+    section_ids = [s['id'] for s in SCHEMA]
+    classified_sentences = _classify_transcript_sentences(transcript, similarity_threshold=similarity_threshold)
 
-    Returns a dict mapping section id -> {
-        status: 'covered'|'partial'|'missing',
-        confidence: float (0..1),
-        extracted_text: str,
-        chunks: [str],
-        scores: [float]
-    }
-    """
-    section_embeds = get_section_embeds()
-    model = get_sentence_model()
-
-    chunks = list(chunk_text(transcript))
-    if not chunks:
-        # return missing for all
+    if not classified_sentences:
         return {
             s['id']: {
                 'status': 'missing',
@@ -349,68 +338,29 @@ def analyze_transcript(transcript: str, *, similarity_threshold: float = 0.20, m
             for s in SCHEMA
         }
 
-    # encode chunks and compute similarities
-    if model is not None:
-        bs = max(8, min(64, len(chunks)))
-        chunk_embeddings = model.encode(chunks, convert_to_tensor=False, batch_size=bs, normalize_embeddings=True)
-        chunk_embeddings = np.asarray(chunk_embeddings, dtype=np.float32)
-    else:
-        chunk_embeddings = np.random.rand(len(chunks), 384).astype(np.float32)
-        chunk_embeddings /= (np.linalg.norm(chunk_embeddings, axis=1, keepdims=True) + 1e-9)
-    section_ids = list(section_embeds.keys())
-    section_emb_list = np.array([section_embeds[sid] for sid in section_ids], dtype=np.float32)
-    sims = np.dot(chunk_embeddings, section_emb_list.T)
-
-    # Assign each chunk to BEST matching section (deduplicated)
     results = {sec_id: {'matched_chunks': [], 'matched_scores': []} for sec_id in section_ids}
-    lower_chunks = [c.lower() for c in chunks]
-    
-    for c_idx, chunk in enumerate(chunks):
-        chunk_lower = lower_chunks[c_idx]
-        chunk_tokens = {token.lower() for token in WORD_RE.findall(chunk)}
-        
-        best_sec_idx = -1
-        best_score = similarity_threshold - 0.01
-        best_has_hint = False
-        
-        # Find BEST section for this chunk
-        for sec_idx, sec_id in enumerate(section_ids):
-            score = float(sims[c_idx, sec_idx])
-            hints = SECTION_HINTS.get(sec_id, set())
-            has_token_hint = bool(chunk_tokens & hints)
-            has_substr_hint = any(h in chunk_lower for h in hints)
-            has_hint = has_token_hint or has_substr_hint
-            
-            should_update = False
-            if has_hint and not best_has_hint:
-                should_update = True
-            elif has_hint == best_has_hint and score > best_score:
-                should_update = True
-            
-            if should_update:
-                best_sec_idx = sec_idx
-                best_score = score
-                best_has_hint = has_hint
-        
-        # Assign to best section only
-        if best_sec_idx >= 0:
-            best_sec_id = section_ids[best_sec_idx]
-            results[best_sec_id]['matched_chunks'].append(chunk)
-            results[best_sec_id]['matched_scores'].append(best_score)
-    
-    # Build final results
+    for classified in classified_sentences:
+        if classified.is_unassigned or classified.primary_classification is None:
+            continue
+        confidence = classified.primary_classification.confidence or 0.0
+        if confidence < similarity_threshold:
+            continue
+        sec_id = classified.primary_classification.section_id
+        results[sec_id]['matched_chunks'].append(classified.sentence.text)
+        results[sec_id]['matched_scores'].append(confidence)
+
     final_results = {}
     for sec_id in section_ids:
         matched_chunks = results[sec_id]['matched_chunks']
         matched_scores = results[sec_id]['matched_scores']
-        
+
         if len(matched_chunks) == 0:
             status = 'missing'
         elif len(matched_chunks) < min_chunks_for_covered:
             status = 'partial'
         else:
             status = 'covered'
-        
+
         confidence = max(matched_scores) if matched_scores else 0.0
         confidence = float(np.clip(confidence, 0.0, 1.0))
         final_results[sec_id] = {
@@ -420,7 +370,7 @@ def analyze_transcript(transcript: str, *, similarity_threshold: float = 0.20, m
             'chunks': matched_chunks,
             'scores': matched_scores
         }
-    
+
     return final_results
 
 
