@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import whisper
+from faster_whisper import WhisperModel
 import ffmpeg
 import tempfile
 import os
@@ -10,9 +10,16 @@ import json
 import uuid
 from threading import Lock
 from datetime import datetime
+import torch
 from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
 from context_mapper import ContextMappingPipeline, serialize_kt
+from devops_transcription import clean_transcript
 from sentence_transformers import util
+
+# Optional environment config for Whisper model
+DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+DEFAULT_WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
+DEFAULT_WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "2"))
 
 app = FastAPI()
 app.add_middleware(
@@ -39,8 +46,16 @@ def load_models():
     """Load heavy models on startup so endpoints can use them."""
     global MODEL, MAPPER_PIPELINE
     if MODEL is None:
-        # Use 'tiny' model for ~4x speedup over 'small'; good accuracy/speed tradeoff
-        MODEL = whisper.load_model("tiny")
+        model_name = DEFAULT_WHISPER_MODEL
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = DEFAULT_WHISPER_COMPUTE_TYPE
+
+        # Use faster CPU-friendly model unless the environment explicitly allows medium on CPU.
+        if device == "cpu" and model_name == "medium" and os.getenv("WHISPER_ALLOW_MEDIUM_CPU", "0") != "1":
+            model_name = "small"
+
+        MODEL = WhisperModel(model_name, device=device, compute_type=compute_type)
+
     if MAPPER_PIPELINE is None:
         MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA)
 
@@ -151,9 +166,35 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             # If trimming fails, continue with original audio
             pass
 
-        # Transcribe (tiny model is faster)
-        result = MODEL.transcribe(audio_to_use, language="en", verbose=False)
-        transcript = result.get("text", "").strip()
+        # Transcribe using faster-whisper with faster settings by default.
+        # On CPU we prefer the small model, while GPU can use medium when configured.
+        transcribe_kwargs = {
+            "language": "en",
+            "beam_size": DEFAULT_WHISPER_BEAM_SIZE,
+            "task": "transcribe"
+        }
+        segments, info = MODEL.transcribe(audio_to_use, **transcribe_kwargs)
+        segments = list(segments)
+        raw_text = " ".join([s.text for s in segments]).strip()
+        cleaned_segments = []
+        for s in segments:
+            cleaned_segments.append({
+                "id": s.id,
+                "seek": s.seek,
+                "start": s.start,
+                "end": s.end,
+                "text": clean_transcript(s.text),
+                "avg_logprob": getattr(s, "avg_logprob", None),
+                "compression_ratio": getattr(s, "compression_ratio", None),
+                "no_speech_prob": getattr(s, "no_speech_prob", None)
+            })
+
+        result = {
+            "text": clean_transcript(raw_text),
+            "segments": cleaned_segments,
+            "language": info.language if info else "en"
+        }
+        transcript = result.get("text", "")
 
         # update progress after transcription
         with JOB_LOCK:

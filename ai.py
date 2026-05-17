@@ -41,6 +41,7 @@ except ImportError:
 
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 
 with open("kt_schema_new.json") as f:
@@ -275,7 +276,8 @@ def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassif
 
 def _prepare_sentences(transcript: str):
     """Segment transcript into sentence objects using context_mapper."""
-    audio_seg = AudioSegment(text=transcript, start=0.0, end=0.0, avg_logprob=-1.0)
+    cleaned_text = clean_transcript(transcript)
+    audio_seg = AudioSegment(text=cleaned_text, start=0.0, end=0.0, avg_logprob=-1.0)
     return segment_sentences([audio_seg])
 
 

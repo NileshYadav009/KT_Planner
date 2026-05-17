@@ -315,6 +315,80 @@ WORD_CORRECTIONS = {
     "flashsales": "flash sales",
 }
 
+FILLER_WORDS = [
+    "okay",
+    "actually",
+    "basically",
+    "right",
+    "you know",
+    "um",
+    "uh",
+    "well",
+    "so",
+    "like",
+]
+
+FILLER_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in FILLER_WORDS) + r")\b[\.,]?", re.IGNORECASE)
+REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)(?:\s+\1\b)+", re.IGNORECASE)
+REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,4}\w+)\s+\1\b", re.IGNORECASE)
+
+
+def remove_fillers(text: str) -> str:
+    if not text:
+        return text
+    cleaned = re.sub(FILLER_PATTERN, "", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def remove_repeated_words(text: str) -> str:
+    if not text:
+        return text
+    previous = None
+    cleaned = text
+    while cleaned != previous:
+        previous = cleaned
+        cleaned = REPEATED_WORD_PATTERN.sub(r"\1", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def remove_repeated_phrases(text: str) -> str:
+    if not text:
+        return text
+    previous = None
+    cleaned = text
+    while cleaned != previous:
+        previous = cleaned
+        cleaned = REPEATED_PHRASE_PATTERN.sub(r"\1", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def clean_transcript(text: str) -> str:
+    """Normalize transcript before semantic classification.
+
+    Steps:
+    1. Normalize whitespace
+    2. Apply phrase and word corrections
+    3. Remove filler words
+    4. Collapse repeated words/phrases
+    5. Re-apply DevOps corrections over cleaned text
+    """
+    if not text:
+        return text
+
+    normalized = re.sub(r"[\r\n\t]+", " ", text)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    normalized, _ = apply_devops_corrections(normalized)
+    normalized = remove_fillers(normalized)
+    normalized = remove_repeated_words(normalized)
+    normalized = remove_repeated_phrases(normalized)
+    normalized, _ = apply_devops_corrections(normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
 # ============================================================================
 # Context-Based Corrections
 # ============================================================================

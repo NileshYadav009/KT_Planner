@@ -31,6 +31,7 @@ from policy import (
 )
 
 from runtime_policy import load_policy
+from devops_transcription import clean_transcript
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Only use the real heavy model when the environment variable USE_REAL_EMBEDDINGS is set to true.
@@ -1183,7 +1184,7 @@ class ContextMappingPipeline:
         # STAGE 1: Convert to AudioSegment objects (already done by Whisper)
         segments = [
             AudioSegment(
-                text=seg.get("text", ""),
+                text=clean_transcript(seg.get("text", "")),
                 start=seg.get("start", 0.0),
                 end=seg.get("end", 0.0),
                 avg_logprob=seg.get("avg_logprob", -1.0),
@@ -1192,6 +1193,9 @@ class ContextMappingPipeline:
             for seg in audio_segments
         ]
         
+        # STAGE 1.5: Pre-clean transcript segments before sentence segmentation
+        logger.info("Stage 1.5: Cleaned transcript segments before classification")
+
         # STAGE 2: Segment sentences
         sentences = segment_sentences(segments)
         logger.info(f"Stage 2: Segmented into {len(sentences)} sentences")

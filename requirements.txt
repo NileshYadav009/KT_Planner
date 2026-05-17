@@ -8,7 +8,7 @@ pydantic>=2.12.0          # Data validation with improved speed and accuracy
 pydantic-settings>=2.6.0  # Configuration management for environment variables
 
 # AI/ML Core (Latest Stable Versions for Better Accuracy)
-openai-whisper>=20250625  # Latest Whisper model with improved accuracy for technical content
+faster-whisper>=1.1.0     # Optimized Whisper with faster inference and better accuracy (replaces openai-whisper)
 transformers>=4.45.0      # Hugging Face transformers for advanced NLP tasks
 sentence-transformers>=5.2.0  # Semantic embeddings for accurate section classification
 torch>=2.2.0              # PyTorch backend (required by transformers and sentence-transformers)
