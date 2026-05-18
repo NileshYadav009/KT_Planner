@@ -214,15 +214,34 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         missing_required = kt.missing_required_sections or []
         for sec_id, cov in kt.coverage.items():
             coverage_sentences = []
-            for s in getattr(cov, 'sentences', []) or []:
-                coverage_sentences.append({
-                    'text': getattr(s, 'text', ''),
-                    'start': getattr(s, 'start', 0.0),
-                    'end': getattr(s, 'end', 0.0),
-                    'speaker': getattr(s, 'speaker', None),
-                    'audio_confidence': getattr(s, 'audio_confidence', 0.0),
-                    'assigned_sections': [sec_id]
-                })
+            
+            # NEW: Extract sentences from topic blocks (preserves order and grouping)
+            blocks = getattr(cov, 'blocks', []) or []
+            for block in blocks:
+                for s in block.sentences:
+                    coverage_sentences.append({
+                        'text': getattr(s, 'text', ''),
+                        'start': getattr(s, 'start', 0.0),
+                        'end': getattr(s, 'end', 0.0),
+                        'speaker': getattr(s, 'speaker', None),
+                        'audio_confidence': getattr(s, 'audio_confidence', 0.0),
+                        'assigned_sections': [sec_id]
+                    })
+            
+            # Fallback: try old structure for backwards compatibility
+            if not coverage_sentences:
+                old_sentences = getattr(cov, 'sentences', []) or []
+                for s in old_sentences:
+                    coverage_sentences.append({
+                        'text': getattr(s, 'text', ''),
+                        'start': getattr(s, 'start', 0.0),
+                        'end': getattr(s, 'end', 0.0),
+                        'speaker': getattr(s, 'speaker', None),
+                        'audio_confidence': getattr(s, 'audio_confidence', 0.0),
+                        'assigned_sections': [sec_id]
+                    })
+            
+            # Last resort: check section_content
             if not coverage_sentences:
                 section_content = kt.section_content.get(sec_id, {})
                 coverage_sentences = section_content.get('sentences', []) if isinstance(section_content, dict) else []
@@ -235,7 +254,8 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 'confidence': cov.confidence_score,
                 'risk': cov.risk_score,
                 'content': [s.get('text', '') for s in coverage_sentences],
-                'sentences': coverage_sentences
+                'sentences': coverage_sentences,
+                'blocks': [b.to_dict() for b in blocks]  # NEW: include blocks for frontend
             }
 
         progress = int(round(kt.overall_coverage_percent or 0))

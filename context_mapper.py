@@ -762,16 +762,49 @@ class ContextRepair:
 # ============================================================================
 
 @dataclass
+class TopicBlock:
+    """Contiguous group of related sentences forming a coherent topic/paragraph."""
+    section_id: str
+    topic_title: Optional[str]  # e.g., "Deployment Process"
+    sentences: List[Sentence]  # Ordered, consecutive sentences
+    start_time: float  # Timestamp of first sentence
+    end_time: float  # Timestamp of last sentence
+    confidence_score: float  # Block-level confidence (mean of sentences)
+    duration: int  # Number of consecutive sentences in block
+    speaker: Optional[str] = None  # Primary speaker for block
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "section_id": self.section_id,
+            "topic_title": self.topic_title,
+            "sentence_count": self.duration,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "confidence": self.confidence_score,
+            "sentences": [
+                {
+                    "text": s.text,
+                    "start": s.start,
+                    "end": s.end,
+                    "speaker": s.speaker,
+                    "audio_confidence": s.audio_confidence
+                }
+                for s in self.sentences
+            ]
+        }
+
+@dataclass
 class SectionCoverage:
     """Coverage metrics for a KT section."""
     section_id: str
     section_title: str
     required: bool
     status: str  # "missing" | "weak" | "covered"
-    sentence_count: int
+    block_count: int  # Number of coherent topic blocks
+    sentence_count: int  # Total sentences across all blocks
     confidence_score: float
     risk_score: float
-    sentences: List[Sentence]
+    blocks: List[TopicBlock]  # Topic-coherent blocks instead of scattered sentences
     
 
 def detect_gaps(
@@ -783,47 +816,98 @@ def detect_gaps(
     """
     STAGE 5: Detect coverage gaps and compute risk.
     
+    NEW APPROACH: Group consecutive sentences into TopicBlocks to preserve paragraph continuity.
+    
     Rules:
-    - 0 sentences → missing
-    - 1 sentence → weak
-    - 2+ sentences → covered
+    - 0 blocks → missing
+    - 1 block → weak
+    - 2+ blocks → covered
     """
     coverage = {}
     
+    # PASS 1: Group consecutive sentences by section to create candidate blocks
+    candidate_blocks: Dict[str, List[TopicBlock]] = defaultdict(list)
+    
+    current_block_sentences: List[Sentence] = []
+    current_block_section: Optional[str] = None
+    current_block_indices: List[int] = []
+    
+    for idx, cs in enumerate(classified_sentences):
+        assigned_section = None
+        if cs.primary_classification:
+            assigned_section = cs.primary_classification.section_id
+        
+        # If section changes or no assignment, finalize current block
+        if assigned_section != current_block_section and current_block_sentences:
+            # Finalize the block
+            if current_block_section:
+                confidences = [classified_sentences[idx_val].sentence.audio_confidence for idx_val in current_block_indices]
+                block_confidence = float(np.mean(confidences)) if confidences else 0.0
+                
+                block = TopicBlock(
+                    section_id=current_block_section,
+                    topic_title=None,  # Could infer from first sentence later
+                    sentences=current_block_sentences.copy(),
+                    start_time=current_block_sentences[0].start,
+                    end_time=current_block_sentences[-1].end,
+                    confidence_score=block_confidence,
+                    duration=len(current_block_sentences),
+                    speaker=current_block_sentences[0].speaker if current_block_sentences else None
+                )
+                candidate_blocks[current_block_section].append(block)
+            
+            # Start new block
+            current_block_sentences = []
+            current_block_section = assigned_section
+            current_block_indices = []
+        
+        # Add sentence to current block
+        if assigned_section:
+            current_block_sentences.append(cs.sentence)
+            current_block_indices.append(idx)
+    
+    # Finalize last block
+    if current_block_sentences and current_block_section:
+        confidences = [classified_sentences[i].sentence.audio_confidence for i in current_block_indices]
+        block_confidence = float(np.mean(confidences)) if confidences else 0.0
+        
+        block = TopicBlock(
+            section_id=current_block_section,
+            topic_title=None,
+            sentences=current_block_sentences.copy(),
+            start_time=current_block_sentences[0].start,
+            end_time=current_block_sentences[-1].end,
+            confidence_score=block_confidence,
+            duration=len(current_block_sentences),
+            speaker=current_block_sentences[0].speaker if current_block_sentences else None
+        )
+        candidate_blocks[current_block_section].append(block)
+    
+    # PASS 2: Compute coverage metrics per section
     for sec in schema_sections:
         sec_id = sec.get("id")
         sec_title = sec.get("title", sec_id)
         sec_required = sec.get("required", False)
         
-        # Find all sentences mapped to this section (use unique normalized text)
-        mapped_texts = []
-        unique_texts = set()
-        mapped_sentences = []
-        for cs in classified_sentences:
-            if cs.primary_classification and cs.primary_classification.section_id == sec_id:
-                text = (cs.sentence.text or '').strip()
-                key = re.sub(r"\s+", " ", text).lower()
-                if key not in unique_texts:
-                    unique_texts.add(key)
-                    mapped_texts.append(text)
-                    mapped_sentences.append(cs.sentence)
-        sentences = mapped_sentences
+        blocks = candidate_blocks.get(sec_id, [])
+        block_count = len(blocks)
+        total_sentences = sum(b.duration for b in blocks)
         
-        # Determine status
-        unique_count = len(mapped_texts)
-        if unique_count == 0:
-            status = "missing"
+        # Compute section-level confidence as mean of block confidences
+        if blocks:
+            confidence = float(np.mean([b.confidence_score for b in blocks]))
+        else:
             confidence = 0.0
+        
+        # Determine status based on block count
+        if block_count == 0:
+            status = "missing"
             risk = 1.0 if sec_required else 0.5
-        elif unique_count <= weak_threshold:
+        elif block_count == 1 and total_sentences <= weak_threshold:
             status = "weak"
-            confidence = np.mean([cs.sentence.audio_confidence for cs in classified_sentences 
-                                 if cs.primary_classification and cs.primary_classification.section_id == sec_id])
             risk = 0.6 if sec_required else 0.2
         else:
             status = "covered"
-            confidence = np.mean([cs.sentence.audio_confidence for cs in classified_sentences 
-                                 if cs.primary_classification and cs.primary_classification.section_id == sec_id])
             risk = 0.0 if confidence > 0.7 else 0.1
         
         coverage[sec_id] = SectionCoverage(
@@ -831,10 +915,11 @@ def detect_gaps(
             section_title=sec_title,
             required=sec_required,
             status=status,
-            sentence_count=unique_count,
-            confidence_score=float(confidence),
+            block_count=block_count,
+            sentence_count=total_sentences,
+            confidence_score=confidence,
             risk_score=float(risk),
-            sentences=sentences
+            blocks=blocks
         )
     
     return coverage
@@ -1022,8 +1107,8 @@ def assemble_kt(
     STAGE 7: Assemble final KT structure.
     
     Returns comprehensive KT object with:
-    - Section-wise content
-    - Sentence lists per section
+    - Topic blocks per section (NEW: preserves paragraph continuity)
+    - Sentence lists per section (for backwards compatibility)
     - Enhanced text (repaired versions)
     - Associated screenshots
     - Confidence scores
@@ -1126,6 +1211,7 @@ def assemble_kt(
                         "enhanced_texts": [],
                         "repair_actions": [],
                         "screenshots": [],
+                        "blocks": [],  # NEW: preserve topic blocks
                         "confidence": 0.0,
                         "sentence_count": 0
                     }
@@ -1172,6 +1258,24 @@ def assemble_kt(
                         "original": repair_action.original,
                         "improved": repair_action.improved
                     })
+    
+    # NEW: Add topic blocks to section_content to preserve paragraph continuity
+    for sec_id, cov in coverage.items():
+        if sec_id not in section_content:
+            section_content[sec_id] = {
+                "section_id": sec_id,
+                "section_title": cov.section_title,
+                "sentences": [],
+                "enhanced_texts": [],
+                "repair_actions": [],
+                "screenshots": [],
+                "blocks": [],
+                "confidence": cov.confidence_score,
+                "sentence_count": 0
+            }
+        
+        # Add blocks to section_content - this preserves the original paragraph grouping
+        section_content[sec_id]["blocks"] = [b.to_dict() for b in cov.blocks]
     
     # Compute section confidences
     for sec_id, content in section_content.items():
