@@ -37,6 +37,7 @@ from devops_transcription import clean_transcript
 # Only use the real heavy model when the environment variable USE_REAL_EMBEDDINGS is set to true.
 _SENT_TRANS_SPEC = importlib.util.find_spec("sentence_transformers")
 _USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "").lower() in ("1", "true", "yes"))
+_CROSS_ENCODER = None  # Lazy-loaded cross-encoder for reranking
 
 # Fallback: simple token-set embedding + Jaccard similarity to avoid heavy deps at module import time
 if not _USE_REAL_EMBEDDINGS:
@@ -314,19 +315,26 @@ class ContextClassifier:
     """
     STAGE 3: Semantic classification against KT schema.
     
-    Uses sentence-transformers for semantic similarity.
-    Never discards sentences—marks unassigned if similarity too low.
+    Uses sentence-transformers for semantic similarity (embedding stage)
+    followed by cross-encoder reranking (reranking stage) for high accuracy.
+    
+    Flow:
+    1. Embed sentence and sections (BAAI/bge-large-en-v1.5)
+    2. Find top 5 candidates by cosine similarity
+    3. Use cross-encoder to rerank top 5 and select best match
     """
     
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
-        similarity_threshold: float = 0.15
+        model_name: str = "BAAI/bge-large-en-v1.5",
+        similarity_threshold: float = 0.15,
+        use_cross_encoder: bool = True
     ):
         """
         Args:
-            model_name: HuggingFace model for embeddings
+            model_name: HuggingFace model for embeddings (upgraded to BAAI/bge-large-en-v1.5)
             similarity_threshold: Minimum cosine similarity for assignment
+            use_cross_encoder: Whether to use cross-encoder for reranking (default True)
         """
         # Lazily import heavy dependencies if configured to use real embeddings
         if _USE_REAL_EMBEDDINGS:
@@ -337,6 +345,8 @@ class ContextClassifier:
                 globals()['np'] = _np
                 globals()['SentenceTransformer'] = st.SentenceTransformer
                 globals()['util'] = st.util
+                if use_cross_encoder:
+                    globals()['CrossEncoder'] = st.CrossEncoder
             except Exception:
                 # Fall back to lightweight implementations
                 pass
@@ -346,6 +356,16 @@ class ContextClassifier:
         self.section_embeddings = {}
         self.section_metadata = {}
         self._section_hints = {}  # Initialize for keyword matching
+        
+        # Initialize cross-encoder for reranking if available
+        self.cross_encoder = None
+        if use_cross_encoder:
+            try:
+                if 'CrossEncoder' in globals() and globals()['CrossEncoder']:
+                    self.cross_encoder = globals()['CrossEncoder']("cross-encoder/ms-marco-MiniLM-L-6-v2")
+                    logger.info("Loaded cross-encoder for reranking")
+            except Exception as e:
+                logger.warning(f"Failed to load cross-encoder: {e}. Classification will proceed without reranking.")
     
     def index_schema(self, schema_sections: List[Dict]) -> None:
         """Index schema sections for fast lookup."""
@@ -446,6 +466,31 @@ class ContextClassifier:
         
         # Sort by combined confidence and take top_k
         classifications.sort(key=lambda x: x.confidence, reverse=True)
+        
+        # RERANKING STAGE: Use cross-encoder to rerank top 5 candidates
+        top_candidates = classifications[:5]  # Get top 5 for cross-encoder
+        if self.cross_encoder and len(top_candidates) > 0:
+            try:
+                # Prepare pairs (sentence, section_title) for cross-encoder
+                pairs = [(sentence.text, c.section_title) for c in top_candidates]
+                cross_scores = self.cross_encoder.predict(pairs)
+                
+                # Update confidence scores with cross-encoder scores (normalize to 0-1)
+                for i, c in enumerate(top_candidates):
+                    cross_score = float(cross_scores[i])
+                    # Blend embedding score with cross-encoder score
+                    # Cross-encoder often outputs unbounded scores, so we use sigmoid-like normalization
+                    normalized_cross = 1.0 / (1.0 + np.exp(-cross_score))
+                    c.confidence = 0.4 * c.confidence + 0.6 * normalized_cross
+                    c.reason = f"Embedding={c.similarity_score:.3f}, CrossEncoder={cross_score:.3f}, Blended={c.confidence:.3f}"
+                
+                # Re-sort after reranking
+                top_candidates.sort(key=lambda x: x.confidence, reverse=True)
+                classifications = top_candidates + classifications[5:]
+                logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
+            except Exception as e:
+                logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
+        
         # Filter by a relaxed threshold for secondary candidates
         primary = None
         secondary = []
