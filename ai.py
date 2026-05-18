@@ -293,14 +293,14 @@ def _classify_transcript_sentences(transcript: str, similarity_threshold: float 
 
     classified_sentences = []
     for idx, sentence in enumerate(sentences):
-        window = 3
-        start = max(0, idx - window)
-        end = min(len(sentences), idx + window + 1)
-        neighbor_embeddings = [embeddings[j] for j in range(start, end) if j != idx]
+        window_size = 2
+        start = max(0, idx - window_size)
+        end = min(len(sentences), idx + window_size + 1)
+        context_text = " ".join([sentences[j].text for j in range(start, end)])
         classified_sentence = classifier.classify_sentence(
             sentence,
             sent_embedding=embeddings[idx],
-            neighbor_embeddings=neighbor_embeddings
+            context_text=context_text
         )
         classified_sentences.append(classified_sentence)
     return classified_sentences

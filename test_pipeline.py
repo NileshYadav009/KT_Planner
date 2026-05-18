@@ -7,8 +7,10 @@ Usage:
 
 import json
 from context_mapper import (
+    ContextClassifier,
     ContextMappingPipeline,
     AudioSegment,
+    Sentence,
     segment_sentences,
     serialize_kt
 )
@@ -125,6 +127,51 @@ def test_classification():
     print(f"\nClassified {classified_count}/{len(sentences)} sentences")
     assert classified_count > 0, "Should classify at least some sentences"
     print("[PASS] Classification test passed")
+
+
+def test_context_window_influence():
+    """Ensure surrounding sentences influence classification for ambiguous text."""
+    print("\n=== Testing Context Window Influence ===")
+
+    schema = [
+        {
+            "id": "rollback",
+            "title": "Rollback Process",
+            "description": "Steps taken when rollback is required",
+            "keywords": ["rollback", "rollback process", "restore"],
+            "required": False
+        },
+        {
+            "id": "general",
+            "title": "General Operations",
+            "description": "Routine operational activities",
+            "keywords": ["health checks", "monitor", "status"],
+            "required": False
+        }
+    ]
+
+    classifier = ContextClassifier(similarity_threshold=0.05)
+    classifier.index_schema(schema)
+
+    sentence = Sentence(text="health checks failed", start=0.0, end=1.0, avg_logprob=-0.5)
+    sent_embed = classifier.model.encode(sentence.text, convert_to_tensor=True)
+
+    no_context = classifier.classify_sentence(sentence, sent_embedding=sent_embed)
+    context_text = "rollback process started. health checks failed. rollback trigger initiated."
+    with_context = classifier.classify_sentence(
+        sentence,
+        sent_embedding=sent_embed,
+        context_text=context_text
+    )
+
+    print(f"Without context -> {no_context.primary_classification.section_id if no_context.primary_classification else 'none'} ({no_context.primary_classification.confidence if no_context.primary_classification else 0:.3f})")
+    print(f"With context    -> {with_context.primary_classification.section_id if with_context.primary_classification else 'none'} ({with_context.primary_classification.confidence if with_context.primary_classification else 0:.3f})")
+
+    assert with_context.primary_classification is not None, "Classification with context should yield a primary section"
+    assert with_context.primary_classification.section_id == "rollback", "Context window should steer classification to rollback"
+    assert (no_context.primary_classification is None or with_context.primary_classification.confidence >= no_context.primary_classification.confidence), \
+        "Context-enhanced classification should be as good or better than sentence-alone classification"
+    print("[PASS] Context window influence test passed")
 
 
 def test_full_pipeline():

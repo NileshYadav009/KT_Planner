@@ -369,12 +369,21 @@ class ContextClassifier:
                 "description": description
             }
     
-    def classify_sentence(self, sentence: Sentence, sent_embedding=None, neighbor_embeddings: List = None, top_k: int = 3, alpha: float = 0.7, beta: float = 0.3) -> ClassifiedSentence:
+    def classify_sentence(
+        self,
+        sentence: Sentence,
+        sent_embedding=None,
+        context_text: Optional[str] = None,
+        neighbor_embeddings: List = None,
+        top_k: int = 3,
+        alpha: float = 0.7,
+        beta: float = 0.3
+    ) -> ClassifiedSentence:
         """
         Classify sentence against all schema sections.
         
-        Uses semantic similarity boosted by keyword matching to prevent misplacement
-        while allowing lower thresholds for better coverage.
+        Uses semantic similarity boosted by keyword matching and surrounding context
+        to prevent misplacement while allowing lower thresholds for better coverage.
         
         Returns:
             ClassifiedSentence with primary + secondary classifications
@@ -398,9 +407,15 @@ class ContextClassifier:
         for sec_id, sec_embedding in self.section_embeddings.items():
             base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
 
-            # Incorporate neighbor context similarity when provided
+            # Incorporate neighbor or windowed context similarity when provided
             context_sim = 0.0
-            if neighbor_embeddings:
+            if context_text:
+                try:
+                    context_embedding = self.model.encode(context_text, convert_to_tensor=True)
+                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
+                except Exception:
+                    context_sim = 0.0
+            elif neighbor_embeddings:
                 sims = [float(util.cos_sim(nb, sec_embedding)[0][0]) for nb in neighbor_embeddings]
                 if sims:
                     context_sim = float(np.mean(sims))
@@ -1207,12 +1222,15 @@ class ContextMappingPipeline:
 
         classified_sentences = []
         for i, s in enumerate(sentences):
-            # Build neighbor embeddings (fixed window)
-            window = 3
-            start = max(0, i - window)
-            end = min(len(sentences), i + window + 1)
-            neighbor_embs = [embeddings[j] for j in range(start, end) if j != i]
-            cs = self.classifier.classify_sentence(s, sent_embedding=embeddings[i], neighbor_embeddings=neighbor_embs)
+            window_size = 2
+            start = max(0, i - window_size)
+            end = min(len(sentences), i + window_size + 1)
+            context_text = " ".join([sentences[j].text for j in range(start, end)])
+            cs = self.classifier.classify_sentence(
+                s,
+                sent_embedding=embeddings[i],
+                context_text=context_text
+            )
             classified_sentences.append(cs)
         logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences")
 
