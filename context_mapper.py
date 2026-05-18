@@ -291,6 +291,7 @@ class ClassifiedSentence:
     is_unassigned: bool = False
     explainability_log: Optional[ExplainabilityLog] = None
     human_feedback: Optional[HumanFeedback] = None
+    active_topic_context: Optional[Dict[str, Any]] = None  # Topic memory context (active_section, topic_confidence, topic_duration)
     
     def __post_init__(self):
         # Build multi-section assignment from primary ONLY
@@ -961,7 +962,7 @@ class StructuredKT:
     human_feedback: Optional[List[HumanFeedback]] = None
     parent_job_id: Optional[str] = None  # For incremental KT (session 2+)
     cross_references: Optional[List[Dict[str, Any]]] = None
-
+    topic_memory_contexts: Optional[List[Dict[str, Any]]] = None  # Topic memory context for each sentence
 
 def assemble_kt(
     job_id: str,
@@ -969,7 +970,8 @@ def assemble_kt(
     classified_sentences: List[ClassifiedSentence],
     coverage: Dict[str, SectionCoverage],
     assets: List[ExtractedAsset],
-    repaired_map: Dict[int, Tuple[str, Optional[RepairAction]]]
+    repaired_map: Dict[int, Tuple[str, Optional[RepairAction]]],
+    topic_memory_contexts: Optional[List[Dict[str, Any]]] = None
 ) -> StructuredKT:
     """
     STAGE 7: Assemble final KT structure.
@@ -1154,10 +1156,91 @@ def assemble_kt(
         assets=assets,
         overall_coverage_percent=float(overall_coverage),
         overall_risk_score=float(overall_risk),
-        timestamp=datetime.utcnow().isoformat() + "Z"
-        ,
-        cross_references=cross_refs or []
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        cross_references=cross_refs or [],
+        topic_memory_contexts=topic_memory_contexts
     )
+
+
+# ============================================================================
+# Topic Memory & Continuity Tracking
+# ============================================================================
+
+@dataclass
+class TopicMemory:
+    """Track the active topic/section to maintain semantic continuity."""
+    active_section_id: Optional[str] = None
+    topic_confidence: float = 0.0  # How confident we are in the current topic (0.0-1.0)
+    topic_duration: int = 0  # How many consecutive sentences share this topic
+    related_sections: List[str] = None  # Sections that frequently co-occur (e.g., rollback + deployment)
+    
+    def __post_init__(self):
+        if self.related_sections is None:
+            self.related_sections = []
+    
+    def update(self, section_id: Optional[str], confidence: float, related: List[str] = None):
+        """Update topic memory with new classified sentence.
+        
+        Args:
+            section_id: Section the sentence was classified to
+            confidence: Semantic confidence of the classification
+            related: Related sections that should extend topic duration
+        """
+        if section_id is None:
+            # Unclassified sentence; decay topic memory slightly
+            self.topic_duration = max(0, self.topic_duration - 1)
+            self.topic_confidence *= 0.9
+            return
+        
+        if section_id == self.active_section_id:
+            # Continuing in same topic
+            self.topic_duration += 1
+            self.topic_confidence = max(self.topic_confidence, confidence)
+        elif related and section_id in related:
+            # Switching to related section (e.g., deployment -> rollback)
+            self.active_section_id = section_id
+            self.topic_duration = 1
+            self.topic_confidence = confidence
+        elif confidence > self.topic_confidence:
+            # Switching to new topic only if confidence is significantly higher
+            if self.topic_confidence > 0:
+                threshold = self.topic_confidence + 0.15  # Hysteresis to avoid thrashing
+            else:
+                threshold = 0.2
+            if confidence > threshold:
+                self.active_section_id = section_id
+                self.topic_duration = 1
+                self.topic_confidence = confidence
+            else:
+                # Stay in current topic
+                self.topic_duration += 1
+        else:
+            # Low confidence sentence; stay in current topic
+            self.topic_duration += 1
+            self.topic_confidence *= 0.95
+    
+    def get_topic_boost(self, section_id: Optional[str], base_confidence: float) -> float:
+        """Compute confidence boost based on active topic.
+        
+        Args:
+            section_id: Section being evaluated
+            base_confidence: Base semantic confidence
+        
+        Returns:
+            Boosted confidence score
+        """
+        if section_id is None:
+            return base_confidence
+        
+        if section_id == self.active_section_id and self.topic_duration > 0:
+            # Boost based on topic momentum
+            boost = min(0.15, self.topic_confidence * 0.3)
+            return base_confidence + boost
+        elif self.active_section_id and section_id in self.related_sections:
+            # Smaller boost for related topics
+            return base_confidence + 0.05
+        
+        return base_confidence
 
 
 # ============================================================================
@@ -1220,6 +1303,24 @@ class ContextMappingPipeline:
         texts = [s.text for s in sentences]
         embeddings = self.classifier.model.encode(texts, convert_to_tensor=True)
 
+        # Initialize topic memory for semantic continuity
+        topic_memory = TopicMemory()
+        
+        # Build section-to-keywords map for topic-related section detection
+        related_sections_map = {}  # section_id -> list of related section ids
+        for sec in self.schema_sections:
+            sec_id = sec.get("id")
+            keywords = set((sec.get("keywords") or []))
+            # Find sections with overlapping keywords
+            related = []
+            for other_sec in self.schema_sections:
+                other_id = other_sec.get("id")
+                if other_id != sec_id:
+                    other_keywords = set((other_sec.get("keywords") or []))
+                    if keywords & other_keywords:  # Intersection
+                        related.append(other_id)
+            related_sections_map[sec_id] = related
+
         classified_sentences = []
         for i, s in enumerate(sentences):
             window_size = 2
@@ -1231,8 +1332,38 @@ class ContextMappingPipeline:
                 sent_embedding=embeddings[i],
                 context_text=context_text
             )
+            
+            # Apply topic memory boost to primary classification
+            if cs.primary_classification:
+                base_conf = cs.primary_classification.confidence
+                boosted_conf = topic_memory.get_topic_boost(
+                    cs.primary_classification.section_id,
+                    base_conf
+                )
+                cs.primary_classification.confidence = boosted_conf
+                # Re-sort secondary classifications by boosted confidence
+                if cs.secondary_classifications:
+                    for sec_class in cs.secondary_classifications:
+                        sec_class.confidence = topic_memory.get_topic_boost(
+                            sec_class.section_id,
+                            sec_class.confidence
+                        )
+                    cs.secondary_classifications.sort(key=lambda x: x.confidence, reverse=True)
+            
+            # Update topic memory
+            classified_section = cs.primary_classification.section_id if cs.primary_classification else None
+            related = related_sections_map.get(classified_section, []) if classified_section else []
+            topic_memory.update(classified_section, cs.primary_classification.confidence if cs.primary_classification else 0.0, related)
+            
+            # Annotate with topic context
+            cs.active_topic_context = {
+                "active_section": topic_memory.active_section_id,
+                "topic_confidence": topic_memory.topic_confidence,
+                "topic_duration": topic_memory.topic_duration
+            }
+            
             classified_sentences.append(cs)
-        logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences")
+        logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences with topic memory")
 
         # Load runtime policy and enforce policies before repair
         policy = load_policy()
@@ -1333,8 +1464,11 @@ class ContextMappingPipeline:
         assets = extract_urls_and_assets(sentences)
         logger.info(f"Stage 6: Extracted {len(assets)} assets")
         
+        # Collect topic memory contexts for serialization
+        topic_contexts = [cs.active_topic_context for cs in classified_sentences if cs.active_topic_context]
+        
         # STAGE 7: Assemble KT
-        kt = assemble_kt(job_id, transcript, classified_sentences, coverage, assets, repaired_map)
+        kt = assemble_kt(job_id, transcript, classified_sentences, coverage, assets, repaired_map, topic_contexts)
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
         
         return kt

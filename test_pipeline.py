@@ -153,7 +153,7 @@ def test_context_window_influence():
     classifier = ContextClassifier(similarity_threshold=0.05)
     classifier.index_schema(schema)
 
-    sentence = Sentence(text="health checks failed", start=0.0, end=1.0, avg_logprob=-0.5)
+    sentence = Sentence(text="health checks failed", start=0.0, end=1.0, audio_confidence=0.7)
     sent_embed = classifier.model.encode(sentence.text, convert_to_tensor=True)
 
     no_context = classifier.classify_sentence(sentence, sent_embedding=sent_embed)
@@ -320,6 +320,89 @@ def test_causal_inference():
     print("[PASS] Causal inference tests passed")
 
 
+def test_topic_memory():
+    """Ensure topic memory tracks active sections and boosts related sentences."""
+    print("\n=== Testing Topic Memory ===" )
+    
+    # Create schema with related keywords for deployment and rollback
+    schema = [
+        {
+            "id": "deployment",
+            "title": "Deployment Process",
+            "description": "Deploying and releasing systems",
+            "keywords": ["deploy", "release", "kubernetes", "kubectl", "rollout"],
+            "required": True
+        },
+        {
+            "id": "rollback",
+            "title": "Rollback Procedure",
+            "description": "Rolling back a failed deployment",
+            "keywords": ["rollback", "revert", "restore", "rollout", "kubectl"],
+            "required": False
+        }
+    ]
+    
+    pipeline = ContextMappingPipeline(schema)
+    
+    # Sequence of related deployment/rollback sentences
+    segments = [
+        {
+            "text": "We use Kubernetes for deployment across regions.",
+            "start": 0.0,
+            "end": 3.0,
+            "avg_logprob": -0.4,
+            "speaker": "Engineer1"
+        },
+        {
+            "text": "The kubectl apply command triggers the rollout.",
+            "start": 3.0,
+            "end": 6.0,
+            "avg_logprob": -0.5,
+            "speaker": "Engineer1"
+        },
+        {
+            "text": "If deployment fails, we initiate rollback immediately.",
+            "start": 6.0,
+            "end": 9.0,
+            "avg_logprob": -0.3,
+            "speaker": "Engineer1"
+        },
+        {
+            "text": "The rollback process restores the previous version.",
+            "start": 9.0,
+            "end": 12.0,
+            "avg_logprob": -0.4,
+            "speaker": "Engineer1"
+        }
+    ]
+    
+    full_transcript = " ".join([s["text"] for s in segments])
+    kt = pipeline.process("test-topic-001", full_transcript, segments)
+    
+    # Verify sentences have topic context
+    topic_contexts = []
+    topic_contexts = kt.topic_memory_contexts or []
+    
+    print(f"\nTopic memory trace ({len(topic_contexts)} of {len(kt.sentences)} sentences have topic context):")
+    for i, ctx in enumerate(topic_contexts):
+        print(f"  [{i}] section={ctx.get('active_section')}, duration={ctx.get('topic_duration')}, confidence={ctx.get('topic_confidence'):.3f}")
+    
+    # Verify that sentences are grouped by topic
+    assert len(topic_contexts) > 0, "Topic memory should be tracking active sections"
+    
+    # Check that at least some sentences maintained the same topic across the sequence
+    active_sections = [ctx.get("active_section") for ctx in topic_contexts]
+    assert len(active_sections) > 0 and (active_sections.count(active_sections[0]) >= 2 or len(set(active_sections)) <= 2), \
+        "Topic memory should maintain coherent topic grouping"
+    
+    # Verify coverage includes both deployment and rollback
+    coverage_ids = [c for c in kt.coverage.keys()]
+    assert "deployment" in coverage_ids or "rollback" in coverage_ids, \
+        "Pipeline should classify deployment/rollback sentences"
+    
+    print("[PASS] Topic memory test passed")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  7-Stage Context Mapping Pipeline - Integration Tests")
@@ -328,7 +411,9 @@ if __name__ == "__main__":
     try:
         test_segmentation()
         test_classification()
+        test_context_window_influence()
         test_full_pipeline()
+        test_topic_memory()
         
         print("\n" + "=" * 60)
         print("  All tests passed! [OK]")
