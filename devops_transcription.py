@@ -249,6 +249,7 @@ DEVOPS_VOCABULARY = {
 PHRASE_CORRECTIONS = {
     # Common transcription errors
     r"pay[\s-]?bin\s+orchestration": "payment orchestration",
+    r"pavement\s+orchestration": "payment orchestration",
     r"pay[\s-]?bin\s+process": "payment process",
     r"devons": "dev environments",
     r"dev\s+dev": "dev",
@@ -365,6 +366,54 @@ def remove_repeated_phrases(text: str) -> str:
     return cleaned
 
 
+
+
+def dedupe_repeated_paragraphs(text: str, min_words: int = 20) -> str:
+    """Remove duplicated long paragraphs often produced by ASR retries."""
+    if not text:
+        return text
+
+    blocks = [b.strip() for b in re.split(r"\n{2,}", text) if b.strip()]
+    if len(blocks) < 2:
+        return text
+
+    seen = set()
+    deduped = []
+    for block in blocks:
+        key = re.sub(r"\s+", " ", block).strip().lower()
+        word_count = len(key.split())
+        if word_count >= min_words and key in seen:
+            continue
+        seen.add(key)
+        deduped.append(block)
+
+    return "\n\n".join(deduped)
+
+
+def polish_sentence_grammar(text: str) -> str:
+    """Lightweight grammar and punctuation cleanup without altering meaning."""
+    if not text:
+        return text
+
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+    if not parts:
+        return text
+
+    polished = []
+    for part in parts:
+        part = re.sub(r"\bisrequired\b", "is required", part, flags=re.IGNORECASE)
+        part = re.sub(r"\basread\s+only\b", "as read-only", part, flags=re.IGNORECASE)
+        part = re.sub(r"\bautoscroller\b", "autoscaler", part, flags=re.IGNORECASE)
+        part = re.sub(r"\bterraformed\s+state\b", "terraform state", part, flags=re.IGNORECASE)
+        part = re.sub(r"\s+", " ", part).strip()
+        if part and part[0].isalpha():
+            part = part[0].upper() + part[1:]
+        polished.append(part)
+
+    result = " ".join(polished)
+    result = re.sub(r"\s+([,.;!?])", r"\1", result)
+    return result.strip()
+
 def clean_transcript(text: str) -> str:
     """Normalize transcript before semantic classification.
 
@@ -378,7 +427,8 @@ def clean_transcript(text: str) -> str:
     if not text:
         return text
 
-    normalized = re.sub(r"[\r\n\t]+", " ", text)
+    normalized = dedupe_repeated_paragraphs(text)
+    normalized = re.sub(r"[\r\n\t]+", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
     normalized, _ = apply_devops_corrections(normalized)
@@ -386,6 +436,7 @@ def clean_transcript(text: str) -> str:
     normalized = remove_repeated_words(normalized)
     normalized = remove_repeated_phrases(normalized)
     normalized, _ = apply_devops_corrections(normalized)
+    normalized = polish_sentence_grammar(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
 

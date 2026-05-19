@@ -1179,6 +1179,10 @@ def assemble_kt(
             conf = np.mean([s["audio_confidence"] for s in content["sentences"]])
             content["confidence"] = float(conf)
             content["sentence_count"] = len(content["sentences"])
+            content["paragraph"] = build_section_paragraph(
+                content.get("sentences", []),
+                content.get("enhanced_texts", [])
+            )
     
     # Identify missing required sections
     for sec_id, cov in coverage.items():
@@ -1206,6 +1210,43 @@ def assemble_kt(
         topic_memory_contexts=topic_memory_contexts
     )
 
+
+
+
+def build_section_paragraph(sentences: List[Dict[str, Any]], enhanced_texts: List[str]) -> str:
+    """Build a readable paragraph from section sentences in timeline order."""
+    if not sentences:
+        return ""
+
+    ordered = sorted(
+        zip(sentences, enhanced_texts or [s.get("text", "") for s in sentences]),
+        key=lambda x: (x[0].get("start", 0.0), x[0].get("end", 0.0))
+    )
+
+    parts = []
+    prev_speaker = None
+    for sent, enhanced in ordered:
+        text = (enhanced or sent.get("text", "")).strip()
+        if not text:
+            continue
+
+        text = re.sub(r"\s+", " ", text).strip()
+        if text and text[0].isalpha():
+            text = text[0].upper() + text[1:]
+        if text and text[-1] not in ".!?":
+            text += "."
+
+        speaker = (sent.get("speaker") or "").strip()
+        if prev_speaker and speaker and speaker != prev_speaker:
+            parts.append("Additionally,")
+
+        parts.append(text)
+        prev_speaker = speaker or prev_speaker
+
+    paragraph = " ".join(parts)
+    paragraph = re.sub(r"\s+([,.;!?])", r"\1", paragraph)
+    paragraph = re.sub(r"\s+", " ", paragraph).strip()
+    return paragraph
 
 # ============================================================================
 # Topic Memory & Continuity Tracking
