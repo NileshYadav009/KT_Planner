@@ -54,7 +54,7 @@ if not _USE_REAL_EMBEDDINGS:
     class SentenceTransformer:
         def __init__(self, model_name=None):
             pass
-        def encode(self, texts, convert_to_tensor=False):
+        def encode(self, texts, convert_to_tensor=False, normalize_embeddings=False, batch_size=None):
             single = isinstance(texts, str)
             items = [texts] if single else texts
             embs = [SimpleEmbedding(t) for t in items]
@@ -457,6 +457,18 @@ class ContextClassifier:
             except Exception as e:
                 logger.warning(f"Failed to load cross-encoder: {e}. Classification will proceed without reranking.")
     
+    def _encode_texts(self, texts, normalize_embeddings: bool = True, convert_to_tensor: bool = True):
+        """Encode one or more texts with the classifier model."""
+        try:
+            return self.model.encode(
+                texts,
+                convert_to_tensor=convert_to_tensor,
+                normalize_embeddings=normalize_embeddings
+            )
+        except TypeError:
+            # Fallback encoder may not support normalize_embeddings
+            return self.model.encode(texts, convert_to_tensor=convert_to_tensor)
+
     def index_schema(self, schema_sections: List[Dict]) -> None:
         """Index schema sections for fast lookup."""
         self._section_hints = {}  # Store hints for keyword matching
@@ -471,7 +483,7 @@ class ContextClassifier:
             
             # Build rich section text
             section_text = f"{title} {description} {' '.join(keywords)}"
-            embedding = self.model.encode(section_text, convert_to_tensor=True)
+            embedding = self._encode_texts(section_text)
             
             self.section_embeddings[sec_id] = embedding
             self.section_metadata[sec_id] = {
@@ -484,6 +496,7 @@ class ContextClassifier:
         self,
         sentence: Sentence,
         sent_embedding=None,
+        context_embedding=None,
         context_text: Optional[str] = None,
         neighbor_embeddings: List = None,
         top_k: int = 3,
@@ -509,7 +522,7 @@ class ContextClassifier:
         
         # Embed sentence (reuse precomputed embedding when available)
         if sent_embedding is None:
-            sent_embedding = self.model.encode(sentence.text, convert_to_tensor=True)
+            sent_embedding = self._encode_texts(sentence.text)
 
         # Compute similarities to all sections
         classifications = []
@@ -520,9 +533,14 @@ class ContextClassifier:
 
             # Incorporate neighbor or windowed context similarity when provided
             context_sim = 0.0
-            if context_text:
+            if context_embedding is not None:
                 try:
-                    context_embedding = self.model.encode(context_text, convert_to_tensor=True)
+                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
+                except Exception:
+                    context_sim = 0.0
+            elif context_text:
+                try:
+                    context_embedding = self._encode_texts(context_text)
                     context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
                 except Exception:
                     context_sim = 0.0
@@ -1657,7 +1675,16 @@ class ContextMappingPipeline:
         # STAGE 3: Classify sentences
         # Precompute embeddings for sentences to allow context-aware scoring
         texts = [s.text for s in sentences]
-        embeddings = self.classifier.model.encode(texts, convert_to_tensor=True)
+        embeddings = self.classifier._encode_texts(texts)
+
+        # Precompute context embeddings for overlapping sentence windows
+        context_texts = []
+        for i, s in enumerate(sentences):
+            window_size = 2
+            start = max(0, i - window_size)
+            end = min(len(sentences), i + window_size + 1)
+            context_texts.append(" ".join([sentences[j].text for j in range(start, end)]))
+        context_embeddings = self.classifier._encode_texts(context_texts)
 
         # Initialize topic memory for semantic continuity
         topic_memory = TopicMemory()
@@ -1679,14 +1706,10 @@ class ContextMappingPipeline:
 
         classified_sentences = []
         for i, s in enumerate(sentences):
-            window_size = 2
-            start = max(0, i - window_size)
-            end = min(len(sentences), i + window_size + 1)
-            context_text = " ".join([sentences[j].text for j in range(start, end)])
             cs = self.classifier.classify_sentence(
                 s,
                 sent_embedding=embeddings[i],
-                context_text=context_text
+                context_embedding=context_embeddings[i]
             )
             
             # Apply topic memory boost to primary classification
