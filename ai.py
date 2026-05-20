@@ -43,6 +43,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
+from enterprise_semantic_mapper import create_semantic_mapper
 
 with open("kt_schema_new.json") as f:
     SCHEMA = json.load(f)["sections"]
@@ -272,6 +273,21 @@ def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassif
     else:
         CONTEXT_CLASSIFIER.similarity_threshold = similarity_threshold
     return CONTEXT_CLASSIFIER
+
+
+def build_section_paragraphs(transcript: str):
+    """Build reconstructed paragraphs for each section from a transcript."""
+    try:
+        sentences = _prepare_sentences(transcript)
+        if not sentences:
+            return {}
+
+        sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
+        mapper = create_semantic_mapper(SCHEMA)
+        result = mapper.process_transcript(sentence_tuples)
+        return result.get("paragraphs", {})
+    except Exception:
+        return {}
 
 
 def _prepare_sentences(transcript: str):
@@ -552,6 +568,7 @@ def generate_report(transcript: str, similarity_threshold: float = 0.20, min_chu
     if len(incomplete_mandatory) > 0:
         recommended_state = "Completed with Risk"
         complete_with_risk = True
+    paragraph_data = build_section_paragraphs(transcript)
     audit = {
         'timestamp': datetime.utcnow().isoformat() + "Z",
         'tenant_id': tenant_id,
@@ -565,6 +582,7 @@ def generate_report(transcript: str, similarity_threshold: float = 0.20, min_chu
         'analysis': analysis,
         'coverage_map': {sid: analysis[sid]['status'] for sid in analysis},
         'heatmap': heatmap,
+        'paragraphs': paragraph_data,
         'auto_highlight_incomplete_mandatory': incomplete_mandatory,
         'summary': summary,
         'risk_warning': complete_with_risk,

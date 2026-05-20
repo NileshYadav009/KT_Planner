@@ -108,6 +108,7 @@ class ReconstructedParagraph:
     word_count: int
     coherence_score: float
     is_repaired: bool  # Was grammar/fragment fixed?
+    pass_count: int = 1
     repair_details: str = ""
 
 
@@ -321,22 +322,33 @@ class ParagraphIntegrityEngine:
         # Check coherence gaps and insert connectors
         merged_text = self._merge_with_coherence(sentence_texts)
         
-        # Fix fragments and grammar
+        # Pass 1: initial merge
         repaired_text, was_repaired = self._repair_fragments(merged_text)
-        
+
+        # Pass 2: semantic refinement and final normalization
+        refined_text, was_refined = self._refine_paragraph(repaired_text)
+
         # Calculate coherence score
         coherence = self._calculate_coherence(sentence_texts)
-        
+
+        pass_count = 1 + int(was_repaired) + int(was_refined)
+        repair_details = []
+        if was_repaired:
+            repair_details.append("Grammar normalization and fragment repair applied")
+        if was_refined:
+            repair_details.append("Semantic refinement applied")
+
         return ReconstructedParagraph(
             section_id=section_id,
             original_sentence_ids=sentence_ids,
-            text=repaired_text,
-            word_count=len(repaired_text.split()),
+            text=refined_text,
+            word_count=len(refined_text.split()),
             coherence_score=coherence,
-            is_repaired=was_repaired,
-            repair_details="Grammar normalization and fragment repair applied" if was_repaired else ""
+            is_repaired=was_repaired or was_refined,
+            pass_count=pass_count,
+            repair_details=". ".join(repair_details) if repair_details else ""
         )
-    
+
     def _merge_with_coherence(self, sentences: List[str]) -> str:
         """Merge sentences with coherence connectors."""
         if len(sentences) == 1:
@@ -378,8 +390,13 @@ class ParagraphIntegrityEngine:
         repairs_made = False
         
         # Fix missing capital after period
-        text = re.sub(r'\.[ ]+([a-z])', r'. \U\1', text)
-        if text != text:
+        original = text
+        text = re.sub(
+            r'\.\s+([a-z])',
+            lambda match: '. ' + match.group(1).upper(),
+            text
+        )
+        if text != original:
             repairs_made = True
         
         # Fix double spaces
@@ -393,7 +410,38 @@ class ParagraphIntegrityEngine:
             text += '.'
             repairs_made = True
         
-        return text, repairs_made
+        return text.strip(), repairs_made
+
+    def _refine_paragraph(self, text: str) -> Tuple[str, bool]:
+        """Refine paragraph text with an additional semantic pass."""
+        original = text
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+        if len(sentences) <= 1:
+            return text, False
+
+        embeddings = self.model.encode(sentences, convert_to_tensor=True)
+        refined_sentences = [sentences[0]]
+
+        for idx in range(1, len(sentences)):
+            prev = sentences[idx - 1]
+            current = sentences[idx]
+            similarity = util.pytorch_cos_sim(embeddings[idx - 1], embeddings[idx]).item()
+            if similarity < 0.45:
+                if not re.match(r'^(However|Furthermore|Additionally|Because|As a result),', current.strip()):
+                    connector = self._suggest_connector(current)
+                    current = f"{connector} {current.strip()}"
+            refined_sentences.append(current)
+
+        refined_text = ' '.join(refined_sentences)
+        refined_text = self._finalize_paragraph(refined_text)
+        return refined_text, refined_text != original
+
+    def _finalize_paragraph(self, text: str) -> str:
+        """Normalize paragraph punctuation and whitespace."""
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text and not text.endswith(('.', '!', '?')):
+            text += '.'
+        return text
     
     def _calculate_coherence(self, sentences: List[str]) -> float:
         """Calculate coherence score for a group of sentences (0.0-1.0)."""
@@ -512,7 +560,10 @@ class EnterpriseSemanticMapper:
             sec_id = sec.get("id")
             title = sec.get("title", sec_id)
             description = sec.get("description", "")
-            keywords = sec.get("keywords", [])
+            keywords = list(sec.get("keywords", []))
+            hints = sec.get("hints", [])
+            if hints:
+                keywords.extend(hints)
             
             # Rich section embedding
             section_text = f"{title}. {description}. Keywords: {' '.join(keywords)}"
@@ -644,7 +695,7 @@ class EnterpriseSemanticMapper:
             split_sentences=split_count,
             section_coverage={sid: len(ids) for sid, ids in assignments_by_section.items()},
             duplicate_rate=self.registry.duplicate_rate(),
-            coherence_score=float(np.mean([p.coherence_score for p in self.paragraphs.values() for p in self.paragraphs.values()])) if self.paragraphs else 0.0
+            coherence_score=float(np.mean([p.coherence_score for paragraph_list in self.paragraphs.values() for p in paragraph_list])) if self.paragraphs else 0.0
         )
         
         return {

@@ -234,6 +234,31 @@ def test_full_pipeline():
     print("[PASS] Full pipeline test passed")
 
 
+def test_paragraph_reconstruction():
+    """Test that report generation returns structured reconstructed paragraphs."""
+    print("\n=== Testing Paragraph Reconstruction ===")
+    from ai import generate_report
+
+    transcript = (
+        "The system name is cloud native order processing platform. "
+        "This system handles order intake, validation, payment orchestration and fulfillment triggers. "
+        "It is used by B2C users through the web app, B2B partners through APIs, and internal finance and support teams. "
+        "This system is most critical during business hours and peak sales events."
+    )
+    report = generate_report(transcript)
+    paragraphs = report.get('paragraphs', {})
+
+    print(f"  Paragraph sections: {len(paragraphs)}")
+    for section_id, section_paragraphs in paragraphs.items():
+        for paragraph in section_paragraphs:
+            print(f"    [{section_id}] {paragraph.get('text', '')[:120]}")
+
+    assert isinstance(paragraphs, dict), "Paragraphs should be a dict keyed by section"
+    assert any(p.get('text') for section in paragraphs.values() for p in section), "At least one reconstructed paragraph should contain text"
+    assert any(p.get('pass_count', 0) >= 2 for section in paragraphs.values() for p in section), "Paragraph reconstruction should run at least two passes"
+    print("[PASS] Paragraph reconstruction test passed")
+
+
 def test_asr_repair_scenario():
     """Scenario: ASR transcribed a technical sentence badly; repair should correct it."""
     print("\n=== Testing ASR Repair Scenario ===")
@@ -480,6 +505,7 @@ if __name__ == "__main__":
         test_classification()
         test_context_window_influence()
         test_full_pipeline()
+        test_paragraph_reconstruction()
         test_topic_memory()
         test_topic_memory_context_window()
         
