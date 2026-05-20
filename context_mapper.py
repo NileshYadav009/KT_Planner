@@ -34,10 +34,14 @@ from runtime_policy import load_policy
 from devops_transcription import clean_transcript
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
-# Only use the real heavy model when the environment variable USE_REAL_EMBEDDINGS is set to true.
+# Use the installed package when available; env var can override real embeddings usage.
 _SENT_TRANS_SPEC = importlib.util.find_spec("sentence_transformers")
 _USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "").lower() in ("1", "true", "yes"))
 _CROSS_ENCODER = None  # Lazy-loaded cross-encoder for reranking
+
+# Cache the semantic chunking model and util to avoid reloading repeatedly.
+_SEMANTIC_CHUNK_MODEL = None
+_SEMANTIC_CHUNK_UTIL = None
 
 # Fallback: simple token-set embedding + Jaccard similarity to avoid heavy deps at module import time
 if not _USE_REAL_EMBEDDINGS:
@@ -242,7 +246,94 @@ def segment_sentences(
         )
         sentences.append(sent)
     
-    return sentences
+    return semantic_chunk_sentences(sentences)
+
+
+def _semantic_similarity(a, b) -> float:
+    try:
+        similarity_util = _SEMANTIC_CHUNK_UTIL if _SEMANTIC_CHUNK_UTIL is not None else util
+        return float(similarity_util.cos_sim(a, b)[0][0])
+    except Exception:
+        return 0.0
+
+
+def _merge_sentences(first: Sentence, second: Sentence) -> Sentence:
+    merged_text = f"{first.text.strip()} {second.text.strip()}".strip()
+    merged_start = min(first.start, second.start)
+    merged_end = max(first.end, second.end)
+    merged_segment_ids = sorted(set(first.segment_ids + second.segment_ids))
+    combined_confidence = (first.audio_confidence * len(first.text.split()) + second.audio_confidence * len(second.text.split())) / max(1, len(merged_text.split()))
+    merged_speaker = first.speaker if first.speaker == second.speaker else first.speaker or second.speaker
+    return Sentence(
+        text=merged_text,
+        start=merged_start,
+        end=merged_end,
+        speaker=merged_speaker,
+        raw_text=f"{first.raw_text} {second.raw_text}".strip(),
+        audio_confidence=float(combined_confidence),
+        segment_ids=merged_segment_ids
+    )
+
+
+def _get_semantic_chunk_model(model_name: str = "all-MiniLM-L6-v2"):
+    global _SEMANTIC_CHUNK_MODEL, _SEMANTIC_CHUNK_UTIL
+    if _SEMANTIC_CHUNK_MODEL is not None:
+        return _SEMANTIC_CHUNK_MODEL
+
+    if _SENT_TRANS_SPEC:
+        try:
+            from sentence_transformers import SentenceTransformer as ST, util as st_util
+            _SEMANTIC_CHUNK_MODEL = ST(model_name)
+            _SEMANTIC_CHUNK_UTIL = st_util
+            return _SEMANTIC_CHUNK_MODEL
+        except Exception:
+            pass
+
+    _SEMANTIC_CHUNK_MODEL = SentenceTransformer()
+    _SEMANTIC_CHUNK_UTIL = None
+    return _SEMANTIC_CHUNK_MODEL
+
+
+def semantic_chunk_sentences(
+    sentences: List[Sentence],
+    similarity_threshold: float = 0.45,
+    min_merge_length: int = 40
+) -> List[Sentence]:
+    """Merge adjacent sentences into semantic chunks.
+
+    This step prevents overly granular sentence splitting and preserves
+    paragraph-level meaning for KT mapping.
+    """
+    if len(sentences) <= 1:
+        return sentences
+
+    model = _get_semantic_chunk_model()
+    encodings = [model.encode(s.text, convert_to_tensor=True) for s in sentences]
+    chunks: List[Sentence] = []
+    current = sentences[0]
+    current_emb = encodings[0]
+
+    for idx in range(1, len(sentences)):
+        candidate = sentences[idx]
+        candidate_emb = encodings[idx]
+        sim = _semantic_similarity(current_emb, candidate_emb)
+
+        should_merge = False
+        if sim >= similarity_threshold:
+            should_merge = True
+        elif len(current.text) < min_merge_length or len(candidate.text) < min_merge_length:
+            should_merge = sim >= (similarity_threshold - 0.15)
+
+        if should_merge:
+            current = _merge_sentences(current, candidate)
+            current_emb = model.encode(current.text, convert_to_tensor=True)
+        else:
+            chunks.append(current)
+            current = candidate
+            current_emb = candidate_emb
+
+    chunks.append(current)
+    return chunks
 
 
 # ============================================================================
@@ -336,11 +427,10 @@ class ContextClassifier:
             similarity_threshold: Minimum cosine similarity for assignment
             use_cross_encoder: Whether to use cross-encoder for reranking (default True)
         """
-        # Lazily import heavy dependencies if configured to use real embeddings
-        if _USE_REAL_EMBEDDINGS:
+        # Lazily import heavy dependencies when sentence-transformers is installed.
+        if _SENT_TRANS_SPEC:
             try:
                 st = __import__("sentence_transformers")
-                # Import numpy when using real model
                 import numpy as _np
                 globals()['np'] = _np
                 globals()['SentenceTransformer'] = st.SentenceTransformer
@@ -348,7 +438,7 @@ class ContextClassifier:
                 if use_cross_encoder:
                     globals()['CrossEncoder'] = st.CrossEncoder
             except Exception:
-                # Fall back to lightweight implementations
+                # Fall back to lightweight implementations only if import fails
                 pass
 
         self.model = SentenceTransformer(model_name)
@@ -1316,60 +1406,151 @@ def assemble_kt(
 # ============================================================================
 
 @dataclass
+@dataclass
+class TopicTransition:
+    """Record of a topic/section change."""
+    from_section: Optional[str]
+    to_section: Optional[str]
+    sentence_index: int
+    confidence: float
+    reason: str  # e.g., "high_confidence_switch", "related_section", "context_decay"
+    timestamp: str
+
+
 class TopicMemory:
-    """Track the active topic/section to maintain semantic continuity."""
-    active_section_id: Optional[str] = None
-    topic_confidence: float = 0.0  # How confident we are in the current topic (0.0-1.0)
-    topic_duration: int = 0  # How many consecutive sentences share this topic
-    related_sections: List[str] = None  # Sections that frequently co-occur (e.g., rollback + deployment)
+    """
+    Enhanced context memory for maintaining semantic continuity across sentences.
     
-    def __post_init__(self):
-        if self.related_sections is None:
-            self.related_sections = []
+    Tracks:
+    - Active topic with confidence and duration
+    - Context window (previous sentences for reference)
+    - Topic stack (nested topics)
+    - Transition history for debugging
+    - Related sections for topic continuity
+    """
     
-    def update(self, section_id: Optional[str], confidence: float, related: List[str] = None):
+    def __init__(self, max_context_window: int = 5):
+        self.active_section_id: Optional[str] = None
+        self.topic_confidence: float = 0.0
+        self.topic_duration: int = 0
+        self.related_sections: List[str] = []
+        
+        # NEW: Context window for multi-sentence context
+        self.context_window: List[Tuple[Optional[str], float]] = []  # (section_id, confidence) tuples
+        self.max_context_window = max_context_window
+        
+        # NEW: Topic stack for nested topics
+        self.topic_stack: List[Tuple[Optional[str], float]] = []  # Stack of (section_id, confidence)
+        
+        # NEW: Transition history for debugging
+        self.transitions: List[TopicTransition] = []
+        
+        # NEW: Decay tracking for unclassified sentences
+        self.unclassified_count: int = 0
+    
+    def update(
+        self,
+        section_id: Optional[str],
+        confidence: float,
+        related: List[str] = None,
+        sentence_index: int = 0
+    ):
         """Update topic memory with new classified sentence.
         
         Args:
             section_id: Section the sentence was classified to
             confidence: Semantic confidence of the classification
             related: Related sections that should extend topic duration
+            sentence_index: Index in the full transcript (for tracking)
         """
+        reason = "no_change"
+        
         if section_id is None:
             # Unclassified sentence; decay topic memory slightly
             self.topic_duration = max(0, self.topic_duration - 1)
             self.topic_confidence *= 0.9
-            return
-        
-        if section_id == self.active_section_id:
-            # Continuing in same topic
-            self.topic_duration += 1
-            self.topic_confidence = max(self.topic_confidence, confidence)
-        elif related and section_id in related:
-            # Switching to related section (e.g., deployment -> rollback)
-            self.active_section_id = section_id
-            self.topic_duration = 1
-            self.topic_confidence = confidence
-        elif confidence > self.topic_confidence:
-            # Switching to new topic only if confidence is significantly higher
-            if self.topic_confidence > 0:
-                threshold = self.topic_confidence + 0.15  # Hysteresis to avoid thrashing
-            else:
-                threshold = 0.2
-            if confidence > threshold:
+            self.unclassified_count += 1
+            reason = "unclassified_decay"
+            # If too many unclassified sentences, pop the topic stack
+            if self.unclassified_count > 3 and self.topic_stack:
+                self.active_section_id, self.topic_confidence = self.topic_stack.pop()
+                reason = "stack_recovery"
+        else:
+            # Reset unclassified counter
+            self.unclassified_count = 0
+            
+            if section_id == self.active_section_id:
+                # Continuing in same topic
+                self.topic_duration += 1
+                self.topic_confidence = max(self.topic_confidence, confidence)
+                reason = "topic_continuation"
+            elif related and section_id in related:
+                # Switching to related section (e.g., deployment -> rollback)
+                # Push current topic onto stack for recovery
+                if self.active_section_id:
+                    self.topic_stack.append((self.active_section_id, self.topic_confidence))
                 self.active_section_id = section_id
                 self.topic_duration = 1
                 self.topic_confidence = confidence
+                reason = "related_section_switch"
+            elif confidence > self.topic_confidence:
+                # Switching to new topic only if confidence is significantly higher
+                if self.topic_confidence > 0:
+                    threshold = self.topic_confidence + 0.15
+                else:
+                    threshold = 0.2
+                
+                if confidence > threshold:
+                    # High-confidence topic switch: push current to stack
+                    if self.active_section_id:
+                        self.topic_stack.append((self.active_section_id, self.topic_confidence))
+                    self.active_section_id = section_id
+                    self.topic_duration = 1
+                    self.topic_confidence = confidence
+                    reason = "high_confidence_switch"
+                else:
+                    # Stay in current topic
+                    self.topic_duration += 1
+                    reason = "threshold_hold"
             else:
-                # Stay in current topic
+                # Low confidence sentence; stay in current topic
                 self.topic_duration += 1
-        else:
-            # Low confidence sentence; stay in current topic
-            self.topic_duration += 1
-            self.topic_confidence *= 0.95
+                self.topic_confidence *= 0.95
+                reason = "low_confidence_hold"
+        
+        # Update context window
+        self._update_context_window(section_id, confidence)
+        
+        # Record transition if topic changed
+        if section_id != self.active_section_id or section_id != (self.context_window[-2][0] if len(self.context_window) > 1 else None):
+            trans = TopicTransition(
+                from_section=self.active_section_id,
+                to_section=section_id,
+                sentence_index=sentence_index,
+                confidence=confidence,
+                reason=reason,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+            self.transitions.append(trans)
+            if len(self.transitions) > 100:
+                self.transitions = self.transitions[-100:]  # Keep last 100
+    
+    def _update_context_window(self, section_id: Optional[str], confidence: float):
+        """Maintain a sliding window of recent section assignments."""
+        self.context_window.append((section_id, confidence))
+        if len(self.context_window) > self.max_context_window:
+            self.context_window.pop(0)
+    
+    def get_context_sections(self, depth: int = 3) -> List[str]:
+        """Get the most recent section assignments from context window."""
+        sections = []
+        for section_id, _ in self.context_window[-depth:]:
+            if section_id and section_id not in sections:
+                sections.append(section_id)
+        return sections
     
     def get_topic_boost(self, section_id: Optional[str], base_confidence: float) -> float:
-        """Compute confidence boost based on active topic.
+        """Compute confidence boost based on active topic and context.
         
         Args:
             section_id: Section being evaluated
@@ -1381,15 +1562,41 @@ class TopicMemory:
         if section_id is None:
             return base_confidence
         
+        # Boost if matching active topic with momentum
         if section_id == self.active_section_id and self.topic_duration > 0:
-            # Boost based on topic momentum
-            boost = min(0.15, self.topic_confidence * 0.3)
+            boost = min(0.20, self.topic_confidence * 0.4)
             return base_confidence + boost
-        elif self.active_section_id and section_id in self.related_sections:
-            # Smaller boost for related topics
-            return base_confidence + 0.05
+        
+        # Boost if in related sections
+        if self.active_section_id and section_id in self.related_sections:
+            boost = min(0.10, 0.05 + self.topic_confidence * 0.2)
+            return base_confidence + boost
+        
+        # Boost if recently seen in context window
+        recent_sections = self.get_context_sections(depth=2)
+        if section_id in recent_sections:
+            boost = 0.08
+            return base_confidence + boost
         
         return base_confidence
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize for inclusion in output/logging."""
+        return {
+            "active_section": self.active_section_id,
+            "topic_confidence": self.topic_confidence,
+            "topic_duration": self.topic_duration,
+            "context_window": self.get_context_sections(),
+            "stack_depth": len(self.topic_stack),
+            "recent_transitions": [
+                {
+                    "from": t.from_section,
+                    "to": t.to_section,
+                    "reason": t.reason
+                }
+                for t in self.transitions[-3:]
+            ]
+        }
 
 
 # ============================================================================
@@ -1499,17 +1706,13 @@ class ContextMappingPipeline:
                         )
                     cs.secondary_classifications.sort(key=lambda x: x.confidence, reverse=True)
             
-            # Update topic memory
+            # Update topic memory with sentence index for tracking
             classified_section = cs.primary_classification.section_id if cs.primary_classification else None
             related = related_sections_map.get(classified_section, []) if classified_section else []
-            topic_memory.update(classified_section, cs.primary_classification.confidence if cs.primary_classification else 0.0, related)
+            topic_memory.update(classified_section, cs.primary_classification.confidence if cs.primary_classification else 0.0, related, sentence_index=i)
             
-            # Annotate with topic context
-            cs.active_topic_context = {
-                "active_section": topic_memory.active_section_id,
-                "topic_confidence": topic_memory.topic_confidence,
-                "topic_duration": topic_memory.topic_duration
-            }
+            # Annotate with enhanced topic context
+            cs.active_topic_context = topic_memory.to_dict()
             
             classified_sentences.append(cs)
         logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences with topic memory")

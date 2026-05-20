@@ -108,6 +108,21 @@ def test_segmentation():
     print("[PASS] Segmentation test passed")
 
 
+def test_semantic_chunking():
+    """Test semantic chunking merges related fragments."""
+    print("\n=== Testing Semantic Chunking ===")
+    segments = [AudioSegment(text="Today this KT is about DevOps.", start=0.0, end=3.0, avg_logprob=-0.4),
+                AudioSegment(text="This KT covers the DevOps handover and operational handoff.", start=3.0, end=6.0, avg_logprob=-0.5),
+                AudioSegment(text="The architecture includes AWS, Kubernetes, Terraform.", start=6.0, end=9.0, avg_logprob=-0.5)]
+    sentences = segment_sentences(segments)
+    print(f"  Semantic chunks produced: {len(sentences)}")
+    for i, sent in enumerate(sentences):
+        print(f"    Chunk {i+1}: {sent.text}")
+    assert len(sentences) < 3, "Related fragments should merge into semantic chunks"
+    assert any("DevOps" in sent.text for sent in sentences), "Merged chunk should preserve original content"
+    print("[PASS] Semantic chunking test passed")
+
+
 def test_classification():
     """Test semantic classification."""
     print("\n=== Testing Classification ===")
@@ -403,6 +418,57 @@ def test_topic_memory():
     print("[PASS] Topic memory test passed")
 
 
+def test_topic_memory_context_window():
+    """Test enhanced topic memory with context window and transition tracking."""
+    print("\n=== Testing Enhanced Topic Memory with Context Window ===")
+    
+    from context_mapper import TopicMemory
+    
+    # Create a topic memory with small context window for testing
+    memory = TopicMemory(max_context_window=3)
+    
+    print("\nTest 1: Context Window Maintenance")
+    # Simulate a sequence of sentence classifications
+    memory.update("deployment", 0.85, sentence_index=0)
+    memory.update("deployment", 0.82, sentence_index=1)
+    memory.update("rollback", 0.78, related=["deployment", "monitoring"], sentence_index=2)
+    memory.update("monitoring", 0.65, sentence_index=3)
+    memory.update("monitoring", 0.75, sentence_index=4)
+    
+    context = memory.get_context_sections(depth=3)
+    print(f"  Context window (last 3): {context}")
+    assert len(context) <= 3, "Context window should not exceed max size"
+    assert len(context) > 0, "Context window should contain recent sections"
+    
+    print("\nTest 2: Topic Boost Application")
+    # Test that topic boost is applied correctly
+    boost_current = memory.get_topic_boost("monitoring", 0.65)
+    boost_unrelated = memory.get_topic_boost("architecture", 0.65)
+    print(f"  Boost for current topic 'monitoring': {boost_current - 0.65:.4f}")
+    print(f"  Boost for unrelated topic 'architecture': {boost_unrelated - 0.65:.4f}")
+    assert boost_current > boost_unrelated, "Current topic should get larger boost"
+    
+    print("\nTest 3: Transition History Tracking")
+    transitions = memory.transitions
+    print(f"  Total transitions recorded: {len(transitions)}")
+    assert len(transitions) >= 2, "Should have recorded topic transitions"
+    for i, trans in enumerate(transitions[-3:]):
+        print(f"    [{i}] {trans.from_section} → {trans.to_section} (reason: {trans.reason})")
+    
+    print("\nTest 4: Memory Serialization")
+    state = memory.to_dict()
+    print(f"  Active section: {state['active_section']}")
+    print(f"  Topic confidence: {state['topic_confidence']:.3f}")
+    print(f"  Topic duration: {state['topic_duration']}")
+    print(f"  Stack depth: {state['stack_depth']}")
+    print(f"  Recent transitions: {len(state['recent_transitions'])}")
+    assert "active_section" in state
+    assert "topic_confidence" in state
+    assert state['topic_confidence'] >= 0.0 and state['topic_confidence'] <= 1.0
+    
+    print("[PASS] Enhanced topic memory context window test passed")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  7-Stage Context Mapping Pipeline - Integration Tests")
@@ -410,10 +476,12 @@ if __name__ == "__main__":
     
     try:
         test_segmentation()
+        test_semantic_chunking()
         test_classification()
         test_context_window_influence()
         test_full_pipeline()
         test_topic_memory()
+        test_topic_memory_context_window()
         
         print("\n" + "=" * 60)
         print("  All tests passed! [OK]")
