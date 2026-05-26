@@ -24,6 +24,7 @@ from dataclasses import dataclass, asdict, field
 from collections import defaultdict
 import uuid
 
+import requests
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
 
@@ -330,9 +331,10 @@ class ProfessionalReconstructionEngine:
         if self.llm_refiner:
             try:
                 prompt = self.prompt_template + "\n\nText:\n" + text
-                refined, did = self.llm_refiner(prompt, {"metadata": metadata or {}})
-                details = "llm_refiner" if did else "llm_no_change"
-                return refined.strip(), bool(did), details
+                refined, did = self.llm_refiner(prompt, metadata or {})
+                if did and refined and refined.strip():
+                    return refined.strip(), True, "llm_refiner"
+                return text, False, "llm_no_change"
             except Exception:
                 # Fall back to local professionalizer on any LLM error
                 pass
@@ -387,6 +389,12 @@ class ParagraphIntegrityEngine:
     
     def __init__(self, model: SentenceTransformer):
         self.model = model
+        self._llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]] = None
+
+    def set_llm_refiner(self, llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]]) -> None:
+        """Attach an external LLM refiner callable for the professionalization layer."""
+        self._llm_refiner = llm_refiner
+
     def reconstruct_paragraph(
         self,
         sentences: List[Tuple[str, str]],  # (sentence_id, text) tuples
@@ -875,9 +883,9 @@ class EnterpriseSemanticMapper:
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def create_semantic_mapper(schema_sections: List[Dict]) -> EnterpriseSemanticMapper:
+def create_semantic_mapper(schema_sections: List[Dict], llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]] = None, model_name: str = "all-MiniLM-L6-v2") -> EnterpriseSemanticMapper:
     """Factory function to create and initialize mapper."""
-    mapper = EnterpriseSemanticMapper()
+    mapper = EnterpriseSemanticMapper(model_name=model_name, llm_refiner=llm_refiner)
     mapper.index_schema(schema_sections)
     return mapper
 

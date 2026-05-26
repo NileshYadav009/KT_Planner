@@ -1,6 +1,7 @@
 import json
 import re
 import numpy as np
+import requests
 try:
     from sentence_transformers import SentenceTransformer, util
 except Exception:
@@ -44,6 +45,49 @@ from datetime import datetime
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
+
+PHI3_MINI_ENDPOINT = "http://localhost:11434/v1/completions"
+PHI3_MINI_MODEL = "phi3:mini"
+
+
+def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> Tuple[str, bool]:
+    """Refine text using local phi3:mini via the local server endpoint."""
+    payload = {
+        "model": PHI3_MINI_MODEL,
+        "prompt": prompt,
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "stop": ["\n\n"]
+    }
+
+    def normalize_response(raw_text: str) -> str:
+        text = raw_text.strip()
+        prompt_text = prompt.strip()
+        if prompt_text and text.startswith(prompt_text):
+            text = text[len(prompt_text):].strip()
+        # Remove any leading response markers
+        return re.sub(r'^(\n|\r|\s)+', '', text)
+
+    try:
+        response = requests.post(PHI3_MINI_ENDPOINT, json=payload, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        text = ""
+        if isinstance(data, dict):
+            if "choices" in data and data["choices"]:
+                choice = data["choices"][0]
+                text = choice.get("text") or choice.get("message", {}).get("content", "")
+            else:
+                text = data.get("text", "")
+        elif isinstance(data, str):
+            text = data
+
+        text = normalize_response(str(text))
+        did_refine = bool(text and text != prompt.strip() and text != "")
+        return (text or prompt.strip()), did_refine
+    except Exception:
+        return prompt.strip(), False
 
 with open("kt_schema_new.json") as f:
     SCHEMA = json.load(f)["sections"]
@@ -287,7 +331,7 @@ def build_section_paragraphs(transcript: str):
             return {}
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        mapper = create_semantic_mapper(SCHEMA)
+        mapper = create_semantic_mapper(SCHEMA, llm_refiner=phi3_mini_refiner)
         result = mapper.process_transcript(sentence_tuples)
         paragraphs = result.get("paragraphs", {})
 
