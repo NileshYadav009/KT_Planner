@@ -256,6 +256,7 @@ def test_paragraph_reconstruction():
     assert isinstance(paragraphs, dict), "Paragraphs should be a dict keyed by section"
     assert any(p.get('text') for section in paragraphs.values() for p in section), "At least one reconstructed paragraph should contain text"
     assert any(p.get('pass_count', 0) >= 2 for section in paragraphs.values() for p in section), "Paragraph reconstruction should run at least two passes"
+    assert any(p.get('is_professionalized', False) for section in paragraphs.values() for p in section), "Paragraphs should be professionalized by the reconstruction engine"
     print("[PASS] Paragraph reconstruction test passed")
 
 

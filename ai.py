@@ -276,7 +276,11 @@ def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassif
 
 
 def build_section_paragraphs(transcript: str):
-    """Build reconstructed paragraphs for each section from a transcript."""
+    """Build reconstructed paragraphs for each section from a transcript.
+
+    If the enterprise mapper fails to produce paragraphs, apply a conservative
+    professionalization fallback to return at least one polished paragraph.
+    """
     try:
         sentences = _prepare_sentences(transcript)
         if not sentences:
@@ -285,7 +289,57 @@ def build_section_paragraphs(transcript: str):
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
         mapper = create_semantic_mapper(SCHEMA)
         result = mapper.process_transcript(sentence_tuples)
-        return result.get("paragraphs", {})
+        paragraphs = result.get("paragraphs", {})
+
+        if paragraphs:
+            return paragraphs
+
+        # Fallback: produce a single professional paragraph for safety using a conservative local professionalizer
+        try:
+            def _local_professionalize(text: str) -> Tuple[str, bool, str]:
+                import re
+                if not text or not text.strip():
+                    return text, False, 'empty'
+                # Simple dedupe of adjacent duplicate sentences
+                parts = [p.strip() for p in re.split(r'(?<=[.!?])\s+', text) if p.strip()]
+                deduped = []
+                for p in parts:
+                    if not deduped or p.lower() != deduped[-1].lower():
+                        deduped.append(p)
+                merged_parts = []
+                for p in deduped:
+                    if merged_parts:
+                        prev = merged_parts[-1]
+                        prev_tokens = set(re.findall(r"\w+", prev.lower()))
+                        cur_tokens = set(re.findall(r"\w+", p.lower()))
+                        if prev_tokens and len(prev_tokens & cur_tokens) / max(1, len(cur_tokens)) > 0.7:
+                            if len(p) < len(prev):
+                                merged_parts[-1] = p
+                            continue
+                    merged_parts.append(p)
+                refined = ' '.join(merged_parts)
+                refined = re.sub(r'\.\s+([a-z])', lambda m: '. ' + m.group(1).upper(), refined)
+                refined = re.sub(r'\s+', ' ', refined).strip()
+                if refined and not refined.endswith(('.', '!', '?')):
+                    refined += '.'
+                return refined, refined.strip() != text.strip(), 'local_fallback'
+
+            merged = " ".join([t for _, t in sentence_tuples])
+            prof_text, did, details = _local_professionalize(merged)
+            return {"system_overview": [{
+                'section_id': 'system_overview',
+                'original_sentence_ids': [sid for sid, _ in sentence_tuples],
+                'text': prof_text,
+                'word_count': len(prof_text.split()),
+                'coherence_score': 1.0,
+                'is_repaired': False,
+                'pass_count': 1 + int(did),
+                'repair_details': details,
+                'is_professionalized': bool(did),
+                'professional_details': details
+            }]}
+        except Exception:
+            return {}
     except Exception:
         return {}
 

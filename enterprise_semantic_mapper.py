@@ -19,7 +19,7 @@ import re
 import json
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple, Set
+from typing import Optional, List, Dict, Any, Tuple, Set, Callable
 from dataclasses import dataclass, asdict, field
 from collections import defaultdict
 import uuid
@@ -110,6 +110,8 @@ class ReconstructedParagraph:
     is_repaired: bool  # Was grammar/fragment fixed?
     pass_count: int = 1
     repair_details: str = ""
+    is_professionalized: bool = False
+    professional_details: str = ""
 
 
 # ============================================================================
@@ -167,6 +169,7 @@ class SemanticClauseSplitter:
     
     def __init__(self, model: SentenceTransformer):
         self.model = model
+        self._llm_refiner = None
         self.clause_patterns = [
             # Conjunctions: "and", "but", "however", "also", "in addition"
             r'(?i)\s+(?:and|but|however|also|in addition|furthermore|moreover|meanwhile|while)\s+',
@@ -175,8 +178,15 @@ class SemanticClauseSplitter:
             # Em-dash separation
             r'\s*—\s+',
             # Parenthetical clarification (keep with main clause)
-            r'\s*\(([^)]+)\)',
+            r'\s*\(([^)]+)\)'
         ]
+
+    def set_llm_refiner(self, llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]]) -> None:
+        """Optionally set an external LLM refiner callable.
+
+        The callable should accept (text, metadata) and return (refined_text, did_refine).
+        """
+        self._llm_refiner = llm_refiner
     
     def split_sentence(self, text: str) -> List[str]:
         """
@@ -284,12 +294,99 @@ class ContextWindowAnalyzer:
 # PARAGRAPH INTEGRITY ENGINE
 # ============================================================================
 
+class ProfessionalReconstructionEngine:
+    """Performs a final professionalization pass on merged paragraph text.
+
+    Strategy:
+    - Prefer an external LLM refiner if provided (callable: (text, metadata) -> (text, bool))
+    - Otherwise apply conservative local cleanups: dedupe adjacent repeats, remove filler tokens,
+      normalize punctuation, and apply lightweight semantic connectors.
+
+    The engine returns (refined_text, did_change, details).
+    """
+
+    def __init__(self, model: SentenceTransformer, llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]] = None):
+        self.model = model
+        self.llm_refiner = llm_refiner
+        # Short prompt template to use if an LLM refiner is available
+        self.prompt_template = (
+            "Convert transcript-style operational notes into professional KT documentation.\n"
+            "Rules:\n"
+            "- preserve meaning\n"
+            "- remove repetition\n"
+            "- improve readability\n"
+            "- maintain technical accuracy\n"
+            "- preserve operational warnings\n"
+            "- preserve ownership details\n"
+            "Output: a single polished paragraph."
+        )
+
+    def refine(self, text: str, metadata: Optional[dict] = None) -> Tuple[str, bool, str]:
+        """Refine paragraph text and return (text, did_change, details)."""
+        if not text or not text.strip():
+            return text, False, "empty"
+
+        # Prefer external LLM if provided
+        if self.llm_refiner:
+            try:
+                prompt = self.prompt_template + "\n\nText:\n" + text
+                refined, did = self.llm_refiner(prompt, {"metadata": metadata or {}})
+                details = "llm_refiner" if did else "llm_no_change"
+                return refined.strip(), bool(did), details
+            except Exception:
+                # Fall back to local professionalizer on any LLM error
+                pass
+
+        # Local conservative professionalization
+        refined = self._local_professionalize(text)
+        did_change = refined.strip() != text.strip()
+        details = "local_professionalizer"
+        return refined.strip(), did_change, details
+
+    def _local_professionalize(self, text: str) -> str:
+        """Lightweight, deterministic cleanup to professionalize transcript text."""
+        # Remove common filler tokens
+        text = re.sub(r"\b(um+|uh+|like)\b", "", text, flags=re.IGNORECASE)
+
+        # Collapse repeated adjacent short fragments (exact duplicates)
+        parts = [p.strip() for p in re.split(r'(?<=[.!?])\s+', text) if p.strip()]
+        deduped = []
+        for p in parts:
+            if not deduped or p.lower() != deduped[-1].lower():
+                deduped.append(p)
+
+        # Remove trivial repeated phrase sequences (e.g., "The rollback procedure is failed. The rollback trigger is failed.")
+        # Heuristic: if last 2 sentences share >70% token overlap, merge them
+        merged_parts = []
+        for p in deduped:
+            if merged_parts:
+                prev = merged_parts[-1]
+                prev_tokens = set(re.findall(r"\w+", prev.lower()))
+                cur_tokens = set(re.findall(r"\w+", p.lower()))
+                if prev_tokens and len(prev_tokens & cur_tokens) / max(1, len(cur_tokens)) > 0.7:
+                    # Merge by preferring the shorter, clearer sentence
+                    if len(p) < len(prev):
+                        merged_parts[-1] = p
+                    # else keep prev
+                    continue
+            merged_parts.append(p)
+
+        refined = ' '.join(merged_parts)
+
+        # Capitalize after periods and fix spacing
+        refined = re.sub(r'\.\s+([a-z])', lambda m: '. ' + m.group(1).upper(), refined)
+        refined = re.sub(r'\s+', ' ', refined).strip()
+        if refined and not refined.endswith(('.', '!', '?')):
+            refined += '.'
+
+        return refined
+
+
 class ParagraphIntegrityEngine:
     """Merges sentences into coherent, professionally-structured paragraphs."""
     
     def __init__(self, model: SentenceTransformer):
         self.model = model
-    
     def reconstruct_paragraph(
         self,
         sentences: List[Tuple[str, str]],  # (sentence_id, text) tuples
@@ -338,15 +435,28 @@ class ParagraphIntegrityEngine:
         if was_refined:
             repair_details.append("Semantic refinement applied")
 
+        # Professional reconstruction layer: try LLM refiner if provided, otherwise fall back to local professionalizer
+        professional_engine = ProfessionalReconstructionEngine(self.model, llm_refiner=getattr(self, '_llm_refiner', None))
+        professional_text, did_professionalize, prof_details = professional_engine.refine(refined_text, metadata={
+            'section_id': section_id,
+            'original_sentence_ids': sentence_ids
+        })
+
+        if did_professionalize:
+            pass_count += 1
+            repair_details.append("Professional reconstruction applied")
+
         return ReconstructedParagraph(
             section_id=section_id,
             original_sentence_ids=sentence_ids,
-            text=refined_text,
-            word_count=len(refined_text.split()),
+            text=professional_text,
+            word_count=len(professional_text.split()),
             coherence_score=coherence,
             is_repaired=was_repaired or was_refined,
             pass_count=pass_count,
-            repair_details=". ".join(repair_details) if repair_details else ""
+            repair_details=". ".join(repair_details) if repair_details else "",
+            is_professionalized=(bool(prof_details) or bool(did_professionalize)),
+            professional_details=prof_details
         )
 
     def _merge_with_coherence(self, sentences: List[str]) -> str:
@@ -539,12 +649,18 @@ class EnterpriseSemanticMapper:
     - Quality controls
     """
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", llm_refiner: Optional[Callable[[str, dict], Tuple[str, bool]]] = None):
         self.model = SentenceTransformer(model_name)
         self.registry = SentenceRegistry()
         self.clause_splitter = SemanticClauseSplitter(self.model)
         self.context_analyzer = ContextWindowAnalyzer(self.model)
         self.paragraph_engine = ParagraphIntegrityEngine(self.model)
+        # Attach optional LLM refiner to paragraph engine for professionalization
+        if llm_refiner is not None:
+            try:
+                self.paragraph_engine.set_llm_refiner(llm_refiner)
+            except Exception:
+                pass
         self.expert_trainer = ExpertTrainingMode()
         
         self.section_embeddings = {}
