@@ -19,7 +19,7 @@ import re
 import json
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple, Set
+from typing import Optional, List, Dict, Any, Tuple, Set, Callable
 from dataclasses import dataclass, asdict, field
 from collections import defaultdict
 import uuid
@@ -281,6 +281,98 @@ class ContextWindowAnalyzer:
 
 
 # ============================================================================
+# PROFESSIONAL RECONSTRUCTION ENGINE
+# ============================================================================
+
+class ProfessionalReconstructionEngine:
+    """Applies professional polish to reconstructed paragraphs using LLM or local fallback."""
+    
+    def __init__(self, model: SentenceTransformer, llm_refiner: Optional[Callable] = None):
+        self.model = model
+        self.llm_refiner = llm_refiner
+    
+    def refine(
+        self,
+        text: str,
+        metadata: Dict[str, Any] = None
+    ) -> Tuple[str, bool, str]:
+        """
+        Apply professional polish to paragraph text.
+        
+        Returns:
+            (refined_text, was_refined, details_string)
+        """
+        if not text or not text.strip():
+            return text, False, "Empty text, skipped"
+        
+        metadata = metadata or {}
+        
+        # CRITICAL: Limit text to ~500 tokens (~2000 chars) to avoid massive LLM requests
+        # Split by sentences and keep first N sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        max_sentences = 20
+        if len(sentences) > max_sentences:
+            truncated_text = ' '.join(sentences[:max_sentences])
+            if not truncated_text.endswith(('.', '!', '?')):
+                truncated_text += '.'
+        else:
+            truncated_text = text.strip()
+        
+        # Try LLM refinement first if available
+        if self.llm_refiner:
+            try:
+                prompt = f"""Polish this knowledge transfer paragraph to be professional and clear.
+                
+Keep the same meaning but improve grammar, clarity, and flow. Remove redundancies.
+Keep it concise. Return ONLY the polished text, no explanations.
+
+Original text:
+{truncated_text}
+
+Polished text:"""
+                
+                refined = self.llm_refiner(prompt, metadata)
+                if refined and refined.strip() and refined.strip() != truncated_text.strip():
+                    # If we truncated, append the rest
+                    if len(sentences) > max_sentences:
+                        rest = ' '.join(sentences[max_sentences:])
+                        refined = refined.strip() + ' ' + rest
+                    return refined.strip(), True, "LLM professional polish applied"
+            except Exception as e:
+                # Silent fallback - just log and continue
+                logger.debug(f"LLM refiner failed: {e}, falling back to local professionalization")
+        
+        # Fallback to local professionalization
+        refined = self._local_professionalize(text)
+        was_refined = refined != text
+        return refined, was_refined, "Local professionalization applied"
+    
+    def _local_professionalize(self, text: str) -> str:
+        """Conservative local professionalization without LLM."""
+        if not text:
+            return text
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        # Fix common issues
+        text = text.replace(' ,', ',')
+        text = text.replace(' .', '.')
+        text = text.replace(' ;', ';')
+        text = text.replace(' :', ':')
+        
+        # Capitalize first letter if needed
+        if text and text[0].islower():
+            text = text[0].upper() + text[1:]
+        
+        # End with period if missing
+        if text and text[-1] not in '.!?':
+            text += '.'
+        
+        return text
+
+
+# ============================================================================
 # PARAGRAPH INTEGRITY ENGINE
 # ============================================================================
 
@@ -325,26 +417,33 @@ class ParagraphIntegrityEngine:
         # Pass 1: initial merge
         repaired_text, was_repaired = self._repair_fragments(merged_text)
 
-        # Pass 2: semantic refinement and final normalization
-        refined_text, was_refined = self._refine_paragraph(repaired_text)
+        # Pass 2: professional cleanup / Phi polish
+        professional_text, was_professionalized, prof_details = self._professionalize_paragraph(
+            repaired_text,
+            section_id=section_id,
+            sentence_ids=sentence_ids
+        )
+
+        # Final deterministic normalization after LLM polish
+        final_text = self._finalize_paragraph(professional_text)
 
         # Calculate coherence score
         coherence = self._calculate_coherence(sentence_texts)
 
-        pass_count = 1 + int(was_repaired) + int(was_refined)
+        pass_count = 1 + int(was_repaired) + int(was_professionalized)
         repair_details = []
         if was_repaired:
             repair_details.append("Grammar normalization and fragment repair applied")
-        if was_refined:
-            repair_details.append("Semantic refinement applied")
+        if was_professionalized:
+            repair_details.append("Professional cleanup applied")
 
         return ReconstructedParagraph(
             section_id=section_id,
             original_sentence_ids=sentence_ids,
-            text=refined_text,
-            word_count=len(refined_text.split()),
+            text=final_text,
+            word_count=len(final_text.split()),
             coherence_score=coherence,
-            is_repaired=was_repaired or was_refined,
+            is_repaired=was_repaired or was_professionalized,
             pass_count=pass_count,
             repair_details=". ".join(repair_details) if repair_details else ""
         )
@@ -369,7 +468,31 @@ class ParagraphIntegrityEngine:
                 merged += f" {sentences[i]}"
         
         return merged
-    
+
+    def _professionalize_paragraph(
+        self,
+        text: str,
+        section_id: str,
+        sentence_ids: List[str]
+    ) -> Tuple[str, bool, str]:
+        """Apply Phi polish via LLM cleanup or a conservative local fallback."""
+        professional_engine = ProfessionalReconstructionEngine(
+            self.model,
+            llm_refiner=getattr(self, '_llm_refiner', None)
+        )
+        refined_text, did_professionalize, details = professional_engine.refine(
+            text,
+            metadata={
+                'section_id': section_id,
+                'original_sentence_ids': sentence_ids
+            }
+        )
+        return refined_text, did_professionalize, details
+
+    def set_llm_refiner(self, llm_refiner: Callable[[str, dict], str]) -> None:
+        """Attach an LLM refiner function for professional paragraph cleanup."""
+        self._llm_refiner = llm_refiner
+
     def _suggest_connector(self, sentence: str) -> str:
         """Suggest appropriate connector based on sentence content."""
         connectors = {
@@ -539,12 +662,18 @@ class EnterpriseSemanticMapper:
     - Quality controls
     """
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", llm_refiner: Optional[Callable[[str, dict], str]] = None):
         self.model = SentenceTransformer(model_name)
         self.registry = SentenceRegistry()
         self.clause_splitter = SemanticClauseSplitter(self.model)
         self.context_analyzer = ContextWindowAnalyzer(self.model)
         self.paragraph_engine = ParagraphIntegrityEngine(self.model)
+        # Attach LLM refiner to paragraph engine if provided
+        if llm_refiner is not None:
+            try:
+                self.paragraph_engine.set_llm_refiner(llm_refiner)
+            except Exception:
+                pass
         self.expert_trainer = ExpertTrainingMode()
         
         self.section_embeddings = {}
@@ -759,9 +888,13 @@ class EnterpriseSemanticMapper:
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def create_semantic_mapper(schema_sections: List[Dict]) -> EnterpriseSemanticMapper:
-    """Factory function to create and initialize mapper."""
-    mapper = EnterpriseSemanticMapper()
+def create_semantic_mapper(
+    schema_sections: List[Dict],
+    llm_refiner: Optional[Callable[[str, dict], str]] = None,
+    model_name: str = "all-MiniLM-L6-v2"
+) -> EnterpriseSemanticMapper:
+    """Factory function to create and initialize mapper with optional LLM refiner."""
+    mapper = EnterpriseSemanticMapper(model_name=model_name, llm_refiner=llm_refiner)
     mapper.index_schema(schema_sections)
     return mapper
 

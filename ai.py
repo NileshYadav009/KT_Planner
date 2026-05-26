@@ -41,9 +41,100 @@ except ImportError:
 
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+import logging
+import time
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
+import requests
+
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# OLLAMA / PHI3:MINI LOCAL LLM SETUP
+# ============================================================================
+PHI3_MINI_ENDPOINT = "http://localhost:11434/v1/completions"
+PHI3_MINI_MODEL = "phi3:mini"
+
+
+def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
+    """Refine text using local phi3:mini via Ollama at localhost:11434 with retry logic."""
+    payload = {
+        "model": PHI3_MINI_MODEL,
+        "prompt": prompt,
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "stream": False,  # CRITICAL: Prevents parser hangs
+        "stop": ["\n\n"]
+    }
+
+    def normalize_response(raw_text: str) -> str:
+        """Strip prompt echo from Ollama response."""
+        text = raw_text.strip()
+        prompt_text = prompt.strip()
+        if prompt_text and text.startswith(prompt_text):
+            text = text[len(prompt_text):].strip()
+        return re.sub(r'^(\n|\r|\s)+', '', text)
+
+    # Retry logic: exponential backoff (1s, 2s, 4s, 8s)
+    max_retries = 4
+    retry_delay = 1
+    last_exception = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(PHI3_MINI_ENDPOINT, json=payload, timeout=(10, 300))
+            response.raise_for_status()
+            data = response.json()
+
+            text = ""
+            if isinstance(data, dict):
+                if "choices" in data and data["choices"]:
+                    choice = data["choices"][0]
+                    text = choice.get("text") or choice.get("message", {}).get("content", "")
+                else:
+                    text = data.get("text", "")
+            elif isinstance(data, str):
+                text = data
+
+            text = normalize_response(str(text))
+            if not text:
+                raise ValueError("Ollama returned no completion text")
+            return text
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                logger.warning("Ollama attempt %d/%d failed: %s. Retrying in %ds...", attempt + 1, max_retries, e, retry_delay)
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.warning("Ollama all %d retries exhausted. Last error: %s", max_retries, e)
+    
+    raise last_exception
+
+
+# Track if we've warmed up the model
+_ollama_warmed_up = False
+
+
+def warmup_ollama_model():
+    """Load Phi3:mini model into memory with a quick warmup request."""
+    global _ollama_warmed_up
+    
+    if _ollama_warmed_up:
+        return
+    
+    try:
+        logger.info("Warming up Phi3:mini model...")
+        phi3_mini_refiner("hello")
+        _ollama_warmed_up = True
+        logger.info("Model warmup complete")
+    except Exception as e:
+        logger.warning("Model warmup failed (non-critical): %s", e)
+        # Non-critical: continue even if warmup fails
+        _ollama_warmed_up = True
+
+
 
 with open("kt_schema_new.json") as f:
     SCHEMA = json.load(f)["sections"]
@@ -277,16 +368,27 @@ def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassif
 
 def build_section_paragraphs(transcript: str):
     """Build reconstructed paragraphs for each section from a transcript."""
+    import traceback
     try:
+        # Warm up Ollama model before processing
+        warmup_ollama_model()
+        
         sentences = _prepare_sentences(transcript)
         if not sentences:
             return {}
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        mapper = create_semantic_mapper(SCHEMA)
+        mapper = create_semantic_mapper(SCHEMA, llm_refiner=phi3_mini_refiner)
         result = mapper.process_transcript(sentence_tuples)
-        return result.get("paragraphs", {})
-    except Exception:
+        paragraphs = result.get("paragraphs", {})
+        if paragraphs:
+            return paragraphs
+        # If no paragraphs produced, log and return empty
+        print(f"[DEBUG] build_section_paragraphs: mapper returned empty paragraphs dict")
+        return {}
+    except Exception as e:
+        print(f"[ERROR] build_section_paragraphs failed: {e}")
+        traceback.print_exc()
         return {}
 
 
