@@ -18,6 +18,7 @@ Replaces basic keyword classification with intelligent semantic resolution.
 import re
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple, Set, Callable
 from dataclasses import dataclass, asdict, field
@@ -307,40 +308,58 @@ class ProfessionalReconstructionEngine:
         
         metadata = metadata or {}
         
-        # CRITICAL: Limit text to ~500 tokens (~2000 chars) to avoid massive LLM requests
-        # Split by sentences and keep first N sentences
+        # CRITICAL: Chunk text into smaller prompts to avoid huge LLM requests
         sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        max_sentences = 20
-        if len(sentences) > max_sentences:
-            truncated_text = ' '.join(sentences[:max_sentences])
-            if not truncated_text.endswith(('.', '!', '?')):
-                truncated_text += '.'
-        else:
-            truncated_text = text.strip()
-        
-        # Try LLM refinement first if available
+        max_sentences = 8
+        total_llm_time = 0.0
+        llm_durations: List[float] = []
+        max_total_llm_time = 120.0
+
+        def build_prompt(chunk_text: str) -> str:
+            return (
+                "Polish this knowledge transfer paragraph to be professional and clear.\n\n"
+                "Keep the same meaning but improve grammar, clarity, and flow. Remove redundancies.\n"
+                "Keep it concise. Return ONLY the polished text, no explanations.\n\n"
+                "Original text:\n" + chunk_text + "\n\nPolished text:"
+            )
+
         if self.llm_refiner:
             try:
-                prompt = f"""Polish this knowledge transfer paragraph to be professional and clear.
-                
-Keep the same meaning but improve grammar, clarity, and flow. Remove redundancies.
-Keep it concise. Return ONLY the polished text, no explanations.
+                polished_chunks: List[str] = []
+                for i in range(0, len(sentences), max_sentences):
+                    chunk_sentences = sentences[i:i + max_sentences]
+                    chunk_text = ' '.join(chunk_sentences).strip()
+                    if not chunk_text:
+                        continue
 
-Original text:
-{truncated_text}
+                    prompt = build_prompt(chunk_text)
+                    approx_tokens = max(1, int(len(prompt) / 4))
+                    logger.debug(
+                        "LLM chunk %d: %d chars (~%d tokens)",
+                        i // max_sentences,
+                        len(prompt),
+                        approx_tokens,
+                    )
 
-Polished text:"""
-                
-                refined = self.llm_refiner(prompt, metadata)
-                if refined and refined.strip() and refined.strip() != truncated_text.strip():
-                    # If we truncated, append the rest
-                    if len(sentences) > max_sentences:
-                        rest = ' '.join(sentences[max_sentences:])
-                        refined = refined.strip() + ' ' + rest
-                    return refined.strip(), True, "LLM professional polish applied"
+                    if total_llm_time > max_total_llm_time:
+                        raise RuntimeError("LLM budget exceeded")
+
+                    start_time = time.perf_counter()
+                    refined = self.llm_refiner(prompt, metadata)
+                    elapsed = time.perf_counter() - start_time
+                    llm_durations.append(elapsed)
+                    total_llm_time += elapsed
+
+                    if refined and refined.strip():
+                        polished_chunks.append(refined.strip())
+                    else:
+                        polished_chunks.append(chunk_text)
+
+                if polished_chunks:
+                    combined = ' '.join(polished_chunks)
+                    return combined.strip(), True, f"LLM professional polish applied; chunks={len(polished_chunks)}; durations={llm_durations}"
             except Exception as e:
-                # Silent fallback - just log and continue
-                logger.debug(f"LLM refiner failed: {e}, falling back to local professionalization")
+                logger.warning("LLM refinement aborted: %s; falling back to local professionalization", e)
         
         # Fallback to local professionalization
         refined = self._local_professionalize(text)

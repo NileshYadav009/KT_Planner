@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # OLLAMA / PHI3:MINI LOCAL LLM SETUP
 # ============================================================================
-PHI3_MINI_ENDPOINT = "http://localhost:11434/v1/completions"
+PHI3_MINI_ENDPOINT = "http://localhost:11434/api/generate"
 PHI3_MINI_MODEL = "phi3:mini"
 
 
@@ -76,14 +76,17 @@ def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
             text = text[len(prompt_text):].strip()
         return re.sub(r'^(\n|\r|\s)+', '', text)
 
-    # Retry logic: exponential backoff (1s, 2s, 4s, 8s)
-    max_retries = 4
+    # Retry logic: exponential backoff (1s, 2s)
+    max_retries = 2
     retry_delay = 1
     last_exception = None
     
     for attempt in range(max_retries):
         try:
-            response = requests.post(PHI3_MINI_ENDPOINT, json=payload, timeout=(10, 300))
+            start_time = time.perf_counter()
+            response = requests.post(PHI3_MINI_ENDPOINT, json=payload, timeout=(10, 120))
+            elapsed = time.perf_counter() - start_time
+            logger.debug("Ollama request duration: %.2fs", elapsed)
             response.raise_for_status()
             data = response.json()
 
@@ -92,6 +95,8 @@ def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
                 if "choices" in data and data["choices"]:
                     choice = data["choices"][0]
                     text = choice.get("text") or choice.get("message", {}).get("content", "")
+                elif "response" in data:
+                    text = data.get("response", "")
                 else:
                     text = data.get("text", "")
             elif isinstance(data, str):
