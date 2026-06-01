@@ -32,6 +32,7 @@ from policy import (
 
 from runtime_policy import load_policy
 from devops_transcription import clean_transcript
+from entity_extractor import EntityExtractor
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
@@ -341,6 +342,7 @@ def semantic_chunk_sentences(
 # ============================================================================
 
 @dataclass
+@dataclass
 class Classification:
     """Semantic classification of a sentence."""
     section_id: str
@@ -348,6 +350,7 @@ class Classification:
     confidence: float
     reason: str  # Why this section was chosen
     similarity_score: float
+    entities: Optional[Dict[str, List[str]]] = None  # Extracted entities (tool, environment, owner, etc.)
 
 
 @dataclass
@@ -456,6 +459,9 @@ class ContextClassifier:
                     logger.info("Loaded cross-encoder for reranking")
             except Exception as e:
                 logger.warning(f"Failed to load cross-encoder: {e}. Classification will proceed without reranking.")
+        
+        # Initialize entity extractor for GLiNER-based entity extraction
+        self.entity_extractor = EntityExtractor()
     
     def _encode_texts(self, texts, normalize_embeddings: bool = True, convert_to_tensor: bool = True):
         """Encode one or more texts with the classifier model."""
@@ -520,6 +526,9 @@ class ContextClassifier:
                 is_unassigned=True
             )
         
+        # Extract entities using GLiNER (tools, environments, services, owners, etc.)
+        extracted_entities = self.entity_extractor.get_context_entities(sentence.text)
+        
         # Embed sentence (reuse precomputed embedding when available)
         if sent_embedding is None:
             sent_embedding = self._encode_texts(sentence.text)
@@ -569,7 +578,8 @@ class ContextClassifier:
                 section_title=self.section_metadata[sec_id]["title"],
                 confidence=combined,
                 similarity_score=base_sim,
-                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}"
+                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}",
+                entities=extracted_entities if extracted_entities else None
             ))
         
         # Sort by combined confidence and take top_k

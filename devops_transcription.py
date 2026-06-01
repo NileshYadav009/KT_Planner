@@ -31,6 +31,20 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
+try:
+    import textdistance
+    HAS_TEXTDISTANCE = True
+except ImportError:
+    textdistance = None
+    HAS_TEXTDISTANCE = False
+
+try:
+    from pii_anonymizer import PIIAnonymizer, anonymize_transcript_before_classification
+    HAS_PRESIDIO = True
+except ImportError:
+    HAS_PRESIDIO = False
+    logger.warning("Presidio PII anonymization not available")
+
 # ============================================================================
 # Enhanced Validation Functions (NEW - Upgraded Modules)
 # ============================================================================
@@ -242,6 +256,28 @@ DEVOPS_VOCABULARY = {
     "version control": ["version control", "ver-shun con-trol"],
 }
 
+KNOWN_TERMS = sorted(set([
+    *[term.lower() for term in DEVOPS_VOCABULARY.keys()],
+    *[alias.lower() for aliases in DEVOPS_VOCABULARY.values() for alias in aliases],
+    "payment orchestration",
+    "payment process",
+    "approval required",
+    "terraform state",
+    "kubernetes",
+    "docker",
+    "jenkins",
+    "aws",
+    "gcp",
+    "azure",
+    "production",
+    "staging",
+    "slack",
+    "teams",
+    "pagerduty"
+]))
+KNOWN_TERMS_SET = set(KNOWN_TERMS)
+MIN_FUZZY_PHRASE_WORDS = 2
+
 # ============================================================================
 # Phrase-Level Corrections
 # ============================================================================
@@ -365,18 +401,33 @@ def remove_repeated_phrases(text: str) -> str:
     return cleaned
 
 
-def clean_transcript(text: str) -> str:
+def clean_transcript(text: str, anonymize_pii: bool = True) -> str:
     """Normalize transcript before semantic classification.
 
     Steps:
-    1. Normalize whitespace
-    2. Apply phrase and word corrections
-    3. Remove filler words
-    4. Collapse repeated words/phrases
-    5. Re-apply DevOps corrections over cleaned text
+    1. Anonymize PII (passwords, emails, secrets, account IDs)
+    2. Normalize whitespace
+    3. Apply phrase and word corrections
+    4. Remove filler words
+    5. Collapse repeated words/phrases
+    6. Re-apply DevOps corrections over cleaned text
+    
+    Args:
+        text: Input transcript
+        anonymize_pii: Whether to anonymize sensitive data (default True)
     """
     if not text:
         return text
+
+    # Step 0: Anonymize PII if available
+    if anonymize_pii and HAS_PRESIDIO:
+        try:
+            text, anonymization_report = anonymize_transcript_before_classification(text)
+            if anonymization_report.get("detection_count", 0) > 0:
+                logger.info(f"Anonymized {anonymization_report['detection_count']} PII instances: "
+                           f"{anonymization_report.get('detections_by_type', {})}")
+        except Exception as e:
+            logger.warning(f"PII anonymization failed: {e}. Continuing without anonymization.")
 
     normalized = re.sub(r"[\r\n\t]+", " ", text)
     normalized = re.sub(r"\s+", " ", normalized).strip()
@@ -419,7 +470,11 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
                 "pattern": pattern
             })
     
-    # Step 2: Apply word-level corrections
+    # Step 2: Apply fuzzy known-term corrections for noisy transcript phrases
+    corrected, fuzzy_corrections = apply_fuzzy_term_corrections(corrected)
+    corrections_applied.extend(fuzzy_corrections)
+
+    # Step 3: Apply word-level corrections
     words = corrected.split()
     corrected_words = []
     for word in words:
@@ -446,6 +501,47 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
     corrected = re.sub(r'\s+', ' ', corrected).strip()
     
     return corrected, corrections_applied
+
+
+def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[str, List[Dict]]:
+    """Use fuzzy matching against known DevOps terms to correct transcription noise."""
+    if not text or not HAS_TEXTDISTANCE:
+        return text, []
+
+    corrections = []
+    corrected = text
+    words = re.findall(r"\b[\w/]+\b", text)
+    if not words:
+        return text, []
+
+    max_n = min(4, len(words))
+    for n in range(max_n, MIN_FUZZY_PHRASE_WORDS - 1, -1):
+        for i in range(len(words) - n + 1):
+            phrase = " ".join(words[i:i+n]).lower()
+            if phrase in KNOWN_TERMS_SET:
+                continue
+            best_term = None
+            best_score = 0.0
+            for target in KNOWN_TERMS:
+                target_words = target.split()
+                if len(target_words) != n:
+                    continue
+                score = textdistance.jaro_winkler.normalized_similarity(phrase, target)
+                if score > best_score:
+                    best_score = score
+                    best_term = target
+            if best_term and best_score >= threshold:
+                escaped_phrase = re.escape(" ".join(words[i:i+n]))
+                pattern = re.compile(rf"\b{escaped_phrase}\b", re.IGNORECASE)
+                corrected, count = pattern.subn(best_term, corrected, count=1)
+                if count > 0:
+                    corrections.append({
+                        "type": "fuzzy",
+                        "original": phrase,
+                        "corrected": best_term,
+                        "score": float(best_score)
+                    })
+    return corrected, corrections
 
 
 def enhance_segment_with_context(
