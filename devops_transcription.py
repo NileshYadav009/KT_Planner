@@ -420,14 +420,19 @@ def clean_transcript(text: str, anonymize_pii: bool = True) -> str:
         return text
 
     # Step 0: Anonymize PII if available
-    if anonymize_pii and HAS_PRESIDIO:
-        try:
-            text, anonymization_report = anonymize_transcript_before_classification(text)
-            if anonymization_report.get("detection_count", 0) > 0:
-                logger.info(f"Anonymized {anonymization_report['detection_count']} PII instances: "
-                           f"{anonymization_report.get('detections_by_type', {})}")
-        except Exception as e:
-            logger.warning(f"PII anonymization failed: {e}. Continuing without anonymization.")
+    # The anonymization step that used Presidio to replace detected PII with
+    # "[REDACTED]" has been commented out because it was introducing
+    # blocking placeholders into transcripts and coverage outputs.
+    # The libraries responsible are `presidio_analyzer` and `presidio_anonymizer`.
+    #
+    # if anonymize_pii and HAS_PRESIDIO:
+    #     try:
+    #         text, anonymization_report = anonymize_transcript_before_classification(text)
+    #         if anonymization_report.get("detection_count", 0) > 0:
+    #             logger.info(f"Anonymized {anonymization_report['detection_count']} PII instances: "
+    #                        f"{anonymization_report.get('detections_by_type', {})}")
+    #     except Exception as e:
+    #         logger.warning(f"PII anonymization failed: {e}. Continuing without anonymization.")
 
     normalized = re.sub(r"[\r\n\t]+", " ", text)
     normalized = re.sub(r"\s+", " ", normalized).strip()

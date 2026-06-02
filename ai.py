@@ -51,7 +51,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# GEMINI / OLLAMA (PHI3:mini) LLM SETUP
+# GEMINI LLM SETUP
 # ============================================================================
 import os
 
@@ -146,80 +146,13 @@ def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
     raise last_exception
 
 
-# OLLAMA / PHI3:MINI LOCAL LLM SETUP (fallback)
-PHI3_MINI_ENDPOINT = "http://localhost:11434/api/generate"
-PHI3_MINI_MODEL = "phi3:mini"
-
-
-def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
-    """Refine text using local phi3:mini via Ollama at localhost:11434 with retry logic."""
-    payload = {
-        "model": PHI3_MINI_MODEL,
-        "prompt": prompt,
-        "temperature": 0.2,
-        "max_tokens": 1024,
-        "stream": False,  # CRITICAL: Prevents parser hangs
-        "stop": ["\n\n"]
-    }
-
-    def normalize_response(raw_text: str) -> str:
-        """Strip prompt echo from Ollama response."""
-        text = raw_text.strip()
-        prompt_text = prompt.strip()
-        if prompt_text and text.startswith(prompt_text):
-            text = text[len(prompt_text):].strip()
-        return re.sub(r'^(\n|\r|\s)+', '', text)
-
-    # Retry logic: exponential backoff (1s, 2s)
-    max_retries = 2
-    retry_delay = 1
-    last_exception = None
-    
-    for attempt in range(max_retries):
-        try:
-            start_time = time.perf_counter()
-            response = requests.post(PHI3_MINI_ENDPOINT, json=payload, timeout=(10, 120))
-            elapsed = time.perf_counter() - start_time
-            logger.debug("Ollama request duration: %.2fs", elapsed)
-            response.raise_for_status()
-            data = response.json()
-
-            text = ""
-            if isinstance(data, dict):
-                if "choices" in data and data["choices"]:
-                    choice = data["choices"][0]
-                    text = choice.get("text") or choice.get("message", {}).get("content", "")
-                elif "response" in data:
-                    text = data.get("response", "")
-                else:
-                    text = data.get("text", "")
-            elif isinstance(data, str):
-                text = data
-
-            text = normalize_response(str(text))
-            if not text:
-                raise ValueError("Ollama returned no completion text")
-            return text
-        except Exception as e:
-            last_exception = e
-            if attempt < max_retries - 1:
-                logger.warning("Ollama attempt %d/%d failed: %s. Retrying in %ds...", attempt + 1, max_retries, e, retry_delay)
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-            else:
-                logger.warning("Ollama all %d retries exhausted. Last error: %s", max_retries, e)
-    
-    raise last_exception
-
-
-# Track if we've warmed up the models
+# Track if we've warmed up the Gemini client
 _gemini_warmed_up = False
-_ollama_warmed_up = False
 
 
 def warmup_models():
-    """Warm up Gemini if enabled, otherwise warm up Ollama Phi3:mini."""
-    global _gemini_warmed_up, _ollama_warmed_up
+    """Warm up Gemini if enabled."""
+    global _gemini_warmed_up
 
     if GEMINI_ENABLED and not _gemini_warmed_up:
         try:
@@ -230,32 +163,6 @@ def warmup_models():
         except Exception as e:
             logger.warning("Gemini warmup failed (non-critical): %s", e)
             _gemini_warmed_up = True
-            # Fallback to Ollama
-            if not _ollama_warmed_up:
-                try:
-                    warmup_ollama_model()
-                except Exception:
-                    pass
-    elif not GEMINI_ENABLED and not _ollama_warmed_up:
-        warmup_ollama_model()
-
-
-def warmup_ollama_model():
-    """Load Phi3:mini model into memory with a quick warmup request."""
-    global _ollama_warmed_up
-    
-    if _ollama_warmed_up:
-        return
-    
-    try:
-        logger.info("Warming up Phi3:mini model...")
-        phi3_mini_refiner("hello")
-        _ollama_warmed_up = True
-        logger.info("Model warmup complete")
-    except Exception as e:
-        logger.warning("Model warmup failed (non-critical): %s", e)
-        # Non-critical: continue even if warmup fails
-        _ollama_warmed_up = True
 
 
 
@@ -501,7 +408,7 @@ def build_section_paragraphs(transcript: str):
             return {}
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        llm_refiner = gemini_refiner if GEMINI_ENABLED else phi3_mini_refiner
+        llm_refiner = gemini_refiner if GEMINI_ENABLED else None
         mapper = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
         result = mapper.process_transcript(sentence_tuples)
         paragraphs = result.get("paragraphs", {})

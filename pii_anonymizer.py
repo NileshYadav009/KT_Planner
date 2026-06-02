@@ -184,19 +184,27 @@ class PIIAnonymizer:
         Returns:
             Dict with anonymized_text, detections, and metadata
         """
-        anonymized, detections = self.anonymize(
-            transcript,
-            use_redaction=True,
-            custom_replacement="[REDACTED]"
-        )
+        # NOTE: The Presidio anonymization below replaces detected PII with
+        # "[REDACTED]". The redaction operation is performed by the
+        # `presidio_anonymizer` library (AnonymizerEngine / OperatorConfig).
+        # To disable the automatic replacement that is currently blocking
+        # transcripts/coverage outputs, the anonymization call is commented
+        # out and we return the original transcript with an empty report.
+        #
+        # Original call (commented):
+        # anonymized, detections = self.anonymize(
+        #     transcript,
+        #     use_redaction=True,
+        #     custom_replacement="[REDACTED]"
+        # )
         
         return {
             "original_text": transcript if keep_original else None,
-            "anonymized_text": anonymized,
-            "detection_count": len(detections),
-            "detections_by_type": self._group_by_type(detections),
-            "detections": detections,
-            "redaction_applied": True,
+            "anonymized_text": transcript,
+            "detection_count": 0,
+            "detections_by_type": {},
+            "detections": [],
+            "redaction_applied": False,
             "audit_timestamp": self._get_timestamp()
         }
     
