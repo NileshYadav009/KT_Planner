@@ -42,3 +42,4 @@ cryptography>=42.0.0      # Cryptographic recipes and primitives
 textdistance>=4.6.3       # Fuzzy string matching for transcript cleanup
 presidio-analyzer>=0.2.2  # PII detection and analysis (NEW - SaaS compliance)
 presidio-anonymizer>=0.2.2 # PII anonymization and redaction (NEW - SaaS compliance)
+google-genai>=2.7.0

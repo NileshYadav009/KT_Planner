@@ -51,8 +51,102 @@ import requests
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# OLLAMA / PHI3:MINI LOCAL LLM SETUP
+# GEMINI / OLLAMA (PHI3:mini) LLM SETUP
 # ============================================================================
+import os
+
+# Gemini config (Google Generative AI)
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_CLIENT = None
+GEMINI_ENABLED = False
+try:
+    from google import genai
+    if GEMINI_API_KEY:
+        GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+        GEMINI_ENABLED = True
+except Exception:
+    GEMINI_CLIENT = None
+    GEMINI_ENABLED = False
+
+
+def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
+    """Refine text using Google Gemini via the genai SDK or direct HTTP with retry logic."""
+    if not (GEMINI_API_KEY or GEMINI_CLIENT):
+        raise RuntimeError("Gemini client not configured. Set GEMINI_API_KEY to enable.")
+
+    max_retries = 2
+    retry_delay = 1
+    last_exception = None
+
+    for attempt in range(max_retries):
+        try:
+            start_time = time.perf_counter()
+            # Prefer SDK client when available
+            if GEMINI_CLIENT:
+                response = GEMINI_CLIENT.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=1024,
+                        stop_sequences=["\n\n"]
+                    )
+                )
+                text = getattr(response, "text", None) or str(response)
+            else:
+                # Use direct HTTP call as a fallback
+                url = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                payload = {
+                    "prompt": {"text": prompt},
+                    "temperature": 0.2,
+                    "maxOutputTokens": 1024,
+                    "stop_sequences": ["\n\n"]
+                }
+                r = requests.post(url, json=payload, timeout=(10, 120))
+                r.raise_for_status()
+                data = r.json()
+                # Try to extract text from common response shapes
+                text = ""
+                if isinstance(data, dict):
+                    if "candidates" in data and data["candidates"]:
+                        parts = []
+                        for c in data["candidates"]:
+                            if isinstance(c, dict):
+                                parts.append(c.get("content") or c.get("output") or c.get("text", ""))
+                            else:
+                                parts.append(str(c))
+                        text = "\n".join([p for p in parts if p])
+                    elif "output" in data:
+                        text = data.get("output")
+                    elif "response" in data and isinstance(data.get("response"), dict):
+                        text = data.get("response", {}).get("output", "") or json.dumps(data.get("response", {}))
+                    else:
+                        text = data.get("text") or json.dumps(data)
+                else:
+                    text = str(data)
+
+            elapsed = time.perf_counter() - start_time
+            logger.debug("Gemini request duration: %.2fs", elapsed)
+
+            text = (text or "").strip()
+            text = re.sub(r'^(\n|\r|\s)+', '', text)
+            if not text:
+                raise ValueError("Gemini returned no completion text")
+            return text
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                logger.warning("Gemini attempt %d/%d failed: %s. Retrying in %ds...", attempt + 1, max_retries, e, retry_delay)
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.warning("Gemini all %d retries exhausted. Last error: %s", max_retries, e)
+
+    raise last_exception
+
+
+# OLLAMA / PHI3:MINI LOCAL LLM SETUP (fallback)
 PHI3_MINI_ENDPOINT = "http://localhost:11434/api/generate"
 PHI3_MINI_MODEL = "phi3:mini"
 
@@ -118,8 +212,32 @@ def phi3_mini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
     raise last_exception
 
 
-# Track if we've warmed up the model
+# Track if we've warmed up the models
+_gemini_warmed_up = False
 _ollama_warmed_up = False
+
+
+def warmup_models():
+    """Warm up Gemini if enabled, otherwise warm up Ollama Phi3:mini."""
+    global _gemini_warmed_up, _ollama_warmed_up
+
+    if GEMINI_ENABLED and not _gemini_warmed_up:
+        try:
+            logger.info("Warming up Gemini model...")
+            gemini_refiner("hello")
+            _gemini_warmed_up = True
+            logger.info("Gemini warmup complete")
+        except Exception as e:
+            logger.warning("Gemini warmup failed (non-critical): %s", e)
+            _gemini_warmed_up = True
+            # Fallback to Ollama
+            if not _ollama_warmed_up:
+                try:
+                    warmup_ollama_model()
+                except Exception:
+                    pass
+    elif not GEMINI_ENABLED and not _ollama_warmed_up:
+        warmup_ollama_model()
 
 
 def warmup_ollama_model():
@@ -375,15 +493,16 @@ def build_section_paragraphs(transcript: str):
     """Build reconstructed paragraphs for each section from a transcript."""
     import traceback
     try:
-        # Warm up Ollama model before processing
-        warmup_ollama_model()
+        # Warm up models (Gemini preferred) before processing
+        warmup_models()
         
         sentences = _prepare_sentences(transcript)
         if not sentences:
             return {}
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        mapper = create_semantic_mapper(SCHEMA, llm_refiner=phi3_mini_refiner)
+        llm_refiner = gemini_refiner if GEMINI_ENABLED else phi3_mini_refiner
+        mapper = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
         result = mapper.process_transcript(sentence_tuples)
         paragraphs = result.get("paragraphs", {})
         if paragraphs:
@@ -402,6 +521,68 @@ def _prepare_sentences(transcript: str):
     cleaned_text = clean_transcript(transcript)
     audio_seg = AudioSegment(text=cleaned_text, start=0.0, end=0.0, avg_logprob=-1.0)
     return segment_sentences([audio_seg])
+
+
+def process_coverage_with_gemini(transcript: str, sentences_per_chunk: int = 20):
+    """Chunk transcript sentences, send each chunk to Gemini, and return structured results.
+
+    Returns a list of dicts: {"chunk_index": int, "text": str, "gemini_raw": str, "gemini_json": Optional[dict]}
+    """
+    sentences = _prepare_sentences(transcript)
+    if not sentences:
+        return []
+
+    # Prepare section catalog to help Gemini map chunks to KT sections
+    section_list = []
+    for s in SCHEMA:
+        title = s.get("title") or s.get("id")
+        section_list.append(f"{s.get('id')}: {title}")
+    section_hint = "\n".join(section_list)
+
+    # Chunk sentences
+    chunks = []
+    for i in range(0, len(sentences), sentences_per_chunk):
+        part = " ".join([sentences[j].text for j in range(i, min(i + sentences_per_chunk, len(sentences)))])
+        chunks.append(part)
+
+    results = []
+    for idx, chunk_text in enumerate(chunks):
+        prompt = f"""
+You are a KT mapping assistant. Given the list of KT sections below, read the transcript chunk and map it to the most relevant sections. Return JSON only as a list of objects with keys: section_id, confidence (0-1 float), summary.
+
+Sections:
+{section_hint}
+
+Transcript chunk:
+{chunk_text}
+
+Return JSON only.
+"""
+        try:
+            gem = gemini_refiner(prompt)
+            gem_json = None
+            try:
+                gem_json = json.loads(gem)
+            except Exception:
+                # If Gemini didn't return machine JSON, keep raw text
+                gem_json = None
+
+            results.append({
+                "chunk_index": idx,
+                "text": chunk_text,
+                "gemini_raw": gem,
+                "gemini_json": gem_json,
+            })
+        except Exception as e:
+            results.append({
+                "chunk_index": idx,
+                "text": chunk_text,
+                "gemini_raw": "",
+                "gemini_json": None,
+                "error": str(e),
+            })
+
+    return results
 
 
 def _classify_transcript_sentences(transcript: str, similarity_threshold: float = 0.20):

@@ -12,7 +12,7 @@ import json
 try:
     from presidio_analyzer import AnalyzerEngine
     from presidio_anonymizer import AnonymizerEngine
-    from presidio_anonymizer.entities import OperatorConfig
+    from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
     HAS_PRESIDIO = True
 except ImportError:
     HAS_PRESIDIO = False
@@ -141,20 +141,23 @@ class PIIAnonymizer:
             else:
                 operator = OperatorConfig("replace", {"new_value": redaction_char})
             
-            # Create anonymization request
-            from presidio_anonymizer.entities import AnonymizationRequest
-            
-            entities = []
-            for detection in detections:
-                entities.append({
-                    "start": detection["start"],
-                    "end": detection["end"],
-                    "entity_type": detection["entity_type"]
-                })
-            
+            # Create anonymization input using Presidio RecognizerResult objects
+            analyzer_results = [
+                RecognizerResult(
+                    entity_type=detection["entity_type"],
+                    start=detection["start"],
+                    end=detection["end"],
+                    score=detection["score"],
+                )
+                for detection in detections
+            ]
+
             if self.anonymizer:
-                request = AnonymizationRequest(text=text, entities=entities)
-                anonymized = self.anonymizer.anonymize(request=request, operators={"DEFAULT": operator})
+                anonymized = self.anonymizer.anonymize(
+                    text=text,
+                    analyzer_results=analyzer_results,
+                    operators={"DEFAULT": operator},
+                )
                 anonymized_text = anonymized.text
             else:
                 anonymized_text = text
