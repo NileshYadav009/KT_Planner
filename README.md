@@ -119,6 +119,16 @@ Legacy support for older classification logic. It is kept as a reference and bac
 ### `enterprise_semantic_mapper.py`
 An alternate or experimental semantic mapper implementation. It is not currently part of the main processing flow but is useful for comparison or future enhancement.
 
+### `pii_anonymizer.py`
+Wraps PII detection and anonymization logic (based on Microsoft Presidio). It provides:
+- `PIIAnonymizer`: class that detects and (optionally) redacts PII from strings
+- `anonymize_transcript_before_classification()`: convenience function used by the transcription pipeline
+
+Note: In the current workspace the automatic redaction call that replaced detected values with the literal "[REDACTED]" has been commented out to avoid blocking transcripts and test coverage output. See the "Recent Changes" section below for details and how to re-enable.
+
+### `devops_transcription.py`
+Transcription-specific cleanup and normalization helpers (fillers removal, repeated phrase collapse, DevOps-specific corrections). The pipeline previously invoked `pii_anonymizer` as the first normalization step; that call is now commented out to preserve original transcript content by default.
+
 ### `scripts/`
 Contains helper scripts for manual workflows, such as generating audio, uploading test files, and performing KT checks.
 
@@ -166,6 +176,87 @@ python check_kt.py
 ```
 
 ## Notes
+## Recent Changes
+
+- The Presidio-based anonymization that replaced sensitive tokens with "[REDACTED]" has been temporarily disabled in the codebase to prevent those placeholders from blocking downstream transcript and coverage outputs. Affected files:
+  - `pii_anonymizer.py` — the `anonymize_transcript`/`anonymize_transcript_before_classification` call is commented and now returns the original transcript with an empty report.
+  - `devops_transcription.py` — the call that invoked `anonymize_transcript_before_classification` at the start of `clean_transcript()` is commented out.
+
+These changes preserve original transcripts while keeping the detection code in place for future toggling.
+
+## Python libraries and why they are used
+
+Key runtime dependencies (see `requirements.txt`):
+
+- **fastapi, uvicorn**: Web API server and ASGI runtime for job submission and result retrieval.
+- **pydantic / pydantic-settings**: Structured configuration and input validation.
+- **faster-whisper**: Fast local transcription engine (Whisper-compatible) for audio -> text.
+- **transformers, sentence-transformers, torch**: Semantic models and embeddings used by `context_mapper.py` for accurate section classification.
+- **ffmpeg-python, librosa, soundfile, pydub**: Audio processing and normalization utilities used by the transcription helpers.
+- **numpy, scipy, pandas**: Numeric and data utilities for scoring, signal processing, and structured logs.
+- **scikit-learn, nltk, textdistance**: Scoring, text cleanup, and fuzzy matching to improve mapping accuracy.
+- **presidio-analyzer, presidio-anonymizer**: PII detection and anonymization (these are present in `requirements.txt`; anonymization calls are currently disabled but detection wrappers remain in `pii_anonymizer.py`).
+- **python-dotenv, python-json-logger**: Environment and structured logging helpers for production deployments.
+- **security libs (python-jose, passlib, cryptography)**: JWT and credential handling for API security and auth flows.
+
+If you decide to re-enable Presidio anonymization, ensure the Presidio packages and their NLP model dependencies (e.g. spacy models) are installed and available in the runtime environment.
+
+## Application flow (high level)
+
+```mermaid
+flowchart TD
+  A[Upload audio/video] --> B[Transcription]
+  B --> C[clean_transcript() - normalization]
+  C --> D[context_mapper.py - sentence segmentation & classification]
+  D --> E[Evidence extraction & gap detection]
+  E --> F[Template population (`templates.py`) & assemble KT]
+  F --> G[KT artifact storage & API response]
+  subgraph optional
+    C --> H[PII detection (`pii_anonymizer.py`) - detection only]
+  end
+```
+
+## How to re-enable or configure PII anonymization
+
+1. Install the Presidio dependencies (already listed in `requirements.txt`) and the required NLP models (e.g., spacy model if needed).
+2. In `pii_anonymizer.py` restore the anonymization call in `anonymize_transcript()` (the commented block), or set `use_anonymizer=False` to run detection-only flows.
+3. In `devops_transcription.py` re-enable the `anonymize_transcript_before_classification` invocation in `clean_transcript()` if you want PII replaced prior to mapping.
+
+Notes:
+- Replacing values with literal placeholders (e.g., "[REDACTED]") affects downstream entity extraction and coverage metrics; consider running detection-only reports (no replacement) if you need counts without modifying the transcript text.
+
+## Tests & verification
+
+- Unit & integration test targeting Presidio behavior: `test_presidio_integration.py` (useful when toggling anonymization).
+- Pipeline tests: `tests/test_pipeline.py` and `test_pipeline.py` in root.
+
+Run tests locally inside the activated environment:
+
+```powershell
+python -m pip install -r requirements.txt
+python test_presidio_integration.py
+python tests/test_pipeline.py
+```
+
+## Files changed in this update
+
+- `pii_anonymizer.py` — anonymization return behavior adjusted to avoid replacing text by default.
+- `devops_transcription.py` — anonymization invocation commented out from `clean_transcript()`.
+
+## Extra notes & next steps
+
+- If you need configurable toggles, I can add an environment-driven flag (via `runtime_policy.py` or `.env`) to enable detection-only vs. replacement modes without editing code.
+- I can also add a short migration script to produce a redaction audit report linking original -> redacted values for audited stores if required for compliance.
+
+---
+
+If you'd like, I can:
+
+- Add an environment-configurable toggle to switch anonymization modes.
+- Re-run tests and report any failures after these README changes.
+
+Tell me which of those you'd like next.
+
 
 - The active schema configuration is `kt_schema_new.json`.
 - `archive/` contains older documentation and artifacts moved out of the core setup.
