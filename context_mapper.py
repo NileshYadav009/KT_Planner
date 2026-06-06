@@ -33,6 +33,7 @@ from policy import (
 from runtime_policy import load_policy
 from devops_transcription import clean_transcript
 from entity_extractor import EntityExtractor
+from section_rules import match_section_rules, find_overview_reassignment, apply_rule_overrides
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
@@ -558,19 +559,31 @@ class ContextClassifier:
                 if sims:
                     context_sim = float(np.mean(sims))
 
-            # Keyword matching boost: if hints match, boost the score
+            # Keyword matching boost: phrase-aware hint matching
             keyword_boost = 0.0
-            if sec_id in self.section_metadata:
-                # Get hints from schema (already loaded during index_schema)
-                # Compute keyword match score
-                hints = getattr(self, '_section_hints', {}).get(sec_id, [])
-                if hints:
-                    matching_hints = sum(1 for h in hints if h.lower() in sent_text_lower)
-                    if matching_hints > 0:
-                        keyword_boost = min(0.3, 0.05 * matching_hints)  # Cap boost at 0.3
+            hints = getattr(self, '_section_hints', {}).get(sec_id, [])
+            if hints:
+                for hint in hints:
+                    hint_lower = hint.lower().strip()
+                    if not hint_lower:
+                        continue
+                    if " " in hint_lower:
+                        if hint_lower in sent_text_lower:
+                            keyword_boost += 0.08
+                    else:
+                        if re.search(rf"\b{re.escape(hint_lower)}\b", sent_text_lower):
+                            keyword_boost += 0.05
+                keyword_boost = min(0.35, keyword_boost)
+
+            # Penalize catch-all sections when specialized routing rules match better
+            overview_penalty = 0.0
+            if sec_id == "system_overview":
+                specialized = find_overview_reassignment(sentence.text)
+                if specialized:
+                    overview_penalty = 0.25
 
             # Combined score — prefer sentence-level similarity but allow context and keywords to influence
-            combined = float(alpha * base_sim + beta * context_sim + keyword_boost)
+            combined = float(alpha * base_sim + beta * context_sim + keyword_boost - overview_penalty)
 
             # Always consider top candidates, thresholding later
             classifications.append(Classification(
@@ -582,6 +595,20 @@ class ContextClassifier:
                 entities=extracted_entities if extracted_entities else None
             ))
         
+        # Deterministic routing rules override weak semantic matches
+        rule_match = match_section_rules(sentence.text)
+        if rule_match:
+            meta = self.section_metadata.get(rule_match.section_id, {})
+            rule_classification = Classification(
+                section_id=rule_match.section_id,
+                section_title=meta.get("title", rule_match.section_id),
+                confidence=rule_match.confidence,
+                similarity_score=rule_match.confidence,
+                reason=f"Rule match: {rule_match.matched_pattern}",
+                entities=extracted_entities if extracted_entities else None
+            )
+            classifications.insert(0, rule_classification)
+
         # Sort by combined confidence and take top_k
         classifications.sort(key=lambda x: x.confidence, reverse=True)
         
@@ -595,6 +622,8 @@ class ContextClassifier:
                 
                 # Update confidence scores with cross-encoder scores (normalize to 0-1)
                 for i, c in enumerate(top_candidates):
+                    if c.reason and c.reason.startswith("Rule match:"):
+                        continue
                     cross_score = float(cross_scores[i])
                     # Blend embedding score with cross-encoder score
                     # Cross-encoder often outputs unbounded scores, so we use sigmoid-like normalization
@@ -608,6 +637,19 @@ class ContextClassifier:
                 logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
             except Exception as e:
                 logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
+
+        # Preserve high-confidence rule matches after cross-encoder blending
+        if rule_match:
+            meta = self.section_metadata.get(rule_match.section_id, {})
+            classifications.insert(0, Classification(
+                section_id=rule_match.section_id,
+                section_title=meta.get("title", rule_match.section_id),
+                confidence=rule_match.confidence,
+                similarity_score=rule_match.confidence,
+                reason=f"Rule match: {rule_match.matched_pattern}",
+                entities=extracted_entities if extracted_entities else None
+            ))
+            classifications.sort(key=lambda x: x.confidence, reverse=True)
         
         # Filter by a relaxed threshold for secondary candidates
         primary = None
@@ -1750,9 +1792,13 @@ class ContextMappingPipeline:
             classified_sentences.append(cs)
         logger.info(f"Stage 3: Classified {len(classified_sentences)} sentences with topic memory")
 
+        # Stage 3.5: deterministic routing overrides and overview cleanup
+        apply_rule_overrides(classified_sentences, self.classifier.section_metadata)
+        logger.info("Stage 3.5: Applied section routing rules")
+
         # Load runtime policy and enforce policies before repair
         policy = load_policy()
-        CONFIDENCE_ACCEPT_THRESHOLD = float(policy.get("confidence_accept_threshold", 0.8))
+        CONFIDENCE_ACCEPT_THRESHOLD = float(policy.get("confidence_accept_threshold", 0.55))
         IMPLEMENTATION_INDICATORS = [i.lower() for i in policy.get("implementation_indicators", [])]
         CONCEPTUAL_SECTIONS = [c.lower() for c in policy.get("conceptual_sections", [])]
 

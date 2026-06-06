@@ -7,7 +7,7 @@ and to decide when to route sentences to review-required.
 from typing import List
 
 # Confidence threshold for accepting automatic section assignment (0.0 - 1.0)
-CONFIDENCE_ACCEPT_THRESHOLD = 0.80
+CONFIDENCE_ACCEPT_THRESHOLD = 0.55
 
 # Implementation step indicators (lowercase strings matched against sentence text)
 IMPLEMENTATION_INDICATORS: List[str] = [

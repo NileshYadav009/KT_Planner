@@ -301,7 +301,26 @@ PHRASE_CORRECTIONS = {
     r"teleform": "terraform",
     r"ter[\s-]?form": "terraform",
     r"csd\s+pipeline": "ci/cd pipeline",
+    r"csd\s+pipelines?": "ci/cd pipelines",
     r"csd\s+tool": "ci/cd tool",
+    r"desklation\s+path": "escalation path",
+    r"trevi\b": "Trivy",
+    r"argos\s+cd": "ArgoCD",
+    r"cache\s+clear": "cache layers",
+    r"intra\s+changes": "infrastructure changes",
+    r"infrastructure\s+as\s+cold": "Infrastructure as Code",
+    r"processrequiresrestoring": "process requires restoring",
+    r"disaster\s+recovery\s+processrequiresrestoring": "disaster recovery process requires restoring",
+    r"staging\s+environment\s+variables\s+mirrors": "staging environment closely mirrors",
+    r"environment\s+variables\s+mirrors": "environment closely mirrors",
+    r"non-production\s+environment\s+variables\s+schedule": "non-production environments and schedule",
+    r"load\s+traffic": "low traffic",
+    r"roll\s+back": "rollback",
+    r"helm\s+roll\s+back": "Helm rollback",
+    r"cloud\s+front": "CloudFront",
+    r"postgres\s+sql": "PostgreSQL",
+    r"fast\s+api": "FastAPI",
+    r"front[\s-]?end": "frontend",
     r"hel[\s-]?checks": "health checks",
     r"redowning": "redeploying",
     r"redone": "red zone",
@@ -317,7 +336,7 @@ PHRASE_CORRECTIONS = {
     # Number and acronym fixes
     r"k[\s-]?8[\s-]?s": "kubernetes",
     r"a[\s-]?w[\s-]?s": "aws",
-    r"s[\s-]?r[\s-]?e": "sre",
+    r"\bs[\s-]?r[\s-]?e\b": "sre",
     r"g[\s-]?c[\s-]?p": "gcp",
     
     # Tense and grammar
@@ -339,6 +358,9 @@ WORD_CORRECTIONS = {
     "redone": "red zone",
     "seekers": "secrets",
     "asclicion": "escalation",
+    "desklation": "escalation",
+    "trevi": "Trivy",
+    "argos": "Argo",
     "katie": "KT",
     "pay-bin": "payment",
     "paybin": "payment",
@@ -461,20 +483,25 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
     
     corrections_applied = []
     corrected = text
-    
-    # Step 1: Apply phrase-level corrections (context-aware)
-    for pattern, replacement in PHRASE_CORRECTIONS.items():
-        matches = re.finditer(pattern, corrected, re.IGNORECASE)
-        for match in matches:
-            original = match.group(0)
-            corrected = re.sub(pattern, replacement, corrected, flags=re.IGNORECASE)
-            corrections_applied.append({
-                "type": "phrase",
-                "original": original,
-                "corrected": replacement,
-                "pattern": pattern
-            })
-    
+
+    def _apply_phrase_corrections(source: str) -> str:
+        updated = source
+        for pattern, replacement in PHRASE_CORRECTIONS.items():
+            matches = list(re.finditer(pattern, updated, re.IGNORECASE))
+            for match in matches:
+                original = match.group(0)
+                updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
+                corrections_applied.append({
+                    "type": "phrase",
+                    "original": original,
+                    "corrected": replacement,
+                    "pattern": pattern
+                })
+        return updated
+
+    # Step 1: Phrase corrections before fuzzy/word normalization
+    corrected = _apply_phrase_corrections(corrected)
+
     # Step 2: Apply fuzzy known-term corrections for noisy transcript phrases
     corrected, fuzzy_corrections = apply_fuzzy_term_corrections(corrected)
     corrections_applied.extend(fuzzy_corrections)
@@ -483,10 +510,9 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
     words = corrected.split()
     corrected_words = []
     for word in words:
-        # Remove punctuation for comparison
         clean_word = word.rstrip('.,!?;:')
         punct = word[len(clean_word):]
-        
+
         if clean_word.lower() in WORD_CORRECTIONS:
             original = clean_word
             corrected_word = WORD_CORRECTIONS[clean_word.lower()]
@@ -499,10 +525,12 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
             })
         else:
             corrected_words.append(word)
-    
+
     corrected = " ".join(corrected_words)
-    
-    # Step 3: Clean up extra spaces and formatting
+
+    # Step 4: Re-apply phrase corrections so fuzzy/word steps cannot undo them
+    corrected = _apply_phrase_corrections(corrected)
+
     corrected = re.sub(r'\s+', ' ', corrected).strip()
     
     return corrected, corrections_applied
