@@ -16,6 +16,7 @@ Pipeline stages:
 
 import re
 import json
+import math
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -45,32 +46,39 @@ _CROSS_ENCODER = None  # Lazy-loaded cross-encoder for reranking
 _SEMANTIC_CHUNK_MODEL = None
 _SEMANTIC_CHUNK_UTIL = None
 
+
+class FallbackEmbedding:
+    def __init__(self, text: str):
+        self.words = set(re.findall(r"\w+", (text or "").lower()))
+
+
+class FallbackSentenceTransformer:
+    def __init__(self, model_name=None):
+        pass
+
+    def encode(self, texts, convert_to_tensor=False, normalize_embeddings=False, batch_size=None):
+        single = isinstance(texts, str)
+        items = [texts] if single else texts
+        embs = [FallbackEmbedding(t) for t in items]
+        return embs[0] if single else embs
+
+
+class FallbackUtil:
+    @staticmethod
+    def cos_sim(a, b):
+        if not hasattr(a, "words") or not hasattr(b, "words"):
+            return [[0.0]]
+        inter = a.words.intersection(b.words)
+        union = a.words.union(b.words)
+        score = float(len(inter) / len(union)) if union else 0.0
+        return [[score]]
+
 # Fallback: simple token-set embedding + Jaccard similarity to avoid heavy deps at module import time
 if not _USE_REAL_EMBEDDINGS:
     import statistics as np
 
-    class SimpleEmbedding:
-        def __init__(self, text: str):
-            self.words = set(re.findall(r"\w+", text.lower()))
-
-    class SentenceTransformer:
-        def __init__(self, model_name=None):
-            pass
-        def encode(self, texts, convert_to_tensor=False, normalize_embeddings=False, batch_size=None):
-            single = isinstance(texts, str)
-            items = [texts] if single else texts
-            embs = [SimpleEmbedding(t) for t in items]
-            return embs[0] if single else embs
-
-    class util:
-        @staticmethod
-        def cos_sim(a, b):
-            if not hasattr(a, 'words') or not hasattr(b, 'words'):
-                return [[0.0]]
-            inter = a.words.intersection(b.words)
-            union = a.words.union(b.words)
-            score = float(len(inter) / len(union)) if union else 0.0
-            return [[score]]
+    SentenceTransformer = FallbackSentenceTransformer
+    util = FallbackUtil
 else:
     # Real modules will be imported lazily inside ContextClassifier to avoid heavy startup costs
     util = None
@@ -285,14 +293,14 @@ def _get_semantic_chunk_model(model_name: str = "all-MiniLM-L6-v2"):
     if _SENT_TRANS_SPEC:
         try:
             from sentence_transformers import SentenceTransformer as ST, util as st_util
-            _SEMANTIC_CHUNK_MODEL = ST(model_name)
+            _SEMANTIC_CHUNK_MODEL = ST(model_name, local_files_only=True)
             _SEMANTIC_CHUNK_UTIL = st_util
             return _SEMANTIC_CHUNK_MODEL
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Falling back to token semantic chunking: %s", exc)
 
-    _SEMANTIC_CHUNK_MODEL = SentenceTransformer()
-    _SEMANTIC_CHUNK_UTIL = None
+    _SEMANTIC_CHUNK_MODEL = FallbackSentenceTransformer()
+    _SEMANTIC_CHUNK_UTIL = FallbackUtil
     return _SEMANTIC_CHUNK_MODEL
 
 
@@ -310,7 +318,11 @@ def semantic_chunk_sentences(
         return sentences
 
     model = _get_semantic_chunk_model()
-    encodings = [model.encode(s.text, convert_to_tensor=True) for s in sentences]
+    sentence_texts = [s.text for s in sentences]
+    try:
+        encodings = model.encode(sentence_texts, convert_to_tensor=True, batch_size=64)
+    except TypeError:
+        encodings = model.encode(sentence_texts, convert_to_tensor=True)
     chunks: List[Sentence] = []
     current = sentences[0]
     current_emb = encodings[0]
@@ -324,7 +336,7 @@ def semantic_chunk_sentences(
         if sim >= similarity_threshold:
             should_merge = True
         elif len(current.text) < min_merge_length or len(candidate.text) < min_merge_length:
-            should_merge = sim >= (similarity_threshold - 0.15)
+            should_merge = sim >= (similarity_threshold - 0.25)
 
         if should_merge:
             current = _merge_sentences(current, candidate)
@@ -445,7 +457,14 @@ class ContextClassifier:
                 # Fall back to lightweight implementations only if import fails
                 pass
 
-        self.model = SentenceTransformer(model_name)
+        try:
+            self.model = SentenceTransformer(model_name, local_files_only=True)
+        except TypeError:
+            self.model = SentenceTransformer(model_name)
+        except Exception as exc:
+            logger.warning("Falling back to token classifier embeddings: %s", exc)
+            self.model = FallbackSentenceTransformer()
+            globals()['util'] = FallbackUtil
         self.similarity_threshold = similarity_threshold
         self.section_embeddings = {}
         self.section_metadata = {}
@@ -965,7 +984,81 @@ class SectionCoverage:
     confidence_score: float
     risk_score: float
     blocks: List[TopicBlock]  # Topic-coherent blocks instead of scattered sentences
+    semantic_coverage_score: float = 0.0
+    dimensions: Optional[Dict[str, float]] = None
+    missing_sub_topics: Optional[List[str]] = None
     
+
+def _semantic_coverage_score(
+    sentences: List[str],
+    scores: List[float],
+    section_meta: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Compute section coverage from confidence, depth, actionability, and expected sub-topics."""
+    if not sentences:
+        return {"status": "missing", "scs": 0.0, "dimensions": {}, "missing_sub_topics": list(section_meta.get("sub_topics", []))}
+
+    strong_scores = [float(s) for s in scores if s is not None and float(s) >= 0.35]
+    if not strong_scores:
+        return {"status": "missing", "scs": 0.0, "dimensions": {}, "missing_sub_topics": list(section_meta.get("sub_topics", []))}
+
+    confidence = sum(sorted(strong_scores, reverse=True)[:3]) / min(3, len(strong_scores))
+    total_words = sum(len(s.split()) for s in sentences)
+    min_words = int(section_meta.get("min_words", 30) or 30)
+    depth = min(1.0, math.log1p(total_words) / math.log1p(max(1, min_words * 3)))
+
+    combined = " ".join(sentences)
+    actionability_signals = [
+        bool(re.search(r"https?://", combined, re.I)),
+        bool(re.search(r"\b\d{1,5}\s*(?:min|mins|minute|minutes|hour|hours|sec|secs|second|seconds|day|days)\b", combined, re.I)),
+        bool(re.search(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b", combined)),
+        bool(re.search(r"`[^`]+`|\b(?:kubectl|helm|terraform|docker|argocd|aws)\b", combined, re.I)),
+        bool(re.search(r"@|#[a-z][a-z0-9_-]+", combined, re.I)),
+        bool(re.search(r"\b(?:step\s*\d+|first|second|third|then|next|finally)\b", combined, re.I)),
+    ]
+    actionability = sum(actionability_signals) / len(actionability_signals)
+
+    sub_topics = list(section_meta.get("sub_topics", []) or [])
+    if sub_topics:
+        covered_topics = []
+        missing_topics = []
+        lower_sentences = [s.lower() for s in sentences]
+        for topic in sub_topics:
+            topic_terms = [term for term in re.split(r"[^a-z0-9]+", topic.lower()) if len(term) > 2]
+            is_covered = any(
+                all(term in sentence for term in topic_terms)
+                or (topic_terms and any(term in sentence for term in topic_terms))
+                for sentence in lower_sentences
+            )
+            if is_covered:
+                covered_topics.append(topic)
+            else:
+                missing_topics.append(topic)
+        completeness = len(covered_topics) / len(sub_topics)
+    else:
+        completeness = 1.0
+        missing_topics = []
+
+    scs = confidence * 0.30 + depth * 0.25 + actionability * 0.25 + completeness * 0.20
+    if scs >= 0.65:
+        status = "covered"
+    elif scs >= 0.40:
+        status = "weak"
+    else:
+        status = "missing"
+
+    return {
+        "status": status,
+        "scs": round(float(scs), 3),
+        "dimensions": {
+            "confidence": round(float(confidence), 3),
+            "depth": round(float(depth), 3),
+            "actionability": round(float(actionability), 3),
+            "completeness": round(float(completeness), 3),
+        },
+        "missing_sub_topics": missing_topics,
+    }
+
 
 def detect_gaps(
     classified_sentences: List[ClassifiedSentence],
@@ -979,9 +1072,9 @@ def detect_gaps(
     NEW APPROACH: Group consecutive sentences into TopicBlocks to preserve paragraph continuity.
     
     Rules:
-    - 0 blocks → missing
-    - 1 block → weak
-    - 2+ blocks → covered
+    - Semantic Coverage Score (SCS) combines semantic confidence, depth,
+      actionability, and configured sub-topic completeness.
+    - SCS >= 0.65 → covered; SCS >= 0.40 → weak; otherwise missing.
     """
     coverage = {}
     
@@ -1023,6 +1116,8 @@ def detect_gaps(
         
         # Add sentence to current block
         if assigned_section:
+            if current_block_section is None:
+                current_block_section = assigned_section
             current_block_sentences.append(cs.sentence)
             current_block_indices.append(idx)
     
@@ -1055,20 +1150,29 @@ def detect_gaps(
         
         # Compute section-level confidence as mean of block confidences
         if blocks:
-            confidence = float(np.mean([b.confidence_score for b in blocks]))
+            classification_scores = [
+                cs.primary_classification.confidence
+                for cs in classified_sentences
+                if cs.primary_classification and cs.primary_classification.section_id == sec_id and not cs.is_unassigned
+            ]
+            confidence = float(np.mean(classification_scores or [b.confidence_score for b in blocks]))
         else:
             confidence = 0.0
         
-        # Determine status based on block count
-        if block_count == 0:
-            status = "missing"
+        section_sentences = [sentence.text for block in blocks for sentence in block.sentences]
+        section_scores = [
+            cs.primary_classification.confidence
+            for cs in classified_sentences
+            if cs.primary_classification and cs.primary_classification.section_id == sec_id and not cs.is_unassigned
+        ]
+        semantic_metrics = _semantic_coverage_score(section_sentences, section_scores, sec)
+        status = semantic_metrics["status"]
+        if status == "missing":
             risk = 1.0 if sec_required else 0.5
-        elif block_count == 1 and total_sentences <= weak_threshold:
-            status = "weak"
+        elif status == "weak":
             risk = 0.6 if sec_required else 0.2
         else:
-            status = "covered"
-            risk = 0.0 if confidence > 0.7 else 0.1
+            risk = 0.0 if semantic_metrics.get("scs", 0.0) >= 0.75 else 0.1
         
         coverage[sec_id] = SectionCoverage(
             section_id=sec_id,
@@ -1079,7 +1183,10 @@ def detect_gaps(
             sentence_count=total_sentences,
             confidence_score=confidence,
             risk_score=float(risk),
-            blocks=blocks
+            blocks=blocks,
+            semantic_coverage_score=semantic_metrics.get("scs", 0.0),
+            dimensions=semantic_metrics.get("dimensions", {}),
+            missing_sub_topics=semantic_metrics.get("missing_sub_topics", [])
         )
     
     return coverage
@@ -1829,9 +1936,15 @@ class ContextMappingPipeline:
 
             sec_title = (cs.primary_classification.section_title or "").lower()
             conf = cs.primary_classification.confidence or 0.0
+            evidence = extract_explicit_evidence(cs.sentence.text)
+            cs.explicit_evidence = evidence
+            setattr(cs.sentence, 'explicit_evidence', evidence)
 
             # Enforce configured confidence acceptance
             if conf < CONFIDENCE_ACCEPT_THRESHOLD:
+                if is_causal_statement(cs.sentence.text) and not extract_explicit_evidence(cs.sentence.text):
+                    cs.is_inferred = True
+                    setattr(cs.sentence, 'is_inferred', True)
                 cs.is_unassigned = True
                 cs.explainability_log = ExplainabilityLog(
                     action="policy",
@@ -1856,14 +1969,11 @@ class ContextMappingPipeline:
                 )
                 continue
 
-            # Extract explicit evidence for root-cause assertions
-            evidence = extract_explicit_evidence(cs.sentence.text)
-            cs.explicit_evidence = evidence
-
             # If sentence reads as a causal statement but lacks explicit evidence,
             # flag it as inferred. Do not change classification, only mark inference.
             if is_causal_statement(cs.sentence.text) and not evidence:
                 cs.is_inferred = True
+                setattr(cs.sentence, 'is_inferred', True)
                 # annotate explainability log
                 if cs.explainability_log:
                     cs.explainability_log.reasoning = (cs.explainability_log.reasoning or "") + " [INFERRED]"
@@ -1883,6 +1993,9 @@ class ContextMappingPipeline:
             if self.repair.should_repair(cs, self.audio_conf_threshold):
                 improved, repair_action = self.repair.repair(cs, classified_sentences)
                 repaired_map[i] = (improved, repair_action)
+                if repair_action:
+                    cs.sentence.raw_text = cs.sentence.text
+                    cs.sentence.text = improved
             else:
                 repaired_map[i] = (cs.sentence.text, None)
         logger.info(f"Stage 4: Repaired {len([r for r in repaired_map.values() if r[1]])} sentences")
@@ -2077,7 +2190,10 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
                 "required": cov.required,
                 "sentence_count": kt.section_content.get(sec_id, {}).get("sentence_count", cov.sentence_count),
                 "confidence": cov.confidence_score,
-                "risk": cov.risk_score
+                "risk": cov.risk_score,
+                "semantic_coverage_score": cov.semantic_coverage_score,
+                "dimensions": cov.dimensions or {},
+                "missing_sub_topics": cov.missing_sub_topics or []
             }
             for sec_id, cov in kt.coverage.items()
         },

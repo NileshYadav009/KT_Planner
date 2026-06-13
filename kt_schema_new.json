@@ -2,13 +2,44 @@
   "template_name": "PROJECT KT & HANDOVER DOCUMENT",
   "version": "1.0",
   "organization_configurable": true,
-  "multi_tenant": { "enabled": true },
+  "multi_tenant": {
+    "enabled": true
+  },
   "rbac": {
     "roles": [
-      { "id": "admin", "can_lock": true, "can_approve": true, "editable_sections": ["*"] },
-      { "id": "manager", "can_lock": false, "can_approve": true, "editable_sections": ["*"] },
-      { "id": "devops", "can_lock": false, "can_approve": false, "editable_sections": ["deployment_and_rollback", "common_failures", "danger_zones", "ownership_escalation"] },
-      { "id": "auditor", "can_lock": false, "can_approve": false, "editable_sections": [] }
+      {
+        "id": "admin",
+        "can_lock": true,
+        "can_approve": true,
+        "editable_sections": [
+          "*"
+        ]
+      },
+      {
+        "id": "manager",
+        "can_lock": false,
+        "can_approve": true,
+        "editable_sections": [
+          "*"
+        ]
+      },
+      {
+        "id": "devops",
+        "can_lock": false,
+        "can_approve": false,
+        "editable_sections": [
+          "deployment_and_rollback",
+          "common_failures",
+          "danger_zones",
+          "ownership_escalation"
+        ]
+      },
+      {
+        "id": "auditor",
+        "can_lock": false,
+        "can_approve": false,
+        "editable_sections": []
+      }
     ]
   },
   "governance": {
@@ -20,25 +51,59 @@
   "data_controls": {
     "encryption_at_rest": true,
     "encryption_in_transit": true,
-    "region_storage": ["us", "eu", "apac"],
+    "region_storage": [
+      "us",
+      "eu",
+      "apac"
+    ],
     "pii_detection_enabled": true,
     "pii_redaction_enabled": true
   },
-  "states": ["Draft", "In Progress", "Pending Review", "Completed", "Completed with Risk", "Rejected"],
+  "states": [
+    "Draft",
+    "In Progress",
+    "Pending Review",
+    "Completed",
+    "Completed with Risk",
+    "Rejected"
+  ],
   "completion_rules": {
     "allow_complete_with_risk": true,
     "risk_requires_manager_signoff": true
   },
   "templates": [
-    { "id": "default", "title": "Default KT Template", "extends": null, "business_unit": "global" },
-    { "id": "devops_handover", "title": "DevOps Handover", "extends": "default", "business_unit": "platform" },
-    { "id": "payments_kt", "title": "Payments KT", "extends": "default", "business_unit": "payments" }
+    {
+      "id": "default",
+      "title": "Default KT Template",
+      "extends": null,
+      "business_unit": "global"
+    },
+    {
+      "id": "devops_handover",
+      "title": "DevOps Handover",
+      "extends": "default",
+      "business_unit": "platform"
+    },
+    {
+      "id": "payments_kt",
+      "title": "Payments KT",
+      "extends": "default",
+      "business_unit": "payments"
+    }
   ],
   "extensions": {
     "enabled": true,
     "registry": [
-      { "id": "fintech", "title": "Fintech Extension", "toggle_per_project": true },
-      { "id": "healthcare", "title": "Healthcare Extension", "toggle_per_project": true }
+      {
+        "id": "fintech",
+        "title": "Fintech Extension",
+        "toggle_per_project": true
+      },
+      {
+        "id": "healthcare",
+        "title": "Healthcare Extension",
+        "toggle_per_project": true
+      }
     ]
   },
   "sections": [
@@ -91,11 +156,41 @@
           "type": "group",
           "required": true,
           "fields": [
-            { "id": "what_it_does", "label": "What does this system do (non-technical)?", "type": "text", "required": true },
-            { "id": "users", "label": "Who uses it?", "type": "multi_select", "options": ["B2B", "B2C", "Internal"], "required": true },
-            { "id": "critical_time", "label": "When is it most critical?", "type": "text", "required": true },
-            { "id": "business_impact", "label": "Business / revenue / compliance impact if down?", "type": "text", "required": true },
-            { "id": "worst_case", "label": "One-line worst-case failure scenario", "type": "text", "required": true }
+            {
+              "id": "what_it_does",
+              "label": "What does this system do (non-technical)?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "users",
+              "label": "Who uses it?",
+              "type": "multi_select",
+              "options": [
+                "B2B",
+                "B2C",
+                "Internal"
+              ],
+              "required": true
+            },
+            {
+              "id": "critical_time",
+              "label": "When is it most critical?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "business_impact",
+              "label": "Business / revenue / compliance impact if down?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "worst_case",
+              "label": "One-line worst-case failure scenario",
+              "type": "text",
+              "required": true
+            }
           ]
         },
         {
@@ -103,15 +198,29 @@
           "label": "Business Purpose",
           "type": "group",
           "fields": [
-            { "id": "problem_solved", "label": "What problem does this system solve?", "type": "text", "required": true },
-            { "id": "business_dependency", "label": "Why does the business depend on it?", "type": "text", "required": true }
+            {
+              "id": "problem_solved",
+              "label": "What problem does this system solve?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "business_dependency",
+              "label": "Why does the business depend on it?",
+              "type": "text",
+              "required": true
+            }
           ]
         },
         {
           "id": "business_criticality",
           "label": "Business Criticality",
           "type": "single_select",
-          "options": ["High", "Medium", "Low"],
+          "options": [
+            "High",
+            "Medium",
+            "Low"
+          ],
           "required": true
         },
         {
@@ -119,8 +228,18 @@
           "label": "Impact if System is Down",
           "type": "group",
           "fields": [
-            { "id": "what_breaks", "label": "What breaks?", "type": "text", "required": true },
-            { "id": "who_affected", "label": "Who is affected?", "type": "text", "required": true }
+            {
+              "id": "what_breaks",
+              "label": "What breaks?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "who_affected",
+              "label": "Who is affected?",
+              "type": "text",
+              "required": true
+            }
           ]
         },
         {
@@ -128,8 +247,25 @@
           "label": "Environments",
           "type": "group",
           "fields": [
-            { "id": "environment_list", "label": "Available Environments", "type": "multi_select", "options": ["Prod", "Staging", "QA", "Dev", "Other"], "required": true },
-            { "id": "ownership_split", "label": "Which environments DevOps owns vs supports?", "type": "text", "required": true }
+            {
+              "id": "environment_list",
+              "label": "Available Environments",
+              "type": "multi_select",
+              "options": [
+                "Prod",
+                "Staging",
+                "QA",
+                "Dev",
+                "Other"
+              ],
+              "required": true
+            },
+            {
+              "id": "ownership_split",
+              "label": "Which environments DevOps owns vs supports?",
+              "type": "text",
+              "required": true
+            }
           ]
         },
         {
@@ -139,7 +275,15 @@
           "type": "text",
           "required": true
         }
-      ]
+      ],
+      "sub_topics": [
+        "system name",
+        "business purpose",
+        "users",
+        "business impact",
+        "worst-case failure"
+      ],
+      "min_words": 25
     },
     {
       "id": "architecture_reference",
@@ -162,10 +306,34 @@
         "verified by incoming owner"
       ],
       "fields": [
-        { "id": "architecture_link", "label": "Link to detailed architecture documentation", "type": "url", "required": true },
-        { "id": "last_updated", "label": "Last Updated", "type": "date", "required": true },
-        { "id": "verified_by_incoming_owner", "label": "Verified by Incoming Owner", "type": "boolean", "required": true }
-      ]
+        {
+          "id": "architecture_link",
+          "label": "Link to detailed architecture documentation",
+          "type": "url",
+          "required": true
+        },
+        {
+          "id": "last_updated",
+          "label": "Last Updated",
+          "type": "date",
+          "required": true
+        },
+        {
+          "id": "verified_by_incoming_owner",
+          "label": "Verified by Incoming Owner",
+          "type": "boolean",
+          "required": true
+        }
+      ],
+      "sub_topics": [
+        "entry point",
+        "core services",
+        "database",
+        "cache",
+        "external dependencies",
+        "architecture diagram"
+      ],
+      "min_words": 25
     },
     {
       "id": "plain_english_notes",
@@ -182,7 +350,14 @@
         "takes longer than expected",
         "history",
         "pitfalls"
-      ]
+      ],
+      "sub_topics": [
+        "plain english explanation",
+        "tribal knowledge",
+        "pitfalls",
+        "workarounds"
+      ],
+      "min_words": 15
     },
     {
       "id": "monitoring_observability",
@@ -201,7 +376,15 @@
         "service health",
         "first response",
         "incidents are visible"
-      ]
+      ],
+      "sub_topics": [
+        "dashboards",
+        "alerts",
+        "metrics",
+        "on-call routing",
+        "first response"
+      ],
+      "min_words": 25
     },
     {
       "id": "disaster_recovery",
@@ -220,7 +403,15 @@
         "30 days",
         "infrastructure as code",
         "recreate kubernetes workloads"
-      ]
+      ],
+      "sub_topics": [
+        "backup schedule",
+        "retention period",
+        "restore procedure",
+        "dr testing",
+        "infrastructure recovery"
+      ],
+      "min_words": 25
     },
     {
       "id": "security_controls",
@@ -236,7 +427,15 @@
         "ecr",
         "vulnerability",
         "secrets"
-      ]
+      ],
+      "sub_topics": [
+        "secret management",
+        "vulnerability scanning",
+        "image scanning",
+        "access controls",
+        "compliance risks"
+      ],
+      "min_words": 25
     },
     {
       "id": "cost_optimization",
@@ -249,7 +448,15 @@
         "low traffic",
         "non-production",
         "cost savings"
-      ]
+      ],
+      "sub_topics": [
+        "cost drivers",
+        "spot instances",
+        "scheduled scaling",
+        "reserved capacity",
+        "savings opportunity"
+      ],
+      "min_words": 15
     },
     {
       "id": "day1_survival_checklist",
@@ -278,8 +485,20 @@
           "id": "required_access",
           "label": "Required Access & Tools",
           "type": "table",
-          "columns": ["Item", "Required", "Location/Link", "Safe on Day-1", "Notes"],
-          "columns_type": ["text", "boolean", "url", "boolean", "text"],
+          "columns": [
+            "Item",
+            "Required",
+            "Location/Link",
+            "Safe on Day-1",
+            "Notes"
+          ],
+          "columns_type": [
+            "text",
+            "boolean",
+            "url",
+            "boolean",
+            "text"
+          ],
           "rows": [
             "Cloud Console",
             "Git Repository",
@@ -310,7 +529,15 @@
             "gotchas"
           ]
         }
-      ]
+      ],
+      "sub_topics": [
+        "required access",
+        "first checks",
+        "safe actions",
+        "dashboards to review",
+        "pipelines to review"
+      ],
+      "min_words": 25
     },
     {
       "id": "deployment_and_rollback",
@@ -345,28 +572,100 @@
           "id": "deployment_steps",
           "label": "Normal Deployment Process",
           "type": "table",
-          "columns": ["Step", "Action", "Tool/Command", "Expected Result"],
+          "columns": [
+            "Step",
+            "Action",
+            "Tool/Command",
+            "Expected Result"
+          ],
           "min_rows": 3,
           "required": true
         },
-        { "id": "repo_link", "label": "Repo Link", "type": "url", "required": true },
-        { "id": "pipeline_link", "label": "Pipeline Link", "type": "url", "required": true },
-        { "id": "trigger_type", "label": "Trigger Type", "type": "single_select", "options": ["Manual", "Auto"], "required": true },
-        { "id": "deployment_window", "label": "Deployment Window", "type": "text", "required": true },
-        { "id": "pre_deployment_checks", "label": "Pre-deployment Checks", "type": "text", "required": true },
-        { "id": "post_deployment_validation", "label": "Post-deployment Validation", "type": "text", "required": true },
+        {
+          "id": "repo_link",
+          "label": "Repo Link",
+          "type": "url",
+          "required": true
+        },
+        {
+          "id": "pipeline_link",
+          "label": "Pipeline Link",
+          "type": "url",
+          "required": true
+        },
+        {
+          "id": "trigger_type",
+          "label": "Trigger Type",
+          "type": "single_select",
+          "options": [
+            "Manual",
+            "Auto"
+          ],
+          "required": true
+        },
+        {
+          "id": "deployment_window",
+          "label": "Deployment Window",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "pre_deployment_checks",
+          "label": "Pre-deployment Checks",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "post_deployment_validation",
+          "label": "Post-deployment Validation",
+          "type": "text",
+          "required": true
+        },
         {
           "id": "rollback_procedure",
           "label": "Rollback Procedure",
           "type": "group",
           "fields": [
-            { "id": "rollback_scenarios", "type": "table", "columns": ["Scenario", "Rollback Action", "Risk Level"], "required": true },
-            { "id": "rollback_trigger", "label": "Rollback Trigger", "type": "text", "required": true },
-            { "id": "rollback_approval", "label": "Who approves rollback?", "type": "text", "required": true },
-            { "id": "rollback_time", "label": "Expected rollback time", "type": "text", "required": true }
+            {
+              "id": "rollback_scenarios",
+              "type": "table",
+              "columns": [
+                "Scenario",
+                "Rollback Action",
+                "Risk Level"
+              ],
+              "required": true
+            },
+            {
+              "id": "rollback_trigger",
+              "label": "Rollback Trigger",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "rollback_approval",
+              "label": "Who approves rollback?",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "rollback_time",
+              "label": "Expected rollback time",
+              "type": "text",
+              "required": true
+            }
           ]
         }
-      ]
+      ],
+      "sub_topics": [
+        "trigger mechanism",
+        "pipeline steps",
+        "deployment window",
+        "rollback procedure",
+        "rollback approver",
+        "expected duration"
+      ],
+      "min_words": 25
     },
     {
       "id": "common_failures",
@@ -389,7 +688,21 @@
         "ticket link"
       ],
       "type": "table",
-      "columns": ["Issue/Symptom", "Likely Cause", "How to Fix", "Frequency", "KEDB / Ticket Link"]
+      "columns": [
+        "Issue/Symptom",
+        "Likely Cause",
+        "How to Fix",
+        "Frequency",
+        "KEDB / Ticket Link"
+      ],
+      "sub_topics": [
+        "issue symptom",
+        "root cause",
+        "fix procedure",
+        "owner or escalation",
+        "prevention"
+      ],
+      "min_words": 25
     },
     {
       "id": "known_bad_days",
@@ -405,10 +718,26 @@
         "times when deployments must be avoided"
       ],
       "fields": [
-        { "id": "high_traffic_periods", "type": "text" },
-        { "id": "month_end_windows", "type": "text" },
-        { "id": "deployment_blackout_times", "type": "text" }
-      ]
+        {
+          "id": "high_traffic_periods",
+          "type": "text"
+        },
+        {
+          "id": "month_end_windows",
+          "type": "text"
+        },
+        {
+          "id": "deployment_blackout_times",
+          "type": "text"
+        }
+      ],
+      "sub_topics": [
+        "risky windows",
+        "change freeze",
+        "business event",
+        "avoidance guidance"
+      ],
+      "min_words": 25
     },
     {
       "id": "danger_zones",
@@ -429,8 +758,25 @@
         "platform-wide outages"
       ],
       "type": "table",
-      "columns": ["Area/Action", "Why Dangerous", "Approval Required", "Emergency Only"],
-      "columns_type": ["text", "text", "boolean", "boolean"]
+      "columns": [
+        "Area/Action",
+        "Why Dangerous",
+        "Approval Required",
+        "Emergency Only"
+      ],
+      "columns_type": [
+        "text",
+        "text",
+        "boolean",
+        "boolean"
+      ],
+      "sub_topics": [
+        "what not to touch",
+        "why it is dangerous",
+        "approval required",
+        "blast radius"
+      ],
+      "min_words": 25
     },
     {
       "id": "ownership_escalation",
@@ -453,8 +799,25 @@
         "escalation channel"
       ],
       "type": "table",
-      "columns": ["Component / Area", "Owner / Team", "When to Contact", "Escalation Channel"],
-      "columns_type": ["text", "text", "text", "text"]
+      "columns": [
+        "Component / Area",
+        "Owner / Team",
+        "When to Contact",
+        "Escalation Channel"
+      ],
+      "columns_type": [
+        "text",
+        "text",
+        "text",
+        "text"
+      ],
+      "sub_topics": [
+        "primary owner",
+        "escalation path",
+        "contact channel",
+        "on-call rotation"
+      ],
+      "min_words": 25
     },
     {
       "id": "first_30_day_plan",
@@ -474,11 +837,34 @@
         "independent ownership"
       ],
       "fields": [
-        { "id": "week1", "label": "Week 1", "value": "Observe, shadow, read-only" },
-        { "id": "week2", "label": "Week 2", "value": "Non-prod changes" },
-        { "id": "week3", "label": "Week 3", "value": "Prod deployment with supervision" },
-        { "id": "week4", "label": "Week 4", "value": "Independent ownership" }
-      ]
+        {
+          "id": "week1",
+          "label": "Week 1",
+          "value": "Observe, shadow, read-only"
+        },
+        {
+          "id": "week2",
+          "label": "Week 2",
+          "value": "Non-prod changes"
+        },
+        {
+          "id": "week3",
+          "label": "Week 3",
+          "value": "Prod deployment with supervision"
+        },
+        {
+          "id": "week4",
+          "label": "Week 4",
+          "value": "Independent ownership"
+        }
+      ],
+      "sub_topics": [
+        "week one actions",
+        "first month goals",
+        "handover milestones",
+        "validation tasks"
+      ],
+      "min_words": 25
     },
     {
       "id": "open_responsibilities",
@@ -549,33 +935,27 @@
         {
           "id": "recurring_responsibilities",
           "type": "table",
-          "columns": ["Activity", "Frequency", "Trigger", "Owner Before", "Owner After"]
+          "columns": [
+            "Activity",
+            "Frequency",
+            "Trigger",
+            "Owner Before",
+            "Owner After"
+          ]
         }
-      ]
+      ],
+      "sub_topics": [
+        "pending work",
+        "handover owner",
+        "due date",
+        "transition dependency"
+      ],
+      "min_words": 25
     },
     {
       "id": "handover_completion",
       "title": "HANDOVER COMPLETION CHECK",
       "required": true,
-      "hints": [
-        "handover completion check",
-        "replacement can deploy safely",
-        "replacement understands rollback",
-        "replacement knows danger zones",
-        "escalation paths are clear",
-        "architecture verified by new owner",
-        "kt status",
-        "complete",
-        "needs follow-up"
-      ],
-      "fields": [
-        { "id": "can_deploy", "label": "Replacement can deploy safely", "type": "boolean" },
-        { "id": "understands_rollback", "type": "boolean" },
-        { "id": "knows_danger_zones", "type": "boolean" },
-        { "id": "escalation_clear", "type": "boolean" },
-        { "id": "architecture_verified", "type": "boolean" },
-        { "id": "kt_status", "type": "single_select", "options": ["Complete", "Needs Follow-up"] }
-      ],
       "hints": [
         "replacement can deploy safely",
         "rollback",
@@ -584,19 +964,82 @@
         "architecture verified",
         "kt status",
         "sign off"
-      ]
+      ],
+      "fields": [
+        {
+          "id": "can_deploy",
+          "label": "Replacement can deploy safely",
+          "type": "boolean"
+        },
+        {
+          "id": "understands_rollback",
+          "type": "boolean"
+        },
+        {
+          "id": "knows_danger_zones",
+          "type": "boolean"
+        },
+        {
+          "id": "escalation_clear",
+          "type": "boolean"
+        },
+        {
+          "id": "architecture_verified",
+          "type": "boolean"
+        },
+        {
+          "id": "kt_status",
+          "type": "single_select",
+          "options": [
+            "Complete",
+            "Needs Follow-up"
+          ]
+        }
+      ],
+      "sub_topics": [
+        "required artifacts",
+        "review status",
+        "completion criteria",
+        "signoff readiness"
+      ],
+      "min_words": 25
     },
     {
       "id": "signoff",
       "title": "Sign-off",
       "required": true,
-      "hints": ["outgoing owner", "incoming owner", "sign-off date", "approved"],
+      "hints": [
+        "outgoing owner",
+        "incoming owner",
+        "sign-off date",
+        "approved"
+      ],
       "fields": [
-        { "id": "outgoing_owner", "type": "text" },
-        { "id": "incoming_owner", "type": "text" },
-        { "id": "date", "type": "date" },
-        { "id": "approved", "label": "Approved by incoming owner", "type": "boolean" }
-      ]
+        {
+          "id": "outgoing_owner",
+          "type": "text"
+        },
+        {
+          "id": "incoming_owner",
+          "type": "text"
+        },
+        {
+          "id": "date",
+          "type": "date"
+        },
+        {
+          "id": "approved",
+          "label": "Approved by incoming owner",
+          "type": "boolean"
+        }
+      ],
+      "sub_topics": [
+        "approver",
+        "date",
+        "acceptance",
+        "risk acknowledgement"
+      ],
+      "min_words": 25
     }
   ]
 }
