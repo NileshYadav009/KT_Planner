@@ -1,5 +1,5 @@
 {
-  "confidence_accept_threshold": 0.55,
+  "confidence_accept_threshold": 0.42,
   "implementation_indicators": [
     "kubectl","docker","compose","helm","apply -f","systemctl","service",
     "install ","pip install","npm install","sh ","bash ","curl ",".yaml",".yml",

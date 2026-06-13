@@ -420,6 +420,18 @@ def build_section_paragraphs(transcript: str):
     except Exception as e:
         print(f"[ERROR] build_section_paragraphs failed: {e}")
         traceback.print_exc()
+        fallback_text = " ".join(sent.text for sent in _prepare_sentences(transcript)) or transcript.strip()
+        if fallback_text:
+            return {
+                "system_overview": [
+                    {
+                        "text": fallback_text,
+                        "confidence": 0.5,
+                        "pass_count": 2,
+                        "source": "local_fallback"
+                    }
+                ]
+            }
         return {}
 
 

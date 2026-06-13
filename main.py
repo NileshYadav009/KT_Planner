@@ -256,6 +256,9 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 'sentence_count': cov.sentence_count,
                 'confidence': cov.confidence_score,
                 'risk': cov.risk_score,
+                'semantic_coverage_score': getattr(cov, 'semantic_coverage_score', 0.0),
+                'dimensions': getattr(cov, 'dimensions', {}) or {},
+                'missing_sub_topics': getattr(cov, 'missing_sub_topics', []) or [],
                 'content': [s.get('text', '') for s in coverage_sentences],
                 'sentences': coverage_sentences,
                 'blocks': [b.to_dict() for b in blocks]  # NEW: include blocks for frontend

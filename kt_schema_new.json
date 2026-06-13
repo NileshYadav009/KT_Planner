@@ -46,6 +46,14 @@
       "id": "system_overview",
       "title": "SYSTEM OVERVIEW",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "system name",
+        "business purpose",
+        "users",
+        "business impact",
+        "worst-case failure"
+      ],
       "hints": [
         "system name",
         "what does this system do",
@@ -145,6 +153,15 @@
       "id": "architecture_reference",
       "title": "Architecture Reference",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "entry point",
+        "core services",
+        "database",
+        "cache",
+        "external dependencies",
+        "architecture diagram"
+      ],
       "hints": [
         "architecture reference",
         "architecture documentation",
@@ -172,6 +189,13 @@
       "title": "Plain-English Notes",
       "description": "Tribal knowledge, shortcuts, sharp edges, history",
       "required": false,
+      "min_words": 15,
+      "sub_topics": [
+        "plain english explanation",
+        "tribal knowledge",
+        "pitfalls",
+        "workarounds"
+      ],
       "hints": [
         "tribal knowledge",
         "shortcuts",
@@ -188,6 +212,14 @@
       "id": "monitoring_observability",
       "title": "MONITORING & OBSERVABILITY",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "dashboards",
+        "alerts",
+        "metrics",
+        "on-call routing",
+        "first response"
+      ],
       "hints": [
         "monitoring",
         "observability",
@@ -207,6 +239,14 @@
       "id": "disaster_recovery",
       "title": "DISASTER RECOVERY",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "backup schedule",
+        "retention period",
+        "restore procedure",
+        "dr testing",
+        "infrastructure recovery"
+      ],
       "hints": [
         "disaster recovery",
         "backup",
@@ -226,6 +266,14 @@
       "id": "security_controls",
       "title": "SECURITY",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "secret management",
+        "vulnerability scanning",
+        "image scanning",
+        "access controls",
+        "compliance risks"
+      ],
       "hints": [
         "security scanning",
         "trivy",
@@ -242,6 +290,14 @@
       "id": "cost_optimization",
       "title": "COST OPTIMIZATION",
       "required": false,
+      "min_words": 15,
+      "sub_topics": [
+        "cost drivers",
+        "spot instances",
+        "scheduled scaling",
+        "reserved capacity",
+        "savings opportunity"
+      ],
       "hints": [
         "cost optimization",
         "spot instances",
@@ -255,6 +311,14 @@
       "id": "day1_survival_checklist",
       "title": "DAY-1 SURVIVAL CHECKLIST",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "required access",
+        "first checks",
+        "safe actions",
+        "dashboards to review",
+        "pipelines to review"
+      ],
       "hints": [
         "required access",
         "tools",
@@ -316,6 +380,15 @@
       "id": "deployment_and_rollback",
       "title": "DEPLOYMENT & ROLLBACK",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "trigger mechanism",
+        "pipeline steps",
+        "deployment window",
+        "rollback procedure",
+        "rollback approver",
+        "expected duration"
+      ],
       "hints": [
         "normal deployment process",
         "exact steps",
@@ -372,6 +445,14 @@
       "id": "common_failures",
       "title": "COMMON FAILURES & FIXES",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "issue symptom",
+        "root cause",
+        "fix procedure",
+        "owner or escalation",
+        "prevention"
+      ],
       "hints": [
         "common production issue",
         "common issue",
@@ -395,6 +476,13 @@
       "id": "known_bad_days",
       "title": "KNOWN BAD DAYS / WINDOWS",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "risky windows",
+        "change freeze",
+        "business event",
+        "avoidance guidance"
+      ],
       "hints": [
         "known bad days",
         "windows",
@@ -414,6 +502,13 @@
       "id": "danger_zones",
       "title": "DANGER ZONES (DO NOT TOUCH)",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "what not to touch",
+        "why it is dangerous",
+        "approval required",
+        "blast radius"
+      ],
       "hints": [
         "danger zones",
         "dangerous area",
@@ -436,6 +531,13 @@
       "id": "ownership_escalation",
       "title": "OWNERSHIP & ESCALATION",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "primary owner",
+        "escalation path",
+        "contact channel",
+        "on-call rotation"
+      ],
       "hints": [
         "ownership",
         "escalation path",
@@ -460,6 +562,13 @@
       "id": "first_30_day_plan",
       "title": "FIRST 30-DAY OWNERSHIP PLAN",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "week one actions",
+        "first month goals",
+        "handover milestones",
+        "validation tasks"
+      ],
       "hints": [
         "first 30-day",
         "week 1",
@@ -484,6 +593,13 @@
       "id": "open_responsibilities",
       "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "pending work",
+        "handover owner",
+        "due date",
+        "transition dependency"
+      ],
       "hints": [
         "open responsibilities",
         "transition plan",
@@ -557,6 +673,13 @@
       "id": "handover_completion",
       "title": "HANDOVER COMPLETION CHECK",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "required artifacts",
+        "review status",
+        "completion criteria",
+        "signoff readiness"
+      ],
       "hints": [
         "handover completion check",
         "replacement can deploy safely",
@@ -590,6 +713,13 @@
       "id": "signoff",
       "title": "Sign-off",
       "required": true,
+      "min_words": 25,
+      "sub_topics": [
+        "approver",
+        "date",
+        "acceptance",
+        "risk acknowledgement"
+      ],
       "hints": ["outgoing owner", "incoming owner", "sign-off date", "approved"],
       "fields": [
         { "id": "outgoing_owner", "type": "text" },
