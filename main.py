@@ -22,11 +22,14 @@ DEFAULT_WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 DEFAULT_WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "2"))
 
 app = FastAPI()
+
+# CORS configuration - restrict to allowed origins
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"]
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 # Serve the frontend static files
@@ -431,6 +434,14 @@ async def receive_feedback(payload: dict):
     corrected_section = payload.get('corrected_classification')
     if sentence_id is None or not corrected_section:
         raise HTTPException(status_code=400, detail='sentence_id and corrected_classification required')
+    
+    # Validate corrected_section against schema
+    valid_section_ids = {s["id"] for s in SCHEMA}
+    if corrected_section not in valid_section_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid section id '{corrected_section}'. Valid options: {sorted(valid_section_ids)}"
+        )
 
     with JOB_LOCK:
         job = JOB_QUEUE.get(job_id)

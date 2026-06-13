@@ -220,16 +220,16 @@ class SemanticClauseSplitter:
         clause_embeddings = self.model.encode(clauses, convert_to_tensor=True)
         
         # Check if different clauses match different sections strongly
-        max_scores = []
+        best_sections = []
         for clause_embed in clause_embeddings:
             scores = {}
             for sec_id, sec_embed in section_embeddings.items():
                 sim = util.pytorch_cos_sim(clause_embed, sec_embed).item()
                 scores[sec_id] = sim
-            max_scores.append(max(scores.values()))
+            best_sections.append(max(scores, key=scores.get))
         
         # If clauses have different top-scoring sections, it's mixed
-        return len(set(max_scores)) > 1
+        return len(set(best_sections)) > 1
 
 
 # ============================================================================

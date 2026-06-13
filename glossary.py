@@ -164,8 +164,8 @@ def apply_glossary_corrections(text: str, sentence_confidence: float, min_confid
         for t in terms:
             if lowered == t.lower():
                 return t
-            # Do NOT perform fuzzy reinterpretation. If ambiguity exists, preserve original token.
-            return tok
+        # Do NOT perform fuzzy reinterpretation. If ambiguity exists, preserve original token.
+        return tok
 
     new_tokens = []
     for tok in tokens:
