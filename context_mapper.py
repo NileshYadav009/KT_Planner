@@ -1023,11 +1023,19 @@ def _semantic_coverage_score(
         covered_topics = []
         missing_topics = []
         lower_sentences = [s.lower() for s in sentences]
+        stop_terms = {"what", "when", "where", "which", "who", "why", "how", "not", "and", "the", "for", "with"}
         for topic in sub_topics:
-            topic_terms = [term for term in re.split(r"[^a-z0-9]+", topic.lower()) if len(term) > 2]
+            topic_terms = [
+                term
+                for term in re.split(r"[^a-z0-9]+", topic.lower())
+                if len(term) > 2 and term not in stop_terms
+            ]
+            if len(topic_terms) <= 1:
+                required_matches = 1
+            else:
+                required_matches = max(1, min(len(topic_terms), (len(topic_terms) + 1) // 2))
             is_covered = any(
-                all(term in sentence for term in topic_terms)
-                or (topic_terms and any(term in sentence for term in topic_terms))
+                sum(1 for term in topic_terms if term in sentence) >= required_matches
                 for sentence in lower_sentences
             )
             if is_covered:
