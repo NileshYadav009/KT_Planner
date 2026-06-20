@@ -11,7 +11,7 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from sentence_transformers import util
@@ -60,7 +60,10 @@ def load_models():
         MODEL = WhisperModel(model_name, device=device, compute_type=compute_type)
 
     if MAPPER_PIPELINE is None:
-        MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA)
+        MAPPER_PIPELINE = ContextMappingPipeline(
+            SCHEMA,
+            llm_fallback_fn=gemini_refiner if GEMINI_ENABLED else None
+        )
 
 def build_coverage(classified):
     coverage = {}
@@ -213,6 +216,12 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
 
         kt = MAPPER_PIPELINE.process(job_id, transcript, result.get('segments', []))
 
+        paragraph_data = {}
+        try:
+            paragraph_data = build_section_paragraphs(transcript) or {}
+        except Exception:
+            paragraph_data = {}
+
         coverage = {}
         missing_required = kt.missing_required_sections or []
         for sec_id, cov in kt.coverage.items():
@@ -264,6 +273,8 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
         kt_structured = serialize_kt(kt)
+        if paragraph_data:
+            kt_structured["paragraphs"] = paragraph_data
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
@@ -337,7 +348,14 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 JOB_QUEUE[job_id]["progress"] = 85
 
 
-        mapped_fields = {}
+        field_analysis = {
+            sec_id: {
+                "chunks": info.get("content", []),
+                "scores": [float(info.get("confidence", 0.0))] * len(info.get("content", []))
+            }
+            for sec_id, info in coverage.items()
+        }
+        mapped_fields = map_analysis_to_fields(field_analysis, SCHEMA)
 
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {

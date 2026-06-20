@@ -46,6 +46,13 @@
       "id": "system_overview",
       "title": "SYSTEM OVERVIEW",
       "required": true,
+      "sub_topics": [
+        "system name",
+        "business purpose",
+        "who uses it",
+        "business criticality",
+        "impact if system is down"
+      ],
       "hints": [
         "system name",
         "what does this system do",
@@ -145,6 +152,11 @@
       "id": "architecture_reference",
       "title": "Architecture Reference",
       "required": true,
+      "sub_topics": [
+        "architecture link",
+        "last updated",
+        "verified by incoming owner"
+      ],
       "hints": [
         "architecture reference",
         "architecture documentation",
@@ -172,6 +184,13 @@
       "title": "Plain-English Notes",
       "description": "Tribal knowledge, shortcuts, sharp edges, history",
       "required": false,
+      "sub_topics": [
+        "tribal knowledge",
+        "shortcuts",
+        "sharp edges",
+        "cache invalidation",
+        "workarounds"
+      ],
       "hints": [
         "tribal knowledge",
         "shortcuts",
@@ -188,6 +207,13 @@
       "id": "monitoring_observability",
       "title": "MONITORING & OBSERVABILITY",
       "required": true,
+      "sub_topics": [
+        "dashboards",
+        "alerts",
+        "metrics",
+        "first response",
+        "service health"
+      ],
       "hints": [
         "monitoring",
         "observability",
@@ -207,6 +233,13 @@
       "id": "disaster_recovery",
       "title": "DISASTER RECOVERY",
       "required": true,
+      "sub_topics": [
+        "backup",
+        "restore procedure",
+        "rds snapshots",
+        "dr testing",
+        "retention"
+      ],
       "hints": [
         "disaster recovery",
         "backup",
@@ -226,6 +259,13 @@
       "id": "security_controls",
       "title": "SECURITY",
       "required": true,
+      "sub_topics": [
+        "security scanning",
+        "secret management",
+        "container images",
+        "amazon ecr",
+        "vulnerability"
+      ],
       "hints": [
         "security scanning",
         "trivy",
@@ -242,6 +282,13 @@
       "id": "cost_optimization",
       "title": "COST OPTIMIZATION",
       "required": false,
+      "sub_topics": [
+        "spot instances",
+        "scheduled scaling",
+        "low traffic",
+        "non-production",
+        "cost savings"
+      ],
       "hints": [
         "cost optimization",
         "spot instances",
@@ -255,6 +302,13 @@
       "id": "day1_survival_checklist",
       "title": "DAY-1 SURVIVAL CHECKLIST",
       "required": true,
+      "sub_topics": [
+        "required access",
+        "tools",
+        "first safe actions",
+        "read-only checks",
+        "actions not to perform"
+      ],
       "hints": [
         "required access",
         "tools",
@@ -316,6 +370,13 @@
       "id": "deployment_and_rollback",
       "title": "DEPLOYMENT & ROLLBACK",
       "required": true,
+      "sub_topics": [
+        "normal deployment process",
+        "deployment window",
+        "pre-deployment checks",
+        "rollback procedure",
+        "expected rollback time"
+      ],
       "hints": [
         "normal deployment process",
         "exact steps",
@@ -372,6 +433,13 @@
       "id": "common_failures",
       "title": "COMMON FAILURES & FIXES",
       "required": true,
+      "sub_topics": [
+        "issue symptom",
+        "likely cause",
+        "how to fix",
+        "frequency",
+        "ticket link"
+      ],
       "hints": [
         "common production issue",
         "common issue",
@@ -395,6 +463,12 @@
       "id": "known_bad_days",
       "title": "KNOWN BAD DAYS / WINDOWS",
       "required": true,
+      "sub_topics": [
+        "high traffic periods",
+        "month-end",
+        "audit windows",
+        "deployment blackout times"
+      ],
       "hints": [
         "known bad days",
         "windows",
@@ -414,6 +488,12 @@
       "id": "danger_zones",
       "title": "DANGER ZONES (DO NOT TOUCH)",
       "required": true,
+      "sub_topics": [
+        "area or action",
+        "why dangerous",
+        "approval required",
+        "emergency only"
+      ],
       "hints": [
         "danger zones",
         "dangerous area",
@@ -436,6 +516,12 @@
       "id": "ownership_escalation",
       "title": "OWNERSHIP & ESCALATION",
       "required": true,
+      "sub_topics": [
+        "component or area",
+        "owner or team",
+        "when to contact",
+        "escalation channel"
+      ],
       "hints": [
         "ownership",
         "escalation path",
@@ -460,6 +546,12 @@
       "id": "first_30_day_plan",
       "title": "FIRST 30-DAY OWNERSHIP PLAN",
       "required": true,
+      "sub_topics": [
+        "week 1 observe and shadow",
+        "week 2 non-prod changes",
+        "week 3 prod deployment with supervision",
+        "week 4 independent ownership"
+      ],
       "hints": [
         "first 30-day",
         "week 1",
@@ -484,6 +576,12 @@
       "id": "open_responsibilities",
       "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
       "required": true,
+      "sub_topics": [
+        "rules",
+        "open tasks",
+        "recurring responsibilities",
+        "incoming owner decision"
+      ],
       "hints": [
         "open responsibilities",
         "transition plan",
@@ -557,6 +655,14 @@
       "id": "handover_completion",
       "title": "HANDOVER COMPLETION CHECK",
       "required": true,
+      "sub_topics": [
+        "can deploy safely",
+        "understands rollback",
+        "knows danger zones",
+        "escalation clear",
+        "architecture verified",
+        "kt status"
+      ],
       "hints": [
         "handover completion check",
         "replacement can deploy safely",

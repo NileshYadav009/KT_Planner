@@ -19,7 +19,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from collections import defaultdict
 
 import importlib.util
@@ -130,12 +130,16 @@ class Sentence:
     raw_text: Optional[str] = None  # Pre-cleaned version
     audio_confidence: float = 0.5
     segment_ids: List[int] = None  # Which Whisper segments contributed
+    explicit_evidence: List[str] = None
+    is_inferred: bool = False
     
     def __post_init__(self):
         if self.segment_ids is None:
             self.segment_ids = []
         if self.raw_text is None:
             self.raw_text = self.text
+        if self.explicit_evidence is None:
+            self.explicit_evidence = []
 
 
 def segment_sentences(
@@ -527,129 +531,17 @@ class ContextClassifier:
                 is_unassigned=True
             )
         
-        # Extract entities using GLiNER (tools, environments, services, owners, etc.)
-        extracted_entities = self.entity_extractor.get_context_entities(sentence.text)
-        
-        # Embed sentence (reuse precomputed embedding when available)
-        if sent_embedding is None:
-            sent_embedding = self._encode_texts(sentence.text)
+        classifications, extracted_entities, rule_match = self._score_sentence_candidates(
+            sentence,
+            sent_embedding=sent_embedding,
+            context_embedding=context_embedding,
+            context_text=context_text,
+            neighbor_embeddings=neighbor_embeddings,
+            alpha=alpha,
+            beta=beta,
+        )
 
-        # Compute similarities to all sections
-        classifications = []
-        sent_text_lower = (sentence.text or "").lower()
-        
-        for sec_id, sec_embedding in self.section_embeddings.items():
-            base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
-
-            # Incorporate neighbor or windowed context similarity when provided
-            context_sim = 0.0
-            if context_embedding is not None:
-                try:
-                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
-                except Exception:
-                    context_sim = 0.0
-            elif context_text:
-                try:
-                    context_embedding = self._encode_texts(context_text)
-                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
-                except Exception:
-                    context_sim = 0.0
-            elif neighbor_embeddings:
-                sims = [float(util.cos_sim(nb, sec_embedding)[0][0]) for nb in neighbor_embeddings]
-                if sims:
-                    context_sim = float(np.mean(sims))
-
-            # Keyword matching boost: phrase-aware hint matching
-            keyword_boost = 0.0
-            hints = getattr(self, '_section_hints', {}).get(sec_id, [])
-            if hints:
-                for hint in hints:
-                    hint_lower = hint.lower().strip()
-                    if not hint_lower:
-                        continue
-                    if " " in hint_lower:
-                        if hint_lower in sent_text_lower:
-                            keyword_boost += 0.08
-                    else:
-                        if re.search(rf"\b{re.escape(hint_lower)}\b", sent_text_lower):
-                            keyword_boost += 0.05
-                keyword_boost = min(0.35, keyword_boost)
-
-            # Penalize catch-all sections when specialized routing rules match better
-            overview_penalty = 0.0
-            if sec_id == "system_overview":
-                specialized = find_overview_reassignment(sentence.text)
-                if specialized:
-                    overview_penalty = 0.25
-
-            # Combined score — prefer sentence-level similarity but allow context and keywords to influence
-            combined = float(alpha * base_sim + beta * context_sim + keyword_boost - overview_penalty)
-
-            # Always consider top candidates, thresholding later
-            classifications.append(Classification(
-                section_id=sec_id,
-                section_title=self.section_metadata[sec_id]["title"],
-                confidence=combined,
-                similarity_score=base_sim,
-                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}",
-                entities=extracted_entities if extracted_entities else None
-            ))
-        
-        # Deterministic routing rules override weak semantic matches
-        rule_match = match_section_rules(sentence.text)
-        if rule_match:
-            meta = self.section_metadata.get(rule_match.section_id, {})
-            rule_classification = Classification(
-                section_id=rule_match.section_id,
-                section_title=meta.get("title", rule_match.section_id),
-                confidence=rule_match.confidence,
-                similarity_score=rule_match.confidence,
-                reason=f"Rule match: {rule_match.matched_pattern}",
-                entities=extracted_entities if extracted_entities else None
-            )
-            classifications.insert(0, rule_classification)
-
-        # Sort by combined confidence and take top_k
-        classifications.sort(key=lambda x: x.confidence, reverse=True)
-        
-        # RERANKING STAGE: Use cross-encoder to rerank top 5 candidates
-        top_candidates = classifications[:5]  # Get top 5 for cross-encoder
-        if self.cross_encoder and len(top_candidates) > 0:
-            try:
-                # Prepare pairs (sentence, section_title) for cross-encoder
-                pairs = [(sentence.text, c.section_title) for c in top_candidates]
-                cross_scores = self.cross_encoder.predict(pairs)
-                
-                # Update confidence scores with cross-encoder scores (normalize to 0-1)
-                for i, c in enumerate(top_candidates):
-                    if c.reason and c.reason.startswith("Rule match:"):
-                        continue
-                    cross_score = float(cross_scores[i])
-                    # Blend embedding score with cross-encoder score
-                    # Cross-encoder often outputs unbounded scores, so we use sigmoid-like normalization
-                    normalized_cross = 1.0 / (1.0 + np.exp(-cross_score))
-                    c.confidence = 0.4 * c.confidence + 0.6 * normalized_cross
-                    c.reason = f"Embedding={c.similarity_score:.3f}, CrossEncoder={cross_score:.3f}, Blended={c.confidence:.3f}"
-                
-                # Re-sort after reranking
-                top_candidates.sort(key=lambda x: x.confidence, reverse=True)
-                classifications = top_candidates + classifications[5:]
-                logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
-            except Exception as e:
-                logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
-
-        # Preserve high-confidence rule matches after cross-encoder blending
-        if rule_match:
-            meta = self.section_metadata.get(rule_match.section_id, {})
-            classifications.insert(0, Classification(
-                section_id=rule_match.section_id,
-                section_title=meta.get("title", rule_match.section_id),
-                confidence=rule_match.confidence,
-                similarity_score=rule_match.confidence,
-                reason=f"Rule match: {rule_match.matched_pattern}",
-                entities=extracted_entities if extracted_entities else None
-            ))
-            classifications.sort(key=lambda x: x.confidence, reverse=True)
+        classifications = self._rerank_candidates(sentence.text, classifications, rule_match)
         
         # Filter by a relaxed threshold for secondary candidates
         primary = None
@@ -708,6 +600,132 @@ class ContextClassifier:
             cs.explainability_log.reasoning = cs.explainability_log.reasoning + " | GLOSSARY_WARNINGS: " + ", ".join(warnings)
 
         return cs
+
+    def _score_sentence_candidates(
+        self,
+        sentence: Sentence,
+        sent_embedding=None,
+        context_embedding=None,
+        context_text: Optional[str] = None,
+        neighbor_embeddings: List = None,
+        alpha: float = 0.7,
+        beta: float = 0.3,
+    ) -> Tuple[List[Classification], Any, Optional[Any]]:
+        """Score a sentence against all sections before cross-encoder reranking."""
+        extracted_entities = self.entity_extractor.get_context_entities(sentence.text)
+
+        if sent_embedding is None:
+            sent_embedding = self._encode_texts(sentence.text)
+
+        classifications = []
+        sent_text_lower = (sentence.text or "").lower()
+
+        for sec_id, sec_embedding in self.section_embeddings.items():
+            base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
+
+            context_sim = 0.0
+            if context_embedding is not None:
+                try:
+                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
+                except Exception:
+                    context_sim = 0.0
+            elif context_text:
+                try:
+                    context_embedding = self._encode_texts(context_text)
+                    context_sim = float(util.cos_sim(context_embedding, sec_embedding)[0][0])
+                except Exception:
+                    context_sim = 0.0
+            elif neighbor_embeddings:
+                sims = [float(util.cos_sim(nb, sec_embedding)[0][0]) for nb in neighbor_embeddings]
+                if sims:
+                    context_sim = float(np.mean(sims))
+
+            keyword_boost = 0.0
+            hints = getattr(self, '_section_hints', {}).get(sec_id, [])
+            if hints:
+                for hint in hints:
+                    hint_lower = hint.lower().strip()
+                    if not hint_lower:
+                        continue
+                    if " " in hint_lower:
+                        if hint_lower in sent_text_lower:
+                            keyword_boost += 0.08
+                    else:
+                        if re.search(rf"\b{re.escape(hint_lower)}\b", sent_text_lower):
+                            keyword_boost += 0.05
+                keyword_boost = min(0.35, keyword_boost)
+
+            overview_penalty = 0.0
+            if sec_id == "system_overview":
+                specialized = find_overview_reassignment(sentence.text)
+                if specialized:
+                    overview_penalty = 0.25
+
+            combined = float(alpha * base_sim + beta * context_sim + keyword_boost - overview_penalty)
+            classifications.append(Classification(
+                section_id=sec_id,
+                section_title=self.section_metadata[sec_id]["title"],
+                confidence=combined,
+                similarity_score=base_sim,
+                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}",
+                entities=extracted_entities if extracted_entities else None
+            ))
+
+        rule_match = match_section_rules(sentence.text)
+        if rule_match:
+            meta = self.section_metadata.get(rule_match.section_id, {})
+            classifications.insert(0, Classification(
+                section_id=rule_match.section_id,
+                section_title=meta.get("title", rule_match.section_id),
+                confidence=rule_match.confidence,
+                similarity_score=rule_match.confidence,
+                reason=f"Rule match: {rule_match.matched_pattern}",
+                entities=extracted_entities if extracted_entities else None
+            ))
+
+        classifications.sort(key=lambda x: x.confidence, reverse=True)
+        return classifications, extracted_entities, rule_match
+
+    def _rerank_candidates(
+        self,
+        sentence_text: str,
+        classifications: List[Classification],
+        rule_match=None,
+        cross_scores=None,
+    ) -> List[Classification]:
+        """Apply cross-encoder reranking to an existing candidate list."""
+        top_candidates = classifications[:5]
+        if self.cross_encoder and len(top_candidates) > 0:
+            try:
+                if cross_scores is None:
+                    pairs = [(sentence_text, c.section_title) for c in top_candidates]
+                    cross_scores = self.cross_encoder.predict(pairs)
+                for i, c in enumerate(top_candidates):
+                    if c.reason and c.reason.startswith("Rule match:"):
+                        continue
+                    cross_score = float(cross_scores[i])
+                    normalized_cross = 1.0 / (1.0 + np.exp(-cross_score))
+                    c.confidence = 0.4 * c.confidence + 0.6 * normalized_cross
+                    c.reason = f"Embedding={c.similarity_score:.3f}, CrossEncoder={cross_score:.3f}, Blended={c.confidence:.3f}"
+                top_candidates.sort(key=lambda x: x.confidence, reverse=True)
+                classifications = top_candidates + classifications[5:]
+                logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
+            except Exception as e:
+                logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
+
+        if rule_match:
+            meta = self.section_metadata.get(rule_match.section_id, {})
+            classifications.insert(0, Classification(
+                section_id=rule_match.section_id,
+                section_title=meta.get("title", rule_match.section_id),
+                confidence=rule_match.confidence,
+                similarity_score=rule_match.confidence,
+                reason=f"Rule match: {rule_match.matched_pattern}",
+                entities=None
+            ))
+            classifications.sort(key=lambda x: x.confidence, reverse=True)
+
+        return classifications
 
 
 # ============================================================================
@@ -964,7 +982,88 @@ class SectionCoverage:
     sentence_count: int  # Total sentences across all blocks
     confidence_score: float
     risk_score: float
-    blocks: List[TopicBlock]  # Topic-coherent blocks instead of scattered sentences
+    coverage_score: float = 0.0
+    blocks: List[TopicBlock] = field(default_factory=list)  # Topic-coherent blocks instead of scattered sentences
+
+
+def semantic_coverage_score(
+    sentences: List[Sentence],
+    block_confidences: List[float],
+    section_meta: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Compute a semantic coverage score for a section.
+
+    The score favors coherent, actionable, and complete coverage over raw sentence count.
+    """
+    import math
+
+    if not sentences:
+        return {
+            "status": "missing",
+            "scs": 0.0,
+            "dimensions": {
+                "confidence": 0.0,
+                "depth": 0.0,
+                "actionability": 0.0,
+                "completeness": 0.0,
+            },
+        }
+
+    strong_scores = [score for score in block_confidences if score >= 0.35]
+    if not strong_scores:
+        confidence = float(np.mean(block_confidences)) if block_confidences else 0.0
+    else:
+        confidence = float(np.mean(sorted(strong_scores, reverse=True)[:3]))
+
+    total_words = sum(len(sentence.text.split()) for sentence in sentences)
+    min_words = int(section_meta.get("min_words", 30))
+    depth = min(1.0, math.log1p(total_words) / math.log1p(min_words * 3))
+
+    combined = " ".join(sentence.text for sentence in sentences)
+    actionability_signals = [
+        bool(re.search(r"https?://", combined)),
+        bool(re.search(r"\b\d{1,5}\s*(min|hour|sec)s?\b", combined, re.I)),
+        bool(re.search(r"[A-Z][a-z]+\s+[A-Z][a-z]+", combined)),
+        bool(re.search(r"`[^`]+`|kubectl|helm|terraform|argocd|docker", combined, re.I)),
+        bool(re.search(r"@|#[a-z\-]+", combined)),
+        bool(re.search(r"\b(step \d+|first|second|third|finally)\b", combined, re.I)),
+    ]
+    actionability = sum(actionability_signals) / len(actionability_signals)
+
+    sub_topics = section_meta.get("sub_topics") or section_meta.get("keywords") or []
+    if sub_topics:
+        covered_topics = sum(
+            1 for topic in sub_topics
+            if any(str(topic).lower() in sentence.text.lower() for sentence in sentences)
+        )
+        completeness = covered_topics / len(sub_topics)
+    else:
+        completeness = 1.0
+
+    scs = (
+        confidence * 0.30 +
+        depth * 0.25 +
+        actionability * 0.25 +
+        completeness * 0.20
+    )
+
+    if scs >= 0.65:
+        status = "covered"
+    elif scs >= 0.40:
+        status = "weak"
+    else:
+        status = "missing"
+
+    return {
+        "status": status,
+        "scs": round(float(scs), 3),
+        "dimensions": {
+            "confidence": round(float(confidence), 3),
+            "depth": round(float(depth), 3),
+            "actionability": round(float(actionability), 3),
+            "completeness": round(float(completeness), 3),
+        },
+    }
     
 
 def detect_gaps(
@@ -1052,6 +1151,9 @@ def detect_gaps(
         blocks = candidate_blocks.get(sec_id, [])
         block_count = len(blocks)
         total_sentences = sum(b.duration for b in blocks)
+        block_sentences = [sentence for block in blocks for sentence in block.sentences]
+        block_confidences = [block.confidence_score for block in blocks]
+        coverage_analysis = semantic_coverage_score(block_sentences, block_confidences, sec)
         
         # Compute section-level confidence as mean of block confidences
         if blocks:
@@ -1059,16 +1161,14 @@ def detect_gaps(
         else:
             confidence = 0.0
         
-        # Determine status based on block count
-        if block_count == 0:
-            status = "missing"
-            risk = 1.0 if sec_required else 0.5
-        elif block_count == 1 and total_sentences <= weak_threshold:
-            status = "weak"
+        # Determine status directly from the semantic coverage score.
+        status = coverage_analysis["status"]
+        if status == "covered":
+            risk = max(0.0, 0.15 - coverage_analysis["scs"] * 0.1)
+        elif status == "weak":
             risk = 0.6 if sec_required else 0.2
         else:
-            status = "covered"
-            risk = 0.0 if confidence > 0.7 else 0.1
+            risk = 1.0 if sec_required else 0.5
         
         coverage[sec_id] = SectionCoverage(
             section_id=sec_id,
@@ -1079,6 +1179,7 @@ def detect_gaps(
             sentence_count=total_sentences,
             confidence_score=confidence,
             risk_score=float(risk),
+            coverage_score=float(coverage_analysis["scs"]),
             blocks=blocks
         )
     
@@ -1680,12 +1781,13 @@ class ContextMappingPipeline:
         self,
         schema_sections: List[Dict],
         similarity_threshold: float = 0.30,
-        audio_confidence_threshold: float = 0.4
+        audio_confidence_threshold: float = 0.4,
+        llm_fallback_fn=None
     ):
         self.schema_sections = schema_sections
         self.classifier = ContextClassifier(similarity_threshold=similarity_threshold)
         self.classifier.index_schema(schema_sections)
-        self.repair = ContextRepair()
+        self.repair = ContextRepair(llm_fallback_fn=llm_fallback_fn)
         self.audio_conf_threshold = audio_confidence_threshold
     
     def process(
@@ -1756,13 +1858,91 @@ class ContextMappingPipeline:
                         related.append(other_id)
             related_sections_map[sec_id] = related
 
-        classified_sentences = []
+        sentence_candidates = []
+        sentence_rule_matches = []
+        extracted_entities_cache = []
         for i, s in enumerate(sentences):
-            cs = self.classifier.classify_sentence(
+            classifications, extracted_entities, rule_match = self.classifier._score_sentence_candidates(
                 s,
                 sent_embedding=embeddings[i],
                 context_embedding=context_embeddings[i]
             )
+            sentence_candidates.append(classifications)
+            sentence_rule_matches.append(rule_match)
+            extracted_entities_cache.append(extracted_entities)
+
+        batch_cross_scores = []
+        batch_pairs = []
+        batch_offsets = []
+        if self.classifier.cross_encoder:
+            for i, classifications in enumerate(sentence_candidates):
+                top_candidates = classifications[:5]
+                batch_offsets.append(len(batch_pairs))
+                batch_pairs.extend([(sentences[i].text, c.section_title) for c in top_candidates])
+            if batch_pairs:
+                try:
+                    batch_cross_scores = self.classifier.cross_encoder.predict(batch_pairs)
+                except Exception as e:
+                    logger.warning(f"Cross-encoder batch reranking failed: {e}. Using embedding scores only.")
+                    batch_cross_scores = []
+
+        classified_sentences = []
+        for i, s in enumerate(sentences):
+            classifications = sentence_candidates[i]
+            rule_match = sentence_rule_matches[i]
+            extracted_entities = extracted_entities_cache[i]
+            top_candidates = classifications[:5]
+            if batch_cross_scores is not None and len(batch_cross_scores) > 0:
+                start_idx = batch_offsets[i]
+                end_idx = start_idx + len(top_candidates)
+                relevant_scores = batch_cross_scores[start_idx:end_idx]
+                classifications = self.classifier._rerank_candidates(
+                    s.text,
+                    classifications,
+                    rule_match=rule_match,
+                    cross_scores=relevant_scores
+                )
+            else:
+                classifications = self.classifier._rerank_candidates(
+                    s.text,
+                    classifications,
+                    rule_match=rule_match,
+                    cross_scores=None
+                )
+
+            # Recreate the final ClassifiedSentence from the reranked candidates
+            filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
+            primary = filtered[0] if filtered else (classifications[0] if classifications else None)
+            secondary = filtered[1:3] if filtered else (classifications[1:3] if len(classifications) > 1 else [])
+            is_unassigned = primary is None
+            explanation = ""
+            alternatives = []
+            if primary:
+                explanation = f"Matched '{s.text[:60]}' to '{primary.section_title}' (score={primary.confidence:.3f})"
+                alternatives = [c.section_id for c in secondary[:2]] if secondary else []
+            else:
+                explanation = f"No section matched above threshold {self.classifier.similarity_threshold} for: {s.text[:60]}"
+                if classifications:
+                    alternatives = [c.section_id for c in classifications[:3]]
+
+            explainability = ExplainabilityLog(
+                action="classify",
+                timestamp=datetime.utcnow().isoformat() + "Z",
+                sentence_id=0,
+                section_id=primary.section_id if primary else None,
+                reasoning=explanation,
+                confidence=primary.confidence if primary else 0.0,
+                alternatives=alternatives
+            )
+            cs = ClassifiedSentence(
+                sentence=s,
+                primary_classification=primary,
+                secondary_classifications=secondary,
+                is_unassigned=is_unassigned,
+                explainability_log=explainability
+            )
+            if extracted_entities:
+                cs.primary_classification.entities = extracted_entities if cs.primary_classification else None
             
             # Apply topic memory boost to primary classification
             if cs.primary_classification:
@@ -1830,6 +2010,14 @@ class ContextMappingPipeline:
             sec_title = (cs.primary_classification.section_title or "").lower()
             conf = cs.primary_classification.confidence or 0.0
 
+            # Extract explicit evidence early so the markers survive policy gating.
+            evidence = extract_explicit_evidence(cs.sentence.text)
+            cs.explicit_evidence = evidence
+            cs.sentence.explicit_evidence = evidence
+            if is_causal_statement(cs.sentence.text) and not evidence:
+                cs.is_inferred = True
+                cs.sentence.is_inferred = True
+
             # Enforce configured confidence acceptance
             if conf < CONFIDENCE_ACCEPT_THRESHOLD:
                 cs.is_unassigned = True
@@ -1856,14 +2044,11 @@ class ContextMappingPipeline:
                 )
                 continue
 
-            # Extract explicit evidence for root-cause assertions
-            evidence = extract_explicit_evidence(cs.sentence.text)
-            cs.explicit_evidence = evidence
-
             # If sentence reads as a causal statement but lacks explicit evidence,
             # flag it as inferred. Do not change classification, only mark inference.
             if is_causal_statement(cs.sentence.text) and not evidence:
                 cs.is_inferred = True
+                cs.sentence.is_inferred = True
                 # annotate explainability log
                 if cs.explainability_log:
                     cs.explainability_log.reasoning = (cs.explainability_log.reasoning or "") + " [INFERRED]"
@@ -1969,6 +2154,39 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
         Sections are presented in the desired logical flow; unmatched sections
         are appended under 'Known Issues'.
         """
+        def _format_section_lines(sec_id: str, content: Dict[str, Any]) -> List[str]:
+            title = content.get("section_title", sec_id)
+            texts = [s.get("text", "").strip() for s in content.get("sentences", []) if s.get("text", "").strip()]
+            lower_id = sec_id.lower()
+            lower_title = title.lower()
+            lines = [f"### {title}"]
+
+            if "deployment" in lower_id or "rollback" in lower_id or "deployment" in lower_title:
+                lines.append("Deployment Process:")
+                for idx, text in enumerate(texts, 1):
+                    lines.append(f"{idx}. {text}")
+            elif "failures" in lower_id or "issue" in lower_title or "troubleshooting" in lower_id:
+                lines.append("Issue / Cause / Fix:")
+                if texts:
+                    if len(texts) >= 1:
+                        lines.append(f"- Issue: {texts[0]}")
+                    if len(texts) >= 2:
+                        lines.append(f"- Cause: {texts[1]}")
+                    if len(texts) >= 3:
+                        lines.append(f"- Fix: {texts[2]}")
+                    for extra in texts[3:]:
+                        lines.append(f"- Detail: {extra}")
+            elif "architecture" in lower_id or "architecture" in lower_title:
+                lines.append("Architecture Notes:")
+                for text in texts:
+                    lines.append(f"- {text}")
+            else:
+                for text in texts:
+                    lines.append(f"- {text}")
+
+            lines.append("")
+            return lines
+
         desired = _desired_order_keywords()
         buckets = {name: [] for name, _ in desired}
         unmatched = []
@@ -1994,18 +2212,12 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
                 continue
             markdown_lines.append(f"## {name}")
             for sec_id, content in items:
-                markdown_lines.append(f"### {content.get('section_title', sec_id)}")
-                for s in content.get('sentences', []):
-                    markdown_lines.append(f"- {s.get('text')}")
-                markdown_lines.append("")
+                markdown_lines.extend(_format_section_lines(sec_id, content))
 
         if unmatched:
             markdown_lines.append("## Known Issues")
             for sec_id, content in unmatched:
-                markdown_lines.append(f"### {content.get('section_title', sec_id)}")
-                for s in content.get('sentences', []):
-                    markdown_lines.append(f"- {s.get('text')}")
-                markdown_lines.append("")
+                markdown_lines.extend(_format_section_lines(sec_id, content))
 
         return "\n".join(markdown_lines)
 
@@ -2077,7 +2289,8 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
                 "required": cov.required,
                 "sentence_count": kt.section_content.get(sec_id, {}).get("sentence_count", cov.sentence_count),
                 "confidence": cov.confidence_score,
-                "risk": cov.risk_score
+                "risk": cov.risk_score,
+                "coverage_score": cov.coverage_score
             }
             for sec_id, cov in kt.coverage.items()
         },

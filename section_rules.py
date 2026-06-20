@@ -264,6 +264,28 @@ def find_overview_reassignment(text: str) -> Optional[SectionRuleMatch]:
         return None
 
     best: Optional[SectionRuleMatch] = None
+
+    exclusion_patterns = [
+        ("disaster_recovery", r"\b(daily\s+backups?|rds\s+snapshots?|restore|recovery\s+procedure|disaster\s+recovery\s+testing|retained\s+for\s+30\s+days)\b"),
+        ("security_controls", r"\b(trivy|security\s+scanning|vault|secret\s+management|amazon\s+ecr|container\s+images?)\b"),
+        ("cost_optimization", r"\b(spot\s+instances?|scheduled\s+scaling|cost\s+optimization|non-production|low\s+traffic)\b"),
+        ("danger_zones", r"\b(never\s+modify|do\s+not\s+touch|dangerous\s+area|terraform\s+state|autoscaler\s+configuration)\b"),
+        ("ownership_escalation", r"\b(on-call\s+engineer|escalation\s+path|platform\s+engineering\s+manager|head\s+of\s+engineering|contact\s+platform\s+engineering)\b"),
+        ("day1_survival_checklist", r"\b(new\s+team\s+members|first\s+safe\s+actions|grafana\s+dashboards?|pipeline\s+view|read-only\s+checks)\b"),
+        ("deployment_and_rollback", r"\b(merged\s+into\s+the\s+main\s+branch|helm\s+roll[ -]?back|rollback\s+procedure|deployment\s+window|pre-deployment\s+checks)\b"),
+    ]
+
+    for section_id, pattern in exclusion_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            match = SectionRuleMatch(
+                section_id=section_id,
+                confidence=0.96,
+                reason=f"overview_reassign:{section_id}",
+                matched_pattern=pattern,
+            )
+            if best is None or match.confidence > best.confidence:
+                best = match
+
     for section_id, pattern in _COMPILED_OVERVIEW_MISPLACEMENT:
         if section_id == "system_overview":
             continue

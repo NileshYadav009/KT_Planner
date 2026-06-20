@@ -109,6 +109,8 @@ class ReconstructedParagraph:
     word_count: int
     coherence_score: float
     is_repaired: bool  # Was grammar/fragment fixed?
+    is_professionalized: bool = False  # Was professional cleanup applied?
+    professional_details: str = ""
     pass_count: int = 1
     repair_details: str = ""
 
@@ -363,8 +365,10 @@ class ProfessionalReconstructionEngine:
         
         # Fallback to local professionalization
         refined = self._local_professionalize(text)
-        was_refined = refined != text
-        return refined, was_refined, "Local professionalization applied"
+        details = "Local professionalization applied"
+        if refined == text:
+            details += "; no text changes required"
+        return refined, True, details
     
     def _local_professionalize(self, text: str) -> str:
         """Conservative local professionalization without LLM."""
@@ -423,7 +427,9 @@ class ParagraphIntegrityEngine:
                 text="",
                 word_count=0,
                 coherence_score=0.0,
-                is_repaired=False
+                is_repaired=False,
+                is_professionalized=False,
+                professional_details=""
             )
         
         # Extract texts
@@ -454,7 +460,7 @@ class ParagraphIntegrityEngine:
         if was_repaired:
             repair_details.append("Grammar normalization and fragment repair applied")
         if was_professionalized:
-            repair_details.append("Professional cleanup applied")
+            repair_details.append(prof_details or "Professional cleanup applied")
 
         return ReconstructedParagraph(
             section_id=section_id,
@@ -463,6 +469,8 @@ class ParagraphIntegrityEngine:
             word_count=len(final_text.split()),
             coherence_score=coherence,
             is_repaired=was_repaired or was_professionalized,
+            is_professionalized=was_professionalized,
+            professional_details=prof_details,
             pass_count=pass_count,
             repair_details=". ".join(repair_details) if repair_details else ""
         )

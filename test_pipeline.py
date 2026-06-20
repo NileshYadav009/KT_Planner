@@ -230,6 +230,7 @@ def test_full_pipeline():
     # Validate coverage metrics
     assert kt.overall_coverage_percent >= 0 and kt.overall_coverage_percent <= 100, "Coverage should be 0-100%"
     assert kt.overall_risk_score >= 0 and kt.overall_risk_score <= 1, "Risk should be 0-1"
+    assert any(getattr(cov, 'coverage_score', 0.0) > 0.0 for cov in kt.coverage.values()), "Coverage should expose a semantic coverage score"
     
     print("[PASS] Full pipeline test passed")
 
@@ -256,6 +257,7 @@ def test_paragraph_reconstruction():
     assert isinstance(paragraphs, dict), "Paragraphs should be a dict keyed by section"
     assert any(p.get('text') for section in paragraphs.values() for p in section), "At least one reconstructed paragraph should contain text"
     assert any(p.get('pass_count', 0) >= 2 for section in paragraphs.values() for p in section), "Paragraph reconstruction should run at least two passes"
+    assert any('professional' in str(p.get('professional_details', '')).lower() or p.get('is_professionalized') for section in paragraphs.values() for p in section), "Paragraph output should include professionalization metadata"
     print("[PASS] Paragraph reconstruction test passed")
 
 
@@ -345,7 +347,7 @@ def test_causal_inference():
     # The single sentence should be flagged as inferred
     inferred_flag = False
     for cs in kt1.sentences:
-        if hasattr(cs, 'is_inferred') and cs.is_inferred:
+        if getattr(cs, 'is_inferred', False):
             inferred_flag = True
     assert inferred_flag, "Ambiguous causal statement should be marked as inferred"
 

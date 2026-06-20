@@ -5,7 +5,7 @@ from typing import Any, Dict
 DEFAULT_POLICY_FILE = "policy.json"
 
 DEFAULT_POLICY = {
-    "confidence_accept_threshold": 0.8,
+    "confidence_accept_threshold": 0.42,
     "implementation_indicators": [
         "kubectl","docker","compose","helm","apply -f","systemctl","service",
         "install ","pip install","npm install","sh ","bash ","curl ",".yaml",".yml",
