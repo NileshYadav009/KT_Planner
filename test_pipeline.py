@@ -261,6 +261,44 @@ def test_paragraph_reconstruction():
     print("[PASS] Paragraph reconstruction test passed")
 
 
+def test_ordered_markdown_renderer():
+    """Test that ordered markdown is rendered with structured section formatting."""
+    print("\n=== Testing Ordered Markdown Renderer ===")
+    from types import SimpleNamespace
+    from kt_markdown_renderer import render_ordered_markdown
+
+    kt = SimpleNamespace(
+        job_id="job-md-001",
+        section_content={
+            "deployment": {
+                "section_title": "Deployment Process",
+                "sentences": [
+                    {"text": "Merge code to main branch."},
+                    {"text": "GitHub Actions triggers CI/CD pipeline."},
+                    {"text": "ArgoCD deploys workloads to Amazon EKS."},
+                ],
+            },
+            "troubleshooting": {
+                "section_title": "Troubleshooting Guide",
+                "sentences": [
+                    {"text": "Issue: high latency during peak traffic."},
+                    {"text": "Cause: database connection pool exhaustion."},
+                    {"text": "Fix: increase pool size and review slow queries."},
+                ],
+            },
+        },
+    )
+
+    markdown = render_ordered_markdown(kt)
+    print(markdown)
+
+    assert "# KT Report - job-md-001" in markdown
+    assert "## Deployment & Rollback" in markdown or "## System Overview" in markdown
+    assert "1." in markdown, "Deployment sections should use numbered steps"
+    assert "**Issue:**" in markdown or "Issue / Cause / Fix:" in markdown, "Troubleshooting sections should emphasize issue structure"
+    print("[PASS] Ordered markdown renderer test passed")
+
+
 def test_asr_repair_scenario():
     """Scenario: ASR transcribed a technical sentence badly; repair should correct it."""
     print("\n=== Testing ASR Repair Scenario ===")
@@ -508,6 +546,7 @@ if __name__ == "__main__":
         test_context_window_influence()
         test_full_pipeline()
         test_paragraph_reconstruction()
+        test_ordered_markdown_renderer()
         test_topic_memory()
         test_topic_memory_context_window()
         

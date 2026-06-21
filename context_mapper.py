@@ -2154,6 +2154,13 @@ def serialize_kt(kt: StructuredKT) -> Dict[str, Any]:
         Sections are presented in the desired logical flow; unmatched sections
         are appended under 'Known Issues'.
         """
+        try:
+            from kt_markdown_renderer import render_ordered_markdown
+
+            return render_ordered_markdown(kt_obj)
+        except Exception:
+            pass
+
         def _format_section_lines(sec_id: str, content: Dict[str, Any]) -> List[str]:
             title = content.get("section_title", sec_id)
             texts = [s.get("text", "").strip() for s in content.get("sentences", []) if s.get("text", "").strip()]
