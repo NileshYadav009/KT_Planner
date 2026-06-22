@@ -314,7 +314,10 @@ def semantic_chunk_sentences(
         return sentences
 
     model = _get_semantic_chunk_model()
-    encodings = [model.encode(s.text, convert_to_tensor=True) for s in sentences]
+    # Batch-encode all sentences once instead of one encode() call per sentence.
+    # model.encode accepts a list and returns a stacked 2D tensor; index by position.
+    texts = [s.text for s in sentences]
+    encodings = model.encode(texts, convert_to_tensor=True, batch_size=32)
     chunks: List[Sentence] = []
     current = sentences[0]
     current_emb = encodings[0]
@@ -332,7 +335,12 @@ def semantic_chunk_sentences(
 
         if should_merge:
             current = _merge_sentences(current, candidate)
-            current_emb = model.encode(current.text, convert_to_tensor=True)
+            # Interpolate the existing normalized embeddings by word-count weight
+            # rather than re-encoding the merged text. For L2-normalized vectors a
+            # weighted average stays a valid direction (re-normalized on use by cos sim).
+            w_a = max(1, len(current.text.split()))
+            w_b = max(1, len(candidate.text.split()))
+            current_emb = (current_emb * float(w_a) + candidate_emb * float(w_b)) / (w_a + w_b)
         else:
             chunks.append(current)
             current = candidate

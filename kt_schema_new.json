@@ -149,6 +149,62 @@
       ]
     },
     {
+      "id": "technology_stack",
+      "title": "Technology Stack",
+      "description": "Languages, frameworks, databases, cloud, and DevOps tooling that make up the system.",
+      "required": true,
+      "sub_topics": [
+        "languages",
+        "frameworks",
+        "databases",
+        "cloud",
+        "devops tools",
+        "orchestration",
+        "ci/cd",
+        "artifact registry",
+        "secret management"
+      ],
+      "hints": [
+        "technology stack",
+        "languages",
+        "frameworks",
+        "databases",
+        "cloud",
+        "devops tools",
+        "react",
+        "python",
+        "fastapi",
+        "postgresql",
+        "redis",
+        "amazon eks",
+        "kubernetes",
+        "terraform",
+        "argocd",
+        "jenkins",
+        "github actions",
+        "helm",
+        "docker",
+        "ecr",
+        "vault",
+        "prometheus",
+        "grafana"
+      ],
+      "fields": [
+        {
+          "id": "stack_summary",
+          "label": "Technology Stack Summary",
+          "type": "group",
+          "fields": [
+            { "id": "languages", "label": "Languages", "type": "text", "required": true },
+            { "id": "frameworks", "label": "Frameworks", "type": "text", "required": true },
+            { "id": "databases", "label": "Databases", "type": "text", "required": true },
+            { "id": "cloud", "label": "Cloud / Hosting", "type": "text", "required": true },
+            { "id": "devops_tools", "label": "DevOps Tools (CI/CD, IaC, registry, secrets)", "type": "text", "required": true }
+          ]
+        }
+      ]
+    },
+    {
       "id": "architecture_reference",
       "title": "Architecture Reference",
       "required": true,

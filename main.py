@@ -11,8 +11,9 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED, infer_open_risks
 from context_mapper import ContextMappingPipeline, serialize_kt
+from kt_gemini_polisher import polish_all_sections
 from devops_transcription import clean_transcript
 from sentence_transformers import util
 
@@ -275,6 +276,28 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         kt_structured = serialize_kt(kt)
         if paragraph_data:
             kt_structured["paragraphs"] = paragraph_data
+
+        # --- Section-aware polish tier (Tier 2: Gemini, Tier 1: local fallback) ---
+        # Reads the coverage sentences already produced above and produces
+        # section-TYPE-AWARE documentation (numbered steps for deployment,
+        # Issue/Cause/Fix for failures, etc.). Always non-empty; degrades to
+        # the Tier-1 reconstructed paragraph on any failure.
+        try:
+            coverage_view = {"coverage": coverage}
+            polish_fn = gemini_refiner if GEMINI_ENABLED else None
+            polish_all_sections(coverage_view, SCHEMA, gemini_fn=polish_fn)
+            kt_structured["polished_sections"] = coverage_view.get("polished_sections", {})
+        except Exception as polish_err:
+            # Non-critical: leave kt_structured unchanged on failure.
+            print(f"[WARN] section polish skipped: {polish_err}")
+            kt_structured.setdefault("polished_sections", {})
+
+        # --- Open Risks & Knowledge Gaps (non-hallucinated gap inference) ---
+        try:
+            kt_structured["open_risks"] = infer_open_risks(kt)
+        except Exception as risks_err:
+            print(f"[WARN] open-risks inference skipped: {risks_err}")
+            kt_structured.setdefault("open_risks", {"risks": [], "summary": {}})
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:

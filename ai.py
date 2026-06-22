@@ -785,3 +785,143 @@ def generate_report(transcript: str, similarity_threshold: float = 0.20, min_chu
         'audit_log': audit,
         'explainability': logs
     }
+
+
+# ---------------------------------------------------------------------------
+# Open Risks & Knowledge Gaps inference (KT methodology §OPEN RISKS)
+# ---------------------------------------------------------------------------
+# Non-hallucinated: only restates gaps the pipeline already detected and asks
+# a follow-up question per gap derived from the section's own description.
+# Never invents missing content; only surfaces what is absent or thin.
+
+def _schema_lookup():
+    """Return a dict of {section_id: section_meta} from the loaded SCHEMA."""
+    return {s.get("id"): s for s in SCHEMA if isinstance(s, dict) and s.get("id")}
+
+
+def _followup_question(section_meta: dict) -> str:
+    """Derive a single follow-up question from a section's title/description."""
+    title = (section_meta.get("title") or section_meta.get("id") or "this area").strip()
+    desc = (section_meta.get("description") or "").strip()
+    if desc:
+        # Use the description as the gist of what to ask about.
+        return f"What is the current state of {title.lower()}? ({desc})"
+    return f"Can the outgoing owner walk through {title.lower()} in more detail?"
+
+
+def infer_open_risks(kt) -> dict:
+    """Produce a structured Open Risks & Knowledge Gaps report from a StructuredKT.
+
+    Reads kt.coverage (status, required, risk_score, sentence_count),
+    kt.missing_required_sections, and kt.unassigned_sentences. Returns:
+
+        {
+          "risks": [
+            {
+              "section": "deployment_and_rollback",
+              "section_title": "...",
+              "gap": "missing" | "weak" | "required_missing" | "unassigned_evidence",
+              "severity": "high" | "medium" | "low",
+              "detail": "<plain-language explanation>",
+              "suggested_followup": "<question for outgoing owner>"
+            }, ...
+          ],
+          "summary": {
+            "total_risks": N,
+            "high_severity": N,
+            "missing_required_count": N,
+            "unassigned_sentence_count": N
+          }
+        }
+    """
+    schema_by_id = _schema_lookup()
+    risks: list = []
+    seen_keys: set = set()
+
+    def _add(section_id: str, gap: str, severity: str, detail: str):
+        key = (section_id, gap)
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        meta = schema_by_id.get(section_id, {})
+        risks.append({
+            "section": section_id,
+            "section_title": meta.get("title", section_id),
+            "gap": gap,
+            "severity": severity,
+            "detail": detail,
+            "suggested_followup": _followup_question(meta) if meta else
+                f"Clarify coverage for '{section_id}'.",
+        })
+
+    # 1. Explicitly missing required sections (highest severity)
+    for sec_id in (getattr(kt, "missing_required_sections", None) or []):
+        _add(
+            sec_id,
+            gap="required_missing",
+            severity="high",
+            detail="Required section has no classified content in the transcript.",
+        )
+
+    # 2. Walk coverage: missing or weak sections
+    coverage = getattr(kt, "coverage", None) or {}
+    for sec_id, cov in coverage.items():
+        status = getattr(cov, "status", None) or ""
+        required = bool(getattr(cov, "required", False))
+        sentence_count = int(getattr(cov, "sentence_count", 0) or 0)
+        risk = float(getattr(cov, "risk_score", 0.0) or 0.0)
+        title = getattr(cov, "section_title", sec_id)
+
+        if status == "missing":
+            sev = "high" if required else "medium"
+            _add(
+                sec_id,
+                gap="missing",
+                severity=sev,
+                detail=f"Section '{title}' has no content{' (required)' if required else ''}.",
+            )
+        elif status == "weak":
+            sev = "medium" if required or risk >= 0.5 else "low"
+            _add(
+                sec_id,
+                gap="weak",
+                severity=sev,
+                detail=(
+                    f"Section '{title}' has thin coverage "
+                    f"({sentence_count} sentence(s), risk={risk:.2f})."
+                ),
+            )
+
+    # 3. Unassigned sentences = ambiguous evidence the reviewer should triage
+    unassigned = getattr(kt, "unassigned_sentences", None) or []
+    if unassigned:
+        sample = []
+        for s in unassigned[:3]:
+            t = getattr(s, "text", None) or (s.get("text") if isinstance(s, dict) else None)
+            if t:
+                sample.append(t.strip())
+        detail = (
+            f"{len(unassigned)} sentence(s) could not be confidently mapped to any "
+            f"section."
+        )
+        if sample:
+            detail += " Examples: " + " | ".join(f'"{t[:80]}"' for t in sample)
+        _add(
+            "unassigned",
+            gap="unassigned_evidence",
+            severity="medium",
+            detail=detail,
+        )
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    risks.sort(key=lambda r: (severity_rank.get(r["severity"], 9), r["section"]))
+
+    return {
+        "risks": risks,
+        "summary": {
+            "total_risks": len(risks),
+            "high_severity": sum(1 for r in risks if r["severity"] == "high"),
+            "missing_required_count": len(getattr(kt, "missing_required_sections", None) or []),
+            "unassigned_sentence_count": len(unassigned),
+        },
+    }
