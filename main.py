@@ -11,7 +11,7 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED, polish_coverage_text
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from sentence_transformers import util
@@ -258,6 +258,19 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 section_content = kt.section_content.get(sec_id, {})
                 coverage_sentences = section_content.get('sentences', []) if isinstance(section_content, dict) else []
 
+            # Raw transcribed fragments as extracted from the transcript.
+            raw_content = [s.get('text', '') for s in coverage_sentences]
+
+            # NEW: Professional polish pass. Route the raw fragments through Gemini so the
+            # coverage section reads as complete, professional prose instead of broken
+            # Whisper fragments. Falls back to a local cleanup when Gemini is unavailable.
+            try:
+                polished = polish_coverage_text(sec_id, cov.section_title, raw_content)
+                display_content = polished if polished else raw_content
+            except Exception:
+                # Polish must never break coverage rendering - fall back to raw fragments.
+                display_content = raw_content
+
             coverage[sec_id] = {
                 'title': cov.section_title,
                 'status': cov.status,
@@ -265,7 +278,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 'sentence_count': cov.sentence_count,
                 'confidence': cov.confidence_score,
                 'risk': cov.risk_score,
-                'content': [s.get('text', '') for s in coverage_sentences],
+                'content': display_content,
                 'sentences': coverage_sentences,
                 'blocks': [b.to_dict() for b in blocks]  # NEW: include blocks for frontend
             }

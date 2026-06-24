@@ -55,8 +55,17 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 import os
 
+# Load environment variables from a local .env file if present, so Gemini (and
+# other) config works without manually exporting env vars before each run.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    # python-dotenv is optional; if it's missing we simply rely on the real env.
+    pass
+
 # Gemini config (Google Generative AI)
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_CLIENT = None
 GEMINI_ENABLED = False
@@ -421,6 +430,89 @@ def build_section_paragraphs(transcript: str):
         print(f"[ERROR] build_section_paragraphs failed: {e}")
         traceback.print_exc()
         return {}
+
+
+def polish_coverage_text(
+    section_id: str,
+    section_title: str,
+    fragments: List[str],
+    *,
+    max_fragments_per_call: int = 8,
+) -> List[str]:
+    """Polish raw transcribed fragments for a coverage section into professional prose.
+
+    The coverage panel renders whatever sentence fragments the classifier dropped into
+    a section. Whisper output is often fragmented, lowercased, or grammatically broken,
+    which makes the coverage section read as unprofessional. This function routes those
+    fragments through Gemini so they are turned into clean, complete, professional
+    sentences before display.
+
+    - When Gemini is enabled, fragments are batched (to keep prompts small) and each
+      batch is sent for professional rewriting. The model is instructed to preserve
+      meaning and not to invent facts.
+    - When Gemini is unavailable, a conservative local cleanup (punctuation/casing/
+      whitespace) is applied so behavior is always safe.
+    - Per-fragment fallback: if Gemini rewriting a batch fails, the original fragments
+      for that batch are returned untouched.
+
+    Returns a list of polished strings with the same ordering/length semantics as the
+    input fragments (one polished unit per input batch; empty input -> empty output).
+    """
+    # Empty / whitespace-only guard
+    cleaned = [f for f in (fragments or []) if f and f.strip()]
+    if not cleaned:
+        return []
+
+    def _local_cleanup(text: str) -> str:
+        text = ' '.join(text.split())
+        text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+        if text and text[0].islower():
+            text = text[0].upper() + text[1:]
+        if text and text[-1] not in '.!?':
+            text += '.'
+        return text.strip()
+
+    # Batch fragments to keep each LLM prompt small and within token budgets.
+    polished_units: List[str] = []
+
+    if not GEMINI_ENABLED:
+        # No LLM available - apply deterministic local cleanup to each fragment.
+        return [_local_cleanup(f) for f in cleaned]
+
+    for i in range(0, len(cleaned), max_fragments_per_call):
+        batch = cleaned[i:i + max_fragments_per_call]
+        joined = '\n'.join(f"- {f.strip()}" for f in batch)
+        prompt = (
+            "You are a technical editor for a Knowledge Transfer (KT) document.\n\n"
+            f"The following sentences were transcribed from speech and grouped under the "
+            f"'{section_title}' section. They may be fragmented, lowercased, or grammatically "
+            "incomplete.\n\n"
+            "Rewrite them into clean, complete, professional English sentences that together "
+            "read as a coherent paragraph for this section.\n"
+            "Rules:\n"
+            "- Fix grammar, casing, punctuation and flow.\n"
+            "- Preserve the original meaning. Do NOT add facts, numbers, names or claims that "
+            "are not present in the input.\n"
+            "- Do not add headings, labels, commentary or explanations.\n"
+            "- Return ONLY the rewritten paragraph text, nothing else.\n\n"
+            f"Input sentences for '{section_title}':\n{joined}\n\n"
+            "Polished paragraph:"
+        )
+        try:
+            refined = gemini_refiner(prompt)
+            refined = (refined or '').strip()
+            if refined:
+                polished_units.append(refined)
+            else:
+                polished_units.append(' '.join(_local_cleanup(f) for f in batch))
+        except Exception as e:
+            logger.warning(
+                "Gemini polish failed for section '%s' batch %d: %s. Using local cleanup.",
+                section_id, i // max_fragments_per_call, e,
+            )
+            polished_units.append(' '.join(_local_cleanup(f) for f in batch))
+
+    return polished_units
 
 
 def _prepare_sentences(transcript: str):
