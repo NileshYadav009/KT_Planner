@@ -11,7 +11,7 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED, polish_coverage_text
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED, polish_coverage_sections
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from sentence_transformers import util
@@ -261,27 +261,37 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             # Raw transcribed fragments as extracted from the transcript.
             raw_content = [s.get('text', '') for s in coverage_sentences]
 
-            # NEW: Professional polish pass. Route the raw fragments through Gemini so the
-            # coverage section reads as complete, professional prose instead of broken
-            # Whisper fragments. Falls back to a local cleanup when Gemini is unavailable.
-            try:
-                polished = polish_coverage_text(sec_id, cov.section_title, raw_content)
-                display_content = polished if polished else raw_content
-            except Exception:
-                # Polish must never break coverage rendering - fall back to raw fragments.
-                display_content = raw_content
-
             coverage[sec_id] = {
                 'title': cov.section_title,
+                'fragments': raw_content,
                 'status': cov.status,
                 'required': cov.required,
                 'sentence_count': cov.sentence_count,
                 'confidence': cov.confidence_score,
                 'risk': cov.risk_score,
-                'content': display_content,
                 'sentences': coverage_sentences,
-                'blocks': [b.to_dict() for b in blocks]  # NEW: include blocks for frontend
+                'blocks': [b.to_dict() for b in blocks]
             }
+
+        # Batch polish all coverage sections in one Gemini request per KT.
+        try:
+            polished_sections = polish_coverage_sections(
+                {sid: {
+                    'title': coverage[sid]['title'],
+                    'fragments': coverage[sid]['fragments']
+                } for sid in coverage},
+                max_fragments_per_section=8,
+            )
+        except Exception as e:
+            logger.warning("Batch coverage polish failed: %s", e)
+            polished_sections = {}
+
+        for sid, section_payload in coverage.items():
+            display_content = polished_sections.get(sid)
+            if not display_content:
+                display_content = section_payload['fragments']
+            coverage[sid]['content'] = display_content
+            del coverage[sid]['fragments']
 
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript

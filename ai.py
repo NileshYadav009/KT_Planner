@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import numpy as np
@@ -69,6 +70,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_CLIENT = None
 GEMINI_ENABLED = False
+GEMINI_CACHE: Dict[str, str] = {}
 try:
     from google import genai
     if GEMINI_API_KEY:
@@ -79,19 +81,99 @@ except Exception:
     GEMINI_ENABLED = False
 
 
+def _parse_duration_from_string(value: str) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        # Accept values like '19s', '19.7s', '20', '20 sec', '20 seconds'
+        match = re.search(r"(\d+(?:\.\d+)?)(?:\s*)(s|sec|seconds)?", str(value), re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _extract_retry_delay_from_error(error: Exception) -> Optional[float]:
+    # Prefer explicit Retry-After header from HTTP responses.
+    response = getattr(error, 'response', None)
+    if response is not None:
+        try:
+            if hasattr(response, 'headers'):
+                retry_after = response.headers.get('Retry-After')
+                delay = _parse_duration_from_string(retry_after)
+                if delay is not None:
+                    return delay
+        except Exception:
+            pass
+        try:
+            if hasattr(response, 'json'):
+                body = response.json()
+                body_text = json.dumps(body)
+                delay = _parse_duration_from_string(body_text)
+                if delay is not None:
+                    return delay
+        except Exception:
+            pass
+    # Fall back to scanning the exception text.
+    return _parse_duration_from_string(getattr(error, 'message', None) or str(error))
+
+
+def _extract_json_response(text: str):
+    payload = text.strip()
+    # Strip markdown fences if present
+    payload = re.sub(r'^```(?:json)?\s*', '', payload, flags=re.IGNORECASE)
+    payload = re.sub(r'```$', '', payload, flags=re.IGNORECASE)
+    payload = payload.strip()
+
+    # Try direct load first
+    try:
+        return json.loads(payload)
+    except Exception:
+        pass
+
+    # Find the first JSON array/object in the text body
+    for pattern in [r'(\[.*\])', r'(\{.*\})']:
+        match = re.search(pattern, payload, flags=re.DOTALL)
+        if match:
+            candidate = match.group(1)
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+    # Last resort: try loading any JSON-looking substring by braces count
+    return None
+
+
+def _local_cleanup(text: str) -> str:
+    text = ' '.join(text.split())
+    text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    if text and text[-1] not in '.!?':
+        text += '.'
+    return text.strip()
+
+
 def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
     """Refine text using Google Gemini via the genai SDK or direct HTTP with retry logic."""
     if not (GEMINI_API_KEY or GEMINI_CLIENT):
         raise RuntimeError("Gemini client not configured. Set GEMINI_API_KEY to enable.")
 
-    max_retries = 2
-    retry_delay = 1
+    cache_key = hashlib.sha256(
+        (prompt + json.dumps(metadata or {}, sort_keys=True)).encode('utf-8')
+    ).hexdigest()
+    if cache_key in GEMINI_CACHE:
+        logger.debug("Gemini cache hit for prompt key %s", cache_key)
+        return GEMINI_CACHE[cache_key]
+
+    max_retries = 3
+    retry_delay = 1.0
     last_exception = None
 
     for attempt in range(max_retries):
         try:
             start_time = time.perf_counter()
-            # Prefer SDK client when available
             if GEMINI_CLIENT:
                 response = GEMINI_CLIENT.models.generate_content(
                     model=GEMINI_MODEL,
@@ -104,7 +186,6 @@ def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
                 )
                 text = getattr(response, "text", None) or str(response)
             else:
-                # Use direct HTTP call as a fallback
                 url = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
                 payload = {
                     "prompt": {"text": prompt},
@@ -113,9 +194,11 @@ def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
                     "stop_sequences": ["\n\n"]
                 }
                 r = requests.post(url, json=payload, timeout=(10, 120))
-                r.raise_for_status()
+                try:
+                    r.raise_for_status()
+                except Exception as err:
+                    raise err
                 data = r.json()
-                # Try to extract text from common response shapes
                 text = ""
                 if isinstance(data, dict):
                     if "candidates" in data and data["candidates"]:
@@ -142,13 +225,24 @@ def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
             text = re.sub(r'^(\n|\r|\s)+', '', text)
             if not text:
                 raise ValueError("Gemini returned no completion text")
+
+            GEMINI_CACHE[cache_key] = text
             return text
         except Exception as e:
             last_exception = e
             if attempt < max_retries - 1:
-                logger.warning("Gemini attempt %d/%d failed: %s. Retrying in %ds...", attempt + 1, max_retries, e, retry_delay)
+                retry_delay_override = _extract_retry_delay_from_error(e)
+                if retry_delay_override is not None:
+                    retry_delay = max(0.5, retry_delay_override + 0.5)
+                logger.warning(
+                    "Gemini attempt %d/%d failed: %s. Retrying in %.1fs...",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                    retry_delay,
+                )
                 time.sleep(retry_delay)
-                retry_delay *= 2
+                retry_delay = min(retry_delay * 2, 60.0)
             else:
                 logger.warning("Gemini all %d retries exhausted. Last error: %s", max_retries, e)
 
@@ -432,6 +526,170 @@ def build_section_paragraphs(transcript: str):
         return {}
 
 
+PRIORITY_COVERAGE_SECTION_IDS = [
+    'system_overview',
+    'deployment_and_rollback',
+    'common_failures'
+]
+
+
+def _build_polish_inputs(
+    section_id: str,
+    section_title: str,
+    fragments: List[str],
+    max_fragments_per_call: int
+) -> Optional[dict]:
+    cleaned = [f.strip() for f in (fragments or []) if f and f.strip()]
+    if not cleaned:
+        return None
+    clipped = cleaned[:max_fragments_per_call]
+    return {
+        'section_id': section_id,
+        'title': section_title,
+        'fragments': clipped,
+        'original_count': len(cleaned)
+    }
+
+
+def polish_coverage_sections(
+    sections: Dict[str, dict],
+    *,
+    max_fragments_per_section: int = 8,
+) -> Dict[str, List[str]]:
+    """Polish coverage sections in one Gemini batch request with graceful fallback."""
+    cleaned_sections = {}
+    for section_id, section_data in sections.items():
+        section_input = _build_polish_inputs(
+            section_id,
+            section_data.get('title', section_id),
+            section_data.get('fragments', []),
+            max_fragments_per_section,
+        )
+        if section_input is not None:
+            cleaned_sections[section_id] = section_input
+
+    if not cleaned_sections:
+        return {sid: [] for sid in sections}
+
+    def _local_cleanup_list(inputs: List[str]) -> List[str]:
+        return [_local_cleanup(text) for text in inputs]
+
+    if not GEMINI_ENABLED:
+        return {
+            sid: _local_cleanup_list(section['fragments'])
+            for sid, section in cleaned_sections.items()
+        }
+
+    json_sections = []
+    for section in cleaned_sections.values():
+        fragments = section['fragments']
+        json_sections.append({
+            'section_id': section['section_id'],
+            'title': section['title'],
+            'fragments': fragments,
+        })
+
+    prompt = (
+        "You are a knowledge transfer professionalization assistant.\n\n"
+        "You will receive a list of KT sections with raw transcript fragments. "
+        "For each section, rewrite the fragments into a single polished paragraph. "
+        "Preserve the meaning exactly and do NOT invent new facts, names, or numbers. "
+        "Return JSON only with a top-level array of objects containing keys: "
+        "section_id and polished_paragraph.\n\n"
+        "Input sections:\n"
+        + json.dumps(json_sections, indent=2, ensure_ascii=False)
+        + "\n\nOutput JSON:\n"
+    )
+
+    def _process_batch(section_ids):
+        try:
+            response_text = gemini_refiner(prompt, metadata={'section_ids': section_ids})
+            response_json = _extract_json_response(response_text)
+            if not isinstance(response_json, list):
+                raise ValueError("Gemini response was not a JSON array")
+
+            polished = {}
+            for item in response_json:
+                if not isinstance(item, dict):
+                    continue
+                sid = item.get('section_id')
+                para = item.get('polished_paragraph') or item.get('polished_text') or ''
+                if sid and isinstance(para, str) and para.strip():
+                    polished[sid] = para.strip()
+            return polished
+        except Exception as e:
+            raise RuntimeError(f"Gemini batch polish failed: {e}") from e
+
+    refined_results = {}
+    try:
+        polished_batch = _process_batch(list(cleaned_sections.keys()))
+        for sid, section in cleaned_sections.items():
+            polished_text = polished_batch.get(sid)
+            if polished_text:
+                refined_results[sid] = [polished_text]
+            else:
+                refined_results[sid] = _local_cleanup_list(section['fragments'])
+        refined_ids = [sid for sid in polished_batch.keys() if sid in cleaned_sections]
+        fallback_ids = [sid for sid in cleaned_sections if sid not in polished_batch]
+        logger.info(
+            "Gemini polished sections: %s; fallback sections: %s",
+            refined_ids,
+            fallback_ids,
+        )
+        return refined_results
+    except Exception as full_error:
+        logger.warning("Full Gemini batch polish failed: %s", full_error)
+
+    # Graceful degradation: refine highest-priority sections only
+    priority_sections = {
+        sid: cleaned_sections[sid]
+        for sid in PRIORITY_COVERAGE_SECTION_IDS
+        if sid in cleaned_sections
+    }
+    fallback_sections = {
+        sid: section for sid, section in cleaned_sections.items()
+        if sid not in priority_sections
+    }
+
+    polished_results = {}
+    if priority_sections:
+        try:
+            priority_prompt = (
+                "You are a knowledge transfer professionalization assistant.\n\n"
+                "You will receive a list of high-priority KT sections with raw transcript fragments. "
+                "For each section, rewrite the fragments into a single polished paragraph. "
+                "Preserve the meaning exactly and do NOT invent new facts, names, or numbers. "
+                "Return JSON only with a top-level array of objects containing keys: "
+                "section_id and polished_paragraph.\n\n"
+                "Input sections:\n"
+                + json.dumps(list(priority_sections.values()), indent=2, ensure_ascii=False)
+                + "\n\nOutput JSON:\n"
+            )
+            resp = gemini_refiner(priority_prompt, metadata={'priority_section_ids': list(priority_sections.keys())})
+            parsed = _extract_json_response(resp)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    sid = item.get('section_id')
+                    para = item.get('polished_paragraph') or item.get('polished_text') or ''
+                    if sid and isinstance(para, str) and para.strip():
+                        polished_results[sid] = [para.strip()]
+        except Exception as e:
+            logger.warning("Priority Gemini polish failed: %s", e)
+
+    # Assign fallback polished content for all sections
+    for sid, section in cleaned_sections.items():
+        if sid in polished_results:
+            continue
+        polished_results[sid] = _local_cleanup_list(section['fragments'])
+
+    logger.info(
+        "Graceful degradation polish results: refined=%s fallback=%s",
+        list(polished_results.keys()),
+        [sid for sid in cleaned_sections if sid not in polished_results],
+    )
+    return polished_results
+
+
 def polish_coverage_text(
     section_id: str,
     section_title: str,
@@ -439,80 +697,14 @@ def polish_coverage_text(
     *,
     max_fragments_per_call: int = 8,
 ) -> List[str]:
-    """Polish raw transcribed fragments for a coverage section into professional prose.
-
-    The coverage panel renders whatever sentence fragments the classifier dropped into
-    a section. Whisper output is often fragmented, lowercased, or grammatically broken,
-    which makes the coverage section read as unprofessional. This function routes those
-    fragments through Gemini so they are turned into clean, complete, professional
-    sentences before display.
-
-    - When Gemini is enabled, fragments are batched (to keep prompts small) and each
-      batch is sent for professional rewriting. The model is instructed to preserve
-      meaning and not to invent facts.
-    - When Gemini is unavailable, a conservative local cleanup (punctuation/casing/
-      whitespace) is applied so behavior is always safe.
-    - Per-fragment fallback: if Gemini rewriting a batch fails, the original fragments
-      for that batch are returned untouched.
-
-    Returns a list of polished strings with the same ordering/length semantics as the
-    input fragments (one polished unit per input batch; empty input -> empty output).
-    """
-    # Empty / whitespace-only guard
-    cleaned = [f for f in (fragments or []) if f and f.strip()]
-    if not cleaned:
-        return []
-
-    def _local_cleanup(text: str) -> str:
-        text = ' '.join(text.split())
-        text = re.sub(r'\s+([,.;:!?])', r'\1', text)
-        if text and text[0].islower():
-            text = text[0].upper() + text[1:]
-        if text and text[-1] not in '.!?':
-            text += '.'
-        return text.strip()
-
-    # Batch fragments to keep each LLM prompt small and within token budgets.
-    polished_units: List[str] = []
-
-    if not GEMINI_ENABLED:
-        # No LLM available - apply deterministic local cleanup to each fragment.
-        return [_local_cleanup(f) for f in cleaned]
-
-    for i in range(0, len(cleaned), max_fragments_per_call):
-        batch = cleaned[i:i + max_fragments_per_call]
-        joined = '\n'.join(f"- {f.strip()}" for f in batch)
-        prompt = (
-            "You are a technical editor for a Knowledge Transfer (KT) document.\n\n"
-            f"The following sentences were transcribed from speech and grouped under the "
-            f"'{section_title}' section. They may be fragmented, lowercased, or grammatically "
-            "incomplete.\n\n"
-            "Rewrite them into clean, complete, professional English sentences that together "
-            "read as a coherent paragraph for this section.\n"
-            "Rules:\n"
-            "- Fix grammar, casing, punctuation and flow.\n"
-            "- Preserve the original meaning. Do NOT add facts, numbers, names or claims that "
-            "are not present in the input.\n"
-            "- Do not add headings, labels, commentary or explanations.\n"
-            "- Return ONLY the rewritten paragraph text, nothing else.\n\n"
-            f"Input sentences for '{section_title}':\n{joined}\n\n"
-            "Polished paragraph:"
-        )
-        try:
-            refined = gemini_refiner(prompt)
-            refined = (refined or '').strip()
-            if refined:
-                polished_units.append(refined)
-            else:
-                polished_units.append(' '.join(_local_cleanup(f) for f in batch))
-        except Exception as e:
-            logger.warning(
-                "Gemini polish failed for section '%s' batch %d: %s. Using local cleanup.",
-                section_id, i // max_fragments_per_call, e,
-            )
-            polished_units.append(' '.join(_local_cleanup(f) for f in batch))
-
-    return polished_units
+    batch = {
+        section_id: {
+            'title': section_title,
+            'fragments': fragments,
+        }
+    }
+    polished = polish_coverage_sections(batch, max_fragments_per_section=max_fragments_per_call)
+    return polished.get(section_id, [])
 
 
 def _prepare_sentences(transcript: str):

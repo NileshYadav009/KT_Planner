@@ -24,7 +24,7 @@ from context_mapper import ContextMappingPipeline
 
 # Import the polish function the same way main.py does, so we exercise the
 # production code path rather than a copy.
-from ai import polish_coverage_text, GEMINI_ENABLED
+from ai import polish_coverage_sections, GEMINI_ENABLED
 
 # Reuse the canonical e-commerce transcript so the demo is directly comparable
 # to the output you have been looking at.
@@ -46,21 +46,31 @@ def build_coverage_with_polish(transcript, segments, schema):
                 coverage_sentences.append({"text": getattr(s, "text", "")})
 
         raw_content = [s.get("text", "") for s in coverage_sentences]
-
-        # <-- THE FIX: professional polish pass on the way out
-        try:
-            polished = polish_coverage_text(sec_id, cov.section_title, raw_content)
-            display_content = polished if polished else raw_content
-        except Exception as e:
-            print(f"  [warn] polish failed for {sec_id}: {e}; using raw")
-            display_content = raw_content
-
         coverage[sec_id] = {
             "title": cov.section_title,
             "status": cov.status,
             "raw_content": raw_content,
-            "content": display_content,
+            "fragments": raw_content,
         }
+
+    try:
+        polished_sections = polish_coverage_sections(
+            {sid: {
+                'title': coverage[sid]['title'],
+                'fragments': coverage[sid]['fragments']
+            } for sid in coverage},
+            max_fragments_per_section=8,
+        )
+    except Exception as e:
+        print(f"  [warn] batch polish failed: {e}; using raw fragments")
+        polished_sections = {}
+
+    for sec_id, section in coverage.items():
+        content = polished_sections.get(sec_id)
+        if not content:
+            content = section['fragments']
+        section['content'] = content
+        del section['fragments']
     return coverage
 
 
