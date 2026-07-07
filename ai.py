@@ -155,7 +155,7 @@ def _local_cleanup(text: str) -> str:
     return text.strip()
 
 
-def gemini_refiner(prompt: str, metadata: Optional[dict] = None) -> str:
+def gemini_refiner(prompt: str, metadata: Optional[dict] = None, **kwargs) -> str:
     """Refine text using Google Gemini via the genai SDK or direct HTTP with retry logic."""
     if not (GEMINI_API_KEY or GEMINI_CLIENT):
         raise RuntimeError("Gemini client not configured. Set GEMINI_API_KEY to enable.")

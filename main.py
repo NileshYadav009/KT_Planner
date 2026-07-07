@@ -60,12 +60,38 @@ def load_models():
         MODEL = WhisperModel(model_name, device=device, compute_type=compute_type)
 
     if MAPPER_PIPELINE is None:
+        enterprise_flag = os.getenv('ENTERPRISE_MAPPER_ENABLED', '1').lower() in ('1', 'true', 'yes')
+        if not enterprise_flag:
+            logger.info('Enterprise semantic mapper disabled via ENTERPRISE_MAPPER_ENABLED=%s', os.getenv('ENTERPRISE_MAPPER_ENABLED'))
         MAPPER_PIPELINE = ContextMappingPipeline(
             SCHEMA,
-            llm_fallback_fn=gemini_refiner if GEMINI_ENABLED else None
+            llm_fallback_fn=gemini_refiner if GEMINI_ENABLED else None,
+            enterprise_mapper_enabled=enterprise_flag
         )
 
 def build_coverage(classified):
+    """Backwards-compatible coverage builder.
+
+    If `classified` is a StructuredKT (has `coverage`), return a normalized
+    view derived from the pipeline's single source-of-truth. Otherwise
+    fall back to legacy behavior that accepts a mapping of section_id -> chunks.
+    """
+    try:
+        # Avoid importing at top-level to prevent circular imports during startup
+        from context_mapper import serialize_kt
+        # If it's a StructuredKT or similar object returned by the pipeline,
+        # serialize it and return the coverage summary.
+        if hasattr(classified, 'coverage'):
+            kt_serial = serialize_kt(classified)
+            coverage = kt_serial.get('coverage', {})
+            missing_required = getattr(classified, 'missing_required_sections', []) or []
+            progress = int(round(getattr(classified, 'overall_coverage_percent', 0) or 0))
+            return coverage, missing_required, progress
+    except Exception:
+        # Fall through to legacy behavior on any failure
+        pass
+
+    # Legacy behavior: `classified` is expected to be a dict mapping sec_id -> chunks
     coverage = {}
     missing_required = []
 
@@ -222,8 +248,14 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         except Exception:
             paragraph_data = {}
 
-        coverage = {}
-        missing_required = kt.missing_required_sections or []
+        # Use unified coverage summary from the pipeline when possible
+        try:
+            summary_cov, missing_required, progress = build_coverage(kt)
+        except Exception:
+            # Fallback to pipeline-provided values
+            summary_cov = {}
+            missing_required = kt.missing_required_sections or []
+            progress = int(round(kt.overall_coverage_percent or 0))
         for sec_id, cov in kt.coverage.items():
             coverage_sentences = []
             
@@ -371,13 +403,22 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 JOB_QUEUE[job_id]["progress"] = 85
 
 
-        field_analysis = {
-            sec_id: {
-                "chunks": info.get("content", []),
-                "scores": [float(info.get("confidence", 0.0))] * len(info.get("content", []))
+        field_analysis = {}
+        for sec_id, cov in coverage.items():
+            section_texts = []
+            if cov.get('sentences'):
+                section_texts = [s.get('text', '') for s in cov.get('sentences', []) if s.get('text')]
+            if not section_texts:
+                section_data = kt.section_content.get(sec_id, {})
+                section_texts = [s.get('text', '') for s in section_data.get('sentences', []) if s.get('text')]
+            if not section_texts:
+                section_data = kt.section_content.get(sec_id, {})
+                section_texts = [t for t in section_data.get('enhanced_texts', []) if t]
+
+            field_analysis[sec_id] = {
+                'chunks': section_texts
             }
-            for sec_id, info in coverage.items()
-        }
+
         mapped_fields = map_analysis_to_fields(field_analysis, SCHEMA)
 
         with JOB_LOCK:

@@ -1,0 +1,1122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Continuum · KT Planner</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── TOKENS ───────────────────────────────────────────────── */
+    :root {
+      --navy:      #0f1c35;
+      --blue:      #1a56db;
+      --blue-lt:   #3b7df8;
+      --blue-dim:  #eef3ff;
+      --green:     #0e7e5a;
+      --green-dim: #d1fae9;
+      --amber:     #92400e;
+      --amber-dim: #fef3c7;
+      --red:       #991b1b;
+      --red-dim:   #fee2e2;
+      --surface:   #ffffff;
+      --bg:        #f4f6fb;
+      --bg2:       #eaecf4;
+      --border:    #dde3f0;
+      --border-lt: #ecf0f9;
+      --text:      #111827;
+      --text2:     #374151;
+      --text3:     #6b7280;
+      --radius:    8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+      --shadow:    0 4px 12px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.04);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,.10),0 2px 6px rgba(0,0,0,.04);
+    }
+
+    /* ── RESET ────────────────────────────────────────────────── */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      font-family:Inter,system-ui,-apple-system,sans-serif;
+      font-size:14px;line-height:1.5;
+      color:var(--text);background:var(--bg);
+      overflow-x:hidden;
+    }
+
+    /* ── TOPBAR ───────────────────────────────────────────────── */
+    .topbar{
+      position:sticky;top:0;z-index:200;
+      height:54px;background:var(--navy);
+      display:flex;align-items:center;padding:0 24px;gap:20px;
+      border-bottom:1px solid rgba(255,255,255,.07);
+      box-shadow:0 1px 8px rgba(0,0,0,.18);
+    }
+    .tb-brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+    .tb-logo{
+      width:30px;height:30px;border-radius:7px;
+      background:linear-gradient(135deg,var(--blue),var(--blue-lt));
+      display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:14px;color:#fff;letter-spacing:-.5px;
+      flex-shrink:0;
+    }
+    .tb-name{font-size:15px;font-weight:700;color:#fff;letter-spacing:-.2px}
+    .tb-divider{
+      height:16px;width:1px;background:rgba(255,255,255,.15);
+      margin:0 6px;
+    }
+    .tb-subtitle{font-size:12px;font-weight:500;color:rgba(255,255,255,.4);letter-spacing:.03em}
+    .tb-right{margin-left:auto;display:flex;align-items:center;gap:20px}
+    .tb-link{font-size:13px;font-weight:500;color:rgba(255,255,255,.5);text-decoration:none;transition:color .15s}
+    .tb-link:hover{color:#fff}
+    .tb-badge{
+      font-size:11px;font-weight:600;
+      padding:3px 8px;border-radius:4px;
+      background:rgba(26,86,219,.35);color:var(--blue-lt);
+      letter-spacing:.02em;
+    }
+
+    /* ── PAGE WRAPPER ─────────────────────────────────────────── */
+    .page-wrap{
+      max-width:1380px;margin:0 auto;
+      display:grid;
+      grid-template-columns:272px minmax(0,1fr) 300px;
+      gap:0;
+      min-height:calc(100vh - 54px);
+    }
+
+    /* ── WORKSPACE SIDEBAR ────────────────────────────────────── */
+    .workspace-sidebar{
+      border-right:1px solid var(--border);
+      background:var(--surface);
+      padding:0;
+      position:sticky;
+      top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+      display:flex;
+      flex-direction:column;
+    }
+    /* Workspace header block */
+    .ws-header{
+      padding:20px 18px 16px;
+      border-bottom:1px solid var(--border-lt);
+    }
+    .ws-header-row{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+    .ws-icon{
+      width:32px;height:32px;border-radius:8px;
+      background:linear-gradient(135deg,var(--blue),var(--blue-lt));
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;
+    }
+    .ws-icon svg{width:16px;height:16px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .ws-title{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.1px}
+    .ws-desc{font-size:12px;color:var(--text3);line-height:1.5}
+
+    /* Nav groups */
+    .nav-group{padding:12px 0 4px}
+    .nav-group-label{
+      font-size:10px;font-weight:600;color:var(--text3);
+      letter-spacing:.08em;text-transform:uppercase;
+      padding:0 18px;margin-bottom:4px;
+    }
+    .nav-link{
+      display:flex;align-items:center;gap:10px;
+      padding:8px 18px;
+      font-size:13px;font-weight:500;color:var(--text2);
+      text-decoration:none;cursor:pointer;
+      border-left:2px solid transparent;
+      transition:background .12s,color .12s,border-color .12s;
+    }
+    .nav-link:hover{background:var(--bg);color:var(--blue)}
+    .nav-link.active{
+      background:var(--blue-dim);color:var(--blue);
+      border-left-color:var(--blue);font-weight:600;
+    }
+    .nav-link-icon{
+      width:18px;height:18px;display:flex;align-items:center;justify-content:center;
+      opacity:.6;font-size:13px;
+    }
+    .nav-link.active .nav-link-icon{opacity:1}
+
+    /* ── MAIN CONTENT ─────────────────────────────────────────── */
+    .main-content{
+      padding:28px 24px 56px;
+      display:flex;flex-direction:column;gap:20px;
+      min-width:0;
+    }
+
+    /* Page heading */
+    .page-heading{margin-bottom:4px}
+    .page-heading h1{font-size:18px;font-weight:700;color:var(--text);letter-spacing:-.3px}
+    .page-heading p{font-size:13px;color:var(--text3);margin-top:3px}
+
+    /* ── CARD ─────────────────────────────────────────────────── */
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-sm);
+      overflow:hidden;
+    }
+    .card-header{
+      padding:14px 18px;
+      border-bottom:1px solid var(--border-lt);
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+    }
+    .card-title{font-size:13px;font-weight:700;color:var(--text)}
+    .card-sub{font-size:12px;color:var(--text3);margin-top:2px}
+    .card-body{padding:18px}
+
+    /* ── UPLOAD ZONE ──────────────────────────────────────────── */
+    .upload-zone{
+      border:1.5px dashed var(--border);
+      border-radius:var(--radius-lg);
+      padding:26px 20px;text-align:center;
+      background:var(--bg);cursor:pointer;
+      transition:border-color .15s,background .15s;
+    }
+    .upload-zone:hover,.upload-zone.drag{
+      border-color:var(--blue);background:var(--blue-dim);
+    }
+    .uz-icon{font-size:26px;margin-bottom:8px}
+    .uz-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:3px}
+    .uz-sub{font-size:12px;color:var(--text3)}
+    .uz-file{font-size:13px;font-weight:500;color:var(--blue);margin-top:8px;min-height:18px}
+    input[type=file]{display:none}
+
+    /* ── BUTTONS ──────────────────────────────────────────────── */
+    .btn{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:8px 14px;border-radius:var(--radius);
+      font-size:13px;font-weight:600;font-family:inherit;
+      cursor:pointer;border:none;
+      transition:all .15s;white-space:nowrap;
+    }
+    .btn-primary{background:var(--blue);color:#fff;box-shadow:0 1px 3px rgba(26,86,219,.3)}
+    .btn-primary:hover{background:#1448c2}
+    .btn-primary:disabled{opacity:.45;cursor:not-allowed}
+    .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+    .btn-ghost:hover{background:var(--bg);color:var(--blue);border-color:var(--blue)}
+    .btn-sm{padding:5px 10px;font-size:12px}
+
+    /* ── PROGRESS ─────────────────────────────────────────────── */
+    .progress-wrap{display:flex;align-items:center;gap:12px}
+    .progress-track{flex:1;height:5px;background:var(--bg2);border-radius:99px;overflow:hidden}
+    .progress-bar{
+      height:100%;width:0%;
+      background:linear-gradient(90deg,var(--blue),var(--blue-lt));
+      border-radius:99px;transition:width .4s ease;
+    }
+    .progress-label{font-size:12px;font-weight:600;color:var(--text3);min-width:34px;text-align:right}
+
+    /* ── METRIC TILES ─────────────────────────────────────────── */
+    .metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .metric-tile{
+      border-radius:var(--radius);padding:13px 14px;
+      background:var(--bg);border:1px solid var(--border-lt);
+    }
+    .mt-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+    .mt-value{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.5px}
+    .metric-tile.t-blue  {border-top:2px solid var(--blue)}
+    .metric-tile.t-green {border-top:2px solid var(--green)}
+    .metric-tile.t-amber {border-top:2px solid #d97706}
+    .metric-tile.t-red   {border-top:2px solid #ef4444}
+
+    /* ── STATUS BADGES ────────────────────────────────────────── */
+    .badge{
+      display:inline-flex;align-items:center;gap:5px;
+      padding:3px 8px;border-radius:99px;
+      font-size:11px;font-weight:600;
+      text-transform:uppercase;letter-spacing:.04em;
+    }
+    .badge::before{content:'';width:5px;height:5px;border-radius:50%;display:inline-block}
+    .badge.covered {background:var(--green-dim);color:var(--green)}
+    .badge.covered::before{background:var(--green)}
+    .badge.weak    {background:var(--amber-dim);color:var(--amber)}
+    .badge.weak::before{background:#d97706}
+    .badge.missing {background:var(--red-dim);color:var(--red)}
+    .badge.missing::before{background:#ef4444}
+
+    /* ── AI SUMMARY ───────────────────────────────────────────── */
+    .summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .summary-item{
+      background:var(--bg);border:1px solid var(--border-lt);
+      border-radius:var(--radius);padding:12px 14px;
+    }
+    .si-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+    .si-val{font-size:20px;font-weight:700;color:var(--text)}
+    .alert-row{
+      display:flex;align-items:center;gap:8px;
+      padding:10px 13px;border-radius:var(--radius);
+      font-size:13px;font-weight:500;margin-top:10px;
+    }
+    .alert-row.danger{background:var(--red-dim);color:var(--red)}
+    .alert-row.warn  {background:var(--amber-dim);color:var(--amber)}
+
+    /* ── TRANSCRIPT ───────────────────────────────────────────── */
+    .transcript-box{
+      background:var(--navy);color:#c8d8f0;
+      padding:14px 16px;border-radius:var(--radius);
+      font-family:'Menlo','Monaco','Consolas',monospace;
+      font-size:12.5px;line-height:1.7;
+      max-height:260px;overflow-y:auto;
+      white-space:pre-wrap;word-break:break-word;
+    }
+
+    /* ── COVERAGE ACCORDION ───────────────────────────────────── */
+    .cov-item{
+      border:1px solid var(--border-lt);border-radius:var(--radius);
+      margin-bottom:8px;overflow:hidden;
+    }
+    .cov-header{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:11px 14px;background:var(--bg);
+      cursor:pointer;gap:10px;
+      transition:background .12s;
+    }
+    .cov-header:hover{background:var(--bg2)}
+    .cov-title{font-size:13px;font-weight:600;color:var(--text)}
+    .cov-chevron{font-size:10px;color:var(--text3);transition:transform .2s;flex-shrink:0}
+    .cov-item.open .cov-chevron{transform:rotate(180deg)}
+    .cov-body{display:none;padding:14px;border-top:1px solid var(--border-lt)}
+    .cov-item.open .cov-body{display:block}
+    .cov-text{font-size:13px;color:var(--text2);line-height:1.65;margin-bottom:6px}
+    .cov-text:last-child{margin-bottom:0}
+    .cov-empty{font-size:12px;color:var(--text3);font-style:italic}
+
+    /* ── SENTENCE ROWS ────────────────────────────────────────── */
+    .sent-row{
+      display:flex;align-items:flex-start;gap:12px;
+      padding:10px 14px;
+      border-bottom:1px solid var(--border-lt);
+      transition:background .1s;
+    }
+    .sent-row:last-child{border-bottom:none}
+    .sent-row:hover{background:var(--bg)}
+    .sent-num{font-size:11px;font-weight:600;color:var(--text3);min-width:22px;padding-top:1px}
+    .sent-text{flex:1;font-size:13px;color:var(--text2);line-height:1.55}
+    .sent-meta{font-size:11px;color:var(--text3);margin-top:4px}
+    .sent-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:130px;flex-shrink:0}
+    .sec-tag{
+      display:inline-block;padding:2px 7px;border-radius:4px;
+      background:var(--blue-dim);color:var(--blue);
+      font-size:11px;font-weight:600;
+    }
+
+    /* ── RIGHT ASIDE ──────────────────────────────────────────── */
+    .right-aside{
+      border-left:1px solid var(--border);
+      background:var(--surface);
+      padding:20px 16px;
+      display:flex;flex-direction:column;gap:18px;
+      position:sticky;top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+    }
+    .ra-section-label{
+      font-size:10px;font-weight:700;color:var(--text3);
+      letter-spacing:.08em;text-transform:uppercase;
+      margin-bottom:8px;
+    }
+    .ra-row{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--border-lt);
+      font-size:13px;
+    }
+    .ra-row:last-child{border-bottom:none}
+    .ra-label{color:var(--text3);font-weight:500}
+    .ra-value{color:var(--text);font-weight:600;text-align:right;max-width:60%;word-break:break-all;font-size:12px}
+    .ra-actions{display:flex;flex-direction:column;gap:8px}
+    .ra-divider{border:none;border-top:1px solid var(--border-lt)}
+    .ra-hint{font-size:11px;color:var(--text3);margin-top:6px}
+
+    /* ── RIGHT PANEL CARDS ────────────────────────────────────── */
+    .right-aside{
+      border-left:1px solid var(--border);
+      background:var(--bg);
+      padding:16px 14px;
+      display:flex;flex-direction:column;gap:12px;
+      position:sticky;top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+    }
+    /* Individual panel card */
+    .rp-card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      overflow:hidden;
+      box-shadow:var(--shadow-sm);
+    }
+    .rp-card-header{
+      display:flex;align-items:center;gap:10px;
+      padding:11px 14px;
+      border-bottom:1px solid var(--border-lt);
+      background:var(--surface);
+    }
+    .rp-card-icon{
+      width:26px;height:26px;
+      border-radius:6px;
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;
+    }
+    .rp-card-icon svg{width:13px;height:13px}
+    .rp-icon-blue  {background:var(--blue-dim);color:var(--blue)}
+    .rp-icon-green {background:var(--green-dim);color:var(--green)}
+    .rp-icon-amber {background:var(--amber-dim);color:var(--amber)}
+    .rp-card-title{font-size:13px;font-weight:700;color:var(--text)}
+    .rp-card-body{padding:12px 14px}
+    /* Row inside session health */
+    .rp-row{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--border-lt);
+      gap:8px;
+    }
+    .rp-row:last-child{border-bottom:none}
+    .rp-label{font-size:12px;font-weight:500;color:var(--text3);flex-shrink:0}
+    .rp-value{font-size:12px;font-weight:600;color:var(--text);text-align:right;word-break:break-all}
+    .rp-mono{font-family:'Menlo','Monaco',monospace;font-size:11px;color:var(--text3)}
+    .rp-strong{font-size:14px;font-weight:700;color:var(--blue)}
+    /* Empty state */
+    .rp-empty-state{
+      text-align:center;padding:16px 8px;
+    }
+    .rp-empty-icon{font-size:22px;margin-bottom:6px}
+    .rp-empty-text{font-size:12px;font-weight:500;color:var(--text3);margin-bottom:3px}
+    .rp-empty-hint{font-size:11px;color:var(--text3);opacity:.7}
+    /* Override old ra- styles that might conflict */
+    .ra-section-label,.ra-row,.ra-label,.ra-value,.ra-actions,.ra-hint,.ra-divider{display:none}
+
+    /* ── FORM ─────────────────────────────────────────────────── */
+    #formContainer{display:none}
+    #formContainer.visible{display:block}
+    #form section{
+      border:1px solid var(--border-lt);border-radius:var(--radius);
+      padding:14px;margin-bottom:12px;background:var(--bg);
+    }
+    #form section h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)}
+    label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:5px;margin-top:8px}
+    input[type=text],select,textarea{
+      width:100%;padding:8px 10px;
+      border:1px solid var(--border);border-radius:var(--radius);
+      font-family:inherit;font-size:13px;
+      background:var(--surface);color:var(--text);
+      transition:border-color .15s,box-shadow .15s;
+    }
+    input[type=text]:focus,select:focus,textarea:focus{
+      outline:none;border-color:var(--blue);
+      box-shadow:0 0 0 3px rgba(26,86,219,.1);
+    }
+    input[type=checkbox]{width:auto;margin-right:8px;transform:scale(1.1)}
+    table{width:100%;border-collapse:collapse;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border-lt)}
+    thead{background:var(--bg2)}
+    th,td{padding:8px 12px;text-align:left;font-size:12px;border-bottom:1px solid var(--border-lt)}
+    th{font-weight:600;color:var(--text)}
+    td{color:var(--text2)}
+    tbody tr:hover{background:var(--bg)}
+
+    /* ── MODAL ────────────────────────────────────────────────── */
+    #editModal{
+      display:none;position:fixed;inset:0;
+      background:rgba(10,20,40,.55);
+      z-index:10000;align-items:center;justify-content:center;
+      backdrop-filter:blur(2px);
+    }
+    #editModal.open{display:flex}
+    .modal-box{
+      background:var(--surface);border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-lg);max-width:460px;width:90%;overflow:hidden;
+    }
+    .modal-hdr{
+      padding:14px 18px;border-bottom:1px solid var(--border-lt);
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .modal-hdr h3{font-size:14px;font-weight:700;color:var(--text)}
+    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);padding:2px 6px;border-radius:4px}
+    .modal-close:hover{background:var(--bg);color:var(--text)}
+    .modal-body{padding:18px}
+    .modal-preview{
+      background:var(--bg);border-left:3px solid var(--blue);
+      border-radius:4px;padding:10px 13px;
+      font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;
+    }
+    .modal-ftr{
+      padding:12px 18px;border-top:1px solid var(--border-lt);
+      display:flex;justify-content:flex-end;gap:8px;
+    }
+
+    /* ── TOASTS ───────────────────────────────────────────────── */
+    #toasts{
+      position:fixed;top:66px;right:18px;
+      z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:300px;
+    }
+    .toast{
+      background:var(--navy);color:#e2e8f0;
+      padding:10px 14px;border-radius:var(--radius);
+      box-shadow:var(--shadow);font-size:13px;font-weight:500;
+      border-left:3px solid var(--blue);
+      opacity:1;transition:opacity .3s;
+    }
+
+    /* ── RESPONSIVE ───────────────────────────────────────────── */
+    @media(max-width:1200px){.page-wrap{grid-template-columns:240px 1fr 260px}}
+    @media(max-width:960px){
+      .page-wrap{grid-template-columns:220px 1fr}
+      .right-aside{display:none}
+      .metric-grid{grid-template-columns:repeat(2,1fr)}
+    }
+    @media(max-width:680px){
+      .page-wrap{grid-template-columns:1fr}
+      .workspace-sidebar{display:none}
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <a class="tb-brand" href="#">
+    <div class="tb-logo">C</div>
+    <span class="tb-name">Continuum</span>
+  </a>
+  <div class="tb-divider"></div>
+  <span class="tb-subtitle">KT Planner</span>
+  <div class="tb-right">
+    <span class="tb-badge">Beta</span>
+    <a class="tb-link" href="/docs">API Docs</a>
+    <a class="tb-link" href="#">Help</a>
+  </div>
+</header>
+
+<!-- PAGE WRAP -->
+<div class="page-wrap">
+
+  <!-- ── WORKSPACE SIDEBAR ───────────────────────────────────── -->
+  <aside class="workspace-sidebar">
+
+    <!-- Workspace header card -->
+    <div class="ws-header">
+      <div class="ws-header-row">
+        <div class="ws-icon">
+          <!-- grid icon -->
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </div>
+        <span class="ws-title">Workspace</span>
+      </div>
+      <p class="ws-desc">Enterprise KT dashboard with workflow navigation and insights.</p>
+    </div>
+
+    <!-- Nav links -->
+    <div class="nav-group" style="padding-top:8px">
+      <p class="nav-group-label">Main</p>
+      <a class="nav-link active" href="#">
+        <span class="nav-link-icon">⊞</span>Dashboard
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">↑</span>Uploads
+      </a>
+      <a class="nav-link" href="#coverageSection">
+        <span class="nav-link-icon">◎</span>Coverage
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <p class="nav-group-label">Knowledge</p>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⬡</span>Architecture
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⚡</span>Troubleshooting
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">≡</span>Runbooks
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <p class="nav-group-label">Tools</p>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">✦</span>AI Insights
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">↓</span>Exports
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⚙</span>Settings
+      </a>
+    </div>
+
+  </aside>
+
+  <!-- ── MAIN CONTENT ─────────────────────────────────────────── -->
+  <main class="main-content">
+
+    <div class="page-heading">
+      <h1>KT Session</h1>
+      <p>Upload a recording to generate a structured knowledge transfer document.</p>
+    </div>
+
+    <!-- Upload card -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Upload Recording</div>
+          <div class="card-sub">Accepts audio and video · Whisper transcription · AI classification</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <label for="file" style="margin:0">
+          <div class="upload-zone" id="uploadZone">
+            <div class="uz-icon">🎙</div>
+            <div class="uz-title">Drop a file or click to browse</div>
+            <div class="uz-sub">MP4, MP3, WAV, MOV, WEBM — up to 500 MB</div>
+            <div class="uz-file" id="fileNameDisplay"></div>
+          </div>
+        </label>
+        <input id="file" type="file" accept="audio/*,video/*"/>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:12px">
+          <button id="upload" class="btn btn-primary">⬆&nbsp; Upload &amp; Process</button>
+        </div>
+
+        <div id="progressWrap" style="display:none;margin-top:16px">
+          <div class="progress-wrap">
+            <div class="progress-track"><div class="progress-bar" id="bar"></div></div>
+            <span class="progress-label" id="progressText">0%</span>
+          </div>
+          <p style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
+            Transcribing and classifying — this may take a few minutes for long recordings.
+          </p>
+        </div>
+
+        <div class="metric-grid" id="summaryGrid" style="margin-top:18px">
+          <div class="metric-tile t-blue">
+            <div class="mt-label">Coverage</div>
+            <div class="mt-value" id="summaryCoverage">—</div>
+          </div>
+          <div class="metric-tile t-green">
+            <div class="mt-label">Confidence</div>
+            <div class="mt-value" id="summaryConfidence">—</div>
+          </div>
+          <div class="metric-tile t-amber">
+            <div class="mt-label">Weak</div>
+            <div class="mt-value" id="summaryWeak">—</div>
+          </div>
+          <div class="metric-tile t-red">
+            <div class="mt-label">Missing</div>
+            <div class="mt-value" id="summaryMissing">—</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- AI Summary card -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">AI Summary</div>
+          <div class="card-sub">High-level insights, gaps, and session health</div>
+        </div>
+        <button id="toggleTranscript" class="btn btn-ghost btn-sm">Show transcript</button>
+      </div>
+      <div class="card-body">
+        <div id="aiSummary">
+          <p style="font-size:13px;color:var(--text3)">Upload a recording to see analysis results.</p>
+        </div>
+        <div id="transcriptCard" style="display:none;margin-top:14px">
+          <pre class="transcript-box" id="transcript">(no transcript yet)</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Coverage Details -->
+    <div class="card" id="coverageSection">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Coverage Details</div>
+          <div class="card-sub" id="coverageSummaryText">Section-level coverage and evidence</div>
+        </div>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="coverage">
+          <p style="font-size:13px;color:var(--text3);padding:6px">No coverage data yet.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- KT Form (hidden until Apply) -->
+    <div class="card" id="formContainer">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Knowledge Transfer Form</div>
+          <div class="card-sub">Auto-populated from AI analysis — review and edit before export</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="
+          document.getElementById('formContainer').classList.remove('visible');
+          document.getElementById('formContainer').style.display='none';
+        ">✕&nbsp;Close</button>
+      </div>
+      <div class="card-body">
+        <div id="form"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── RIGHT ASIDE ───────────────────────────────────────────── -->
+  <aside class="right-aside">
+
+    <!-- Session Health card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <span class="rp-card-title">Session Health</span>
+      </div>
+      <div class="rp-card-body">
+        <div class="rp-row">
+          <span class="rp-label">Job ID</span>
+          <span class="rp-value rp-mono" id="sessionJob">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Overall coverage</span>
+          <span class="rp-value rp-strong" id="sessionCoverage">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Missing required</span>
+          <span class="rp-value" id="sessionMissing">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Weak sections</span>
+          <span class="rp-value" id="sessionWeak">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-green">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </div>
+        <span class="rp-card-title">Actions</span>
+      </div>
+      <div class="rp-card-body">
+        <button id="applyJob" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px">
+          ⊕&nbsp; Apply results to form
+        </button>
+        <button id="downloadJson" class="btn btn-ghost" style="width:100%;justify-content:center">
+          ↓&nbsp; Export JSON
+        </button>
+        <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
+          Apply maps AI coverage into the KT form fields for review and export.
+        </p>
+      </div>
+    </div>
+
+    <!-- Visual Evidence card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+        <span class="rp-card-title">Visual Evidence</span>
+      </div>
+      <div class="rp-card-body">
+        <div id="screenshots">
+          <div class="rp-empty-state">
+            <div class="rp-empty-icon">🖼</div>
+            <p class="rp-empty-text">No screenshots captured yet.</p>
+            <p class="rp-empty-hint">Screenshots will appear here after processing.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+</div><!-- /page-wrap -->
+
+<!-- EDIT MODAL -->
+<div id="editModal">
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <h3>Correct Classification</h3>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--text3);margin-bottom:6px">Sentence</p>
+      <div class="modal-preview" id="sentencePreview"></div>
+      <label for="sectionSelect">Assign to section</label>
+      <select id="sectionSelect"></select>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditSentence()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div id="toasts"></div>
+
+<script>
+/* ── DOM refs ─────────────────────────────────────────────── */
+const uploadBtn        = document.getElementById('upload');
+const fileInput        = document.getElementById('file');
+const transcriptEl     = document.getElementById('transcript');
+const transcriptCard   = document.getElementById('transcriptCard');
+const coverageEl       = document.getElementById('coverage');
+const bar              = document.getElementById('bar');
+const progressText     = document.getElementById('progressText');
+const summaryCoverage  = document.getElementById('summaryCoverage');
+const summaryMissing   = document.getElementById('summaryMissing');
+const summaryWeak      = document.getElementById('summaryWeak');
+const summaryConfidence= document.getElementById('summaryConfidence');
+const aiSummaryEl      = document.getElementById('aiSummary');
+const toggleTranscript = document.getElementById('toggleTranscript');
+const sessionJob       = document.getElementById('sessionJob');
+const sessionCoverage  = document.getElementById('sessionCoverage');
+const sessionMissing   = document.getElementById('sessionMissing');
+const sessionWeak      = document.getElementById('sessionWeak');
+const progressWrap     = document.getElementById('progressWrap');
+const fileNameDisplay  = document.getElementById('fileNameDisplay');
+
+let currentJobId = null;
+let pollInterval = null;
+let SCHEMA = null;
+
+/* ── Progress ──────────────────────────────────────────────── */
+function setProgress(p){ bar.style.width=p+'%'; progressText.textContent=p+'%'; }
+
+/* ── Toast ─────────────────────────────────────────────────── */
+const toastsEl=document.getElementById('toasts');
+function showToast(msg,timeout=4000){
+  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+  toastsEl.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>{ try{t.remove()}catch(e){} },300); },timeout);
+}
+
+/* ── File picker ────────────────────────────────────────────── */
+fileInput.addEventListener('change',(e)=>{
+  const f=e.target.files[0];
+  fileNameDisplay.textContent=f?(f.name.length>38?f.name.slice(0,34)+'…':f.name):'';
+  const z=document.getElementById('uploadZone');
+  if(f){z.style.borderColor='var(--blue)';z.style.background='var(--blue-dim)'}
+});
+
+/* ── Render summary ─────────────────────────────────────────── */
+function renderSummary(data){
+  const cov=data.coverage||{};
+  const secs=Object.keys(cov);
+  const covered=secs.filter(id=>cov[id].status==='covered').length;
+  const weak=secs.filter(id=>cov[id].status==='weak').length;
+  const missing=secs.filter(id=>cov[id].status==='missing').length;
+  const total=secs.length;
+  const pct=total?Math.round((covered+weak)/total*100):0;
+
+  summaryCoverage.textContent=`${covered+weak}/${total}`;
+  summaryWeak.textContent=weak;
+  summaryMissing.textContent=data.missing_required?.length??missing;
+  summaryConfidence.textContent=data.overall_coverage_percent?Math.round(data.overall_coverage_percent)+'%':'—';
+  sessionJob.textContent=data.job_id?(data.job_id.slice(0,14)+'…'):'—';
+  sessionCoverage.textContent=pct+'%';
+  sessionMissing.textContent=data.missing_required?.length??missing;
+  sessionWeak.textContent=weak;
+
+  const missingList=data.missing_required||[];
+  const weakList=secs.filter(id=>cov[id].status==='weak');
+  aiSummaryEl.innerHTML='';
+
+  const grid=document.createElement('div'); grid.className='summary-grid';
+  [{label:'Expected',value:total},{label:'Covered',value:covered},{label:'Weak',value:weak},{label:'Missing',value:missingList.length}].forEach(item=>{
+    const d=document.createElement('div'); d.className='summary-item';
+    d.innerHTML=`<div class="si-label">${item.label}</div><div class="si-val">${item.value}</div>`;
+    grid.appendChild(d);
+  });
+  aiSummaryEl.appendChild(grid);
+
+  if(missingList.length){
+    const a=document.createElement('div'); a.className='alert-row danger';
+    a.innerHTML=`⚠&nbsp;<span><strong>Missing critical sections:</strong> ${missingList.join(', ')}</span>`;
+    aiSummaryEl.appendChild(a);
+  }
+  if(weakList.length){
+    const a=document.createElement('div'); a.className='alert-row warn';
+    a.innerHTML=`◌&nbsp;<span><strong>Weak coverage:</strong> ${weakList.join(', ')}</span>`;
+    aiSummaryEl.appendChild(a);
+  }
+}
+
+/* ── Render coverage ────────────────────────────────────────── */
+function renderCoverage(cov){
+  coverageEl.innerHTML='';
+  for(const [id,info] of Object.entries(cov)){
+    const status=info.status||'missing';
+    const contentArray=Array.isArray(info.content)?info.content:[];
+    const item=document.createElement('div'); item.className='cov-item';
+    const hdr=document.createElement('div'); hdr.className='cov-header';
+    hdr.innerHTML=`
+      <span class="cov-title">${info.title||id}</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <span class="badge ${status}">${status}</span>
+        <span class="cov-chevron">▼</span>
+      </div>`;
+    hdr.addEventListener('click',()=>item.classList.toggle('open'));
+    const body=document.createElement('div'); body.className='cov-body';
+    if(contentArray.length){
+      contentArray.forEach(c=>{ const p=document.createElement('p'); p.className='cov-text'; p.textContent=c; body.appendChild(p); });
+    } else {
+      const p=document.createElement('p'); p.className='cov-empty';
+      p.textContent='No explicit sentence text available — coverage inferred from semantic analysis.';
+      body.appendChild(p);
+    }
+    item.appendChild(hdr); item.appendChild(body);
+    if(status!=='missing') item.classList.add('open');
+    coverageEl.appendChild(item);
+  }
+
+  // Sentence assignments
+  const flat=[];
+  for(const [secId,info] of Object.entries(cov)){
+    for(const s of (info.sentences||[])){ flat.push({...s,assigned_sections:s.assigned_sections||[secId]}); }
+  }
+  if(flat.length){
+    const wrap=document.createElement('div');
+    wrap.className='card'; wrap.style.marginTop='8px'; wrap.style.border='1px solid var(--border-lt)';
+    const wHdr=document.createElement('div'); wHdr.className='card-header';
+    wHdr.innerHTML=`<div class="card-title">Sentence Assignments</div><div class="card-sub">${flat.length} sentences classified</div>`;
+    wrap.appendChild(wHdr);
+    flat.forEach((s,i)=>{
+      const row=document.createElement('div'); row.className='sent-row';
+      const num=document.createElement('div'); num.className='sent-num'; num.textContent=i+1;
+      const mid=document.createElement('div'); mid.style.flex='1'; mid.style.minWidth='0';
+      const txt=document.createElement('div'); txt.className='sent-text'; txt.textContent=s.text;
+      const meta=document.createElement('div'); meta.className='sent-meta';
+      meta.textContent=`${(s.start||0).toFixed(1)}s · conf ${(s.audio_confidence||0).toFixed(2)}`;
+      mid.appendChild(txt); mid.appendChild(meta);
+      const right=document.createElement('div'); right.className='sent-right';
+      (s.assigned_sections||[]).forEach(sec=>{ const t=document.createElement('span'); t.className='sec-tag'; t.textContent=sec; right.appendChild(t); });
+      const eb=document.createElement('button'); eb.className='btn btn-ghost btn-sm'; eb.textContent='Edit';
+      eb.onclick=()=>promptEditSentence(i,s); right.appendChild(eb);
+      row.appendChild(num); row.appendChild(mid); row.appendChild(right);
+      wrap.appendChild(row);
+    });
+    coverageEl.appendChild(wrap);
+  }
+}
+
+/* ── Transcript toggle ──────────────────────────────────────── */
+toggleTranscript.addEventListener('click',()=>{
+  const open=transcriptCard.style.display==='block';
+  transcriptCard.style.display=open?'none':'block';
+  toggleTranscript.textContent=open?'Show transcript':'Hide transcript';
+});
+
+/* ── Poll job ───────────────────────────────────────────────── */
+function pollJobStatus(jobId){
+  if(pollInterval) clearInterval(pollInterval);
+  pollInterval=setInterval(async()=>{
+    try{
+      const resp=await fetch(`/status/${jobId}`);
+      if(!resp.ok){ showToast('Status check failed'); clearInterval(pollInterval); return; }
+      const data=await resp.json();
+      if(data.status==='processing'){
+        setProgress(Math.min(50,data.progress||0));
+      } else if(data.status==='completed'){
+        setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
+        renderSummary(data);
+        transcriptEl.textContent=data.transcript||'(none)';
+        renderCoverage(data.coverage||{});
+        const shotsEl=document.getElementById('screenshots');
+        shotsEl.innerHTML='';
+        const shots=data.screenshots||[];
+        if(shots.length){ shots.forEach(s=>{ const img=document.createElement('img'); img.src=s; img.style.cssText='max-width:100%;border-radius:6px'; shotsEl.appendChild(img); }); }
+        else { shotsEl.innerHTML='<p style="font-size:12px;color:var(--text3)">No screenshots captured.</p>'; }
+      } else if(data.status==='failed'){
+        showToast('Processing failed: '+(data.error||'Unknown error'));
+        setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
+      }
+    }catch(err){ showToast('Poll error: '+err); clearInterval(pollInterval); }
+  },2000);
+}
+
+/* ── Upload ─────────────────────────────────────────────────── */
+uploadBtn.addEventListener('click',async()=>{
+  const f=fileInput.files[0];
+  if(!f){ showToast('Choose a file first'); return; }
+  progressWrap.style.display='block'; setProgress(5);
+  const fd=new FormData(); fd.append('file',f);
+  try{
+    const resp=await fetch('/upload',{method:'POST',body:fd});
+    if(!resp.ok){ const t=await resp.text(); showToast('Upload failed: '+resp.status+' '+t); setProgress(0); progressWrap.style.display='none'; return; }
+    setProgress(20);
+    const data=await resp.json();
+    currentJobId=data.job_id;
+    if(data.status==='processing'){
+      transcriptEl.textContent='Processing…';
+      coverageEl.innerHTML='<p style="font-size:13px;color:var(--text3);padding:6px">Processing — please wait…</p>';
+      aiSummaryEl.innerHTML='<p style="font-size:13px;color:var(--text3)">Waiting for analysis results…</p>';
+      sessionJob.textContent=currentJobId.slice(0,14)+'…';
+      pollJobStatus(currentJobId);
+    }
+  }catch(err){ showToast('Error: '+err); setProgress(0); progressWrap.style.display='none'; }
+});
+
+/* ── Edit modal ─────────────────────────────────────────────── */
+let editState={sentenceIndex:null,sentenceObj:null};
+async function promptEditSentence(idx,s){
+  editState={sentenceIndex:idx,sentenceObj:s};
+  document.getElementById('sentencePreview').textContent=s.text;
+  const dd=document.getElementById('sectionSelect'); dd.innerHTML='';
+  if(SCHEMA){ SCHEMA.forEach(sec=>{ const o=document.createElement('option'); o.value=sec.id; o.textContent=sec.title||sec.id; if(s.assigned_sections?.includes(sec.id)) o.selected=true; dd.appendChild(o); }); }
+  document.getElementById('editModal').classList.add('open');
+}
+function closeEditModal(){ document.getElementById('editModal').classList.remove('open'); editState={sentenceIndex:null,sentenceObj:null}; }
+async function confirmEditSentence(){
+  const cs=document.getElementById('sectionSelect').value;
+  if(!cs||editState.sentenceIndex===null){ showToast('Select a section'); return; }
+  try{
+    const body={job_id:currentJobId,sentence_id:editState.sentenceIndex,corrected_classification:cs,user:'local_user',feedback_notes:'UI correction'};
+    const r=await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ showToast('Feedback failed'); return; }
+    const j=await r.json();
+    if(j.coverage){ renderCoverage(j.coverage); renderSummary(j); }
+    showToast('Reclassified → '+cs+' ✓');
+    closeEditModal();
+  }catch(e){ showToast('Feedback error: '+e); }
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeEditModal(); });
+document.getElementById('editModal').addEventListener('click',e=>{ if(e.target.id==='editModal') closeEditModal(); });
+
+/* ── Schema ─────────────────────────────────────────────────── */
+async function loadSchema(){
+  try{
+    const r=await fetch('/schema'); if(!r.ok) throw new Error('Schema load failed');
+    const j=await r.json(); SCHEMA=j.sections;
+  }catch(e){ console.error('Schema error',e); }
+}
+
+/* ── Form rendering ─────────────────────────────────────────── */
+function createInput(field,sectionId){
+  const wrap=document.createElement('div'); wrap.style.marginBottom='10px';
+  const lbl=document.createElement('label'); lbl.textContent=field.label||field.id||''; wrap.appendChild(lbl);
+  if(field.type==='text'||!field.type){
+    const inp=document.createElement('input'); inp.type='text'; inp.dataset.section=sectionId; inp.dataset.field=field.id||''; wrap.appendChild(inp); return wrap;
+  }
+  if(field.type==='boolean'){
+    const inp=document.createElement('input'); inp.type='checkbox'; inp.dataset.section=sectionId; inp.dataset.field=field.id||''; wrap.appendChild(inp); return wrap;
+  }
+  if(field.type==='single_select'||field.type==='multi_select'){
+    const sel=document.createElement('select'); sel.dataset.section=sectionId; sel.dataset.field=field.id||'';
+    if(field.type==='multi_select') sel.multiple=true;
+    (field.options||[]).forEach(opt=>{ const o=document.createElement('option'); o.value=opt; o.textContent=opt; sel.appendChild(o); });
+    wrap.appendChild(sel); return wrap;
+  }
+  if(field.type==='table'){
+    const tbl=document.createElement('table');
+    const thead=document.createElement('thead'); const tr=document.createElement('tr');
+    (field.columns||[]).forEach(c=>{ const th=document.createElement('th'); th.textContent=c; tr.appendChild(th); });
+    thead.appendChild(tr); tbl.appendChild(thead);
+    const tbody=document.createElement('tbody'); tbody.dataset.section=sectionId; tbody.dataset.field=field.id||'';
+    tbl.appendChild(tbody); addTableRow(tbody,field); wrap.appendChild(tbl); return wrap;
+  }
+  const inp2=document.createElement('input'); inp2.type='text'; wrap.appendChild(inp2); return wrap;
+}
+function addTableRow(tbody,field,values){
+  const tr=document.createElement('tr');
+  (field.columns||[]).forEach((col,idx)=>{
+    const td=document.createElement('td');
+    const ct=(field.columns_type&&field.columns_type[idx])||'text';
+    if(ct==='boolean'){ const cb=document.createElement('input'); cb.type='checkbox'; td.appendChild(cb); }
+    else { const inp=document.createElement('input'); inp.type='text'; inp.style.width='100%'; inp.value=(values&&values[idx])||''; td.appendChild(inp); }
+    tr.appendChild(td);
+  });
+  tbody.appendChild(tr);
+}
+function renderForm(schema){
+  const form=document.getElementById('form'); form.innerHTML='';
+  for(const sec of schema){
+    const sDiv=document.createElement('section');
+    const h=document.createElement('h3'); h.textContent=sec.title||sec.id; sDiv.appendChild(h);
+    for(const field of (sec.fields||[])){ sDiv.appendChild(createInput(field,sec.id)); }
+    form.appendChild(sDiv);
+  }
+}
+
+/* ── Apply job ──────────────────────────────────────────────── */
+document.getElementById('applyJob').addEventListener('click',async()=>{
+  if(!currentJobId){ showToast('No active job'); return; }
+  if(!document.querySelector('#form section')) renderForm(SCHEMA);
+  const r=await fetch(`/status/${currentJobId}`);
+  if(!r.ok){ showToast('Job fetch failed'); return; }
+  const j=await r.json();
+  const cov=j.coverage||{};
+  for(const [secId,info] of Object.entries(cov)){
+    const contentArr=Array.isArray(info)?info:(info?.content)||[];
+    const texts=(contentArr||[]).join('\n');
+    document.querySelectorAll(`[data-section="${secId}"]`).forEach(el=>{
+      const field=el.dataset.field; if(!field) return;
+      if(el.tagName==='INPUT'&&el.type==='text'){ el.value=texts; return; }
+      if(el.tagName==='SELECT'){ for(const opt of el.options){ if(texts&&opt.value&&texts.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } return; }
+      if(el.tagName==='TBODY'){
+        el.innerHTML='';
+        const fd=(SCHEMA&&SCHEMA.find(s=>s.id===secId)?.fields?.find(f=>f.id===el.dataset.field))||null;
+        const rows=contentArr||[];
+        if(rows.length>0){ for(const rowText of rows) addTableRow(el,fd,[rowText]); } else addTableRow(el,fd);
+        return;
+      }
+      if(el.tagName==='INPUT'&&el.type==='checkbox'){ el.checked=texts.length>0; return; }
+    });
+  }
+  const mapped=j.mapped_fields||{};
+  for(const [secId,fields] of Object.entries(mapped)){
+    for(const [fid,info] of Object.entries(fields)){
+      const els=document.querySelectorAll(`[data-section="${secId}"][data-field="${fid}"]`);
+      for(const el of els){
+        const val=info.value||'';
+        if(el.tagName==='INPUT'&&el.type==='text') el.value=val;
+        else if(el.tagName==='INPUT'&&el.type==='checkbox') el.checked=!!val;
+        else if(el.tagName==='SELECT'){ for(const opt of el.options){ if(val&&opt.value&&val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } }
+        else if(el.tagName==='TBODY'){ el.innerHTML=''; const fd=(SCHEMA&&SCHEMA.find(s=>s.id===secId)?.fields?.find(f=>f.id===fid))||null; addTableRow(el,fd,[val]); }
+      }
+    }
+  }
+  const fc=document.getElementById('formContainer');
+  fc.style.display='block'; fc.classList.add('visible');
+  setTimeout(()=>fc.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+  showToast('Form populated ✓');
+});
+
+/* ── Export JSON ─────────────────────────────────────────────── */
+document.getElementById('downloadJson').addEventListener('click',()=>{
+  if(!SCHEMA){ showToast('Schema not loaded'); return; }
+  const out={template_name:'PROJECT KT & HANDOVER DOCUMENT',sections:[]};
+  for(const sec of SCHEMA){
+    const entry={id:sec.id,title:sec.title,fields:{}};
+    document.querySelectorAll(`[data-section="${sec.id}"]`).forEach(el=>{
+      const fid=el.dataset.field; if(!fid) return;
+      if(el.tagName==='INPUT'&&el.type==='text') entry.fields[fid]=el.value;
+      else if(el.tagName==='INPUT'&&el.type==='checkbox') entry.fields[fid]=el.checked;
+      else if(el.tagName==='SELECT'&&el.multiple) entry.fields[fid]=Array.from(el.selectedOptions).map(o=>o.value);
+      else if(el.tagName==='SELECT') entry.fields[fid]=el.value;
+      else if(el.tagName==='TBODY'){
+        const rows=[];
+        for(const tr of Array.from(el.children)){ const cols=Array.from(tr.children).map(td=>{ const inp=td.querySelector('input'); if(!inp) return ''; return inp.type==='checkbox'?inp.checked:inp.value; }); rows.push(cols); }
+        entry.fields[fid]=rows;
+      }
+    });
+    out.sections.push(entry);
+  }
+  const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='kt_filled.json'; a.click(); URL.revokeObjectURL(url);
+});
+
+loadSchema();
+</script>
+</body>
+</html>

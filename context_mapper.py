@@ -16,6 +16,7 @@ Pipeline stages:
 
 import re
 import json
+import inspect
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -81,6 +82,17 @@ try:
     import numpy as np
 except Exception:
     import statistics as np
+
+# Sentence tokenization support for better transcript splitting.
+try:
+    import nltk
+    nltk.download('punkt', quiet=True)
+    from nltk.tokenize import sent_tokenize
+    HAS_NLTK = True
+except Exception:
+    HAS_NLTK = False
+    def sent_tokenize(text):
+        return re.split(r"(?<=[.!?])\s+", text)
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +186,14 @@ def segment_sentences(
             char_to_segment[char_pos + i] = seg_idx
         char_pos += len(seg_text) + 1  # +1 for space
     
-    # Split by sentence endings
-    sentence_texts = re.split(r"(?<=[.!?])\s+", full_text.strip())
+    # Split into sentences using NLTK when available, otherwise regex fallback.
+    if HAS_NLTK:
+        try:
+            sentence_texts = sent_tokenize(full_text.strip())
+        except Exception:
+            sentence_texts = re.split(r"(?<=[.!?])\s+", full_text.strip())
+    else:
+        sentence_texts = re.split(r"(?<=[.!?])\s+", full_text.strip())
 
     # If some sentences are extremely long (e.g., long monologue without punctuation),
     # further split them on commas or after a max length to ensure every word gets a mapping.
@@ -845,9 +863,12 @@ class ContextRepair:
                 improved = self._infer_from_context(improved, context_text)
         
         # Stage 3: LLM fallback (if enabled and needed)
-        if self.llm_fallback_fn and classified.sentence.audio_confidence < 0.3:
+        if self.llm_fallback_fn and (
+            classified.sentence.audio_confidence < 0.3
+            or (classified.primary_classification and classified.primary_classification.confidence < 0.45)
+            or self._has_grammar_issues(original)
+        ):
             try:
-                # Async hook for Claude/GPT-4
                 section_id = classified.primary_classification.section_id if classified.primary_classification else None
                 llm_result = self._try_llm_repair(original, context_sentences, section_id)
                 if llm_result and llm_result != improved:
@@ -922,14 +943,32 @@ class ContextRepair:
         """Hook for LLM-based repair (Claude/GPT-4)."""
         if not self.llm_fallback_fn:
             return None
-        
+
+        context_text = ' '.join([c.sentence.text for c in context]) if context else ''
+        prompt = (
+            "You are a conservative text editor for technical transcripts. "
+            "Improve the sentence below only for grammar and clarity without changing any technical meaning or introducing new facts. "
+            "If the sentence is already clear, return it unchanged.\n\n"
+            f"Section: {section_id or 'unknown'}\n"
+            f"Context: {context_text}\n"
+            f"Original sentence: {original}\n"
+            "Return only the repaired sentence."
+        )
+
         try:
-            # This would be called asynchronously in production
-            # Delegate to provided LLM hook with conservative settings
-            # The llm_fallback_fn should accept (text, context_text, section_id, temperature)
-            context_text = ' '.join([c.sentence.text for c in context]) if context else ''
-            # Low temperature to avoid hallucination
-            result = self.llm_fallback_fn(original, context_text, section_id, temperature=0.2)
+            # Support both legacy call signatures and prompt/metadata-based hooks.
+            sig = inspect.signature(self.llm_fallback_fn)
+            if len(sig.parameters) >= 4:
+                return self.llm_fallback_fn(original, context_text, section_id, temperature=0.2)
+
+            result = self.llm_fallback_fn(
+                prompt,
+                metadata={
+                    "context": context_text,
+                    "section_id": section_id,
+                    "temperature": 0.2
+                }
+            )
             return result
         except Exception:
             return None
@@ -1100,7 +1139,13 @@ def detect_gaps(
         if assigned_section != current_block_section and current_block_sentences:
             # Finalize the block
             if current_block_section:
-                confidences = [classified_sentences[idx_val].sentence.audio_confidence for idx_val in current_block_indices]
+                confidences = []
+                for idx_val in current_block_indices:
+                    cs_block = classified_sentences[idx_val]
+                    if cs_block.primary_classification:
+                        confidences.append(cs_block.primary_classification.confidence)
+                    else:
+                        confidences.append(cs_block.sentence.audio_confidence)
                 block_confidence = float(np.mean(confidences)) if confidences else 0.0
                 
                 block = TopicBlock(
@@ -1127,9 +1172,15 @@ def detect_gaps(
     
     # Finalize last block
     if current_block_sentences and current_block_section:
-        confidences = [classified_sentences[i].sentence.audio_confidence for i in current_block_indices]
+        confidences = []
+        for idx_val in current_block_indices:
+            cs_block = classified_sentences[idx_val]
+            if cs_block.primary_classification:
+                confidences.append(cs_block.primary_classification.confidence)
+            else:
+                confidences.append(cs_block.sentence.audio_confidence)
         block_confidence = float(np.mean(confidences)) if confidences else 0.0
-        
+
         block = TopicBlock(
             section_id=current_block_section,
             topic_title=None,
@@ -1341,6 +1392,7 @@ class StructuredKT:
     job_id: str
     transcript: str
     sentences: List[Sentence]
+    classified_sentences: List["ClassifiedSentence"]
     coverage: Dict[str, SectionCoverage]
     section_content: Dict[str, Dict[str, Any]]
     missing_required_sections: List[str]
@@ -1559,6 +1611,7 @@ def assemble_kt(
         job_id=job_id,
         transcript=transcript,
         sentences=[cs.sentence for cs in classified_sentences],
+        classified_sentences=classified_sentences,
         coverage=coverage,
         section_content=section_content,
         missing_required_sections=missing_required,
@@ -1782,13 +1835,15 @@ class ContextMappingPipeline:
         schema_sections: List[Dict],
         similarity_threshold: float = 0.30,
         audio_confidence_threshold: float = 0.4,
-        llm_fallback_fn=None
+        llm_fallback_fn=None,
+        enterprise_mapper_enabled: bool = True
     ):
         self.schema_sections = schema_sections
         self.classifier = ContextClassifier(similarity_threshold=similarity_threshold)
         self.classifier.index_schema(schema_sections)
         self.repair = ContextRepair(llm_fallback_fn=llm_fallback_fn)
         self.audio_conf_threshold = audio_confidence_threshold
+        self.enterprise_mapper_enabled = bool(enterprise_mapper_enabled)
     
     def process(
         self,
@@ -2086,7 +2141,33 @@ class ContextMappingPipeline:
         # STAGE 7: Assemble KT
         kt = assemble_kt(job_id, transcript, classified_sentences, coverage, assets, repaired_map, topic_contexts)
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
-        
+        # STAGE 7.5: Enterprise paragraph reconstruction (optional)
+        try:
+            # Gate enterprise mapper behind pipeline-level flag to avoid heavy loads by default
+            if getattr(self, 'enterprise_mapper_enabled', True):
+                # Lazy import to avoid heavy model load during module import
+                from enterprise_semantic_mapper import create_semantic_mapper
+                llm_refiner = self.repair.llm_fallback_fn if getattr(self, 'repair', None) else None
+                mapper = create_semantic_mapper(self.schema_sections, llm_refiner=llm_refiner)
+            else:
+                mapper = None
+            # Build sentence tuples with stable ids
+            sentence_tuples = [(f"s_{i}", cs.sentence.text) for i, cs in enumerate(classified_sentences)]
+            sem_res = mapper.process_transcript(sentence_tuples) if mapper else {}
+            # Merge reconstructed paragraphs into kt.section_content under 'enterprise_paragraphs'
+            paragraphs = sem_res.get('paragraphs', {}) if isinstance(sem_res, dict) else {}
+            for sec_id, para_list in paragraphs.items():
+                try:
+                    kt.section_content.setdefault(sec_id, {}).setdefault('enterprise_paragraphs', para_list)
+                except Exception:
+                    # Non-critical: skip on any merge failure
+                    continue
+            # Attach metrics for visibility
+            kt.enterprise_metrics = sem_res.get('metrics', {}) if isinstance(sem_res, dict) else {}
+            logger.info("Enterprise semantic mapper produced paragraphs for %d sections", len(paragraphs))
+        except Exception as e:
+            logger.warning("Enterprise semantic mapper integration failed: %s", e)
+
         return kt
 
 
