@@ -332,14 +332,20 @@ def semantic_chunk_sentences(
         return sentences
 
     model = _get_semantic_chunk_model()
-    encodings = [model.encode(s.text, convert_to_tensor=True) for s in sentences]
+    # Batch encode all sentence texts to reduce repeated model calls
+    texts = [s.text for s in sentences]
+    try:
+        encodings = model.encode(texts, convert_to_tensor=True)
+    except Exception:
+        # Fallback to per-item encoding if model.encode batch isn't available
+        encodings = [model.encode(t, convert_to_tensor=True) for t in texts]
     chunks: List[Sentence] = []
     current = sentences[0]
     current_emb = encodings[0]
 
     for idx in range(1, len(sentences)):
         candidate = sentences[idx]
-        candidate_emb = encodings[idx]
+        candidate_emb = encodings[idx] if isinstance(encodings, (list, tuple)) else encodings[idx]
         sim = _semantic_similarity(current_emb, candidate_emb)
 
         should_merge = False
@@ -1965,6 +1971,29 @@ class ContextMappingPipeline:
                     cross_scores=None
                 )
 
+            # Apply keyword-based boosts to all candidate classifications (before selection)
+            try:
+                text_lower = (s.text or '').lower()
+                for c in classifications:
+                    try:
+                        hints = self.classifier._section_hints.get(c.section_id, [])
+                        matches = 0
+                        for h in hints:
+                            if not h:
+                                continue
+                            if ' ' in h:
+                                if h.lower() in text_lower:
+                                    matches += 1
+                            else:
+                                if re.search(rf"\b{re.escape(h.lower())}\b", text_lower):
+                                    matches += 1
+                        if matches > 0:
+                            c.confidence = min(1.0, c.confidence + min(0.30, 0.06 * matches))
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
             # Recreate the final ClassifiedSentence from the reranked candidates
             filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
             primary = filtered[0] if filtered else (classifications[0] if classifications else None)
@@ -2007,6 +2036,27 @@ class ContextMappingPipeline:
                     base_conf
                 )
                 cs.primary_classification.confidence = boosted_conf
+                # Keyword-based boost: check section hints for direct keyword matches
+                try:
+                    hints = self.classifier._section_hints.get(cs.primary_classification.section_id, [])
+                    text_lower = (cs.sentence.text or '').lower()
+                    kw_matches = 0
+                    for h in hints:
+                        if not h:
+                            continue
+                        # match whole hint or words
+                        if ' ' in h:
+                            if h.lower() in text_lower:
+                                kw_matches += 1
+                        else:
+                            if re.search(rf"\b{re.escape(h.lower())}\b", text_lower):
+                                kw_matches += 1
+                    if kw_matches > 0:
+                        # small per-match boost, capped
+                        boost = min(0.30, 0.06 * kw_matches)
+                        cs.primary_classification.confidence = min(1.0, cs.primary_classification.confidence + boost)
+                except Exception:
+                    pass
                 # Re-sort secondary classifications by boosted confidence
                 if cs.secondary_classifications:
                     for sec_class in cs.secondary_classifications:
