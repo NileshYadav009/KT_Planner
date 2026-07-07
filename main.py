@@ -295,58 +295,6 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             coverage[sid]['content'] = display_content
             del coverage[sid]['fragments']
 
-        # Build a human-readable display summary per section (preserves backward compatibility)
-        for sid, sec_info in coverage.items():
-            lines = []
-            title = (sec_info.get('title') or sid).upper()
-            status = sec_info.get('status', 'missing')
-            confidence = float(sec_info.get('confidence') or 0.0)
-            sentence_count = int(sec_info.get('sentence_count') or 0)
-
-            # Coverage percent: use confidence if available (0.0-1.0) mapped to 0-100
-            coverage_pct = int(round(min(max(confidence, 0.0), 1.0) * 100))
-
-            # Map to a simple quality label
-            if confidence >= 0.85 and sentence_count >= 2:
-                quality = 'High'
-            elif confidence >= 0.6 or sentence_count >= 1:
-                quality = 'Medium'
-            else:
-                quality = 'Low'
-
-            if status in ('covered', 'weak'):
-                lines.append(title)
-                lines.append(f"Coverage: {coverage_pct}%")
-                lines.append(f"Confidence: {int(round(confidence*100))}%")
-                lines.append(f"Knowledge Quality: {quality}")
-                # include a short preview if available
-                content_preview = sec_info.get('content') or []
-                if isinstance(content_preview, list) and content_preview:
-                    # Limit to first 2 paragraphs/fragments
-                    for p in content_preview[:2]:
-                        if isinstance(p, str):
-                            lines.append(p)
-                        else:
-                            lines.append(str(p))
-            else:
-                # Missing section: explain and list expected subitems from schema
-                lines.append(title)
-                lines.append(f"No {title.lower()} was discussed.")
-                # Try to list subitems from SCHEMA
-                schema_entry = next((s for s in SCHEMA if s.get('id') == sid), None)
-                missing_items = []
-                if schema_entry:
-                    for f in schema_entry.get('fields', []):
-                        label = f.get('label') or f.get('id') or None
-                        if label:
-                            missing_items.append(label)
-                if missing_items:
-                    lines.append('Missing:' + ' | '.join(missing_items))
-                else:
-                    lines.append('Missing: No specific subitems detected in schema.')
-
-            sec_info['display'] = lines
-
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
         kt_structured = serialize_kt(kt)
