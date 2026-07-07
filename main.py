@@ -11,9 +11,10 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, gemini_refiner, GEMINI_ENABLED, polish_coverage_sections
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
+from llm_provider import get_llm_provider
 from sentence_transformers import util
 
 # Optional environment config for Whisper model
@@ -60,9 +61,10 @@ def load_models():
         MODEL = WhisperModel(model_name, device=device, compute_type=compute_type)
 
     if MAPPER_PIPELINE is None:
+        provider = get_llm_provider()
         MAPPER_PIPELINE = ContextMappingPipeline(
             SCHEMA,
-            llm_fallback_fn=gemini_refiner if GEMINI_ENABLED else None
+            llm_fallback_fn=provider.generate if provider else None
         )
 
 def build_coverage(classified):
@@ -292,6 +294,58 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 display_content = section_payload['fragments']
             coverage[sid]['content'] = display_content
             del coverage[sid]['fragments']
+
+        # Build a human-readable display summary per section (preserves backward compatibility)
+        for sid, sec_info in coverage.items():
+            lines = []
+            title = (sec_info.get('title') or sid).upper()
+            status = sec_info.get('status', 'missing')
+            confidence = float(sec_info.get('confidence') or 0.0)
+            sentence_count = int(sec_info.get('sentence_count') or 0)
+
+            # Coverage percent: use confidence if available (0.0-1.0) mapped to 0-100
+            coverage_pct = int(round(min(max(confidence, 0.0), 1.0) * 100))
+
+            # Map to a simple quality label
+            if confidence >= 0.85 and sentence_count >= 2:
+                quality = 'High'
+            elif confidence >= 0.6 or sentence_count >= 1:
+                quality = 'Medium'
+            else:
+                quality = 'Low'
+
+            if status in ('covered', 'weak'):
+                lines.append(title)
+                lines.append(f"Coverage: {coverage_pct}%")
+                lines.append(f"Confidence: {int(round(confidence*100))}%")
+                lines.append(f"Knowledge Quality: {quality}")
+                # include a short preview if available
+                content_preview = sec_info.get('content') or []
+                if isinstance(content_preview, list) and content_preview:
+                    # Limit to first 2 paragraphs/fragments
+                    for p in content_preview[:2]:
+                        if isinstance(p, str):
+                            lines.append(p)
+                        else:
+                            lines.append(str(p))
+            else:
+                # Missing section: explain and list expected subitems from schema
+                lines.append(title)
+                lines.append(f"No {title.lower()} was discussed.")
+                # Try to list subitems from SCHEMA
+                schema_entry = next((s for s in SCHEMA if s.get('id') == sid), None)
+                missing_items = []
+                if schema_entry:
+                    for f in schema_entry.get('fields', []):
+                        label = f.get('label') or f.get('id') or None
+                        if label:
+                            missing_items.append(label)
+                if missing_items:
+                    lines.append('Missing:' + ' | '.join(missing_items))
+                else:
+                    lines.append('Missing: No specific subitems detected in schema.')
+
+            sec_info['display'] = lines
 
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript

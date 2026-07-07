@@ -47,6 +47,7 @@ import time
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
+from llm_provider import get_llm_provider
 import requests
 
 logger = logging.getLogger(__name__)
@@ -503,15 +504,13 @@ def build_section_paragraphs(transcript: str):
     """Build reconstructed paragraphs for each section from a transcript."""
     import traceback
     try:
-        # Warm up models (Gemini preferred) before processing
-        warmup_models()
-        
+        provider = get_llm_provider()
         sentences = _prepare_sentences(transcript)
         if not sentences:
             return {}
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        llm_refiner = gemini_refiner if GEMINI_ENABLED else None
+        llm_refiner = provider.generate if provider else None
         mapper = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
         result = mapper.process_transcript(sentence_tuples)
         paragraphs = result.get("paragraphs", {})
@@ -574,7 +573,8 @@ def polish_coverage_sections(
     def _local_cleanup_list(inputs: List[str]) -> List[str]:
         return [_local_cleanup(text) for text in inputs]
 
-    if not GEMINI_ENABLED:
+    provider = get_llm_provider()
+    if provider is None:
         return {
             sid: _local_cleanup_list(section['fragments'])
             for sid, section in cleaned_sections.items()
@@ -603,7 +603,12 @@ def polish_coverage_sections(
 
     def _process_batch(section_ids):
         try:
-            response_text = gemini_refiner(prompt, metadata={'section_ids': section_ids})
+            response_text = provider.generate(
+                prompt,
+                temperature=0.2,
+                max_output_tokens=1024,
+                stop_sequences=["\n\n"]
+            )
             response_json = _extract_json_response(response_text)
             if not isinstance(response_json, list):
                 raise ValueError("Gemini response was not a JSON array")
@@ -665,7 +670,12 @@ def polish_coverage_sections(
                 + json.dumps(list(priority_sections.values()), indent=2, ensure_ascii=False)
                 + "\n\nOutput JSON:\n"
             )
-            resp = gemini_refiner(priority_prompt, metadata={'priority_section_ids': list(priority_sections.keys())})
+            resp = provider.generate(
+                priority_prompt,
+                temperature=0.2,
+                max_output_tokens=1024,
+                stop_sequences=["\n\n"]
+            )
             parsed = _extract_json_response(resp)
             if isinstance(parsed, list):
                 for item in parsed:
