@@ -402,8 +402,9 @@ class ProfessionalReconstructionEngine:
 class ParagraphIntegrityEngine:
     """Merges sentences into coherent, professionally-structured paragraphs."""
     
-    def __init__(self, model: SentenceTransformer):
+    def __init__(self, model: SentenceTransformer, llm_refiner=None):
         self.model = model
+        self._llm_refiner = llm_refiner
     
     def reconstruct_paragraph(
         self,

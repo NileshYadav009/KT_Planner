@@ -11,7 +11,7 @@ import uuid
 from threading import Lock
 from datetime import datetime
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections
+from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_paragraphs_from_classified, polish_coverage_sections
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from llm_provider import get_llm_provider
@@ -226,7 +226,11 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
 
         paragraph_data = {}
         try:
-            paragraph_data = build_section_paragraphs(transcript) or {}
+            provider = get_llm_provider()
+            paragraph_data = build_paragraphs_from_classified(
+                kt,
+                llm_fn=provider.generate if provider else None,
+            ) or {}
         except Exception:
             paragraph_data = {}
 
@@ -295,10 +299,23 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             polished_sections = {}
 
         for sid, section_payload in coverage.items():
-            display_content = polished_sections.get(sid)
+            display_content = paragraph_data.get(sid)
+            if not display_content:
+                display_content = polished_sections.get(sid)
             if not display_content:
                 display_content = section_payload['fragments']
-            coverage[sid]['content'] = display_content
+
+            if isinstance(display_content, str):
+                content_items = [display_content]
+            elif isinstance(display_content, list):
+                content_items = [item for item in display_content if isinstance(item, str) and item.strip()]
+            else:
+                content_items = []
+
+            if not content_items and section_payload.get('fragments'):
+                content_items = [item for item in section_payload['fragments'] if isinstance(item, str) and item.strip()]
+
+            coverage[sid]['content'] = content_items
             del coverage[sid]['fragments']
 
         progress = int(round(kt.overall_coverage_percent or 0))

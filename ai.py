@@ -46,7 +46,7 @@ import logging
 import time
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
-from enterprise_semantic_mapper import create_semantic_mapper
+from enterprise_semantic_mapper import create_semantic_mapper, ParagraphIntegrityEngine
 from llm_provider import get_llm_provider
 import requests
 
@@ -498,6 +498,37 @@ def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassif
     else:
         CONTEXT_CLASSIFIER.similarity_threshold = similarity_threshold
     return CONTEXT_CLASSIFIER
+
+
+def build_paragraphs_from_classified(kt, llm_fn=None):
+    """Build paragraph summaries from already-classified section content."""
+    try:
+        if SentenceTransformer is None:
+            return {}
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        engine = ParagraphIntegrityEngine(model)
+        if llm_fn is not None:
+            engine.set_llm_refiner(llm_fn)
+
+        paragraphs = {}
+        for sec_id, content in (getattr(kt, "section_content", {}) or {}).items():
+            sentences = []
+            for idx, sent in enumerate(content.get("sentences", []) or []):
+                text = (sent or {}).get("text", "")
+                if text:
+                    sentences.append((f"{sec_id}_{idx}", text))
+            if not sentences:
+                continue
+
+            para = engine.reconstruct_paragraph(sentences, sec_id)
+            if para and para.text:
+                paragraphs[sec_id] = para.text
+
+        return paragraphs
+    except Exception as e:
+        logger.warning("build_paragraphs_from_classified failed: %s", e)
+        return {}
 
 
 def build_section_paragraphs(transcript: str):
