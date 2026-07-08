@@ -172,6 +172,28 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         0.92,
     ),
     (
+        "first_30_day_ownership",
+        [
+            r"\bweek\s+[1one]\b",
+            r"\bfirst\s+(?:30|thirty)\s+days?\b",
+            r"\b30[\s-]?day\s+plan\b",
+            r"\bobserve\s+(?:and\s+)?shadow\b",
+            r"\bindependent\s+ownership\b",
+        ],
+        0.94,
+    ),
+    (
+        "handover_completion",
+        [
+            r"\bhandover\s+(?:is\s+)?complete\b",
+            r"\breplacement\s+(?:can|should|will)\b",
+            r"\bsign[\s-]?off\b",
+            r"\bKT\s+(?:is\s+)?(?:done|complete|finished)\b",
+            r"\bthis\s+(?:concludes|completes)\b",
+        ],
+        0.94,
+    ),
+    (
         "architecture_reference",
         [
             r"\barchitecture\s+diagram\b",

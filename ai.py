@@ -531,6 +531,125 @@ PRIORITY_COVERAGE_SECTION_IDS = [
     'common_failures'
 ]
 
+SECTION_POLISH_PROMPTS = {
+    "deployment_and_rollback": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these transcript fragments into a structured deployment reference.\n"
+        "Format rules:\n"
+        "- Deployment steps: numbered list (1. 2. 3.)\n"
+        "- Use BOLD labels: **Trigger:**, **Window:**, **Approver:**, **Duration:**\n"
+        "- Rollback: separate subsection with **Rollback trigger:**, **Action:**, "
+        "**Target time:**\n"
+        "- Keep all specific values (tool names, times, branch names) exactly as given.\n"
+        "- Do NOT invent information not present in the input.\n"
+        "Return only the formatted section content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "common_failures": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a structured failure reference.\n"
+        "For each distinct issue use this format:\n"
+        "**Issue:** [name]\n"
+        "**Cause:** [root cause]\n"
+        "**Fix:** [resolution steps]\n"
+        "**Frequency:** [if mentioned]\n\n"
+        "Group related fragments into one issue block.\n"
+        "Do NOT add issues not present in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "danger_zones": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a danger zone reference.\n"
+        "Format:\n"
+        "**Do not modify:**\n- [item 1]\n- [item 2]\n\n"
+        "**Why it is dangerous:** [explanation per item]\n\n"
+        "**Approval required:** [who approves, if mentioned]\n\n"
+        "Use imperative language. Do NOT add dangers not in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "ownership_escalation": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into an ownership and escalation reference.\n"
+        "Format:\n"
+        "**Application ownership:** [team]\n"
+        "**Infrastructure ownership:** [team]\n\n"
+        "**Escalation chain:**\n1. [first contact]\n2. [second]\n3. [third]\n\n"
+        "**Contact channel:** [Slack / PagerDuty / email if mentioned]\n\n"
+        "Do NOT add contacts not present in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "monitoring_observability": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a monitoring reference.\n"
+        "Format:\n"
+        "**Monitoring stack:**\n- [tool — purpose]\n\n"
+        "**First response steps:**\n1. [step]\n2. [step]\n\n"
+        "**Alert routing:** [if mentioned]\n\n"
+        "Do NOT add tools or steps not in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "disaster_recovery": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a DR reference.\n"
+        "Format:\n"
+        "**Recovery procedure:**\n1. [step]\n\n"
+        "**Backup policy:**\n"
+        "- Schedule: [if mentioned]\n"
+        "- Retention: [if mentioned]\n\n"
+        "**DR testing:** [frequency if mentioned]\n\n"
+        "**RTO / RPO:** [if mentioned]\n\n"
+        "Do NOT add facts not in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "security_controls": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a security controls reference.\n"
+        "Format:\n"
+        "**Security controls:**\n"
+        "- [Tool]: [what it does]\n\n"
+        "Group by type if possible: Secret Management, Scanning, Access Control.\n"
+        "Do NOT add controls not in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "day1_survival_checklist": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a Day-1 checklist.\n"
+        "Format:\n"
+        "**Access to request:**\n- [system]\n\n"
+        "**Safe first actions (read-only):**\n- [action]\n\n"
+        "**Do NOT do on Day 1:**\n- [action]\n\n"
+        "Only include groups that have content from the input.\n"
+        "Do NOT add items not present in the input.\n"
+        "Return only the formatted content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nFormatted output:"
+    ),
+    "default": (
+        "You are a senior technical writer for a Knowledge Transfer document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these transcript fragments into clean, professional prose.\n"
+        "Rules:\n"
+        "- Fix grammar, casing, punctuation.\n"
+        "- Preserve all facts, names, numbers exactly.\n"
+        "- Do NOT add information not present in the input.\n"
+        "- Return only the rewritten content, no heading.\n\n"
+        "Source fragments:\n{fragments}\n\nPolished content:"
+    ),
+}
+
 
 def _build_polish_inputs(
     section_id: str,
@@ -555,7 +674,7 @@ def polish_coverage_sections(
     *,
     max_fragments_per_section: int = 8,
 ) -> Dict[str, List[str]]:
-    """Polish coverage sections in one Gemini batch request with graceful fallback."""
+    """Polish coverage sections with section-specific prompts and graceful fallback."""
     cleaned_sections = {}
     for section_id, section_data in sections.items():
         section_input = _build_polish_inputs(
@@ -580,124 +699,32 @@ def polish_coverage_sections(
             for sid, section in cleaned_sections.items()
         }
 
-    json_sections = []
-    for section in cleaned_sections.values():
-        fragments = section['fragments']
-        json_sections.append({
-            'section_id': section['section_id'],
-            'title': section['title'],
-            'fragments': fragments,
-        })
-
-    prompt = (
-        "You are a knowledge transfer professionalization assistant.\n\n"
-        "You will receive a list of KT sections with raw transcript fragments. "
-        "For each section, rewrite the fragments into a single polished paragraph. "
-        "Preserve the meaning exactly and do NOT invent new facts, names, or numbers. "
-        "Return JSON only with a top-level array of objects containing keys: "
-        "section_id and polished_paragraph.\n\n"
-        "Input sections:\n"
-        + json.dumps(json_sections, indent=2, ensure_ascii=False)
-        + "\n\nOutput JSON:\n"
-    )
-
-    def _process_batch(section_ids):
+    results = {}
+    for sid, section in cleaned_sections.items():
+        prompt_template = SECTION_POLISH_PROMPTS.get(sid, SECTION_POLISH_PROMPTS["default"])
+        joined_fragments = "\n".join(f"- {fragment}" for fragment in section["fragments"])
+        prompt = prompt_template.format(
+            title=section["title"],
+            fragments=joined_fragments,
+        )
         try:
-            response_text = provider.generate(
+            response = provider.generate(
                 prompt,
                 temperature=0.2,
                 max_output_tokens=1024,
-                stop_sequences=["\n\n"]
+                stop_sequences=[],
+                system_prompt=(
+                    "You are a senior technical writer for a Knowledge Transfer document. "
+                    "Follow the formatting instructions exactly and do not invent facts."
+                ),
             )
-            response_json = _extract_json_response(response_text)
-            if not isinstance(response_json, list):
-                raise ValueError("Gemini response was not a JSON array")
-
-            polished = {}
-            for item in response_json:
-                if not isinstance(item, dict):
-                    continue
-                sid = item.get('section_id')
-                para = item.get('polished_paragraph') or item.get('polished_text') or ''
-                if sid and isinstance(para, str) and para.strip():
-                    polished[sid] = para.strip()
-            return polished
+            cleaned_text = response.strip() if isinstance(response, str) else ""
+            results[sid] = [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
         except Exception as e:
-            raise RuntimeError(f"Gemini batch polish failed: {e}") from e
+            logger.warning("Polish failed for %s: %s", sid, e)
+            results[sid] = _local_cleanup_list(section["fragments"])
 
-    refined_results = {}
-    try:
-        polished_batch = _process_batch(list(cleaned_sections.keys()))
-        for sid, section in cleaned_sections.items():
-            polished_text = polished_batch.get(sid)
-            if polished_text:
-                refined_results[sid] = [polished_text]
-            else:
-                refined_results[sid] = _local_cleanup_list(section['fragments'])
-        refined_ids = [sid for sid in polished_batch.keys() if sid in cleaned_sections]
-        fallback_ids = [sid for sid in cleaned_sections if sid not in polished_batch]
-        logger.info(
-            "Gemini polished sections: %s; fallback sections: %s",
-            refined_ids,
-            fallback_ids,
-        )
-        return refined_results
-    except Exception as full_error:
-        logger.warning("Full Gemini batch polish failed: %s", full_error)
-
-    # Graceful degradation: refine highest-priority sections only
-    priority_sections = {
-        sid: cleaned_sections[sid]
-        for sid in PRIORITY_COVERAGE_SECTION_IDS
-        if sid in cleaned_sections
-    }
-    fallback_sections = {
-        sid: section for sid, section in cleaned_sections.items()
-        if sid not in priority_sections
-    }
-
-    polished_results = {}
-    if priority_sections:
-        try:
-            priority_prompt = (
-                "You are a knowledge transfer professionalization assistant.\n\n"
-                "You will receive a list of high-priority KT sections with raw transcript fragments. "
-                "For each section, rewrite the fragments into a single polished paragraph. "
-                "Preserve the meaning exactly and do NOT invent new facts, names, or numbers. "
-                "Return JSON only with a top-level array of objects containing keys: "
-                "section_id and polished_paragraph.\n\n"
-                "Input sections:\n"
-                + json.dumps(list(priority_sections.values()), indent=2, ensure_ascii=False)
-                + "\n\nOutput JSON:\n"
-            )
-            resp = provider.generate(
-                priority_prompt,
-                temperature=0.2,
-                max_output_tokens=1024,
-                stop_sequences=["\n\n"]
-            )
-            parsed = _extract_json_response(resp)
-            if isinstance(parsed, list):
-                for item in parsed:
-                    sid = item.get('section_id')
-                    para = item.get('polished_paragraph') or item.get('polished_text') or ''
-                    if sid and isinstance(para, str) and para.strip():
-                        polished_results[sid] = [para.strip()]
-        except Exception as e:
-            logger.warning("Priority Gemini polish failed: %s", e)
-
-    # Assign fallback polished content for all sections
-    for sid, section in cleaned_sections.items():
-        if sid in polished_results:
-            continue
-        polished_results[sid] = _local_cleanup_list(section['fragments'])
-
-    logger.info(
-        "Graceful degradation polish results: refined=%s fallback=%s",
-        list(polished_results.keys()),
-        [sid for sid in cleaned_sections if sid not in polished_results],
-    )
-    return polished_results
+    return results
 
 
 def polish_coverage_text(
