@@ -183,22 +183,28 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         }
         segments, info = MODEL.transcribe(audio_to_use, **transcribe_kwargs)
         segments = list(segments)
-        raw_text = " ".join([s.text for s in segments]).strip()
+
+        # Clean each segment once and build the joined transcript from cleaned parts
         cleaned_segments = []
+        raw_parts = []
         for s in segments:
+            cleaned_text = clean_transcript(s.text)
+            raw_parts.append(cleaned_text)
             cleaned_segments.append({
                 "id": s.id,
                 "seek": s.seek,
                 "start": s.start,
                 "end": s.end,
-                "text": clean_transcript(s.text),
+                "text": cleaned_text,
                 "avg_logprob": getattr(s, "avg_logprob", None),
                 "compression_ratio": getattr(s, "compression_ratio", None),
                 "no_speech_prob": getattr(s, "no_speech_prob", None)
             })
 
+        raw_text = " ".join(raw_parts).strip()
+
         result = {
-            "text": clean_transcript(raw_text),
+            "text": raw_text,
             "segments": cleaned_segments,
             "language": info.language if info else "en"
         }
