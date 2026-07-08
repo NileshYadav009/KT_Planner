@@ -38,7 +38,9 @@ from section_rules import match_section_rules, find_overview_reassignment, apply
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
 _SENT_TRANS_SPEC = importlib.util.find_spec("sentence_transformers")
-_USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "").lower() in ("1", "true", "yes"))
+# Auto-enable real embeddings whenever sentence-transformers is installed;
+# allow explicit opt-out via USE_REAL_EMBEDDINGS=0/false/no.
+_USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "1").lower() not in ("0", "false", "no"))
 _CROSS_ENCODER = None  # Lazy-loaded cross-encoder for reranking
 
 # Cache the semantic chunking model and util to avoid reloading repeatedly.
