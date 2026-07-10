@@ -1,927 +1,1122 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Continumm KT Planner</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <style>
-      :root{
-        --bg:#f8fafc;
-        --card:#ffffff;
-        --muted:#64748b;
-        --primary:#1e40af;
-        --primary-light:#3b82f6;
-        --accent:#059669;
-        --accent-light:#10b981;
-        --border:#e2e8f0;
-        --shadow:0 10px 25px rgba(0,0,0,0.08);
-        --shadow-hover:0 20px 40px rgba(0,0,0,0.12);
-      }
-      html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overflow-x:hidden}
-      body{background:linear-gradient(135deg,var(--bg) 0%,#f1f5f9 100%);padding:32px;box-sizing:border-box;color:#1e293b}
-      .app{max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box}
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Continuum · KT Planner</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── TOKENS ───────────────────────────────────────────────── */
+    :root {
+      --navy:      #0f1c35;
+      --blue:      #1a56db;
+      --blue-lt:   #3b7df8;
+      --blue-dim:  #eef3ff;
+      --green:     #0e7e5a;
+      --green-dim: #d1fae9;
+      --amber:     #92400e;
+      --amber-dim: #fef3c7;
+      --red:       #991b1b;
+      --red-dim:   #fee2e2;
+      --surface:   #ffffff;
+      --bg:        #f4f6fb;
+      --bg2:       #eaecf4;
+      --border:    #dde3f0;
+      --border-lt: #ecf0f9;
+      --text:      #111827;
+      --text2:     #374151;
+      --text3:     #6b7280;
+      --radius:    8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+      --shadow:    0 4px 12px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.04);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,.10),0 2px 6px rgba(0,0,0,.04);
+    }
 
-      /* Form visibility toggle */
-      #formContainer{display:none !important;margin-top:20px;opacity:0;visibility:hidden;transition:opacity 0.3s ease-in-out,display 0s linear 0.3s}
-      #formContainer.visible{display:block !important;opacity:1;visibility:visible;transition:opacity 0.3s ease-in-out}
-      header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-      .brand{display:flex;align-items:center;gap:16px}
-      .logo{width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;box-shadow:0 8px 20px rgba(30,64,175,0.3)}
-      .brand h1{margin:0;font-size:24px;letter-spacing:0.4px;color:#0f172a;font-weight:700}
-      .brand p{margin:0;color:var(--muted);font-size:14px;font-weight:500}
+    /* ── RESET ────────────────────────────────────────────────── */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      font-family:Inter,system-ui,-apple-system,sans-serif;
+      font-size:14px;line-height:1.5;
+      color:var(--text);background:var(--bg);
+      overflow-x:hidden;
+    }
 
-      .card{background:var(--card);box-shadow:var(--shadow);border-radius:16px;padding:28px;box-sizing:border-box;width:100%;overflow-x:hidden;border:1px solid var(--border);transition:box-shadow 0.3s ease}
-      .card:hover{box-shadow:var(--shadow-hover)}
-      .controls{display:flex;gap:14px;align-items:center;margin-bottom:16px;flex-wrap:wrap;min-width:0}
-      input[type=file]{display:none}
-      .fileLabel{display:inline-flex;align-items:center;gap:12px;padding:12px 18px;border-radius:10px;background:linear-gradient(135deg,#ffffff,#f8fafc);border:1px solid var(--border);color:var(--primary);cursor:pointer;font-weight:600;transition:all 0.2s}
-      .fileLabel:hover{background:linear-gradient(135deg,#f8fafc,#ffffff);border-color:var(--primary-light);transform:translateY(-1px)}
-      button.primary{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;border:none;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:600;white-space:nowrap;box-shadow:0 4px 12px rgba(30,64,175,0.3);transition:all 0.2s}
-      button.primary:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(30,64,175,0.4)}
-      button.ghost{background:transparent;border:1px solid var(--border);padding:10px 16px;border-radius:10px;color:var(--primary);cursor:pointer;white-space:nowrap;font-weight:600;transition:all 0.2s}
-      button.ghost:hover{background:var(--primary);color:white;border-color:var(--primary)}
+    /* ── TOPBAR ───────────────────────────────────────────────── */
+    .topbar{
+      position:sticky;top:0;z-index:200;
+      height:54px;background:var(--navy);
+      display:flex;align-items:center;padding:0 24px;gap:20px;
+      border-bottom:1px solid rgba(255,255,255,.07);
+      box-shadow:0 1px 8px rgba(0,0,0,.18);
+    }
+    .tb-brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+    .tb-logo{
+      width:30px;height:30px;border-radius:7px;
+      background:linear-gradient(135deg,var(--blue),var(--blue-lt));
+      display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:14px;color:#fff;letter-spacing:-.5px;
+      flex-shrink:0;
+    }
+    .tb-name{font-size:15px;font-weight:700;color:#fff;letter-spacing:-.2px}
+    .tb-divider{
+      height:16px;width:1px;background:rgba(255,255,255,.15);
+      margin:0 6px;
+    }
+    .tb-subtitle{font-size:12px;font-weight:500;color:rgba(255,255,255,.4);letter-spacing:.03em}
+    .tb-right{margin-left:auto;display:flex;align-items:center;gap:20px}
+    .tb-link{font-size:13px;font-weight:500;color:rgba(255,255,255,.5);text-decoration:none;transition:color .15s}
+    .tb-link:hover{color:#fff}
+    .tb-badge{
+      font-size:11px;font-weight:600;
+      padding:3px 8px;border-radius:4px;
+      background:rgba(26,86,219,.35);color:var(--blue-lt);
+      letter-spacing:.02em;
+    }
 
-      .layout{display:grid;grid-template-columns:280px minmax(0,1fr) 340px;gap:24px;width:100%;box-sizing:border-box;align-items:start}
-      .sidebar, .asidePanel{display:flex;flex-direction:column;gap:20px}
-      .sidebar{position:sticky;top:32px;align-self:flex-start}
-      .sidebar h3, .asidePanel h3{margin-top:0;font-size:16px;letter-spacing:0.02em;text-transform:uppercase;color:#0f172a;font-weight:700;border-bottom:2px solid var(--primary);padding-bottom:8px}
-      .navList{list-style:none;padding:0;margin:0;display:grid;gap:8px}
-      .navList li a{display:block;padding:14px 16px;border-radius:12px;background:#f8fafc;color:#1e293b;text-decoration:none;font-weight:600;border:1px solid var(--border);transition:all 0.2s}
-      .navList li a:hover{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;border-color:var(--primary);transform:translateY(-1px);box-shadow:0 4px 12px rgba(30,64,175,0.2)}
-      .mainPanel{display:flex;flex-direction:column;gap:20px}
-      .summaryGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:20px}
-      .summaryCard{padding:16px;border-radius:16px;background:linear-gradient(135deg,#ffffff,#f8fafc);border:1px solid var(--border);box-shadow:0 6px 16px rgba(0,0,0,0.06);transition:all 0.3s;min-height:80px;display:flex;flex-direction:column;justify-content:flex-start;aspect-ratio:1/1}
-      .summaryCard:hover{transform:translateY(-4px);box-shadow:0 12px 24px rgba(0,0,0,0.1)}
-      .summaryCard h4{margin:0 0 6px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--primary);font-weight:700}
-      .summaryCard p{margin:0;font-size:16px;font-weight:800;color:#0f172a;word-break:break-word;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
-      .sectionHeader{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-      .sectionHeader h2{margin:0;font-size:20px;color:#0f172a;font-weight:700}
-      .sectionHeader small{color:var(--muted);font-size:14px;font-weight:500}
-      .collapsible{cursor:pointer;border-radius:12px;padding:16px;background:#f8fafc;border:1px solid var(--border);transition:all 0.2s}
-      .collapsible:hover{background:#f1f5f9}
-      .collapsibleContent{max-height:0;overflow:hidden;transition:max-height 0.3s ease}
-      .collapsible.open .collapsibleContent{max-height:1000px}
-      .panel{background:linear-gradient(135deg,rgba(255,255,255,0.9),#ffffff);border-radius:16px;padding:24px;border:1px solid var(--border);word-wrap:break-word;overflow-wrap:break-word;width:100%;box-sizing:border-box;overflow-x:hidden;box-shadow:0 8px 20px rgba(0,0,0,0.06);transition:box-shadow 0.3s ease}
-      .panel:hover{box-shadow:0 12px 28px rgba(0,0,0,0.08)}
-      .panel h3{margin-top:0;font-size:18px;color:#0f172a;font-weight:700}
-      .panel p{margin:0;color:#374151}
-      .statusBadge{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:20px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em}
-      .statusBadge.covered{background:linear-gradient(135deg,#dcfce7,#bbf7d0);color:#166534;border:1px solid #86efac}
-      .statusBadge.weak{background:linear-gradient(135deg,#fef3c7,#fde68a);color:#92400e;border:1px solid #fcd34d}
-      .statusBadge.missing{background:linear-gradient(135deg,#fef2f2,#fecaca);color:#991b1b;border:1px solid #fca5a5}
-      .progressWrap{display:flex;align-items:center;gap:16px}
-      .progress{flex:1;height:14px;background:#e2e8f0;border-radius:20px;overflow:hidden}
-      .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:20px;transition:width 0.3s ease}
-      .meta{color:var(--muted);font-size:14px;font-weight:500}
+    /* ── PAGE WRAPPER ─────────────────────────────────────────── */
+    .page-wrap{
+      max-width:1380px;margin:0 auto;
+      display:grid;
+      grid-template-columns:272px minmax(0,1fr) 300px;
+      gap:0;
+      min-height:calc(100vh - 54px);
+    }
 
-      pre#transcript{background:#0f172a;color:#e6fffb;padding:16px;border-radius:12px;max-height:300px;overflow:auto;word-wrap:break-word;word-break:break-word;width:100%;white-space:pre-wrap;font-family:'Monaco','Menlo','Ubuntu Mono',monospace;font-size:14px;border:1px solid var(--border)}
-      #coverage{max-height:400px;overflow-y:auto;overflow-x:hidden;width:100%;word-wrap:break-word;word-break:break-word}
-      #coverage > div{word-wrap:break-word;word-break:break-word;line-height:1.6;padding:12px;border-radius:8px;margin-bottom:8px;background:#f8fafc;border:1px solid var(--border)}
-      #coverage > div p{margin:8px 0;word-break:break-word;color:#374151}
-      #screenshots img{border-radius:12px;box-shadow:0 8px 16px rgba(0,0,0,0.1);margin-right:12px;transition:transform 0.2s}
-      #screenshots img:hover{transform:scale(1.05)}
+    /* ── WORKSPACE SIDEBAR ────────────────────────────────────── */
+    .workspace-sidebar{
+      border-right:1px solid var(--border);
+      background:var(--surface);
+      padding:0;
+      position:sticky;
+      top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+      display:flex;
+      flex-direction:column;
+    }
+    /* Workspace header block */
+    .ws-header{
+      padding:20px 18px 16px;
+      border-bottom:1px solid var(--border-lt);
+    }
+    .ws-header-row{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+    .ws-icon{
+      width:32px;height:32px;border-radius:8px;
+      background:linear-gradient(135deg,var(--blue),var(--blue-lt));
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;
+    }
+    .ws-icon svg{width:16px;height:16px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .ws-title{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.1px}
+    .ws-desc{font-size:12px;color:var(--text3);line-height:1.5}
 
-      h2.sectionTitle{margin-top:20px;margin-bottom:12px;color:#0f172a;font-weight:700}
+    /* Nav groups */
+    .nav-group{padding:12px 0 4px}
+    .nav-group-label{
+      font-size:10px;font-weight:600;color:var(--text3);
+      letter-spacing:.08em;text-transform:uppercase;
+      padding:0 18px;margin-bottom:4px;
+    }
+    .nav-link{
+      display:flex;align-items:center;gap:10px;
+      padding:8px 18px;
+      font-size:13px;font-weight:500;color:var(--text2);
+      text-decoration:none;cursor:pointer;
+      border-left:2px solid transparent;
+      transition:background .12s,color .12s,border-color .12s;
+    }
+    .nav-link:hover{background:var(--bg);color:var(--blue)}
+    .nav-link.active{
+      background:var(--blue-dim);color:var(--blue);
+      border-left-color:var(--blue);font-weight:600;
+    }
+    .nav-link-icon{
+      width:18px;height:18px;display:flex;align-items:center;justify-content:center;
+      opacity:.6;font-size:13px;
+    }
+    .nav-link.active .nav-link-icon{opacity:1}
 
-      /* Form styles - minimalistic and classy */
-      #formContainer{border-radius:16px;background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);padding:0;overflow:hidden;box-shadow:var(--shadow);border:1px solid var(--border)}
-      #formContainer .formHeader{display:flex;align-items:center;justify-content:space-between;padding:24px 28px;border-bottom:1px solid var(--border);background:#ffffff}
-      #formContainer .formHeader h2{margin:0;font-size:20px;font-weight:700;color:#0f172a}
-      #formContainer .closeForm{background:transparent;border:none;font-size:28px;cursor:pointer;color:#64748b;padding:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:all 0.2s}
-      #formContainer .closeForm:hover{background:#f1f5f9;color:var(--primary)}
+    /* ── MAIN CONTENT ─────────────────────────────────────────── */
+    .main-content{
+      padding:28px 24px 56px;
+      display:flex;flex-direction:column;gap:20px;
+      min-width:0;
+    }
 
-      #form{padding:28px}
-      #form section{padding:20px;border-radius:12px;background:#f9fafc;margin-bottom:16px;border:1px solid var(--border);box-sizing:border-box;width:100%;transition:all 0.3s}
-      #form section:hover{background:#ffffff;box-shadow:0 6px 16px rgba(0,0,0,0.06)}
-      #form section h3{margin:0 0 14px 0;font-size:18px;font-weight:700;color:#0f172a}
-      #form section > div{color:var(--muted);font-size:14px;margin-bottom:14px;font-style:italic}
-      label{display:block;font-weight:600;margin-bottom:10px;color:#0f172a;font-size:15px}
-      input[type=text], select, textarea{width:100%;padding:14px;border-radius:10px;border:1px solid var(--border);background:#ffffff;box-sizing:border-box;word-break:break-word;font-family:inherit;font-size:15px;transition:all 0.2s;margin-bottom:14px}
-      input[type=text]:focus, select:focus, textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(30,64,175,0.1);background:#ffffff}
-      input[type=checkbox]{transform:scale(1.2);cursor:pointer;margin-right:10px}
-      table{width:100%;border-collapse:collapse;table-layout:fixed;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.04)}
-      table thead{background:#f8fafc;border-bottom:1px solid var(--border)}
-      th,td{padding:14px;border:none;text-align:left;font-size:15px}
-      th{font-weight:700;color:#0f172a}
-      td{color:#374151;border-bottom:1px solid #f1f5f9}
-      table tbody tr:hover{background:#f9fafc}
+    /* Page heading */
+    .page-heading{margin-bottom:4px}
+    .page-heading h1{font-size:18px;font-weight:700;color:var(--text);letter-spacing:-.3px}
+    .page-heading p{font-size:13px;color:var(--text3);margin-top:3px}
 
-      .actions{display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+    /* ── CARD ─────────────────────────────────────────────────── */
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-sm);
+      overflow:hidden;
+    }
+    .card-header{
+      padding:14px 18px;
+      border-bottom:1px solid var(--border-lt);
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+    }
+    .card-title{font-size:13px;font-weight:700;color:var(--text)}
+    .card-sub{font-size:12px;color:var(--text3);margin-top:2px}
+    .card-body{padding:18px}
 
-      /* Sentence list styles */
-      .sentence-row{display:flex;align-items:flex-start;gap:10px;padding:12px;border-bottom:1px solid #f1f5f9;border-radius:8px;margin-bottom:4px;background:#ffffff;transition:background 0.2s}
-      .sentence-row:hover{background:#f8fafc}
-      .sentence-text{flex:1;font-size:15px;color:#1e293b}
-      .tag{display:inline-block;padding:6px 10px;border-radius:16px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;font-weight:600;font-size:12px;margin-right:8px}
-      .small-muted{font-size:13px;color:#64748b;font-weight:500}
+    /* ── UPLOAD ZONE ──────────────────────────────────────────── */
+    .upload-zone{
+      border:1.5px dashed var(--border);
+      border-radius:var(--radius-lg);
+      padding:26px 20px;text-align:center;
+      background:var(--bg);cursor:pointer;
+      transition:border-color .15s,background .15s;
+    }
+    .upload-zone:hover,.upload-zone.drag{
+      border-color:var(--blue);background:var(--blue-dim);
+    }
+    .uz-icon{font-size:26px;margin-bottom:8px}
+    .uz-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:3px}
+    .uz-sub{font-size:12px;color:var(--text3)}
+    .uz-file{font-size:13px;font-weight:500;color:var(--blue);margin-top:8px;min-height:18px}
+    input[type=file]{display:none}
 
+    /* ── BUTTONS ──────────────────────────────────────────────── */
+    .btn{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:8px 14px;border-radius:var(--radius);
+      font-size:13px;font-weight:600;font-family:inherit;
+      cursor:pointer;border:none;
+      transition:all .15s;white-space:nowrap;
+    }
+    .btn-primary{background:var(--blue);color:#fff;box-shadow:0 1px 3px rgba(26,86,219,.3)}
+    .btn-primary:hover{background:#1448c2}
+    .btn-primary:disabled{opacity:.45;cursor:not-allowed}
+    .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+    .btn-ghost:hover{background:var(--bg);color:var(--blue);border-color:var(--blue)}
+    .btn-sm{padding:5px 10px;font-size:12px}
 
-      /* Edit Sentence Modal */
-      #editModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
-      #editModal.open{display:flex}
-      .editModalContent{background:#ffffff;border-radius:16px;padding:28px;box-shadow:var(--shadow-hover);max-width:520px;width:90%;max-height:90vh;overflow:auto;border:1px solid var(--border)}
-      .editModalContent h3{margin:0 0 20px 0;font-size:20px;color:#0f172a;font-weight:700}
-      .editModalContent .sentence-preview{background:#f8fafc;padding:16px;border-radius:12px;margin-bottom:20px;font-size:15px;color:#374151;border-left:4px solid var(--primary);border:1px solid var(--border)}
-      .editModalContent label{display:block;font-weight:600;margin-bottom:12px;color:#0f172a;font-size:15px}
-      .editModalContent select{width:100%;padding:14px;border-radius:10px;border:1px solid var(--border);font-size:15px;margin-bottom:20px;box-sizing:border-box;background:#ffffff;transition:all 0.2s}
-      .editModalContent select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(30,64,175,0.1)}
-      .editModalActions{display:flex;gap:12px;justify-content:flex-end}
-      .editModalActions button{padding:12px 20px;border-radius:10px;border:none;cursor:pointer;font-weight:600;transition:all 0.2s;font-size:15px}
-      .editModalActions .confirm{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;box-shadow:0 4px 12px rgba(30,64,175,0.3)}
-      .editModalActions .confirm:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(30,64,175,0.4)}
-      .editModalActions .cancel{background:#f1f5f9;color:#64748b;border:1px solid var(--border)}
-      .editModalActions .cancel:hover{background:#e2e8f0}
+    /* ── PROGRESS ─────────────────────────────────────────────── */
+    .progress-wrap{display:flex;align-items:center;gap:12px}
+    .progress-track{flex:1;height:5px;background:var(--bg2);border-radius:99px;overflow:hidden}
+    .progress-bar{
+      height:100%;width:0%;
+      background:linear-gradient(90deg,var(--blue),var(--blue-lt));
+      border-radius:99px;transition:width .4s ease;
+    }
+    .progress-label{font-size:12px;font-weight:600;color:var(--text3);min-width:34px;text-align:right}
 
-      /* Toasts */
-      #toasts{position:fixed;right:18px;bottom:18px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-      .toast{background:#0f172a;color:#e6fffb;padding:14px 18px;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,0.15);opacity:0.98;border:1px solid var(--border);font-weight:500}
-      #toasts{position:fixed;top:32px;right:32px;z-index:1000;display:flex;flex-direction:column;gap:12px;max-width:400px}
+    /* ── METRIC TILES ─────────────────────────────────────────── */
+    .metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .metric-tile{
+      border-radius:var(--radius);padding:13px 14px;
+      background:var(--bg);border:1px solid var(--border-lt);
+    }
+    .mt-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+    .mt-value{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.5px}
+    .metric-tile.t-blue  {border-top:2px solid var(--blue)}
+    .metric-tile.t-green {border-top:2px solid var(--green)}
+    .metric-tile.t-amber {border-top:2px solid #d97706}
+    .metric-tile.t-red   {border-top:2px solid #ef4444}
 
-      @media(max-width:1200px){
-        .row{grid-template-columns:1fr 280px}
-        #screenshots img{max-width:85px}
-      }
-      @media(max-width:900px){
-        .row{grid-template-columns:1fr}
-        .brand p{display:none}
-        .controls{flex-wrap:wrap;gap:8px}
-      }
-    </style>
-  </head>
-  <body>
-    <div class="app">
-      <header>
-        <div class="brand">
-          <div class="logo">C</div>
-          <div>
-            <h1>Continumm</h1>
-            <p>Knowledge Transfer Planner</p>
-          </div>
+    /* ── STATUS BADGES ────────────────────────────────────────── */
+    .badge{
+      display:inline-flex;align-items:center;gap:5px;
+      padding:3px 8px;border-radius:99px;
+      font-size:11px;font-weight:600;
+      text-transform:uppercase;letter-spacing:.04em;
+    }
+    .badge::before{content:'';width:5px;height:5px;border-radius:50%;display:inline-block}
+    .badge.covered {background:var(--green-dim);color:var(--green)}
+    .badge.covered::before{background:var(--green)}
+    .badge.weak    {background:var(--amber-dim);color:var(--amber)}
+    .badge.weak::before{background:#d97706}
+    .badge.missing {background:var(--red-dim);color:var(--red)}
+    .badge.missing::before{background:#ef4444}
+
+    /* ── AI SUMMARY ───────────────────────────────────────────── */
+    .summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .summary-item{
+      background:var(--bg);border:1px solid var(--border-lt);
+      border-radius:var(--radius);padding:12px 14px;
+    }
+    .si-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+    .si-val{font-size:20px;font-weight:700;color:var(--text)}
+    .alert-row{
+      display:flex;align-items:center;gap:8px;
+      padding:10px 13px;border-radius:var(--radius);
+      font-size:13px;font-weight:500;margin-top:10px;
+    }
+    .alert-row.danger{background:var(--red-dim);color:var(--red)}
+    .alert-row.warn  {background:var(--amber-dim);color:var(--amber)}
+
+    /* ── TRANSCRIPT ───────────────────────────────────────────── */
+    .transcript-box{
+      background:var(--navy);color:#c8d8f0;
+      padding:14px 16px;border-radius:var(--radius);
+      font-family:'Menlo','Monaco','Consolas',monospace;
+      font-size:12.5px;line-height:1.7;
+      max-height:260px;overflow-y:auto;
+      white-space:pre-wrap;word-break:break-word;
+    }
+
+    /* ── COVERAGE ACCORDION ───────────────────────────────────── */
+    .cov-item{
+      border:1px solid var(--border-lt);border-radius:var(--radius);
+      margin-bottom:8px;overflow:hidden;
+    }
+    .cov-header{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:11px 14px;background:var(--bg);
+      cursor:pointer;gap:10px;
+      transition:background .12s;
+    }
+    .cov-header:hover{background:var(--bg2)}
+    .cov-title{font-size:13px;font-weight:600;color:var(--text)}
+    .cov-chevron{font-size:10px;color:var(--text3);transition:transform .2s;flex-shrink:0}
+    .cov-item.open .cov-chevron{transform:rotate(180deg)}
+    .cov-body{display:none;padding:14px;border-top:1px solid var(--border-lt)}
+    .cov-item.open .cov-body{display:block}
+    .cov-text{font-size:13px;color:var(--text2);line-height:1.65;margin-bottom:6px}
+    .cov-text:last-child{margin-bottom:0}
+    .cov-empty{font-size:12px;color:var(--text3);font-style:italic}
+
+    /* ── SENTENCE ROWS ────────────────────────────────────────── */
+    .sent-row{
+      display:flex;align-items:flex-start;gap:12px;
+      padding:10px 14px;
+      border-bottom:1px solid var(--border-lt);
+      transition:background .1s;
+    }
+    .sent-row:last-child{border-bottom:none}
+    .sent-row:hover{background:var(--bg)}
+    .sent-num{font-size:11px;font-weight:600;color:var(--text3);min-width:22px;padding-top:1px}
+    .sent-text{flex:1;font-size:13px;color:var(--text2);line-height:1.55}
+    .sent-meta{font-size:11px;color:var(--text3);margin-top:4px}
+    .sent-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:130px;flex-shrink:0}
+    .sec-tag{
+      display:inline-block;padding:2px 7px;border-radius:4px;
+      background:var(--blue-dim);color:var(--blue);
+      font-size:11px;font-weight:600;
+    }
+
+    /* ── RIGHT ASIDE ──────────────────────────────────────────── */
+    .right-aside{
+      border-left:1px solid var(--border);
+      background:var(--surface);
+      padding:20px 16px;
+      display:flex;flex-direction:column;gap:18px;
+      position:sticky;top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+    }
+    .ra-section-label{
+      font-size:10px;font-weight:700;color:var(--text3);
+      letter-spacing:.08em;text-transform:uppercase;
+      margin-bottom:8px;
+    }
+    .ra-row{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--border-lt);
+      font-size:13px;
+    }
+    .ra-row:last-child{border-bottom:none}
+    .ra-label{color:var(--text3);font-weight:500}
+    .ra-value{color:var(--text);font-weight:600;text-align:right;max-width:60%;word-break:break-all;font-size:12px}
+    .ra-actions{display:flex;flex-direction:column;gap:8px}
+    .ra-divider{border:none;border-top:1px solid var(--border-lt)}
+    .ra-hint{font-size:11px;color:var(--text3);margin-top:6px}
+
+    /* ── RIGHT PANEL CARDS ────────────────────────────────────── */
+    .right-aside{
+      border-left:1px solid var(--border);
+      background:var(--bg);
+      padding:16px 14px;
+      display:flex;flex-direction:column;gap:12px;
+      position:sticky;top:54px;
+      height:calc(100vh - 54px);
+      overflow-y:auto;
+    }
+    /* Individual panel card */
+    .rp-card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      overflow:hidden;
+      box-shadow:var(--shadow-sm);
+    }
+    .rp-card-header{
+      display:flex;align-items:center;gap:10px;
+      padding:11px 14px;
+      border-bottom:1px solid var(--border-lt);
+      background:var(--surface);
+    }
+    .rp-card-icon{
+      width:26px;height:26px;
+      border-radius:6px;
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;
+    }
+    .rp-card-icon svg{width:13px;height:13px}
+    .rp-icon-blue  {background:var(--blue-dim);color:var(--blue)}
+    .rp-icon-green {background:var(--green-dim);color:var(--green)}
+    .rp-icon-amber {background:var(--amber-dim);color:var(--amber)}
+    .rp-card-title{font-size:13px;font-weight:700;color:var(--text)}
+    .rp-card-body{padding:12px 14px}
+    /* Row inside session health */
+    .rp-row{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--border-lt);
+      gap:8px;
+    }
+    .rp-row:last-child{border-bottom:none}
+    .rp-label{font-size:12px;font-weight:500;color:var(--text3);flex-shrink:0}
+    .rp-value{font-size:12px;font-weight:600;color:var(--text);text-align:right;word-break:break-all}
+    .rp-mono{font-family:'Menlo','Monaco',monospace;font-size:11px;color:var(--text3)}
+    .rp-strong{font-size:14px;font-weight:700;color:var(--blue)}
+    /* Empty state */
+    .rp-empty-state{
+      text-align:center;padding:16px 8px;
+    }
+    .rp-empty-icon{font-size:22px;margin-bottom:6px}
+    .rp-empty-text{font-size:12px;font-weight:500;color:var(--text3);margin-bottom:3px}
+    .rp-empty-hint{font-size:11px;color:var(--text3);opacity:.7}
+    /* Override old ra- styles that might conflict */
+    .ra-section-label,.ra-row,.ra-label,.ra-value,.ra-actions,.ra-hint,.ra-divider{display:none}
+
+    /* ── FORM ─────────────────────────────────────────────────── */
+    #formContainer{display:none}
+    #formContainer.visible{display:block}
+    #form section{
+      border:1px solid var(--border-lt);border-radius:var(--radius);
+      padding:14px;margin-bottom:12px;background:var(--bg);
+    }
+    #form section h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)}
+    label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:5px;margin-top:8px}
+    input[type=text],select,textarea{
+      width:100%;padding:8px 10px;
+      border:1px solid var(--border);border-radius:var(--radius);
+      font-family:inherit;font-size:13px;
+      background:var(--surface);color:var(--text);
+      transition:border-color .15s,box-shadow .15s;
+    }
+    input[type=text]:focus,select:focus,textarea:focus{
+      outline:none;border-color:var(--blue);
+      box-shadow:0 0 0 3px rgba(26,86,219,.1);
+    }
+    input[type=checkbox]{width:auto;margin-right:8px;transform:scale(1.1)}
+    table{width:100%;border-collapse:collapse;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border-lt)}
+    thead{background:var(--bg2)}
+    th,td{padding:8px 12px;text-align:left;font-size:12px;border-bottom:1px solid var(--border-lt)}
+    th{font-weight:600;color:var(--text)}
+    td{color:var(--text2)}
+    tbody tr:hover{background:var(--bg)}
+
+    /* ── MODAL ────────────────────────────────────────────────── */
+    #editModal{
+      display:none;position:fixed;inset:0;
+      background:rgba(10,20,40,.55);
+      z-index:10000;align-items:center;justify-content:center;
+      backdrop-filter:blur(2px);
+    }
+    #editModal.open{display:flex}
+    .modal-box{
+      background:var(--surface);border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-lg);max-width:460px;width:90%;overflow:hidden;
+    }
+    .modal-hdr{
+      padding:14px 18px;border-bottom:1px solid var(--border-lt);
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .modal-hdr h3{font-size:14px;font-weight:700;color:var(--text)}
+    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);padding:2px 6px;border-radius:4px}
+    .modal-close:hover{background:var(--bg);color:var(--text)}
+    .modal-body{padding:18px}
+    .modal-preview{
+      background:var(--bg);border-left:3px solid var(--blue);
+      border-radius:4px;padding:10px 13px;
+      font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;
+    }
+    .modal-ftr{
+      padding:12px 18px;border-top:1px solid var(--border-lt);
+      display:flex;justify-content:flex-end;gap:8px;
+    }
+
+    /* ── TOASTS ───────────────────────────────────────────────── */
+    #toasts{
+      position:fixed;top:66px;right:18px;
+      z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:300px;
+    }
+    .toast{
+      background:var(--navy);color:#e2e8f0;
+      padding:10px 14px;border-radius:var(--radius);
+      box-shadow:var(--shadow);font-size:13px;font-weight:500;
+      border-left:3px solid var(--blue);
+      opacity:1;transition:opacity .3s;
+    }
+
+    /* ── RESPONSIVE ───────────────────────────────────────────── */
+    @media(max-width:1200px){.page-wrap{grid-template-columns:240px 1fr 260px}}
+    @media(max-width:960px){
+      .page-wrap{grid-template-columns:220px 1fr}
+      .right-aside{display:none}
+      .metric-grid{grid-template-columns:repeat(2,1fr)}
+    }
+    @media(max-width:680px){
+      .page-wrap{grid-template-columns:1fr}
+      .workspace-sidebar{display:none}
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <a class="tb-brand" href="#">
+    <div class="tb-logo">C</div>
+    <span class="tb-name">Continuum</span>
+  </a>
+  <div class="tb-divider"></div>
+  <span class="tb-subtitle">KT Planner</span>
+  <div class="tb-right">
+    <span class="tb-badge">Beta</span>
+    <a class="tb-link" href="/docs">API Docs</a>
+    <a class="tb-link" href="#">Help</a>
+  </div>
+</header>
+
+<!-- PAGE WRAP -->
+<div class="page-wrap">
+
+  <!-- ── WORKSPACE SIDEBAR ───────────────────────────────────── -->
+  <aside class="workspace-sidebar">
+
+    <!-- Workspace header card -->
+    <div class="ws-header">
+      <div class="ws-header-row">
+        <div class="ws-icon">
+          <!-- grid icon -->
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         </div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <a href="/docs" class="meta">API Docs</a>
-        </div>
-      </header>
-
-      <div class="layout">
-        <aside class="sidebar card">
-          <div>
-            <h3>Workspace</h3>
-            <p class="meta">Enterprise KT dashboard with workflow navigation and insights.</p>
-          </div>
-          <ul class="navList">
-            <li><a href="#">Dashboard</a></li>
-            <li><a href="#">Uploads</a></li>
-            <li><a href="#coverage">Coverage</a></li>
-            <li><a href="#">Architecture</a></li>
-            <li><a href="#">Troubleshooting</a></li>
-            <li><a href="#">Runbooks</a></li>
-            <li><a href="#">AI Insights</a></li>
-            <li><a href="#">Exports</a></li>
-            <li><a href="#">Settings</a></li>
-          </ul>
-        </aside>
-
-        <main class="mainPanel">
-          <div class="card">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap">
-              <div style="flex:1;min-width:260px">
-                <h2 style="margin:0 0 8px 0">Upload Recording</h2>
-                <p class="meta">Start a new KT session by uploading audio or video. The system will transcribe, classify, and summarize automatically.</p>
-              </div>
-              <div class="controls">
-                <label class="fileLabel" for="file">Choose file</label>
-                <input id="file" type="file" accept="audio/*,video/*" />
-                <button id="upload" class="primary">Upload & Process</button>
-              </div>
-            </div>
-
-            <div class="progressWrap" id="progressWrap" style="display:none;margin-top:16px">
-              <div class="progress">
-                <div class="bar" id="bar"></div>
-              </div>
-              <span class="meta" id="progressText">0%</span>
-            </div>
-
-            <div class="summaryGrid" id="summaryGrid">
-              <div class="summaryCard">
-                <h4>Coverage</h4>
-                <p id="summaryCoverage">0/0</p>
-              </div>
-              <div class="summaryCard">
-                <h4>Missing</h4>
-                <p id="summaryMissing">0</p>
-              </div>
-              <div class="summaryCard">
-                <h4>Weak</h4>
-                <p id="summaryWeak">0</p>
-              </div>
-              <div class="summaryCard">
-                <h4>Confidence</h4>
-                <p id="summaryConfidence">N/A</p>
-              </div>
-            </div>
-
-            <div class="panel" style="margin-top:20px">
-              <div class="sectionHeader">
-                <div>
-                  <h2>AI Summary</h2>
-                  <small>High-level insights, missing KT gaps, and session health.</small>
-                </div>
-                <button id="toggleTranscript" class="ghost">Show transcript</button>
-              </div>
-              <div id="aiSummary" style="display:grid;gap:12px"></div>
-              <div id="transcriptCard" class="collapsible" style="margin-top:16px;">
-                <div class="collapsibleContent">
-                  <pre id="transcript">(no transcript yet)</pre>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card" id="coverageSection">
-            <div class="sectionHeader">
-              <div>
-                <h2>Coverage Details</h2>
-                <small id="coverageSummaryText">Section-level coverage and evidence.</small>
-              </div>
-            </div>
-            <div id="coverage"></div>
-          </div>
-
-          <div class="card" style="display:none" id="formContainer">
-            <div class="formHeader">
-              <h2>Knowledge Transfer Form</h2>
-              <button class="closeForm" onclick="document.getElementById('formContainer').classList.remove('visible')">✕</button>
-            </div>
-            <div id="form"></div>
-          </div>
-        </main>
-
-        <aside class="asidePanel">
-          <div class="panel">
-            <h3>Session Health</h3>
-            <div style="display:grid;gap:12px">
-              <div><strong>Processed Job:</strong> <span id="sessionJob">None</span></div>
-              <div><strong>Overall Coverage:</strong> <span id="sessionCoverage">0%</span></div>
-              <div><strong>Missing Required:</strong> <span id="sessionMissing">0</span></div>
-              <div><strong>Weak Sections:</strong> <span id="sessionWeak">0</span></div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <h3>Visual Evidence</h3>
-            <div id="screenshots" style="display:flex;flex-wrap:wrap;gap:12px"></div>
-          </div>
-
-          <div class="panel">
-            <h3>Actions</h3>
-            <div class="actions" style="flex-direction:column;align-items:stretch">
-              <button id="applyJob" class="primary">Apply results</button>
-              <button id="downloadJson" class="ghost">Export JSON</button>
-            </div>
-            <div class="small-muted" style="margin-top:12px">Use Apply to map coverage into the KT form.</div>
-          </div>
-        </aside>
+        <span class="ws-title">Workspace</span>
       </div>
+      <p class="ws-desc">Enterprise KT dashboard with workflow navigation and insights.</p>
+    </div>
 
-    <!-- Edit Sentence Modal -->
-    <div id="editModal">
-      <div class="editModalContent">
-        <h3>Correct Sentence Classification</h3>
-        <div class="sentence-preview" id="sentencePreview"></div>
-        <label for="sectionSelect">Select the correct section:</label>
-        <select id="sectionSelect"></select>
-        <div class="editModalActions">
-          <button class="cancel" onclick="closeEditModal()">Cancel</button>
-          <button class="confirm" onclick="confirmEditSentence()">Confirm</button>
+    <!-- Nav links -->
+    <div class="nav-group" style="padding-top:8px">
+      <p class="nav-group-label">Main</p>
+      <a class="nav-link active" href="#">
+        <span class="nav-link-icon">⊞</span>Dashboard
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">↑</span>Uploads
+      </a>
+      <a class="nav-link" href="#coverageSection">
+        <span class="nav-link-icon">◎</span>Coverage
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <p class="nav-group-label">Knowledge</p>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⬡</span>Architecture
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⚡</span>Troubleshooting
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">≡</span>Runbooks
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <p class="nav-group-label">Tools</p>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">✦</span>AI Insights
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">↓</span>Exports
+      </a>
+      <a class="nav-link" href="#">
+        <span class="nav-link-icon">⚙</span>Settings
+      </a>
+    </div>
+
+  </aside>
+
+  <!-- ── MAIN CONTENT ─────────────────────────────────────────── -->
+  <main class="main-content">
+
+    <div class="page-heading">
+      <h1>KT Session</h1>
+      <p>Upload a recording to generate a structured knowledge transfer document.</p>
+    </div>
+
+    <!-- Upload card -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Upload Recording</div>
+          <div class="card-sub">Accepts audio and video · Whisper transcription · AI classification</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <label for="file" style="margin:0">
+          <div class="upload-zone" id="uploadZone">
+            <div class="uz-icon">🎙</div>
+            <div class="uz-title">Drop a file or click to browse</div>
+            <div class="uz-sub">MP4, MP3, WAV, MOV, WEBM — up to 500 MB</div>
+            <div class="uz-file" id="fileNameDisplay"></div>
+          </div>
+        </label>
+        <input id="file" type="file" accept="audio/*,video/*"/>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:12px">
+          <button id="upload" class="btn btn-primary">⬆&nbsp; Upload &amp; Process</button>
+        </div>
+
+        <div id="progressWrap" style="display:none;margin-top:16px">
+          <div class="progress-wrap">
+            <div class="progress-track"><div class="progress-bar" id="bar"></div></div>
+            <span class="progress-label" id="progressText">0%</span>
+          </div>
+          <p style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
+            Transcribing and classifying — this may take a few minutes for long recordings.
+          </p>
+        </div>
+
+        <div class="metric-grid" id="summaryGrid" style="margin-top:18px">
+          <div class="metric-tile t-blue">
+            <div class="mt-label">Coverage</div>
+            <div class="mt-value" id="summaryCoverage">—</div>
+          </div>
+          <div class="metric-tile t-green">
+            <div class="mt-label">Confidence</div>
+            <div class="mt-value" id="summaryConfidence">—</div>
+          </div>
+          <div class="metric-tile t-amber">
+            <div class="mt-label">Weak</div>
+            <div class="mt-value" id="summaryWeak">—</div>
+          </div>
+          <div class="metric-tile t-red">
+            <div class="mt-label">Missing</div>
+            <div class="mt-value" id="summaryMissing">—</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- AI Summary card -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">AI Summary</div>
+          <div class="card-sub">High-level insights, gaps, and session health</div>
+        </div>
+        <button id="toggleTranscript" class="btn btn-ghost btn-sm">Show transcript</button>
+      </div>
+      <div class="card-body">
+        <div id="aiSummary">
+          <p style="font-size:13px;color:var(--text3)">Upload a recording to see analysis results.</p>
+        </div>
+        <div id="transcriptCard" style="display:none;margin-top:14px">
+          <pre class="transcript-box" id="transcript">(no transcript yet)</pre>
         </div>
       </div>
     </div>
 
-    <script>
-      const uploadBtn = document.getElementById('upload');
-      const fileInput = document.getElementById('file');
-      const transcriptEl = document.getElementById('transcript');
-      const coverageEl = document.getElementById('coverage');
-      const bar = document.getElementById('bar');
-      const progressText = document.getElementById('progressText');
-      const summaryCoverage = document.getElementById('summaryCoverage');
-      const summaryMissing = document.getElementById('summaryMissing');
-      const summaryWeak = document.getElementById('summaryWeak');
-      const summaryConfidence = document.getElementById('summaryConfidence');
-      const aiSummaryEl = document.getElementById('aiSummary');
-      const transcriptCard = document.getElementById('transcriptCard');
-      const toggleTranscript = document.getElementById('toggleTranscript');
-      const sessionJob = document.getElementById('sessionJob');
-      const sessionCoverage = document.getElementById('sessionCoverage');
-      const sessionMissing = document.getElementById('sessionMissing');
-      const sessionWeak = document.getElementById('sessionWeak');
-      const progressWrap = document.getElementById('progressWrap');
+    <!-- Coverage Details -->
+    <div class="card" id="coverageSection">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Coverage Details</div>
+          <div class="card-sub" id="coverageSummaryText">Section-level coverage and evidence</div>
+        </div>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="coverage">
+          <p style="font-size:13px;color:var(--text3);padding:6px">No coverage data yet.</p>
+        </div>
+      </div>
+    </div>
 
-      let currentJobId = null;
-      let pollInterval = null;
+    <!-- KT Form (hidden until Apply) -->
+    <div class="card" id="formContainer">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Knowledge Transfer Form</div>
+          <div class="card-sub">Auto-populated from AI analysis — review and edit before export</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="
+          document.getElementById('formContainer').classList.remove('visible');
+          document.getElementById('formContainer').style.display='none';
+        ">✕&nbsp;Close</button>
+      </div>
+      <div class="card-body">
+        <div id="form"></div>
+      </div>
+    </div>
 
-      function setProgress(p){
-        bar.style.width = p + '%';
-        progressText.textContent = p + '%';
+  </main>
+
+  <!-- ── RIGHT ASIDE ───────────────────────────────────────────── -->
+  <aside class="right-aside">
+
+    <!-- Session Health card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <span class="rp-card-title">Session Health</span>
+      </div>
+      <div class="rp-card-body">
+        <div class="rp-row">
+          <span class="rp-label">Job ID</span>
+          <span class="rp-value rp-mono" id="sessionJob">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Overall coverage</span>
+          <span class="rp-value rp-strong" id="sessionCoverage">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Missing required</span>
+          <span class="rp-value" id="sessionMissing">—</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Weak sections</span>
+          <span class="rp-value" id="sessionWeak">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-green">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </div>
+        <span class="rp-card-title">Actions</span>
+      </div>
+      <div class="rp-card-body">
+        <button id="applyJob" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px">
+          ⊕&nbsp; Apply results to form
+        </button>
+        <button id="downloadJson" class="btn btn-ghost" style="width:100%;justify-content:center">
+          ↓&nbsp; Export JSON
+        </button>
+        <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
+          Apply maps AI coverage into the KT form fields for review and export.
+        </p>
+      </div>
+    </div>
+
+    <!-- Visual Evidence card -->
+    <div class="rp-card">
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+        <span class="rp-card-title">Visual Evidence</span>
+      </div>
+      <div class="rp-card-body">
+        <div id="screenshots">
+          <div class="rp-empty-state">
+            <div class="rp-empty-icon">🖼</div>
+            <p class="rp-empty-text">No screenshots captured yet.</p>
+            <p class="rp-empty-hint">Screenshots will appear here after processing.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+</div><!-- /page-wrap -->
+
+<!-- EDIT MODAL -->
+<div id="editModal">
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <h3>Correct Classification</h3>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--text3);margin-bottom:6px">Sentence</p>
+      <div class="modal-preview" id="sentencePreview"></div>
+      <label for="sectionSelect">Assign to section</label>
+      <select id="sectionSelect"></select>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditSentence()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div id="toasts"></div>
+
+<script>
+/* ── DOM refs ─────────────────────────────────────────────── */
+const uploadBtn        = document.getElementById('upload');
+const fileInput        = document.getElementById('file');
+const transcriptEl     = document.getElementById('transcript');
+const transcriptCard   = document.getElementById('transcriptCard');
+const coverageEl       = document.getElementById('coverage');
+const bar              = document.getElementById('bar');
+const progressText     = document.getElementById('progressText');
+const summaryCoverage  = document.getElementById('summaryCoverage');
+const summaryMissing   = document.getElementById('summaryMissing');
+const summaryWeak      = document.getElementById('summaryWeak');
+const summaryConfidence= document.getElementById('summaryConfidence');
+const aiSummaryEl      = document.getElementById('aiSummary');
+const toggleTranscript = document.getElementById('toggleTranscript');
+const sessionJob       = document.getElementById('sessionJob');
+const sessionCoverage  = document.getElementById('sessionCoverage');
+const sessionMissing   = document.getElementById('sessionMissing');
+const sessionWeak      = document.getElementById('sessionWeak');
+const progressWrap     = document.getElementById('progressWrap');
+const fileNameDisplay  = document.getElementById('fileNameDisplay');
+
+let currentJobId = null;
+let pollInterval = null;
+let SCHEMA = null;
+
+/* ── Progress ──────────────────────────────────────────────── */
+function setProgress(p){ bar.style.width=p+'%'; progressText.textContent=p+'%'; }
+
+/* ── Toast ─────────────────────────────────────────────────── */
+const toastsEl=document.getElementById('toasts');
+function showToast(msg,timeout=4000){
+  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+  toastsEl.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>{ try{t.remove()}catch(e){} },300); },timeout);
+}
+
+/* ── File picker ────────────────────────────────────────────── */
+fileInput.addEventListener('change',(e)=>{
+  const f=e.target.files[0];
+  fileNameDisplay.textContent=f?(f.name.length>38?f.name.slice(0,34)+'…':f.name):'';
+  const z=document.getElementById('uploadZone');
+  if(f){z.style.borderColor='var(--blue)';z.style.background='var(--blue-dim)'}
+});
+
+/* ── Render summary ─────────────────────────────────────────── */
+function renderSummary(data){
+  const cov=data.coverage||{};
+  const secs=Object.keys(cov);
+  const covered=secs.filter(id=>cov[id].status==='covered').length;
+  const weak=secs.filter(id=>cov[id].status==='weak').length;
+  const missing=secs.filter(id=>cov[id].status==='missing').length;
+  const total=secs.length;
+  const pct=total?Math.round((covered+weak)/total*100):0;
+
+  summaryCoverage.textContent=`${covered+weak}/${total}`;
+  summaryWeak.textContent=weak;
+  summaryMissing.textContent=data.missing_required?.length??missing;
+  summaryConfidence.textContent=data.overall_coverage_percent?Math.round(data.overall_coverage_percent)+'%':'—';
+  sessionJob.textContent=data.job_id?(data.job_id.slice(0,14)+'…'):'—';
+  sessionCoverage.textContent=pct+'%';
+  sessionMissing.textContent=data.missing_required?.length??missing;
+  sessionWeak.textContent=weak;
+
+  const missingList=data.missing_required||[];
+  const weakList=secs.filter(id=>cov[id].status==='weak');
+  aiSummaryEl.innerHTML='';
+
+  const grid=document.createElement('div'); grid.className='summary-grid';
+  [{label:'Expected',value:total},{label:'Covered',value:covered},{label:'Weak',value:weak},{label:'Missing',value:missingList.length}].forEach(item=>{
+    const d=document.createElement('div'); d.className='summary-item';
+    d.innerHTML=`<div class="si-label">${item.label}</div><div class="si-val">${item.value}</div>`;
+    grid.appendChild(d);
+  });
+  aiSummaryEl.appendChild(grid);
+
+  if(missingList.length){
+    const a=document.createElement('div'); a.className='alert-row danger';
+    a.innerHTML=`⚠&nbsp;<span><strong>Missing critical sections:</strong> ${missingList.join(', ')}</span>`;
+    aiSummaryEl.appendChild(a);
+  }
+  if(weakList.length){
+    const a=document.createElement('div'); a.className='alert-row warn';
+    a.innerHTML=`◌&nbsp;<span><strong>Weak coverage:</strong> ${weakList.join(', ')}</span>`;
+    aiSummaryEl.appendChild(a);
+  }
+}
+
+/* ── Render coverage ────────────────────────────────────────── */
+function renderCoverage(cov){
+  coverageEl.innerHTML='';
+  for(const [id,info] of Object.entries(cov)){
+    const status=info.status||'missing';
+    const contentArray=Array.isArray(info.content)?info.content:[];
+    const item=document.createElement('div'); item.className='cov-item';
+    const hdr=document.createElement('div'); hdr.className='cov-header';
+    hdr.innerHTML=`
+      <span class="cov-title">${info.title||id}</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <span class="badge ${status}">${status}</span>
+        <span class="cov-chevron">▼</span>
+      </div>`;
+    hdr.addEventListener('click',()=>item.classList.toggle('open'));
+    const body=document.createElement('div'); body.className='cov-body';
+    if(contentArray.length){
+      contentArray.forEach(c=>{ const p=document.createElement('p'); p.className='cov-text'; p.textContent=c; body.appendChild(p); });
+    } else {
+      const p=document.createElement('p'); p.className='cov-empty';
+      p.textContent='No explicit sentence text available — coverage inferred from semantic analysis.';
+      body.appendChild(p);
+    }
+    item.appendChild(hdr); item.appendChild(body);
+    if(status!=='missing') item.classList.add('open');
+    coverageEl.appendChild(item);
+  }
+
+  // Sentence assignments
+  const flat=[];
+  for(const [secId,info] of Object.entries(cov)){
+    for(const s of (info.sentences||[])){ flat.push({...s,assigned_sections:s.assigned_sections||[secId]}); }
+  }
+  if(flat.length){
+    const wrap=document.createElement('div');
+    wrap.className='card'; wrap.style.marginTop='8px'; wrap.style.border='1px solid var(--border-lt)';
+    const wHdr=document.createElement('div'); wHdr.className='card-header';
+    wHdr.innerHTML=`<div class="card-title">Sentence Assignments</div><div class="card-sub">${flat.length} sentences classified</div>`;
+    wrap.appendChild(wHdr);
+    flat.forEach((s,i)=>{
+      const row=document.createElement('div'); row.className='sent-row';
+      const num=document.createElement('div'); num.className='sent-num'; num.textContent=i+1;
+      const mid=document.createElement('div'); mid.style.flex='1'; mid.style.minWidth='0';
+      const txt=document.createElement('div'); txt.className='sent-text'; txt.textContent=s.text;
+      const meta=document.createElement('div'); meta.className='sent-meta';
+      meta.textContent=`${(s.start||0).toFixed(1)}s · conf ${(s.audio_confidence||0).toFixed(2)}`;
+      mid.appendChild(txt); mid.appendChild(meta);
+      const right=document.createElement('div'); right.className='sent-right';
+      (s.assigned_sections||[]).forEach(sec=>{ const t=document.createElement('span'); t.className='sec-tag'; t.textContent=sec; right.appendChild(t); });
+      const eb=document.createElement('button'); eb.className='btn btn-ghost btn-sm'; eb.textContent='Edit';
+      eb.onclick=()=>promptEditSentence(i,s); right.appendChild(eb);
+      row.appendChild(num); row.appendChild(mid); row.appendChild(right);
+      wrap.appendChild(row);
+    });
+    coverageEl.appendChild(wrap);
+  }
+}
+
+/* ── Transcript toggle ──────────────────────────────────────── */
+toggleTranscript.addEventListener('click',()=>{
+  const open=transcriptCard.style.display==='block';
+  transcriptCard.style.display=open?'none':'block';
+  toggleTranscript.textContent=open?'Show transcript':'Hide transcript';
+});
+
+/* ── Poll job ───────────────────────────────────────────────── */
+function pollJobStatus(jobId){
+  if(pollInterval) clearInterval(pollInterval);
+  pollInterval=setInterval(async()=>{
+    try{
+      const resp=await fetch(`/status/${jobId}`);
+      if(!resp.ok){ showToast('Status check failed'); clearInterval(pollInterval); return; }
+      const data=await resp.json();
+      if(data.status==='processing'){
+        setProgress(Math.min(50,data.progress||0));
+      } else if(data.status==='completed'){
+        setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
+        renderSummary(data);
+        transcriptEl.textContent=data.transcript||'(none)';
+        renderCoverage(data.coverage||{});
+        const shotsEl=document.getElementById('screenshots');
+        shotsEl.innerHTML='';
+        const shots=data.screenshots||[];
+        if(shots.length){ shots.forEach(s=>{ const img=document.createElement('img'); img.src=s; img.style.cssText='max-width:100%;border-radius:6px'; shotsEl.appendChild(img); }); }
+        else { shotsEl.innerHTML='<p style="font-size:12px;color:var(--text3)">No screenshots captured.</p>'; }
+      } else if(data.status==='failed'){
+        showToast('Processing failed: '+(data.error||'Unknown error'));
+        setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
       }
+    }catch(err){ showToast('Poll error: '+err); clearInterval(pollInterval); }
+  },2000);
+}
 
-      function renderSummary(data){
-        const cov = data.coverage || {};
-        const sections = Object.keys(cov);
-        const covered = sections.filter(id => cov[id].status === 'covered').length;
-        const weak = sections.filter(id => cov[id].status === 'weak').length;
-        const missing = sections.filter(id => cov[id].status === 'missing').length;
-        const total = sections.length;
-        const coveragePercent = total ? Math.round((covered + weak) / total * 100) : 0;
+/* ── Upload ─────────────────────────────────────────────────── */
+uploadBtn.addEventListener('click',async()=>{
+  const f=fileInput.files[0];
+  if(!f){ showToast('Choose a file first'); return; }
+  progressWrap.style.display='block'; setProgress(5);
+  const fd=new FormData(); fd.append('file',f);
+  try{
+    const resp=await fetch('/upload',{method:'POST',body:fd});
+    if(!resp.ok){ const t=await resp.text(); showToast('Upload failed: '+resp.status+' '+t); setProgress(0); progressWrap.style.display='none'; return; }
+    setProgress(20);
+    const data=await resp.json();
+    currentJobId=data.job_id;
+    if(data.status==='processing'){
+      transcriptEl.textContent='Processing…';
+      coverageEl.innerHTML='<p style="font-size:13px;color:var(--text3);padding:6px">Processing — please wait…</p>';
+      aiSummaryEl.innerHTML='<p style="font-size:13px;color:var(--text3)">Waiting for analysis results…</p>';
+      sessionJob.textContent=currentJobId.slice(0,14)+'…';
+      pollJobStatus(currentJobId);
+    }
+  }catch(err){ showToast('Error: '+err); setProgress(0); progressWrap.style.display='none'; }
+});
 
-        summaryCoverage.textContent = `${covered + weak}/${total}`;
-        summaryWeak.textContent = `${weak}`;
-        summaryMissing.textContent = `${data.missing_required?.length || missing}`;
-        summaryConfidence.textContent = data.overall_coverage_percent ? `${Math.round(data.overall_coverage_percent)}%` : 'N/A';
+/* ── Edit modal ─────────────────────────────────────────────── */
+let editState={sentenceIndex:null,sentenceObj:null};
+async function promptEditSentence(idx,s){
+  editState={sentenceIndex:idx,sentenceObj:s};
+  document.getElementById('sentencePreview').textContent=s.text;
+  const dd=document.getElementById('sectionSelect'); dd.innerHTML='';
+  if(SCHEMA){ SCHEMA.forEach(sec=>{ const o=document.createElement('option'); o.value=sec.id; o.textContent=sec.title||sec.id; if(s.assigned_sections?.includes(sec.id)) o.selected=true; dd.appendChild(o); }); }
+  document.getElementById('editModal').classList.add('open');
+}
+function closeEditModal(){ document.getElementById('editModal').classList.remove('open'); editState={sentenceIndex:null,sentenceObj:null}; }
+async function confirmEditSentence(){
+  const cs=document.getElementById('sectionSelect').value;
+  if(!cs||editState.sentenceIndex===null){ showToast('Select a section'); return; }
+  try{
+    const body={job_id:currentJobId,sentence_id:editState.sentenceIndex,corrected_classification:cs,user:'local_user',feedback_notes:'UI correction'};
+    const r=await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ showToast('Feedback failed'); return; }
+    const j=await r.json();
+    if(j.coverage){ renderCoverage(j.coverage); renderSummary(j); }
+    showToast('Reclassified → '+cs+' ✓');
+    closeEditModal();
+  }catch(e){ showToast('Feedback error: '+e); }
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeEditModal(); });
+document.getElementById('editModal').addEventListener('click',e=>{ if(e.target.id==='editModal') closeEditModal(); });
 
-        sessionJob.textContent = data.job_id || 'None';
-        sessionCoverage.textContent = `${coveragePercent}%`;
-        sessionMissing.textContent = `${data.missing_required?.length || missing}`;
-        sessionWeak.textContent = `${weak}`;
+/* ── Schema ─────────────────────────────────────────────────── */
+async function loadSchema(){
+  try{
+    const r=await fetch('/schema'); if(!r.ok) throw new Error('Schema load failed');
+    const j=await r.json(); SCHEMA=j.sections;
+  }catch(e){ console.error('Schema error',e); }
+}
 
-        const missingList = data.missing_required || [];
-        const weakList = sections.filter(id => cov[id].status === 'weak');
-        aiSummaryEl.innerHTML = '';
+/* ── Form rendering ─────────────────────────────────────────── */
+function createInput(field,sectionId){
+  const wrap=document.createElement('div'); wrap.style.marginBottom='10px';
+  const lbl=document.createElement('label'); lbl.textContent=field.label||field.id||''; wrap.appendChild(lbl);
+  if(field.type==='text'||!field.type){
+    const inp=document.createElement('input'); inp.type='text'; inp.dataset.section=sectionId; inp.dataset.field=field.id||''; wrap.appendChild(inp); return wrap;
+  }
+  if(field.type==='boolean'){
+    const inp=document.createElement('input'); inp.type='checkbox'; inp.dataset.section=sectionId; inp.dataset.field=field.id||''; wrap.appendChild(inp); return wrap;
+  }
+  if(field.type==='single_select'||field.type==='multi_select'){
+    const sel=document.createElement('select'); sel.dataset.section=sectionId; sel.dataset.field=field.id||'';
+    if(field.type==='multi_select') sel.multiple=true;
+    (field.options||[]).forEach(opt=>{ const o=document.createElement('option'); o.value=opt; o.textContent=opt; sel.appendChild(o); });
+    wrap.appendChild(sel); return wrap;
+  }
+  if(field.type==='table'){
+    const tbl=document.createElement('table');
+    const thead=document.createElement('thead'); const tr=document.createElement('tr');
+    (field.columns||[]).forEach(c=>{ const th=document.createElement('th'); th.textContent=c; tr.appendChild(th); });
+    thead.appendChild(tr); tbl.appendChild(thead);
+    const tbody=document.createElement('tbody'); tbody.dataset.section=sectionId; tbody.dataset.field=field.id||'';
+    tbl.appendChild(tbody); addTableRow(tbody,field); wrap.appendChild(tbl); return wrap;
+  }
+  const inp2=document.createElement('input'); inp2.type='text'; wrap.appendChild(inp2); return wrap;
+}
+function addTableRow(tbody,field,values){
+  const tr=document.createElement('tr');
+  (field.columns||[]).forEach((col,idx)=>{
+    const td=document.createElement('td');
+    const ct=(field.columns_type&&field.columns_type[idx])||'text';
+    if(ct==='boolean'){ const cb=document.createElement('input'); cb.type='checkbox'; td.appendChild(cb); }
+    else { const inp=document.createElement('input'); inp.type='text'; inp.style.width='100%'; inp.value=(values&&values[idx])||''; td.appendChild(inp); }
+    tr.appendChild(td);
+  });
+  tbody.appendChild(tr);
+}
+function renderForm(schema){
+  const form=document.getElementById('form'); form.innerHTML='';
+  for(const sec of schema){
+    const sDiv=document.createElement('section');
+    const h=document.createElement('h3'); h.textContent=sec.title||sec.id; sDiv.appendChild(h);
+    for(const field of (sec.fields||[])){ sDiv.appendChild(createInput(field,sec.id)); }
+    form.appendChild(sDiv);
+  }
+}
 
-        const summaryItems = [
-          {label:'Expected Sections', value:`${total}`},
-          {label:'Covered Sections', value:`${covered}`},
-          {label:'Weak Sections', value:`${weak}`},
-          {label:'Missing Required', value:`${missingList.length}`}
-        ];
-        const grid = document.createElement('div');
-        grid.style.display = 'grid';
-        grid.style.gridTemplateColumns = 'repeat(2,minmax(0,1fr))';
-        grid.style.gap='12px';
-        summaryItems.forEach(item=>{
-          const card = document.createElement('div');
-          card.style.background='#f8fafc';
-          card.style.border='1px solid #e3e8ff';
-          card.style.borderRadius='12px';
-          card.style.padding='14px';
-          card.innerHTML = `<strong style="display:block;margin-bottom:6px;color:#0f1724;">${item.label}</strong><span style="font-size:18px;font-weight:700;color:#111827;">${item.value}</span>`;
-          grid.appendChild(card);
-        });
-        aiSummaryEl.appendChild(grid);
-
-        if(missingList.length){
-          const missingBlock = document.createElement('div');
-          missingBlock.innerHTML = `<strong>Missing critical coverage:</strong> ${missingList.join(', ')}`;
-          missingBlock.style.color='#92400e';
-          aiSummaryEl.appendChild(missingBlock);
-        }
-        if(weakList.length){
-          const weakBlock = document.createElement('div');
-          weakBlock.innerHTML = `<strong>Weak coverage sections:</strong> ${weakList.join(', ')}`;
-          weakBlock.style.color='#1f2937';
-          aiSummaryEl.appendChild(weakBlock);
-        }
+/* ── Apply job ──────────────────────────────────────────────── */
+document.getElementById('applyJob').addEventListener('click',async()=>{
+  if(!currentJobId){ showToast('No active job'); return; }
+  if(!document.querySelector('#form section')) renderForm(SCHEMA);
+  const r=await fetch(`/status/${currentJobId}`);
+  if(!r.ok){ showToast('Job fetch failed'); return; }
+  const j=await r.json();
+  const cov=j.coverage||{};
+  for(const [secId,info] of Object.entries(cov)){
+    const contentArr=Array.isArray(info)?info:(info?.content)||[];
+    const texts=(contentArr||[]).join('\n');
+    document.querySelectorAll(`[data-section="${secId}"]`).forEach(el=>{
+      const field=el.dataset.field; if(!field) return;
+      if(el.tagName==='INPUT'&&el.type==='text'){ el.value=texts; return; }
+      if(el.tagName==='SELECT'){ for(const opt of el.options){ if(texts&&opt.value&&texts.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } return; }
+      if(el.tagName==='TBODY'){
+        el.innerHTML='';
+        const fd=(SCHEMA&&SCHEMA.find(s=>s.id===secId)?.fields?.find(f=>f.id===el.dataset.field))||null;
+        const rows=contentArr||[];
+        if(rows.length>0){ for(const rowText of rows) addTableRow(el,fd,[rowText]); } else addTableRow(el,fd);
+        return;
       }
-
-      toggleTranscript.addEventListener('click', ()=>{
-        const open = transcriptCard.classList.toggle('open');
-        toggleTranscript.textContent = open ? 'Hide transcript' : 'Show transcript';
-      });
-
-      function pollJobStatus(jobId) {
-        if (pollInterval) clearInterval(pollInterval);
-        
-        pollInterval = setInterval(async () => {
-          try {
-            const resp = await fetch(`/status/${jobId}`);
-            if (!resp.ok) {
-              showToast('Status check failed');
-              clearInterval(pollInterval);
-              return;
-            }
-
-            const data = await resp.json();
-            
-            if (data.status === 'processing') {
-              setProgress(Math.min(50, (data.progress || 0)));
-            } else if (data.status === 'completed') {
-              setProgress(100);
-              clearInterval(pollInterval);
-              progressWrap.style.display = 'none';
-              renderSummary(data);
-              transcriptEl.textContent = data.transcript || '(none)';
-              
-              coverageEl.innerHTML = '';
-              const cov = data.coverage || {};
-              for(const [id, info] of Object.entries(cov)){
-                const div = document.createElement('div');
-                const contentArray = (info && info.content && Array.isArray(info.content)) ? info.content : [];
-                const contentHtml = contentArray.map(c=>`<p>${c}</p>`).join('');
-                const note = (contentArray.length === 0 && info.status !== 'missing')
-                  ? `<p class="small-muted">No explicit sentence text is available for this section; coverage is inferred from semantic/contextual analysis.</p>`
-                  : '';
-                div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}${note}</div>`;
-                coverageEl.appendChild(div);
-              }
-              
-              // Build per-sentence list aggregated from coverage.sentences
-              const sentencesPanel = document.createElement('div');
-              sentencesPanel.style.marginTop = '12px';
-              const flatSentences = [];
-              for(const [secId, info] of Object.entries(cov)){
-                const sentObjs = info.sentences || [];
-                for(const s of sentObjs){
-                  flatSentences.push({
-                    text: s.text,
-                    start: s.start,
-                    end: s.end,
-                    audio_confidence: s.audio_confidence,
-                    assigned_sections: s.assigned_sections || [secId]
-                  });
-                }
-              }
-
-              if(flatSentences.length>0){
-                const header = document.createElement('h3'); header.textContent = 'Sentence Assignments'; sentencesPanel.appendChild(header);
-                for(let i=0;i<flatSentences.length;i++){
-                  const s = flatSentences[i];
-                  const row = document.createElement('div'); row.className = 'sentence-row';
-                  const txt = document.createElement('div'); txt.className = 'sentence-text'; txt.textContent = s.text;
-                  const meta = document.createElement('div'); meta.style.minWidth='160px'; meta.style.textAlign='right';
-                  const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `t:${s.start.toFixed(1)}s • conf:${(s.audio_confidence||0).toFixed(2)}`;
-                  const tags = document.createElement('div'); tags.style.marginTop='6px';
-                  for(const as of s.assigned_sections){ const t = document.createElement('span'); t.className='tag'; t.textContent=as; tags.appendChild(t); }
-                  const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Edit'; editBtn.style.marginLeft='8px';
-                  editBtn.onclick = ()=>{ promptEditSentence(i, s); };
-                  meta.appendChild(conf); meta.appendChild(tags); meta.appendChild(editBtn);
-                  row.appendChild(txt); row.appendChild(meta);
-                  sentencesPanel.appendChild(row);
-                }
-                coverageEl.appendChild(sentencesPanel);
-              }
-              // render screenshots
-              const shots = data.screenshots || [];
-              const shotsEl = document.getElementById('screenshots');
-              shotsEl.innerHTML = '';
-              for(const s of shots){
-                const img = document.createElement('img');
-                img.src = s;
-                img.style.maxWidth = '200px';
-                img.style.margin = '6px';
-                shotsEl.appendChild(img);
-              }
-            } else if (data.status === 'failed') {
-              showToast('Processing failed: ' + (data.error || 'Unknown error'));
-              setProgress(0);
-              progressWrap.style.display = 'none';
-              clearInterval(pollInterval);
-            }
-          } catch (err) {
-            showToast('Poll error: ' + err);
-            clearInterval(pollInterval);
-          }
-        }, 2000);  // Poll every 2 seconds
+      if(el.tagName==='INPUT'&&el.type==='checkbox'){ el.checked=texts.length>0; return; }
+    });
+  }
+  const mapped=j.mapped_fields||{};
+  for(const [secId,fields] of Object.entries(mapped)){
+    for(const [fid,info] of Object.entries(fields)){
+      const els=document.querySelectorAll(`[data-section="${secId}"][data-field="${fid}"]`);
+      for(const el of els){
+        const val=info.value||'';
+        if(el.tagName==='INPUT'&&el.type==='text') el.value=val;
+        else if(el.tagName==='INPUT'&&el.type==='checkbox') el.checked=!!val;
+        else if(el.tagName==='SELECT'){ for(const opt of el.options){ if(val&&opt.value&&val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } }
+        else if(el.tagName==='TBODY'){ el.innerHTML=''; const fd=(SCHEMA&&SCHEMA.find(s=>s.id===secId)?.fields?.find(f=>f.id===fid))||null; addTableRow(el,fd,[val]); }
       }
+    }
+  }
+  const fc=document.getElementById('formContainer');
+  fc.style.display='block'; fc.classList.add('visible');
+  setTimeout(()=>fc.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+  showToast('Form populated ✓');
+});
 
-      // make custom file label show chosen filename
-      // The label element already uses `for="file"` which opens the file picker.
-      // Avoid programmatically calling `.click()` to prevent double file dialogs
-      // in some browsers/environments.
-      fileInput.addEventListener('change', (e)=>{
-        const f = e.target.files[0];
-        const lbl = document.querySelector('.fileLabel');
-        lbl.textContent = f ? (f.name.length>28?f.name.slice(0,24)+'...':f.name) : 'Choose file';
-      });
-
-      uploadBtn.addEventListener('click', async ()=>{
-        const f = fileInput.files[0];
-        if(!f){ showToast('Choose a file first'); return }
-
-        // Show progress bar
-        progressWrap.style.display = 'flex';
-        setProgress(5);
-        const fd = new FormData();
-        fd.append('file', f);
-
-        setProgress(10);
-        try{
-          const resp = await fetch('/upload', {method:'POST', body:fd});
-          if(!resp.ok){
-            const text = await resp.text();
-            showToast('Upload failed: ' + resp.status + ' ' + text);
-            setProgress(0);
-            progressWrap.style.display = 'none';
-            return;
-          }
-
-          setProgress(20);
-          const data = await resp.json();
-          currentJobId = data.job_id;
-          
-          if (data.status === 'processing') {
-            transcriptEl.textContent = 'Processing... Please wait.';
-            coverageEl.innerHTML = '<p>Processing... This may take several minutes for large files.</p>';
-            aiSummaryEl.innerHTML = '<p class="small-muted">Waiting for analysis results...</p>';
-            sessionJob.textContent = currentJobId;
-            sessionCoverage.textContent = 'Pending';
-            sessionMissing.textContent = 'Pending';
-            sessionWeak.textContent = 'Pending';
-            
-            // Start polling for status
-            pollJobStatus(currentJobId);
-          }
-        }catch(err){
-          showToast('Error: '+err);
-          setProgress(0);
-          progressWrap.style.display = 'none';
-        }
-      });
-
-      // Simple toast system
-      const toastsEl = document.createElement('div'); toastsEl.id='toasts'; document.body.appendChild(toastsEl);
-      function showToast(msg, timeout=5000){
-        const t = document.createElement('div'); t.className='toast'; t.textContent = msg; toastsEl.appendChild(t);
-        setTimeout(()=>{ t.style.opacity='0'; try{ t.remove(); }catch(e){} }, timeout);
+/* ── Export JSON ─────────────────────────────────────────────── */
+document.getElementById('downloadJson').addEventListener('click',()=>{
+  if(!SCHEMA){ showToast('Schema not loaded'); return; }
+  const out={template_name:'PROJECT KT & HANDOVER DOCUMENT',sections:[]};
+  for(const sec of SCHEMA){
+    const entry={id:sec.id,title:sec.title,fields:{}};
+    document.querySelectorAll(`[data-section="${sec.id}"]`).forEach(el=>{
+      const fid=el.dataset.field; if(!fid) return;
+      if(el.tagName==='INPUT'&&el.type==='text') entry.fields[fid]=el.value;
+      else if(el.tagName==='INPUT'&&el.type==='checkbox') entry.fields[fid]=el.checked;
+      else if(el.tagName==='SELECT'&&el.multiple) entry.fields[fid]=Array.from(el.selectedOptions).map(o=>o.value);
+      else if(el.tagName==='SELECT') entry.fields[fid]=el.value;
+      else if(el.tagName==='TBODY'){
+        const rows=[];
+        for(const tr of Array.from(el.children)){ const cols=Array.from(tr.children).map(td=>{ const inp=td.querySelector('input'); if(!inp) return ''; return inp.type==='checkbox'?inp.checked:inp.value; }); rows.push(cols); }
+        entry.fields[fid]=rows;
       }
+    });
+    out.sections.push(entry);
+  }
+  const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='kt_filled.json'; a.click(); URL.revokeObjectURL(url);
+});
 
-      // Global state for edit modal
-      let editState = {
-        sentenceIndex: null,
-        sentenceObj: null
-      };
-
-      // Prompt edit for sentence -> send feedback (IMPROVED with dropdown)
-      async function promptEditSentence(sentenceIndex, sentenceObj){
-        // Store state for confirmation
-        editState.sentenceIndex = sentenceIndex;
-        editState.sentenceObj = sentenceObj;
-        
-        // Show sentence preview
-        document.getElementById('sentencePreview').textContent = sentenceObj.text;
-        
-        // Populate dropdown with available sections
-        const dropdown = document.getElementById('sectionSelect');
-        dropdown.innerHTML = '';
-        if(SCHEMA){
-          for(const sec of SCHEMA){
-            const opt = document.createElement('option');
-            opt.value = sec.id;
-            opt.textContent = sec.title || sec.id;
-            // Pre-select current section
-            if(sentenceObj.assigned_sections && sentenceObj.assigned_sections.includes(sec.id)){
-              opt.selected = true;
-            }
-            dropdown.appendChild(opt);
-          }
-        }
-        
-        // Show modal
-        document.getElementById('editModal').classList.add('open');
-      }
-
-      function closeEditModal(){
-        document.getElementById('editModal').classList.remove('open');
-        editState = {sentenceIndex: null, sentenceObj: null};
-      }
-
-      async function confirmEditSentence(){
-        const dropdown = document.getElementById('sectionSelect');
-        const correctedSection = dropdown.value;
-        
-        if(!correctedSection || editState.sentenceIndex === null){
-          showToast('Please select a section');
-          return;
-        }
-        
-        // POST feedback
-        try{
-          const body = {
-            job_id: currentJobId,
-            sentence_id: editState.sentenceIndex,
-            corrected_classification: correctedSection,
-            user: 'local_user',
-            feedback_notes: 'UI correction via dropdown'
-          };
-          const r = await fetch('/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-          if(!r.ok){ showToast('Feedback failed'); return; }
-          const j = await r.json(); 
-          
-          // Update UI with new coverage data returned from server
-          if(j.coverage){
-            // Re-render coverage details
-            coverageEl.innerHTML = '';
-            for(const [id, info] of Object.entries(j.coverage)){
-              const div = document.createElement('div');
-              const contentArray = (info && info.content && Array.isArray(info.content)) ? info.content : [];
-              const contentHtml = contentArray.map(c=>`<p>${c}</p>`).join('');
-              const note = (contentArray.length === 0 && info.status !== 'missing')
-                ? `<p class="small-muted">No explicit sentence text is available for this section; coverage is inferred from semantic/contextual analysis.</p>`
-                : '';
-              div.innerHTML = `<strong>${info.title} (${info.status})</strong> <div>${contentHtml}${note}</div>`;
-              coverageEl.appendChild(div);
-            }
-            
-            // Rebuild sentence list from updated coverage
-            const sentencesPanel = document.createElement('div');
-            sentencesPanel.style.marginTop = '12px';
-            const flatSentences = [];
-            for(const [secId, info] of Object.entries(j.coverage)){
-              const sentObjs = info.sentences || [];
-              for(const s of sentObjs){
-                flatSentences.push({
-                  text: s.text,
-                  start: s.start,
-                  end: s.end,
-                  audio_confidence: s.audio_confidence,
-                  assigned_sections: s.assigned_sections || [secId]
-                });
-              }
-            }
-
-            if(flatSentences.length>0){
-              const header = document.createElement('h3'); header.textContent = 'Sentence Assignments'; sentencesPanel.appendChild(header);
-              for(let i=0;i<flatSentences.length;i++){
-                const s = flatSentences[i];
-                const row = document.createElement('div'); row.className = 'sentence-row';
-                const txt = document.createElement('div'); txt.className = 'sentence-text'; txt.textContent = s.text;
-                const meta = document.createElement('div'); meta.style.minWidth='160px'; meta.style.textAlign='right';
-                const conf = document.createElement('div'); conf.className='small-muted'; conf.textContent = `t:${s.start.toFixed(1)}s • conf:${(s.audio_confidence||0).toFixed(2)}`;
-                const tags = document.createElement('div'); tags.style.marginTop='6px';
-                for(const as of s.assigned_sections){ const t = document.createElement('span'); t.className='tag'; t.textContent=as; tags.appendChild(t); }
-                const editBtn = document.createElement('button'); editBtn.className='ghost'; editBtn.textContent='Edit'; editBtn.style.marginLeft='8px';
-                editBtn.onclick = ()=>{ promptEditSentence(i, s); };
-                meta.appendChild(conf); meta.appendChild(tags); meta.appendChild(editBtn);
-                row.appendChild(txt); row.appendChild(meta);
-                sentencesPanel.appendChild(row);
-              }
-              coverageEl.appendChild(sentencesPanel);
-            }
-            
-            // Update summary metrics
-            const cov = j.coverage || {};
-            const sections = Object.keys(cov);
-            const covered = sections.filter(id => cov[id].status === 'covered').length;
-            const weak = sections.filter(id => cov[id].status === 'weak').length;
-            const missing = sections.filter(id => cov[id].status === 'missing').length;
-            const total = sections.length;
-            const coveragePercent = total ? Math.round((covered + weak) / total * 100) : 0;
-
-            summaryCoverage.textContent = `${covered + weak}/${total}`;
-            summaryWeak.textContent = `${weak}`;
-            summaryMissing.textContent = `${j.missing_required?.length || missing}`;
-            
-            sessionCoverage.textContent = `${j.progress || coveragePercent}%`;
-            sessionMissing.textContent = `${j.missing_required?.length || missing}`;
-            sessionWeak.textContent = `${weak}`;
-          }
-          
-          showToast('Feedback recorded for: ' + correctedSection + ' ✓');
-          closeEditModal();
-        }catch(e){ showToast('Feedback error: '+e); }
-      }
-
-      // Close modal on Escape key
-      document.addEventListener('keydown', (e)=>{
-        if(e.key === 'Escape') closeEditModal();
-      });
-
-      // Close modal when clicking outside
-      document.getElementById('editModal').addEventListener('click', (e)=>{
-        if(e.target.id === 'editModal') closeEditModal();
-      });
-
-      // --- Schema-driven form rendering ---
-      let SCHEMA = null;
-
-      async function loadSchema(){
-        try{
-          const r = await fetch('/schema');
-          if(!r.ok) throw new Error('Failed to load schema');
-          const j = await r.json();
-          SCHEMA = j.sections;
-          // Don't render form on load - only render when user clicks "Apply"
-        }catch(e){
-          console.error('Schema load error', e);
-        }
-      }
-
-      function createInput(field, sectionId){
-        const wrapper = document.createElement('div');
-        wrapper.style.marginBottom = '8px';
-        const label = document.createElement('label');
-        label.textContent = field.label || field.id || '';
-        wrapper.appendChild(label);
-
-        if(field.type === 'text' || field.type === undefined){
-          const inp = document.createElement('input');
-          inp.type = 'text';
-          inp.dataset.section = sectionId;
-          inp.dataset.field = field.id || '';
-          inp.style.width = '100%';
-          wrapper.appendChild(inp);
-          return wrapper;
-        }
-
-        if(field.type === 'boolean'){
-          const inp = document.createElement('input');
-          inp.type = 'checkbox';
-          inp.dataset.section = sectionId;
-          inp.dataset.field = field.id || '';
-          wrapper.appendChild(inp);
-          return wrapper;
-        }
-
-        if(field.type === 'single_select' || field.type === 'multi_select'){
-          const sel = document.createElement('select');
-          sel.dataset.section = sectionId;
-          sel.dataset.field = field.id || '';
-          if(field.type === 'multi_select') sel.multiple = true;
-          (field.options || []).forEach(opt=>{
-            const o = document.createElement('option'); o.value = opt; o.textContent = opt; sel.appendChild(o);
-          });
-          wrapper.appendChild(sel);
-          return wrapper;
-        }
-
-        if(field.type === 'table'){
-          const tbl = document.createElement('table');
-          tbl.style.width = '100%';
-          tbl.style.borderCollapse = 'collapse';
-          const thead = document.createElement('thead');
-          const tr = document.createElement('tr');
-          (field.columns || []).forEach((c, idx)=>{
-            const th = document.createElement('th'); th.textContent = c; th.style.border='1px solid #ddd'; th.style.padding='6px'; tr.appendChild(th);
-          });
-          thead.appendChild(tr); tbl.appendChild(thead);
-          const tbody = document.createElement('tbody');
-          tbody.dataset.section = sectionId; tbody.dataset.field = field.id || '';
-          tbl.appendChild(tbody);
-          // add one empty row
-          addTableRow(tbody, field);
-          wrapper.appendChild(tbl);
-          return wrapper;
-        }
-
-        // fallback
-        const inp2 = document.createElement('input'); inp2.type='text'; wrapper.appendChild(inp2); return wrapper;
-      }
-
-      function addTableRow(tbody, field, values){
-        const tr = document.createElement('tr');
-        (field.columns || []).forEach((col, idx)=>{
-          const td = document.createElement('td'); td.style.border='1px solid #ddd'; td.style.padding='6px';
-          const colType = (field.columns_type && field.columns_type[idx]) || 'text';
-          if(colType === 'boolean'){
-            const cb = document.createElement('input'); cb.type='checkbox'; td.appendChild(cb);
-          } else {
-            const input = document.createElement('input'); input.type='text'; input.style.width='100%'; input.value = (values && values[idx])||''; td.appendChild(input);
-          }
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      }
-
-      function renderForm(schema){
-        const form = document.getElementById('form'); form.innerHTML = '';
-        for(const sec of schema){
-          const sDiv = document.createElement('section');
-          sDiv.style.borderTop = '1px solid #eee'; sDiv.style.paddingTop='8px';
-          const h = document.createElement('h3'); h.textContent = sec.title || sec.id; sDiv.appendChild(h);
-          const note = document.createElement('div'); note.style.color='#666'; note.textContent = sec.hints?('Hints: '+sec.hints.join(', ')) : ''; sDiv.appendChild(note);
-          for(const field of (sec.fields||[])){
-            const fEl = createInput(field, sec.id);
-            sDiv.appendChild(fEl);
-          }
-          form.appendChild(sDiv);
-        }
-      }
-
-      // Apply job results into form using coverage mapping
-      document.getElementById('applyJob').addEventListener('click', async ()=>{
-        if(!currentJobId){ showToast('No job selected'); return; }
-        
-        // Render form template if not already rendered
-        if(!document.querySelector('#form section')) {
-          renderForm(SCHEMA);
-        }
-
-        const r = await fetch(`/status/${currentJobId}`);
-        if(!r.ok){ showToast('Job fetch failed'); return; }
-        const j = await r.json();
-        const cov = j.coverage || {};
-
-        // cov entries may be objects: { title, status, content: [..] }
-        for(const [secId, info] of Object.entries(cov)){
-          const contentArr = Array.isArray(info) ? info : (info && info.content) ? info.content : [];
-          const texts = (contentArr || []).join('\n');
-
-          // fill inputs belonging to this section
-          document.querySelectorAll(`[data-section="${secId}"]`).forEach(el=>{
-            const field = el.dataset.field;
-            if(!field) return;
-            if(el.tagName === 'INPUT' && el.type === 'text') {
-              el.value = texts;
-              return;
-            }
-
-            if(el.tagName === 'SELECT'){
-              for(const opt of Array.from(el.options)){
-                if(texts && opt.value && texts.toLowerCase().includes(opt.value.toLowerCase())) opt.selected = true;
-              }
-              return;
-            }
-
-            if(el.tagName === 'TBODY'){
-              el.innerHTML='';
-              const fieldDef = (SCHEMA && SCHEMA.find(s=>s.id===secId) && SCHEMA.find(s=>s.id===secId).fields.find(f=>f.id===el.dataset.field)) || null;
-              const rows = contentArr || [];
-              if(rows.length>0){
-                for(const rowText of rows){
-                  addTableRow(el, fieldDef, [rowText]);
-                }
-              } else {
-                addTableRow(el, fieldDef);
-              }
-              return;
-            }
-
-            if(el.tagName === 'INPUT' && el.type === 'checkbox'){
-              el.checked = texts.length>0;
-              return;
-            }
-          });
-        }
-
-        // apply mapped fields if available (more precise per-field autofill)
-        const mapped = j.mapped_fields || {};
-        for(const [secId, fields] of Object.entries(mapped)){
-          for(const [fid, info] of Object.entries(fields)){
-            const els = document.querySelectorAll(`[data-section="${secId}"][data-field="${fid}"]`);
-            for(const el of els){
-              const val = info.value || '';
-              if(el.tagName==='INPUT' && el.type==='text') el.value = val;
-              else if(el.tagName==='INPUT' && el.type==='checkbox') el.checked = !!val;
-              else if(el.tagName==='SELECT'){
-                for(const opt of Array.from(el.options)){
-                  if(val && opt.value && val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected = true;
-                }
-              } else if(el.tagName==='TBODY'){
-                el.innerHTML = '';
-                const fieldDef = (SCHEMA && SCHEMA.find(s=>s.id===secId) && SCHEMA.find(s=>s.id===secId).fields.find(f=>f.id===fid)) || null;
-                addTableRow(el, fieldDef, [val]);
-              }
-            }
-          }
-        }
-
-        // Show the form with smooth animation
-        const formContainer = document.getElementById('formContainer');
-        formContainer.classList.add('visible');
-        setTimeout(() => {
-          formContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }, 50);
-
-        showToast('Form populated with job results!');
-      });
-
-      // Download filled JSON
-      document.getElementById('downloadJson').addEventListener('click', ()=>{
-        if(!SCHEMA) return showToast('Schema not loaded');
-        const out = { template_name: 'PROJECT KT & HANDOVER DOCUMENT', sections: [] };
-        for(const sec of SCHEMA){
-          const entry = { id: sec.id, title: sec.title, fields: {} };
-          // collect inputs
-          document.querySelectorAll(`[data-section="${sec.id}"]`).forEach(el=>{
-            const fid = el.dataset.field; if(!fid) return;
-            if(el.tagName==='INPUT' && el.type==='text') entry.fields[fid]=el.value;
-            else if(el.tagName==='INPUT' && el.type==='checkbox') entry.fields[fid]=el.checked;
-            else if(el.tagName==='SELECT' && el.multiple) entry.fields[fid]=Array.from(el.selectedOptions).map(o=>o.value);
-            else if(el.tagName==='SELECT') entry.fields[fid]=el.value;
-            else if(el.tagName==='TBODY'){
-              // table rows
-              const rows = [];
-              for(const tr of Array.from(el.children)){
-                const cols = Array.from(tr.children).map(td=>{
-                  const input = td.querySelector('input'); if(!input) return '';
-                  if(input.type==='checkbox') return input.checked;
-                  return input.value;
-                });
-                rows.push(cols);
-              }
-              entry.fields[fid]=rows;
-            }
-          });
-          out.sections.push(entry);
-        }
-        const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href=url; a.download='kt_filled.json'; a.click(); URL.revokeObjectURL(url);
-      });
-
-      loadSchema();
-    </script>
-  </body>
+loadSchema();
+</script>
+</body>
 </html>

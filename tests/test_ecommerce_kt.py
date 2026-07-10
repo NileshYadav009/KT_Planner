@@ -154,6 +154,24 @@ def build_segments(transcript: str):
     return cleaned, segments
 
 
+def test_clean_transcript_regression_fixes():
+    transcript = (
+        "For development, code is merged into the main branch and GitHub Action Triggers, CSED pipelines automatically. "
+        "One dangerous area is that production Kubernetes cluster autoscaler configuration because one dangerous area is that production Kubernetes cluster autoscaler configuration because incorrect changes. "
+        "infrastructure as cold should be reviewed."
+    )
+
+    cleaned = clean_transcript(transcript)
+    normalized = cleaned.lower()
+
+    assert "ci/cd pipelines" in normalized or "ci/cd pipeline" in normalized or "ci/cd" in normalized
+    assert "infrastructure as code" in normalized or "infrastructure as code" in cleaned.lower()
+    assert "Infrastructure as Code" in cleaned
+    assert "because one dangerous area is that production kubernetes cluster autoscaler configuration because" not in normalized
+    assert "because incorrect changes" in normalized
+    assert cleaned.startswith("For") or cleaned.startswith("For development")
+
+
 def run_classification():
     with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "kt_schema_new.json")) as f:
         schema = json.load(f)["sections"]

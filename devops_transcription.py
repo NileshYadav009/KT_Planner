@@ -300,9 +300,9 @@ PHRASE_CORRECTIONS = {
     r"season\s+sales": "flash sales",
     r"teleform": "terraform",
     r"ter[\s-]?form": "terraform",
-    r"csd\s+pipeline": "ci/cd pipeline",
-    r"csd\s+pipelines?": "ci/cd pipelines",
-    r"csd\s+tool": "ci/cd tool",
+    r"csed\s+pipeline": "CI/CD pipeline",
+    r"csed\s+pipelines?": "CI/CD pipelines",
+    r"csed\s+tool": "CI/CD tool",
     r"desklation\s+path": "escalation path",
     r"trevi\b": "Trivy",
     r"argos\s+cd": "ArgoCD",
@@ -359,6 +359,7 @@ WORD_CORRECTIONS = {
     "seekers": "secrets",
     "asclicion": "escalation",
     "desklation": "escalation",
+    "csed": "CI/CD",
     "trevi": "Trivy",
     "argos": "Argo",
     "katie": "KT",
@@ -388,7 +389,7 @@ FILLER_WORDS = [
 
 FILLER_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in FILLER_WORDS) + r")\b[\.,]?", re.IGNORECASE)
 REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)(?:\s+\1\b)+", re.IGNORECASE)
-REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,4}\w+)\s+\1\b", re.IGNORECASE)
+REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,12}\w+)\s+\1\b", re.IGNORECASE)
 
 
 def remove_fillers(text: str) -> str:
@@ -465,6 +466,8 @@ def clean_transcript(text: str, anonymize_pii: bool = True) -> str:
     normalized = remove_repeated_phrases(normalized)
     normalized, _ = apply_devops_corrections(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"(\.\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), normalized)
+    normalized = re.sub(r"^([a-z])", lambda m: m.group(1).upper(), normalized)
     return normalized
 
 # ============================================================================
