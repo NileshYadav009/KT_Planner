@@ -15,6 +15,8 @@ from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analy
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from llm_provider import get_llm_provider
+from schema_generator import generate_dynamic_schema
+from field_populator import populate_fields
 from sentence_transformers import util
 
 # Optional environment config for Whisper model
@@ -139,6 +141,25 @@ def deduplicate_analysis(analysis):
 @app.get("/schema")
 async def get_schema():
     return {"sections": SCHEMA}
+
+@app.get("/schema/{job_id}")
+async def get_job_schema(job_id: str):
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    dynamic = job.get("dynamic_schema", SCHEMA)
+    populated = job.get("populated_fields", {})
+    return {
+        "sections": dynamic,
+        "populated_fields": populated,
+        "field_count": sum(len(v) for v in populated.values()),
+        "auto_filled_count": sum(
+            1 for sec in populated.values()
+            for f in sec.values()
+            if isinstance(f, dict) and f.get("source") not in ("unfilled", "")
+        ),
+    }
 
 def process_upload_task(job_id: str, input_path: str, audio_path: str):
     """Background task for transcription and classification."""
@@ -301,6 +322,34 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             coverage[sid]['content'] = display_content
             del coverage[sid]['fragments']
 
+        try:
+            dynamic_schema = generate_dynamic_schema(
+                coverage=coverage,
+                base_schema=SCHEMA,
+                include_missing_required=True,
+            )
+        except Exception as exc:
+            logger.warning("Dynamic schema generation failed: %s", exc)
+            dynamic_schema = SCHEMA
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            embedding_model = None
+
+        try:
+            llm_provider = get_llm_provider()
+            populated_fields = populate_fields(
+                dynamic_schema=dynamic_schema,
+                coverage=coverage,
+                llm_provider=llm_provider,
+                embedding_model=embedding_model,
+            )
+        except Exception as exc:
+            logger.warning("Field population failed: %s", exc)
+            populated_fields = {}
+
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
         kt_structured = serialize_kt(kt)
@@ -398,6 +447,8 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 "progress": progress,
                 "screenshots": screenshots,
                 "kt_structured": kt_structured,
+                "dynamic_schema": dynamic_schema,
+                "populated_fields": populated_fields,
                 "error": None
             }
     except Exception as e:

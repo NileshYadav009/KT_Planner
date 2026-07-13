@@ -388,6 +388,15 @@
     .ra-section-label,.ra-row,.ra-label,.ra-value,.ra-actions,.ra-hint,.ra-divider{display:none}
 
     /* ── FORM ─────────────────────────────────────────────────── */
+    .field-wrap{margin-bottom:10px}
+    .field-header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+    .field-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:16px}
+    .field-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+    .field-badge.pattern{background:var(--green-dim);color:var(--green)}
+    .field-badge.semantic{background:var(--blue-dim);color:var(--blue)}
+    .field-badge.llm{background:var(--amber-dim);color:var(--amber)}
+    .field-badge.auto{background:var(--bg2);color:var(--text2)}
+    .field-confidence{font-size:11px;color:var(--text3)}
     #formContainer{display:none}
     #formContainer.visible{display:block}
     #form section{
@@ -705,14 +714,25 @@
         <span class="rp-card-title">Actions</span>
       </div>
       <div class="rp-card-body">
-        <button id="applyJob" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px">
+        <button id="viewSchemaBtn" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px" disabled>
+          🧩&nbsp; View generated schema
+        </button>
+        <button id="applyJob" class="btn btn-ghost" style="width:100%;justify-content:center;margin-bottom:8px">
           ⊕&nbsp; Apply results to form
         </button>
-        <button id="downloadJson" class="btn btn-ghost" style="width:100%;justify-content:center">
-          ↓&nbsp; Export JSON
-        </button>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <select id="exportFormat" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px">
+            <option value="json">JSON</option>
+            <option value="html">HTML</option>
+            <option value="markdown">Markdown</option>
+            <option value="pdf">PDF (Print)</option>
+          </select>
+          <button id="downloadJson" class="btn btn-ghost" style="justify-content:center">
+            ↓&nbsp; Download
+          </button>
+        </div>
         <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
-          Apply maps AI coverage into the KT form fields for review and export.
+          Export the current schema view in JSON, HTML, Markdown, or PDF format.
         </p>
       </div>
     </div>
@@ -936,6 +956,17 @@ function pollJobStatus(jobId){
         const shots=data.screenshots||[];
         if(shots.length){ shots.forEach(s=>{ const img=document.createElement('img'); img.src=s; img.style.cssText='max-width:100%;border-radius:6px'; shotsEl.appendChild(img); }); }
         else { shotsEl.innerHTML='<p style="font-size:12px;color:var(--text3)">No screenshots captured.</p>'; }
+
+        try{
+          const schemaResp=await fetch(`/schema/${jobId}`);
+          if(schemaResp.ok){
+            const schemaData=await schemaResp.json();
+            applySchemaDataToForm(schemaData);
+            const viewBtn=document.getElementById('viewSchemaBtn');
+            if(viewBtn){ viewBtn.disabled=false; viewBtn.textContent='🧩 View generated schema'; }
+            showToast('Dynamic schema loaded with auto-filled fields');
+          }
+        }catch(err){ console.error('Dynamic schema load error', err); }
       } else if(data.status==='failed'){
         showToast('Processing failed: '+(data.error||'Unknown error'));
         setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
@@ -1000,10 +1031,32 @@ async function loadSchema(){
   }catch(e){ console.error('Schema error',e); }
 }
 
+function applyAutoFillIndicator(el, info){
+  if(!el) return;
+  const wrap=el.closest('.field-wrap');
+  if(!wrap) return;
+  let meta=wrap.querySelector('.field-meta');
+  if(!meta){
+    meta=document.createElement('div'); meta.className='field-meta';
+    const header=wrap.querySelector('.field-header');
+    if(header) header.appendChild(meta); else wrap.appendChild(meta);
+  }
+  const source=info?.source||'unfilled';
+  if(!info || !info.value){ meta.innerHTML=''; meta.style.display='none'; return; }
+  const confidence=Math.round((info.confidence||0)*100);
+  const label=source==='pattern'?'Pattern':source==='semantic'?'Semantic':source==='llm'?'LLM':'Auto';
+  const className=source==='pattern'?'pattern':source==='semantic'?'semantic':source==='llm'?'llm':'auto';
+  meta.innerHTML=`<span class="field-badge ${className}">Auto-filled · ${label}</span><span class="field-confidence">${confidence}% confidence</span>`;
+  meta.style.display='flex';
+}
+
 /* ── Form rendering ─────────────────────────────────────────── */
 function createInput(field,sectionId){
-  const wrap=document.createElement('div'); wrap.style.marginBottom='10px';
-  const lbl=document.createElement('label'); lbl.textContent=field.label||field.id||''; wrap.appendChild(lbl);
+  const wrap=document.createElement('div'); wrap.className='field-wrap';
+  const header=document.createElement('div'); header.className='field-header';
+  const lbl=document.createElement('label'); lbl.textContent=field.label||field.id||''; header.appendChild(lbl);
+  const meta=document.createElement('div'); meta.className='field-meta'; meta.style.display='none'; header.appendChild(meta);
+  wrap.appendChild(header);
   if(field.type==='text'||!field.type){
     const inp=document.createElement('input'); inp.type='text'; inp.dataset.section=sectionId; inp.dataset.field=field.id||''; wrap.appendChild(inp); return wrap;
   }
@@ -1048,6 +1101,41 @@ function renderForm(schema){
 }
 
 /* ── Apply job ──────────────────────────────────────────────── */
+function applySchemaDataToForm(schemaData){
+  SCHEMA=schemaData?.sections||SCHEMA;
+  renderForm(SCHEMA);
+  const populated=schemaData?.populated_fields||{};
+  for(const [secId, fields] of Object.entries(populated)){
+    for(const [fieldId, info] of Object.entries(fields)){
+      if(!info || !info.value) continue;
+      const els=document.querySelectorAll(`[data-section="${secId}"][data-field="${fieldId}"]`);
+      for(const el of els){
+        if(el.tagName==='INPUT'&&el.type==='text'){ el.value=info.value; el.style.borderLeft=`3px solid ${info.source==='pattern'?'#0e7e5a':info.source==='semantic'?'#1a56db':'#d97706'}`; el.title=`Auto-filled via ${info.source} (confidence: ${Math.round((info.confidence||0)*100)}%)`; applyAutoFillIndicator(el, info); }
+        else if(el.tagName==='INPUT'&&el.type==='checkbox'){ el.checked=!!info.value; applyAutoFillIndicator(el, info); }
+        else if(el.tagName==='SELECT'){ for(const opt of el.options){ if(info.value&&opt.value.toLowerCase()===String(info.value).toLowerCase()){ opt.selected=true; } } applyAutoFillIndicator(el, info); }
+      }
+    }
+  }
+}
+
+async function openGeneratedSchema(jobId=currentJobId){
+  if(!jobId){ showToast('No active job'); return; }
+  const viewBtn=document.getElementById('viewSchemaBtn');
+  if(viewBtn){ viewBtn.disabled=true; viewBtn.textContent='Loading schema…'; }
+  try{
+    const schemaResp=await fetch(`/schema/${jobId}`);
+    if(!schemaResp.ok) throw new Error('Schema fetch failed');
+    const schemaData=await schemaResp.json();
+    applySchemaDataToForm(schemaData);
+    const fc=document.getElementById('formContainer');
+    fc.style.display='block'; fc.classList.add('visible');
+    setTimeout(()=>fc.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+    showToast('Generated schema loaded ✓');
+  }catch(err){ console.error('Generated schema load error',err); showToast('Unable to load generated schema'); }
+  finally{ if(viewBtn){ viewBtn.disabled=false; viewBtn.textContent='🧩 View generated schema'; } }
+}
+
+document.getElementById('viewSchemaBtn').addEventListener('click',()=>openGeneratedSchema());
 document.getElementById('applyJob').addEventListener('click',async()=>{
   if(!currentJobId){ showToast('No active job'); return; }
   if(!document.querySelector('#form section')) renderForm(SCHEMA);
@@ -1078,9 +1166,9 @@ document.getElementById('applyJob').addEventListener('click',async()=>{
       const els=document.querySelectorAll(`[data-section="${secId}"][data-field="${fid}"]`);
       for(const el of els){
         const val=info.value||'';
-        if(el.tagName==='INPUT'&&el.type==='text') el.value=val;
-        else if(el.tagName==='INPUT'&&el.type==='checkbox') el.checked=!!val;
-        else if(el.tagName==='SELECT'){ for(const opt of el.options){ if(val&&opt.value&&val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } }
+        if(el.tagName==='INPUT'&&el.type==='text') { el.value=val; applyAutoFillIndicator(el, info); }
+        else if(el.tagName==='INPUT'&&el.type==='checkbox') { el.checked=!!val; applyAutoFillIndicator(el, info); }
+        else if(el.tagName==='SELECT'){ for(const opt of el.options){ if(val&&opt.value&&val.toLowerCase().includes(opt.value.toLowerCase())) opt.selected=true; } applyAutoFillIndicator(el, info); }
         else if(el.tagName==='TBODY'){ el.innerHTML=''; const fd=(SCHEMA&&SCHEMA.find(s=>s.id===secId)?.fields?.find(f=>f.id===fid))||null; addTableRow(el,fd,[val]); }
       }
     }
@@ -1091,9 +1179,9 @@ document.getElementById('applyJob').addEventListener('click',async()=>{
   showToast('Form populated ✓');
 });
 
-/* ── Export JSON ─────────────────────────────────────────────── */
-document.getElementById('downloadJson').addEventListener('click',()=>{
-  if(!SCHEMA){ showToast('Schema not loaded'); return; }
+/* ── Export schema ─────────────────────────────────────────── */
+function collectFormData(){
+  if(!SCHEMA){ return null; }
   const out={template_name:'PROJECT KT & HANDOVER DOCUMENT',sections:[]};
   for(const sec of SCHEMA){
     const entry={id:sec.id,title:sec.title,fields:{}};
@@ -1111,9 +1199,69 @@ document.getElementById('downloadJson').addEventListener('click',()=>{
     });
     out.sections.push(entry);
   }
-  const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+  return out;
+}
+
+function downloadBlob(filename, content, mime){
+  const blob=new Blob([content],{type:mime});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='kt_filled.json'; a.click(); URL.revokeObjectURL(url);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+}
+
+function createMarkdownExport(data){
+  return data.sections.map(sec=>{
+    const lines=[`## ${sec.title || sec.id}`];
+    Object.entries(sec.fields||{}).forEach(([key,val])=>{
+      const rendered=Array.isArray(val)?val.map(row=>`  - ${row.join(' | ')}`).join('\n'):(typeof val==='boolean'?String(val):String(val));
+      lines.push(`- **${key}**: ${rendered}`);
+    });
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+function createHtmlExport(data){
+  const sections=data.sections.map(sec=>{
+    const rows=Object.entries(sec.fields||{}).map(([key,val])=>{
+      const rendered=Array.isArray(val)?val.map(row=>`<li>${row.join(' | ')}</li>`).join(''):(typeof val==='boolean'?String(val):String(val));
+      return `<tr><th>${key}</th><td>${rendered}</td></tr>`;
+    }).join('');
+    return `<section><h2>${sec.title || sec.id}</h2><table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table></section>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${data.template_name}</title><style>body{font-family:Inter,Arial,sans-serif;padding:24px;color:#111}table{width:100%;border-collapse:collapse;margin-bottom:16px}th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}th{background:#f5f5f5;width:180px}</style></head><body><h1>${data.template_name}</h1>${sections}</body></html>`;
+}
+
+function exportSchema(format){
+  const data=collectFormData();
+  if(!data){ showToast('Schema not loaded'); return; }
+  const stamp=new Date().toISOString().slice(0,10);
+  if(format==='json'){
+    downloadBlob(`kt_schema_${stamp}.json`, JSON.stringify(data,null,2), 'application/json');
+    showToast('Downloaded JSON');
+    return;
+  }
+  if(format==='html'){
+    downloadBlob(`kt_schema_${stamp}.html`, createHtmlExport(data), 'text/html;charset=utf-8');
+    showToast('Downloaded HTML');
+    return;
+  }
+  if(format==='markdown'){
+    downloadBlob(`kt_schema_${stamp}.md`, createMarkdownExport(data), 'text/markdown;charset=utf-8');
+    showToast('Downloaded Markdown');
+    return;
+  }
+  if(format==='pdf'){
+    const html=createHtmlExport(data);
+    const win=window.open('', '_blank', 'width=900,height=1100');
+    if(!win){ showToast('Popup blocked — allow popups to print PDF'); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(()=>{ win.focus(); win.print(); showToast('Print dialog opened for PDF'); }, 400);
+  }
+}
+
+document.getElementById('downloadJson').addEventListener('click',()=>{
+  const format=document.getElementById('exportFormat').value;
+  exportSchema(format);
 });
 
 loadSchema();
