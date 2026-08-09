@@ -589,11 +589,16 @@ SECTION_POLISH_PROMPTS = {
         "You are a senior technical writer producing a KT document.\n"
         "Section: {title}\n\n"
         "Rewrite these fragments into a monitoring reference.\n"
-        "Format:\n"
-        "**Monitoring stack:**\n- [tool — purpose]\n\n"
-        "**First response steps:**\n1. [step]\n2. [step]\n\n"
-        "**Alert routing:** [if mentioned]\n\n"
-        "Do NOT add tools or steps not in the input.\n"
+        "Use this EXACT format with each item on its own line:\n\n"
+        "**Monitoring stack:**\n"
+        "- [tool name]: [what it monitors]\n"
+        "- [tool name]: [what it monitors]\n\n"
+        "**First response steps:**\n"
+        "1. [step]\n"
+        "2. [step]\n\n"
+        "**Alert routing:** [tool and channel if mentioned]\n\n"
+        "Do NOT put multiple items on the same line.\n"
+        "Do NOT add information not in the input.\n"
         "Return only the formatted content, no heading.\n\n"
         "Source fragments:\n{fragments}\n\nFormatted output:"
     ),
@@ -700,6 +705,16 @@ def polish_coverage_sections(
         }
 
     results = {}
+    def _enforce_list_item_rule(prompt_text: str) -> str:
+        rule = (
+            "IMPORTANT: Each list item must be on its own line.\n"
+            "Do NOT compress multiple items onto one line.\n"
+            "Use actual newlines between items, not semicolons or dashes inline.\n\n"
+        )
+        if 'Source fragments:' in prompt_text:
+            return prompt_text.replace('Source fragments:', rule + 'Source fragments:')
+        return rule + prompt_text
+
     for sid, section in cleaned_sections.items():
         prompt_template = SECTION_POLISH_PROMPTS.get(sid, SECTION_POLISH_PROMPTS["default"])
         joined_fragments = "\n".join(f"- {fragment}" for fragment in section["fragments"])
@@ -707,6 +722,7 @@ def polish_coverage_sections(
             title=section["title"],
             fragments=joined_fragments,
         )
+        prompt = _enforce_list_item_rule(prompt)
         try:
             response = provider.generate(
                 prompt,

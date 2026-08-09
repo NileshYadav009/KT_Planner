@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Continuum · KT Planner</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script>
+    marked.setOptions({
+      breaks: false,
+      gfm: true,
+      headerIds: false,
+      mangle: false,
+    });
+  </script>
   <style>
     /* ── TOKENS ───────────────────────────────────────────────── */
     :root {
@@ -478,9 +487,274 @@
       .page-wrap{grid-template-columns:1fr}
       .workspace-sidebar{display:none}
     }
+
+    /* ═══════════════════════════════════════════════════════
+       PRINT / PDF STYLES
+       Controls appearance when user does Ctrl+P or Print to PDF
+       ═══════════════════════════════════════════════════════ */
+    @media print {
+
+      /* ── Page setup ──────────────────────────────────────── */
+      @page {
+        size: A4 portrait;
+        margin: 22mm 18mm 22mm 18mm;
+        @bottom-center {
+          content: "PROJECT KT & HANDOVER DOCUMENT  ·  Page " counter(page) " of " counter(pages);
+          font-size: 9pt;
+          color: #888;
+          font-family: 'Inter', sans-serif;
+        }
+        @top-right {
+          content: attr(data-system-name, 'KT Document');
+          font-size: 9pt;
+          color: #888;
+          font-family: 'Inter', sans-serif;
+        }
+      }
+
+      /* ── Hide everything that is not KT content ──────────── */
+      .topbar,
+      .workspace-sidebar,
+      .right-aside,
+      .tabs,
+      .tab,
+      .btn,
+      .btn-primary,
+      .btn-ghost,
+      #progressWrap,
+      #summaryGrid,
+      #toggleTranscript,
+      #transcriptCard,
+      #formContainer,
+      #toasts,
+      #editModal,
+      .sent-row .sent-right,
+      .badge,
+      .cov-chevron,
+      .upload-zone,
+      .page-heading p
+      {
+        display: none !important;
+      }
+
+      /* ── Layout: single column full width ───────────────── */
+      body {
+        background: white !important;
+        color: black !important;
+        font-family: 'Inter', 'Calibri', sans-serif !important;
+        font-size: 10pt !important;
+        line-height: 1.6 !important;
+      }
+
+      .page-wrap {
+        display: block !important;
+        max-width: 100% !important;
+      }
+
+      .main-content {
+        padding: 0 !important;
+        display: block !important;
+      }
+
+      /* ── Cover block — printed at top of page 1 ─────────── */
+      #ktCoverBlock {
+        display: block !important;
+        text-align: center;
+        padding: 20pt 0 30pt;
+        border-bottom: 2pt solid #1B2A4A;
+        margin-bottom: 24pt;
+        page-break-after: avoid;
+      }
+      #ktCoverBlock h1 {
+        font-size: 20pt;
+        font-weight: 700;
+        color: #1B2A4A;
+        letter-spacing: -.3px;
+        margin: 0 0 6pt;
+      }
+      #ktCoverBlock .cover-meta {
+        font-size: 10pt;
+        color: #555;
+        margin: 4pt 0;
+      }
+
+      /* ── Cards: remove shadow/border, just spacing ───────── */
+      .card {
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        margin-bottom: 0 !important;
+        padding: 0 !important;
+      }
+
+      .card-header {
+        display: none !important;
+      }
+
+      /* ── Coverage accordion: always show body, clean headers */
+      .cov-item {
+        border: none !important;
+        border-radius: 0 !important;
+        margin-bottom: 0 !important;
+        page-break-inside: avoid;
+      }
+
+      .cov-header {
+        background: none !important;
+        cursor: default !important;
+        padding: 0 !important;
+        border-bottom: none !important;
+      }
+
+      .cov-title {
+        font-size: 13pt !important;
+        font-weight: 700 !important;
+        color: #1B2A4A !important;
+        text-transform: uppercase !important;
+        letter-spacing: .05em !important;
+        padding-top: 16pt !important;
+        padding-bottom: 4pt !important;
+        border-bottom: 1.5pt solid #1F5C99 !important;
+        display: block !important;
+        width: 100% !important;
+      }
+
+      .cov-body {
+        display: block !important;
+        padding: 6pt 0 0 !important;
+        border-top: none !important;
+      }
+
+      /* ── Rendered markdown content ───────────────────────── */
+      .kt-rendered {
+        font-size: 10pt !important;
+        line-height: 1.65 !important;
+        color: #1a1a1a !important;
+        margin-bottom: 4pt !important;
+      }
+
+      .kt-rendered strong {
+        font-weight: 600 !important;
+        color: #111 !important;
+      }
+
+      .kt-rendered ul {
+        margin: 4pt 0 4pt 16pt !important;
+        padding: 0 !important;
+        list-style-type: disc !important;
+      }
+
+      .kt-rendered li {
+        margin-bottom: 2pt !important;
+        font-size: 10pt !important;
+      }
+
+      .kt-rendered ol {
+        margin: 4pt 0 4pt 16pt !important;
+        padding: 0 !important;
+        list-style-type: decimal !important;
+      }
+
+      .kt-rendered h2,
+      .kt-rendered h3 {
+        font-size: 10.5pt !important;
+        font-weight: 600 !important;
+        color: #1F5C99 !important;
+        margin: 8pt 0 2pt !important;
+        text-transform: none !important;
+        letter-spacing: 0 !important;
+        border: none !important;
+      }
+
+      .kt-rendered code {
+        font-family: 'Menlo', 'Consolas', monospace !important;
+        font-size: 9pt !important;
+        background: #f4f4f4 !important;
+        padding: 1pt 4pt !important;
+        border-radius: 2pt !important;
+        color: #c7254e !important;
+      }
+
+      .doc-section {
+        margin-bottom: 18px;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(31, 84, 154, 0.12);
+        background: rgba(227, 238, 255, 0.22);
+      }
+
+      .doc-block {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(30, 60, 100, 0.06);
+      }
+
+      .doc-block-title {
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        color: #1F5C99;
+      }
+
+      .doc-warning {
+        padding: 10px;
+        background: #fff3cd;
+        border: 1px solid #ffeeba;
+        border-radius: 8px;
+        color: #66512c;
+      }
+
+      .doc-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .doc-grid-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid #eef2ff;
+      }
+
+      .doc-grid-row:last-child {
+        border-bottom: none;
+      }
+
+      .doc-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .doc-table td {
+        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+      }
+
+      /* ── Section separator ───────────────────────────────── */
+      .cov-item + .cov-item .cov-title {
+        padding-top: 14pt !important;
+      }
+
+      .cov-item {
+        page-break-inside: avoid !important;
+      }
+
+      .cov-item[data-section="deployment_and_rollback"],
+      .cov-item[data-section="ownership_escalation"],
+      .cov-item[data-section="disaster_recovery"] {
+        page-break-before: auto !important;
+      }
+
+      #coverageSection .card:last-child {
+        display: none !important;
+      }
+    }
   </style>
 </head>
-<body>
+<body data-system-name="Continuum KT Planner">
 
 <!-- TOPBAR -->
 <header class="topbar">
@@ -559,6 +833,15 @@
 
   <!-- ── MAIN CONTENT ─────────────────────────────────────────── -->
   <main class="main-content">
+
+    <!-- Print-only cover block — hidden in the browser, shown in PDF -->
+    <div id="ktCoverBlock" style="display:none">
+      <h1>PROJECT KT &amp; HANDOVER DOCUMENT</h1>
+      <p class="cover-meta">System: <strong id="coverSystemName">—</strong></p>
+      <p class="cover-meta">Date: <strong id="coverDate">—</strong></p>
+      <p class="cover-meta">Prepared by: <strong id="coverAuthor">—</strong></p>
+      <p class="cover-meta">Coverage: <strong id="coverCoverage">—</strong></p>
+    </div>
 
     <div class="page-heading">
       <h1>KT Session</h1>
@@ -655,6 +938,21 @@
       </div>
     </div>
 
+    <!-- Rendered KT Document -->
+    <div class="card" id="renderedDocumentSection">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Rendered KT Document</div>
+          <div class="card-sub">Human-readable document blocks generated from the knowledge object</div>
+        </div>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="renderedDocument">
+          <p style="font-size:13px;color:var(--text3);padding:6px">No rendered document available yet.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- KT Form (hidden until Apply) -->
     <div class="card" id="formContainer">
       <div class="card-header">
@@ -716,6 +1014,9 @@
       <div class="rp-card-body">
         <button id="viewSchemaBtn" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px" disabled>
           🧩&nbsp; View generated schema
+        </button>
+        <button id="downloadPdfBtn" class="btn btn-ghost" style="width:100%;justify-content:center;margin-bottom:8px">
+          📄&nbsp; Download KT PDF
         </button>
         <button id="applyJob" class="btn btn-ghost" style="width:100%;justify-content:center;margin-bottom:8px">
           ⊕&nbsp; Apply results to form
@@ -878,6 +1179,7 @@ function renderCoverage(cov){
     const status=info.status||'missing';
     const contentArray=Array.isArray(info.content)?info.content:[];
     const item=document.createElement('div'); item.className='cov-item';
+    item.setAttribute('data-section', id);
     const hdr=document.createElement('div'); hdr.className='cov-header';
     hdr.innerHTML=`
       <span class="cov-title">${info.title||id}</span>
@@ -888,7 +1190,12 @@ function renderCoverage(cov){
     hdr.addEventListener('click',()=>item.classList.toggle('open'));
     const body=document.createElement('div'); body.className='cov-body';
     if(contentArray.length){
-      contentArray.forEach(c=>{ const p=document.createElement('p'); p.className='cov-text'; p.textContent=c; body.appendChild(p); });
+      contentArray.forEach(c=>{
+        const div=document.createElement('div');
+        div.className='cov-text kt-rendered';
+        div.innerHTML = marked.parse(c || '');
+        body.appendChild(div);
+      });
     } else {
       const p=document.createElement('p'); p.className='cov-empty';
       p.textContent='No explicit sentence text available — coverage inferred from semantic analysis.';
@@ -929,6 +1236,70 @@ function renderCoverage(cov){
   }
 }
 
+function renderKnowledgeDocument(knowledge){
+  const container=document.getElementById('renderedDocument');
+  container.innerHTML='';
+  if(!knowledge || !Array.isArray(knowledge.rendered_sections) || knowledge.rendered_sections.length===0){
+    container.innerHTML='<p style="font-size:13px;color:var(--text3);padding:6px">No rendered document available yet.</p>';
+    return;
+  }
+
+  knowledge.rendered_sections.forEach(section=>{
+    const sectionWrap=document.createElement('div'); sectionWrap.className='doc-section';
+    const heading=document.createElement('h3'); heading.textContent=section.section_title||section.section_id||'Section';
+    sectionWrap.appendChild(heading);
+    (section.blocks||[]).forEach(block=>{
+      const blockEl=document.createElement('div'); blockEl.className='doc-block';
+      blockEl.innerHTML = renderBlockHtml(block);
+      sectionWrap.appendChild(blockEl);
+    });
+    container.appendChild(sectionWrap);
+  });
+}
+
+function renderBlockHtml(block){
+  if(!block || !block.type) return '<p>Invalid block.</p>';
+  switch(block.type){
+    case 'NarrativeBlock':
+      return `<div class="doc-block-title">${block.title||'Narrative'}</div>${(block.paragraphs||[]).map(p=>`<p>${escapeHtml(p)}</p>`).join('')}`;
+    case 'ChecklistBlock':
+      return `<div class="doc-block-title">${block.title||'Checklist'}</div><ul>${(block.items||[]).map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    case 'WarningBlock':
+      return `<div class="doc-block-title">${block.title||'Warning'}</div><div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${escapeHtml(w)}</p>`).join('')}</div>`;
+    case 'TechnologyGrid':
+      return `<div class="doc-block-title">${block.title||'Technology'}</div><div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join('')}</div>`;
+    case 'DeploymentTimeline':
+      return `<div class="doc-block-title">${block.title||'Timeline'}</div><ol>${(block.entries||[]).map(entry=>`<li><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.description)}</li>`).join('')}</ol>`;
+    case 'OwnershipTable':
+      return `<div class="doc-block-title">${block.title||'Ownership'}</div><table class="doc-table"><tbody>${(block.rows||[]).map(row=>`<tr><td>${escapeHtml(row.role||'')}</td><td>${escapeHtml(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
+    case 'DecisionTable':
+      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>`<td>${escapeHtml(row[col]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    case 'TroubleshootingBlock':
+      return `<div class="doc-block-title">${block.title||'Troubleshooting'}</div><ol>${(block.steps||[]).map(step=>`<li>${escapeHtml(step)}</li>`).join('')}</ol>`;
+    case 'CodeBlock':
+      return `<div class="doc-block-title">${block.title||'Code'}</div><pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
+    default:
+      return `<div class="doc-block-title">${block.title||block.type}</div><p>${escapeHtml(block.description||'')}</p>`;
+  }
+}
+
+function escapeHtml(text){
+  if(typeof text !== 'string') return '';
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function populateCoverBlock(data){
+  const cov = data.coverage || {};
+  const secs = Object.keys(cov);
+  const covered = secs.filter(id => cov[id].status === 'covered').length;
+  const total = secs.length;
+
+  document.getElementById('coverSystemName').textContent = data.system_name || 'AWS E-Commerce Platform';
+  document.getElementById('coverDate').textContent = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+  document.getElementById('coverAuthor').textContent = data.author || 'KT Session';
+  document.getElementById('coverCoverage').textContent = `${covered}/${total} sections covered`;
+}
+
 /* ── Transcript toggle ──────────────────────────────────────── */
 toggleTranscript.addEventListener('click',()=>{
   const open=transcriptCard.style.display==='block';
@@ -951,6 +1322,7 @@ function pollJobStatus(jobId){
         renderSummary(data);
         transcriptEl.textContent=data.transcript||'(none)';
         renderCoverage(data.coverage||{});
+        populateCoverBlock(data);
         const shotsEl=document.getElementById('screenshots');
         shotsEl.innerHTML='';
         const shots=data.screenshots||[];
@@ -967,6 +1339,8 @@ function pollJobStatus(jobId){
             showToast('Dynamic schema loaded with auto-filled fields');
           }
         }catch(err){ console.error('Dynamic schema load error', err); }
+
+        renderKnowledgeDocument(data.knowledge_object || {});
       } else if(data.status==='failed'){
         showToast('Processing failed: '+(data.error||'Unknown error'));
         setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
@@ -1259,12 +1633,92 @@ function exportSchema(format){
   }
 }
 
+function createRenderedDocumentPrintHtml(){
+  const content = document.getElementById('renderedDocument')?.innerHTML || '<p>No rendered document available.</p>';
+  const title = 'PROJECT KT & HANDOVER DOCUMENT';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Inter,Arial,sans-serif;padding:24px;color:#111}h1{font-size:24px;margin-bottom:16px}h2{font-size:18px;margin:20px 0 10px}h3{font-size:16px;margin:16px 0 8px}p,li{font-size:13px;line-height:1.5}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left;vertical-align:top}ul,ol{margin:10px 0 10px 18px}</style></head><body><h1>${title}</h1>${content}</body></html>`;
+}
+
+function openRenderedDocumentPrintPreview(){
+  const html = createRenderedDocumentPrintHtml();
+  const win = window.open('', '_blank', 'width=900,height=1100');
+  if(!win){ showToast('Popup blocked — allow popups to print PDF'); return false; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ win.print(); }, 400);
+  return true;
+}
+
+async function downloadKtPdf(){
+  if(!currentJobId){ showToast('No active job to export'); return; }
+
+  try{
+    const statusResp = await fetch(`/status/${currentJobId}`);
+    if(!statusResp.ok){
+      showToast('Unable to verify job status for PDF export');
+      return;
+    }
+    const statusData = await statusResp.json();
+    if(statusData.status !== 'completed'){
+      showToast('KT PDF is not ready yet. Wait until processing completes.');
+      return;
+    }
+
+    const resp = await fetch(`/export/pdf/${currentJobId}`);
+    if(!resp.ok){
+      const contentType = resp.headers.get('content-type') || '';
+      let details = '';
+      try{
+        if(contentType.includes('application/json')){
+          const jsonBody = await resp.json();
+          details = jsonBody.detail || jsonBody.message || JSON.stringify(jsonBody);
+        } else {
+          details = await resp.text();
+        }
+      }catch(e){
+        details = await resp.text().catch(()=>'<unable to read error body>');
+      }
+      console.error('KT PDF download failed', resp.status, details);
+      const msg = details || `HTTP ${resp.status}`;
+      const shouldFallback = resp.status === 503 || msg.toLowerCase().includes('weasyprint') || msg.toLowerCase().includes('404');
+      if(shouldFallback){
+        const fallback = openRenderedDocumentPrintPreview();
+        if(fallback){
+          showToast('Fallback: opened rendered KT document for print/PDF');
+        }
+      } else {
+        showToast(`KT PDF export failed: ${msg}`);
+      }
+      return;
+    }
+
+    const blob = await resp.blob();
+    const stamp = new Date().toISOString().slice(0,10);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kt_${stamp}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Downloaded KT PDF');
+  }catch(err){
+    console.error('KT PDF download failed', err);
+    showToast('KT PDF download failed: ' + (err.message || err));
+    openRenderedDocumentPrintPreview();
+  }
+}
+
 document.getElementById('downloadJson').addEventListener('click',()=>{
   const format=document.getElementById('exportFormat').value;
   exportSchema(format);
 });
 
+document.getElementById('downloadPdfBtn').addEventListener('click',()=>downloadKtPdf());
+
 loadSchema();
 </script>
 </body>
 </html>
+
+

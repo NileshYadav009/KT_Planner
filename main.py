@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
 import ffmpeg
@@ -10,14 +10,27 @@ import json
 import uuid
 from threading import Lock
 from datetime import datetime
+import re
 import torch
-from ai import classify_transcript, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections
+from ai import analyze_transcript, classify_transcript, generate_report, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from llm_provider import get_llm_provider
 from schema_generator import generate_dynamic_schema
 from field_populator import populate_fields
+from knowledge import build_knowledge_object
+from renderers import get_renderer
 from sentence_transformers import util
+
+try:
+    from markdown import markdown as markdown_to_html
+except ImportError:
+    markdown_to_html = None
+
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+except ImportError:
+    Environment = None
 
 # Optional environment config for Whisper model
 DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
@@ -159,7 +172,281 @@ async def get_job_schema(job_id: str):
             for f in sec.values()
             if isinstance(f, dict) and f.get("source") not in ("unfilled", "")
         ),
+        "knowledge_object": job.get("knowledge_object", {}),
     }
+
+
+def html_escape(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    return (
+        value.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace('"', "&quot;")
+             .replace("'", "&#39;")
+    )
+
+
+def build_toc_sections(rendered_sections: list) -> list:
+    toc = []
+    for idx, section in enumerate(rendered_sections, start=1):
+        section_title = section.get("section_title") or section.get("section_id") or f"Section {idx}"
+        anchor = section.get("section_id") or f"section-{idx}"
+        toc.append({"title": section_title, "anchor": anchor})
+    return toc
+
+
+def _render_paragraph_text(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    content = text.strip()
+    if not content:
+        return ""
+    if re.search(r"<[^>]+>", content):
+        return text
+    if markdown_to_html:
+        return markdown_to_html(text)
+    return html_escape(text)
+
+
+def render_section_blocks(rendered_sections: list) -> str:
+    html = []
+    for section in rendered_sections:
+        section_title = html_escape(section.get("section_title") or section.get("section_id") or "Section")
+        section_id = section.get("section_id") or section_title.lower().replace(" ", "-")
+        html.append(f"<section class=\"section-block\" id=\"{html_escape(section_id)}\">")
+        html.append(f"<h2 class=\"section-title\">{section_title}</h2>")
+        for block in section.get("blocks", []):
+            block_title = html_escape(block.get("title") or block.get("type", "Block"))
+            block_type = block.get("type")
+            html.append(f"<div class=\"block-card\">")
+            html.append(f"<h3 class=\"block-title\">{block_title}</h3>")
+            if block_type == "NarrativeBlock":
+                for p in block.get("paragraphs", []):
+                    html.append(f"<div class=\"narrative-para\">{_render_paragraph_text(p)}</div>")
+            elif block_type == "ChecklistBlock":
+                html.append("<ul>")
+                for item in block.get("items", []):
+                    html.append(f"<li>{html_escape(item)}</li>")
+                html.append("</ul>")
+            elif block_type == "WarningBlock":
+                for warning in block.get("warnings", []):
+                    html.append(f"<p><strong>{html_escape(warning)}</strong></p>")
+            elif block_type == "TechnologyGrid":
+                html.append("<div class=\"table-wrapper\"><table>")
+                for row in block.get("rows", []):
+                    html.append(
+                        f"<tr><td>{html_escape(row.get('label',''))}</td>"
+                        f"<td>{html_escape(row.get('value',''))}</td></tr>"
+                    )
+                html.append("</table></div>")
+            elif block_type == "DeploymentTimeline":
+                html.append("<ol>")
+                for entry in block.get("entries", []):
+                    html.append(
+                        f"<li><strong>{html_escape(entry.get('label',''))}</strong>: {html_escape(entry.get('description',''))}</li>"
+                    )
+                html.append("</ol>")
+            elif block_type == "OwnershipTable":
+                html.append("<div class=\"table-wrapper\"><table>")
+                for row in block.get("rows", []):
+                    html.append(
+                        f"<tr><td>{html_escape(row.get('role',''))}</td>"
+                        f"<td>{html_escape(row.get('team',''))}</td></tr>"
+                    )
+                html.append("</table></div>")
+            elif block_type == "DecisionTable":
+                columns = block.get("columns", [])
+                html.append("<div class=\"table-wrapper\"><table>")
+                html.append("<thead><tr>")
+                for col in columns:
+                    html.append(f"<th>{html_escape(col)}</th>")
+                html.append("</tr></thead><tbody>")
+                for row in block.get("rows", []):
+                    html.append("<tr>")
+                    for col in columns:
+                        html.append(f"<td>{html_escape(str(row.get(col, '')))}</td>")
+                    html.append("</tr>")
+                html.append("</tbody></table></div>")
+            elif block_type == "TroubleshootingBlock":
+                html.append("<ol>")
+                for step in block.get("steps", []):
+                    html.append(f"<li>{html_escape(step)}</li>")
+                html.append("</ol>")
+            elif block_type == "CodeBlock":
+                html.append(
+                    f"<pre><code>{html_escape(block.get('code', ''))}</code></pre>"
+                )
+            else:
+                html.append(f"<p>{html_escape(block.get('description', ''))}</p>")
+            html.append("</div>")
+        html.append("</section>")
+    return "\n".join(html)
+
+
+def load_template_environment():
+    if Environment is None:
+        raise RuntimeError("Jinja2 is not installed. Install with: pip install jinja2")
+    template_dir = os.path.join(os.path.dirname(__file__), "pdf", "templates")
+    loader = FileSystemLoader(template_dir)
+    return Environment(loader=loader, autoescape=select_autoescape(["html", "xml"]))
+
+
+def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str) -> str:
+    env = load_template_environment()
+    template = env.get_template("kt_document.html")
+    toc_sections = build_toc_sections(rendered_sections)
+    content_html = render_section_blocks(rendered_sections)
+    css_path = os.path.join(os.path.dirname(__file__), "pdf", "templates", "kt_document.css")
+    style_css = ""
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as css_file:
+            style_css = css_file.read()
+
+    return template.render(
+        title=title,
+        job_id=job_id,
+        date_str=date_str,
+        toc_sections=toc_sections,
+        content_html=content_html,
+        style_css=style_css,
+    )
+
+
+def _build_fallback_paragraphs(section: dict) -> list:
+    seen = set()
+    paragraphs = []
+
+    def _add(text: str):
+        if not isinstance(text, str):
+            return
+        normalized = re.sub(r"\s+", " ", text.strip()).lower()
+        if not normalized:
+            return
+        keys = {normalized[:120]}
+        if ": " in normalized:
+            suffix = normalized.split(": ", 1)[1]
+            keys.add(suffix[:120])
+        for key in keys:
+            if key in seen:
+                return
+        seen.update(keys)
+        paragraphs.append(text.strip())
+
+    coverage_content = section.get("coverage_content") or []
+    if isinstance(coverage_content, str):
+        coverage_content = [coverage_content]
+    for item in coverage_content:
+        _add(item)
+
+    for fact in section.get("facts", []) or []:
+        value = fact.get("value")
+        if isinstance(value, str) and value.strip():
+            label = fact.get("label") or fact.get("id") or "Fact"
+            _add(f"{label}: {value.strip()}")
+
+    for evidence in section.get("evidence", []) or []:
+        _add(evidence.get("text", ""))
+
+    if not paragraphs and section.get("description"):
+        _add(str(section["description"]))
+
+    return paragraphs or ["Rendered content not available."]
+
+
+def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
+    blocks = rendered.get("blocks") or []
+    for block in blocks:
+        block_type = block.get("type")
+        if block_type == "NarrativeBlock":
+            paragraphs = [p for p in block.get("paragraphs", []) if isinstance(p, str) and p.strip()]
+            if paragraphs:
+                lowered = [p.lower() for p in paragraphs]
+                if not any("rendered content not available" in p or "being built" in p or "synthesized" in p or "assembled" in p for p in lowered):
+                    return True
+        elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock"}:
+            return True
+    return False
+
+
+def build_rendered_sections(knowledge_object: dict) -> list:
+    rendered_sections = []
+    for section in knowledge_object.get("sections", []):
+        section_id = section.get("id")
+        renderer = get_renderer(section_id)
+        rendered = None
+        if renderer:
+            rendered = renderer(section)
+
+        if rendered and _has_meaningful_rendered_blocks(rendered):
+            rendered_sections.append(rendered)
+            continue
+
+        fallback_paragraphs = _build_fallback_paragraphs(section)
+        rendered_sections.append({
+            "section_id": section_id,
+            "section_title": section.get("title") or section_id,
+            "blocks": [{
+                "type": "NarrativeBlock",
+                "title": section.get("title") or section_id,
+                "paragraphs": fallback_paragraphs,
+            }],
+        })
+    return rendered_sections
+
+
+@app.get("/export/pdf/{job_id}")
+async def export_pdf(job_id: str):
+    with JOB_LOCK:
+        job = JOB_QUEUE.get(job_id)
+    if not job or job.get("status") != "completed":
+        raise HTTPException(status_code=404, detail="Job not found or not completed")
+
+    knowledge_object = job.get("knowledge_object", {}) or {}
+    title = knowledge_object.get("system_name") or job.get("title") or "KT Document"
+    date_str = datetime.utcnow().strftime("%d %B %Y")
+    rendered_sections = knowledge_object.get("rendered_sections")
+
+    if not isinstance(rendered_sections, list) or not rendered_sections:
+        coverage = job.get("coverage", {}) or {}
+        rendered_sections = []
+        for sec_id, sec_info in coverage.items():
+            rendered_sections.append({
+                "section_id": sec_id,
+                "section_title": sec_info.get("title", sec_id),
+                "blocks": [{
+                    "type": "NarrativeBlock",
+                    "title": sec_info.get("title", sec_id),
+                    "paragraphs": [
+                        markdown_to_html(item) if markdown_to_html and isinstance(item, str) else html_escape(item)
+                        for item in sec_info.get("content", []) if isinstance(item, str)
+                    ]
+                }]
+            })
+
+    html_doc = render_pdf_html(
+        title=title,
+        job_id=job_id,
+        rendered_sections=rendered_sections,
+        coverage=job.get("coverage", {}),
+        date_str=date_str,
+    )
+    try:
+        from weasyprint import HTML
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="WeasyPrint is not available. Install required native dependencies and Python packages.",
+        ) from exc
+
+    pdf_bytes = HTML(string=html_doc, base_url=os.path.dirname(__file__)).write_pdf()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}.pdf\""},
+    )
+
 
 def process_upload_task(job_id: str, input_path: str, audio_path: str):
     """Background task for transcription and classification."""
@@ -350,6 +637,24 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             logger.warning("Field population failed: %s", exc)
             populated_fields = {}
 
+        try:
+            knowledge_object = build_knowledge_object(
+                job_id=job_id,
+                coverage=coverage,
+                dynamic_schema=dynamic_schema,
+                populated_fields=populated_fields,
+                section_content=kt.section_content,
+            )
+        except Exception as exc:
+            logger.warning("Knowledge object build failed: %s", exc)
+            knowledge_object = {}
+
+        try:
+            knowledge_object["rendered_sections"] = build_rendered_sections(knowledge_object)
+        except Exception as exc:
+            logger.warning("Rendered sections build failed: %s", exc)
+            knowledge_object["rendered_sections"] = []
+
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
         kt_structured = serialize_kt(kt)
@@ -442,6 +747,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 "status": "completed",
                 "transcript": transcript,
                 "coverage": coverage,
+                "knowledge_object": knowledge_object,
                 "mapped_fields": mapped_fields,
                 "missing_required": missing_required,
                 "progress": progress,
@@ -510,6 +816,45 @@ async def get_status(job_id: str):
         if not job:
             raise HTTPException(status_code=404, detail="Job not found.")
         return job
+
+
+@app.post("/semantic-placement")
+async def semantic_placement(payload: dict):
+    """Classify raw transcript text into KT sections and return quality metrics."""
+    transcript = payload.get("transcript", "")
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcript is required and must be non-empty.")
+
+    similarity_threshold = payload.get("similarity_threshold", 0.20)
+    try:
+        similarity_threshold = float(similarity_threshold)
+    except (TypeError, ValueError):
+        similarity_threshold = 0.20
+
+    try:
+        report = generate_report(transcript, similarity_threshold=similarity_threshold)
+        assignment_counts = {sid: len(report["analysis"][sid].get("chunks", [])) for sid in report["analysis"]}
+        total_assigned = sum(assignment_counts.values())
+        return {
+            "status": "success",
+            "transcript": transcript,
+            "metrics": {
+                "total_sentences": total_assigned,
+                "assigned_sentences": total_assigned,
+                "unclassified_sentences": 0,
+                "duplicate_rate": 0.0,
+                "avg_confidence": float(report["summary"]["confidence_score"]),
+                "clauses_split": 0,
+            },
+            "assignments": {sid: report["analysis"][sid].get("chunks", []) for sid in report["analysis"]},
+            "paragraphs": report["paragraphs"],
+            "summary": report["summary"],
+            "explainability": report["explainability"],
+            "risk_warning": report["risk_warning"],
+            "recommended_state": report["recommended_state"],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/")

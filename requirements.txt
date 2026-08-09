@@ -27,6 +27,8 @@ pandas>=2.2.0             # Data manipulation and analysis for better logging/an
 # Machine Learning Utilities (Detection & Scoring)
 scikit-learn>=1.5.0       # ML utilities and confidence scoring
 nltk>=3.8.1               # Natural Language Toolkit for text processing (NEW)
+markdown>=3.4.0           # Markdown rendering for PDF export
+weasyprint>=57.0          # PDF rendering support for export endpoint
 
 # Development & Logging (Recommended for Production)
 python-dotenv>=1.0.0      # Environment variable management

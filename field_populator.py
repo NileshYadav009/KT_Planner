@@ -77,10 +77,62 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
         if channels:
             return ", ".join(channels)
 
+    if field_id == "system_name":
+        match = re.search(
+            r"(?:handing over|this is|for|about)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-]{2,50}?)(?:\s+platform|\s+system|\s+application|\s+service|\.|\,)",
+            section_text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip().title()
+
+    if "escalation" in field_id or "chain" in field_id:
+        pattern = re.compile(
+            r"(?:starts with|first|initially|beginning with)\s+(.+?)\s+(?:followed by|then|and then)\s+(.+?)(?:\s+and then\s+(.+?))?[,\.]",
+            re.IGNORECASE,
+        )
+        match = pattern.search(section_text)
+        if match:
+            chain = [g.strip() for g in match.groups() if g]
+            return " → ".join(chain)
+
+    if "blackout" in field_id or "bad_day" in field_id or "avoid" in field_id:
+        events = re.findall(
+            r"\b(Black Friday|month[\s-]end|end[\s-]of[\s-]month|promotional campaign|peak sale|quarter[\s-]end|EOD)\b",
+            section_text,
+            re.IGNORECASE,
+        )
+        if events:
+            return ", ".join(dict.fromkeys(events))
+
+    if "rollback" in field_id and ("time" in field_id or "duration" in field_id):
+        match = re.search(
+            r"(?:rollback|roll back|roll-back).*?(?:within|in|under)\s+(\d+\s*minutes?)",
+            section_text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1)
+
     if "duration" in field_id or "time" in field_id or "minutes" in field_id:
         match = PATTERN_EXTRACTORS["duration"].search(section_text)
         if match:
             return f"{match.group(1)} {match.group(2)}"
+
+    if field_type == "table":
+        lines = [line.strip() for line in section_text.splitlines() if line.strip()]
+        if not lines:
+            return None
+
+        pipe_rows = [line for line in lines if "|" in line]
+        if pipe_rows:
+            return "\n".join(pipe_rows)
+
+        numbered_rows = [line for line in lines if re.match(r"^(?:\d+\.|step\b)", line, re.IGNORECASE)]
+        if numbered_rows:
+            return "\n".join(numbered_rows)
+
+        return "\n".join(lines[:10])
 
     return None
 
