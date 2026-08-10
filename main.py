@@ -12,7 +12,7 @@ from threading import Lock
 from datetime import datetime
 import re
 import torch
-from ai import analyze_transcript, classify_transcript, generate_report, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections
+from ai import analyze_transcript, classify_transcript, generate_report, get_sentence_model, SECTION_HINTS, map_analysis_to_fields, build_section_paragraphs, polish_coverage_sections, polish_coverage_sections_structured
 from context_mapper import ContextMappingPipeline, serialize_kt
 from devops_transcription import clean_transcript
 from llm_provider import get_llm_provider
@@ -226,19 +226,31 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for p in block.get("paragraphs", []):
                     html.append(f"<div class=\"narrative-para\">{_render_paragraph_text(p)}</div>")
             elif block_type == "ChecklistBlock":
-                html.append("<ul>")
-                for item in block.get("items", []):
-                    html.append(f"<li>{html_escape(item)}</li>")
-                html.append("</ul>")
+                items = [it for it in block.get("items", []) if isinstance(it, str) and it.strip()]
+                # If items look like numbered steps, render one ordered list instead of bullets
+                def _is_numbered(it: str) -> bool:
+                    return re.match(r"^\s*\d+[\.)]\s+", it) is not None
+
+                if items and all(_is_numbered(it) for it in items):
+                    html.append("<ol>")
+                    for item in items:
+                        cleaned = re.sub(r"^\s*\d+[\.)]\s+", "", item)
+                        html.append(f"<li>{_render_paragraph_text(cleaned)}</li>")
+                    html.append("</ol>")
+                else:
+                    html.append("<ul>")
+                    for item in items:
+                        html.append(f"<li>{_render_paragraph_text(item)}</li>")
+                    html.append("</ul>")
             elif block_type == "WarningBlock":
                 for warning in block.get("warnings", []):
-                    html.append(f"<p><strong>{html_escape(warning)}</strong></p>")
+                    html.append(f"<p class=\"warning-text\">{_render_paragraph_text(warning)}</p>")
             elif block_type == "TechnologyGrid":
                 html.append("<div class=\"table-wrapper\"><table>")
                 for row in block.get("rows", []):
                     html.append(
                         f"<tr><td>{html_escape(row.get('label',''))}</td>"
-                        f"<td>{html_escape(row.get('value',''))}</td></tr>"
+                        f"<td>{_render_paragraph_text(row.get('value',''))}</td></tr>"
                     )
                 html.append("</table></div>")
             elif block_type == "DeploymentTimeline":
@@ -266,13 +278,13 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for row in block.get("rows", []):
                     html.append("<tr>")
                     for col in columns:
-                        html.append(f"<td>{html_escape(str(row.get(col, '')))}</td>")
+                        html.append(f"<td>{_render_paragraph_text(str(row.get(col, '')))}</td>")
                     html.append("</tr>")
                 html.append("</tbody></table></div>")
             elif block_type == "TroubleshootingBlock":
                 html.append("<ol>")
                 for step in block.get("steps", []):
-                    html.append(f"<li>{html_escape(step)}</li>")
+                    html.append(f"<li>{_render_paragraph_text(step)}</li>")
                 html.append("</ol>")
             elif block_type == "CodeBlock":
                 html.append(
@@ -393,6 +405,29 @@ def build_rendered_sections(knowledge_object: dict) -> list:
                 "paragraphs": fallback_paragraphs,
             }],
         })
+    gaps = knowledge_object.get("gaps") or []
+    if gaps:
+        follow_up_items = []
+        for gap in gaps:
+            title = gap.get("section_title") or gap.get("section_id")
+            status = gap.get("status", "missing")
+            reason = gap.get("reason", "Review this section for missing coverage.")
+            follow_up_items.append(
+                f"{title} ({status.capitalize()} coverage): {reason}"
+            )
+
+        rendered_sections.append({
+            "section_id": "gaps_followups",
+            "section_title": "Gaps & Follow-ups",
+            "blocks": [
+                {
+                    "type": "ChecklistBlock",
+                    "title": "Gaps and Recommended Actions",
+                    "items": follow_up_items,
+                }
+            ],
+        })
+
     return rendered_sections
 
 
@@ -602,11 +637,25 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             logger.warning("Batch coverage polish failed: %s", e)
             polished_sections = {}
 
+        try:
+            structured_sections = polish_coverage_sections_structured(
+                {sid: {
+                    'title': coverage[sid]['title'],
+                    'fragments': coverage[sid]['fragments']
+                } for sid in coverage},
+                max_fragments_per_section=8,
+            )
+        except Exception as e:
+            logger.warning("Structured coverage polish failed: %s", e)
+            structured_sections = {}
+
         for sid, section_payload in coverage.items():
             display_content = polished_sections.get(sid)
             if not display_content:
                 display_content = section_payload['fragments']
             coverage[sid]['content'] = display_content
+            if sid in structured_sections:
+                coverage[sid]['_structured'] = structured_sections[sid]
             del coverage[sid]['fragments']
 
         try:

@@ -22,7 +22,19 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "First 30-Day Ownership")
-    rows = _coverage_rows(section)
+    structured = section.get("_structured") or {}
+    rows = []
+    if structured:
+        owners = structured.get("owners") or []
+        for o in owners:
+            if not isinstance(o, dict):
+                continue
+            role = o.get("role") or o.get("title") or ""
+            team = o.get("team") or ""
+            if role:
+                rows.append({"role": role, "team": team})
+    if not rows:
+        rows = _coverage_rows(section)
     blocks = []
 
     if rows:

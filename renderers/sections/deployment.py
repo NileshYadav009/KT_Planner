@@ -1,8 +1,14 @@
-from typing import Dict, Any, List
+import re
+from typing import Dict, Any, List, Optional
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.checklist import build_block as build_checklist_block
 from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.timeline import build_block as build_timeline_block
+
+
+def _get_structured(section: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    structured = section.get("_structured")
+    return structured if isinstance(structured, dict) else None
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
@@ -37,12 +43,39 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     rollback_rows: List[Dict[str, str]] = []
     timeline: List[Dict[str, str]] = []
 
-    if fields.get("deployment_steps", {}).get("value"):
-        deployment_value = fields["deployment_steps"]["value"]
-        if "|" in str(deployment_value):
-            decision_rows = _parse_table_rows(deployment_value, ["Step", "Action", "Tool/Command", "Expected Result"])
-        else:
-            checklist = [line.strip() for line in str(deployment_value).split("\n") if line.strip()]
+    structured = _get_structured(section)
+    if structured is not None:
+        steps = structured.get("deployment_steps") or []
+        if isinstance(steps, list) and steps:
+            checklist = [str(step).strip() for step in steps if isinstance(step, str) and step.strip()]
+        trigger = structured.get("trigger")
+        window = structured.get("window")
+        approver = structured.get("approver")
+        duration = structured.get("duration")
+        rollback = structured.get("rollback") or {}
+
+        if trigger:
+            paragraphs.append(f"Trigger: {trigger}")
+        if window:
+            paragraphs.append(f"Window: {window}")
+        if approver:
+            paragraphs.append(f"Approver: {approver}")
+        if duration:
+            paragraphs.append(f"Duration: {duration}")
+        if rollback and isinstance(rollback, dict):
+            rollback_trigger = rollback.get("trigger")
+            rollback_action = rollback.get("action")
+            rollback_target = rollback.get("target_time")
+            rollback_lines = []
+            if rollback_trigger:
+                rollback_lines.append(f"Rollback trigger: {rollback_trigger}")
+            if rollback_action:
+                rollback_lines.append(f"Rollback action: {rollback_action}")
+            if rollback_target:
+                rollback_lines.append(f"Target time: {rollback_target}")
+            if rollback_lines:
+                paragraphs.append("Rollback:")
+                paragraphs.extend(rollback_lines)
 
     if not checklist and not decision_rows and coverage_content:
         for item in coverage_content:
@@ -51,6 +84,13 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             if re.match(r"^\d+\.", text) or any(kw in text.lower() for kw in ["merge", "trigger", "deploy", "rollback", "helm", "release", "gitops"]):
                 checklist.append(text)
+
+    if fields.get("deployment_steps", {}).get("value"):
+        deployment_value = fields["deployment_steps"]["value"]
+        if "|" in str(deployment_value):
+            decision_rows = _parse_table_rows(deployment_value, ["Step", "Action", "Tool/Command", "Expected Result"])
+        else:
+            checklist = [line.strip() for line in str(deployment_value).split("\n") if line.strip()]
 
     if fields.get("rollback_scenarios", {}).get("value"):
         rollback_rows = _parse_table_rows(fields["rollback_scenarios"]["value"], ["Scenario", "Rollback Action", "Risk Level"])

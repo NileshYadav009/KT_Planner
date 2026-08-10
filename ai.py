@@ -146,6 +146,41 @@ def _extract_json_response(text: str):
     return None
 
 
+_META_COMMENTARY_PATTERNS = [
+    r"^(however|given|considering|note that|to better|the output should)",
+    r"corrected and grouped version",
+    r"it'?s more accurately described",
+]
+
+def _looks_like_meta_commentary(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    # anchored check for commentary-opening responses
+    if any(re.search(p, lowered) for p in _META_COMMENTARY_PATTERNS):
+        return True
+    # unanchored check — catches commentary that starts mid-response
+    for p in _META_COMMENTARY_PATTERNS:
+        pat = p.lstrip("^")
+        if re.search(pat, lowered):
+            return True
+    return False
+
+
+def _is_degenerate_repetition(text: str, source_fragments: List[str]) -> bool:
+    """Catches runaway LLM loops: output disproportionate to input, or repeated lines."""
+    if not isinstance(text, str):
+        return False
+    lines = [l.strip().lower() for l in text.split("\n") if l.strip()]
+    if len(lines) >= 6:
+        from collections import Counter
+        counts = Counter(lines)
+        if counts.most_common(1)[0][1] >= 3:  # same line repeated 3+ times
+            return True
+    source_len = sum(len(f) for f in (source_fragments or []) if isinstance(f, str))
+    if source_len > 0 and len(text) > source_len * 8 and len(text) > 800:
+        return True  # output ballooned to 8x+ the input with no proportional new info
+    return False
+
+
 def _local_cleanup(text: str) -> str:
     text = ' '.join(text.split())
     text = re.sub(r'\s+([,.;:!?])', r'\1', text)
@@ -308,6 +343,20 @@ def _build_section_hints():
 SECTION_HINTS = _build_section_hints()
 
 WORD_RE = re.compile(r"\b\w+\b")
+
+SEMANTIC_MAPPER = None
+
+
+def get_semantic_mapper(llm_refiner: Optional[Callable[[str, dict], str]] = None):
+    global SEMANTIC_MAPPER
+    if SEMANTIC_MAPPER is None:
+        SEMANTIC_MAPPER = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
+    elif llm_refiner is not None:
+        try:
+            SEMANTIC_MAPPER.paragraph_engine.set_llm_refiner(llm_refiner)
+        except Exception:
+            pass
+    return SEMANTIC_MAPPER
 
 def assess_audio_quality(audio_path: str) -> Dict[str, float]:
     """
@@ -511,7 +560,7 @@ def build_section_paragraphs(transcript: str):
 
         sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
         llm_refiner = provider.generate if provider else None
-        mapper = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
+        mapper = get_semantic_mapper(llm_refiner=llm_refiner)
         result = mapper.process_transcript(sentence_tuples)
         paragraphs = result.get("paragraphs", {})
         if paragraphs:
@@ -655,6 +704,110 @@ SECTION_POLISH_PROMPTS = {
     ),
 }
 
+SECTION_STRUCTURED_PROMPTS = {
+    "deployment_and_rollback": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a structured deployment reference.\n"
+        "Return JSON only with these keys:\n"
+        "- deployment_steps: array of strings\n"
+        "- trigger: string\n"
+        "- window: string\n"
+        "- approver: string\n"
+        "- duration: string\n"
+        "- rollback: object with trigger, action, target_time\n\n"
+        "Use exact values from the input. Do NOT invent information.\n"
+        "Return only valid JSON, no prose or explanation.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "cost_optimization": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Return JSON only with keys:\n"
+        "- levers: array of {name, impact, notes}\n"
+        "- expected_savings: string or null\n"
+        "Do not invent levers not present in the input. Return only valid JSON.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "first_30_day_ownership": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Return JSON only with keys:\n"
+        "- owners: array of {role, team, priority}\n"
+        "- handover_tasks: array of strings\n\n"
+        "Use input values only. Return only valid JSON.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "handover_completion": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Return JSON only with keys:\n"
+        "- checklist: array of strings\n"
+        "- required_signoffs: array of strings\n\n"
+        "Return only valid JSON and do not add items not present in the input.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "security_controls": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Return a JSON object with keys:\n"
+        "  scanners: array of {tool, purpose}\n"
+        "  secret_management: string or null\n"
+        "  issues: array of strings (security concerns raised), or []\n"
+        "Do not invent tools not present in the input. Return ONLY the JSON object.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON:"
+    ),
+    "common_failures": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a structured failure reference.\n"
+        "Return JSON only in this format:\n"
+        "{{\n"
+        "  \"issues\": [\n"
+        "    {{\n"
+        "      \"issue\": \"...\",\n"
+        "      \"cause\": \"...\",\n"
+        "      \"fix\": \"...\",\n"
+        "      \"frequency\": \"...\"\n"
+        "    }}\n"
+        "  ]\n"
+        "}}\n\n"
+        "Do NOT add issues not present in the input.\n"
+        "Return only valid JSON, no prose or explanation.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "danger_zones": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a structured danger zone reference.\n"
+        "Return JSON only in this format:\n"
+        "{{\n"
+        "  \"danger_zones\": [\n"
+        "    {{\n"
+        "      \"item\": \"...\",\n"
+        "      \"why_dangerous\": \"...\",\n"
+        "      \"approval_required\": \"...\"\n"
+        "    }}\n"
+        "  ]\n"
+        "}}\n\n"
+        "Use imperative language and do not add zones not in the source.\n"
+        "Return only valid JSON, no prose or explanation.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+    "monitoring_observability": (
+        "You are a senior technical writer producing a KT document.\n"
+        "Section: {title}\n\n"
+        "Rewrite these fragments into a structured monitoring reference.\n"
+        "Return JSON only with keys:\n"
+        "- monitoring_stack: array of {{tool, monitors}}\n"
+        "- first_response_steps: array of strings\n"
+        "- alert_routing: string\n\n"
+        "Do NOT add information not present in the input.\n"
+        "Return only valid JSON, no prose or explanation.\n\n"
+        "Source fragments:\n{fragments}\n\nJSON output:"
+    ),
+}
+
 
 def _build_polish_inputs(
     section_id: str,
@@ -735,10 +888,80 @@ def polish_coverage_sections(
                 ),
             )
             cleaned_text = response.strip() if isinstance(response, str) else ""
-            results[sid] = [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
+            if _looks_like_meta_commentary(cleaned_text) or _is_degenerate_repetition(cleaned_text, section.get("fragments", [])):
+                logger.warning("Discarding meta-commentary or degenerate repetition from LLM for %s", sid)
+                results[sid] = _local_cleanup_list(section["fragments"])
+            else:
+                results[sid] = [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
         except Exception as e:
             logger.warning("Polish failed for %s: %s", sid, e)
             results[sid] = _local_cleanup_list(section["fragments"])
+
+    return results
+
+
+def _safe_parse_json(text: str) -> Optional[dict]:
+    if not isinstance(text, str):
+        return None
+    parsed = _extract_json_response(text)
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def polish_coverage_sections_structured(
+    sections: Dict[str, dict],
+    *,
+    max_fragments_per_section: int = 8,
+) -> Dict[str, dict]:
+    """Polish selected coverage sections into structured JSON for renderer consumption."""
+    cleaned_sections = {}
+    for section_id, section_data in sections.items():
+        if section_id not in SECTION_STRUCTURED_PROMPTS:
+            continue
+        section_input = _build_polish_inputs(
+            section_id,
+            section_data.get('title', section_id),
+            section_data.get('fragments', []),
+            max_fragments_per_section,
+        )
+        if section_input is not None:
+            cleaned_sections[section_id] = section_input
+
+    if not cleaned_sections:
+        return {}
+
+    provider = get_llm_provider()
+    if provider is None:
+        return {}
+
+    results = {}
+    for sid, section in cleaned_sections.items():
+        prompt_template = SECTION_STRUCTURED_PROMPTS[sid]
+        joined_fragments = "\n".join(f"- {fragment}" for fragment in section["fragments"])
+        prompt = prompt_template.format(
+            title=section["title"],
+            fragments=joined_fragments,
+        )
+        try:
+            response = provider.generate(
+                prompt,
+                temperature=0.0,
+                max_output_tokens=1024,
+                stop_sequences=[],
+                system_prompt=(
+                    "You are a senior technical writer for a Knowledge Transfer document. "
+                    "Return only valid JSON and do not invent facts."
+                ),
+            )
+            if _looks_like_meta_commentary(response) or _is_degenerate_repetition(response, section.get("fragments", [])):
+                logger.warning("Discarding meta-commentary or degenerate repetition from structured LLM output for %s", sid)
+                continue
+            structured = _safe_parse_json(response)
+            if structured is not None:
+                results[sid] = structured
+        except Exception as e:
+            logger.warning("Structured polish failed for %s: %s", sid, e)
 
     return results
 

@@ -46,6 +46,16 @@ def _collect_evidence(
     ]
 
 
+_BAD_NAME_WORDS = {"provisioning", "infrastructure", "state", "deployment", "process", "workflow"}
+
+
+def _is_plausible_system_name(candidate: str) -> bool:
+    words = [w for w in candidate.strip().split() if w]
+    if not (1 <= len(words) <= 5):
+        return False
+    return words[-1].lower() not in _BAD_NAME_WORDS
+
+
 def _infer_system_name(
     coverage: Dict[str, Any],
     populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -54,22 +64,10 @@ def _infer_system_name(
         sys_field = (populated_fields.get("system_overview", {}) or {}).get("system_name", {})
         val = sys_field.get("value")
         if isinstance(val, str) and val.strip():
-            normalized = val.strip().title()
-            if len(normalized.split()) <= 6:
-                return normalized
-
-    overview = coverage.get("system_overview", {})
-    content_list = overview.get("content", [])
-    if isinstance(content_list, str):
-        content_list = [content_list]
-    combined = " ".join(str(c) for c in content_list)
-    match = re.search(
-        r"\b([A-Za-z0-9][A-Za-z0-9\s\-]{2,40}?)\s+(?:platform|system|application|service)\b",
-        combined,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).strip().title()
+            candidate = val.strip()
+            if _is_plausible_system_name(candidate):
+                return candidate
+    # TODO: surface inferred system_name in the UI as an editable field before export.
     return "KT Document"
 
 
@@ -89,6 +87,7 @@ def build_knowledge_object(
         section_title = section.get("title") or section_id
         section_cov = coverage.get(section_id, {})
         section_evidence = section_content.get(section_id, {})
+        section_structured = section_cov.get("_structured") if isinstance(section_cov, dict) else None
 
         raw_fields = populated_fields.get(section_id, {})
         field_objects = {fid: {
@@ -116,17 +115,53 @@ def build_knowledge_object(
             "sentence_count": int(section_cov.get("sentence_count", 0) or 0),
             "risk": float(section_cov.get("risk", 0.0) or 0.0),
             "coverage_content": section_cov.get("content", []),
+            "_structured": section_structured,
             "facts": section_facts,
             "entities": section_entities,
             "evidence": section_evidence_list,
             "relationships": section_relations,
             "fields": field_objects,
         })
+        def _section_gap_reason(section: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            fields = section.get("fields", {}) or {}
+            if not fields:
+                # No schema fields to assess — rely on status
+                if section.get("status") == "missing":
+                    return {"reason": "No content was detected for this section.", "severity": "missing"}
+                return None
+
+            filled = [
+                f for f in fields.values()
+                if f.get("value") not in (None, "", []) and float(f.get("confidence", 0.0)) >= 0.5
+            ]
+            fill_rate = len(filled) / len(fields) if fields else 0.0
+            if section.get("status") == "missing" and fill_rate == 0:
+                return {"reason": "No content was detected for this section.", "severity": "missing"}
+            if fill_rate < 0.4:
+                return {"reason": f"Only {len(filled)}/{len(fields)} fields have confident values.", "severity": "weak"}
+            return None
+
+        gaps = []
+        for section in knowledge_sections:
+            reason_obj = _section_gap_reason(section)
+            if reason_obj is None:
+                continue
+            gaps.append({
+                "section_id": section["id"],
+                "section_title": section["title"],
+                "status": section.get("status"),
+                "confidence": section.get("confidence", 0.0),
+                "sentence_count": section.get("sentence_count", 0),
+                "reason": reason_obj.get("reason"),
+                "severity": reason_obj.get("severity"),
+                "suggestion": "Review this section and fill any missing details or evidence.",
+            })
 
     return {
         "job_id": job_id,
         "system_name": _infer_system_name(coverage, populated_fields),
         "sections": knowledge_sections,
+        "gaps": gaps,
         "summary": {
             "section_count": len(knowledge_sections),
             "covered_sections": sum(1 for sec in knowledge_sections if sec.get("status") in {"covered", "weak"}),

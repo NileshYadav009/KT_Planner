@@ -22,7 +22,20 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Cost Optimization")
-    rows = _coverage_rows(section)
+    structured = section.get("_structured") or {}
+    rows = []
+    if structured:
+        levers = structured.get("levers") or []
+        for lv in levers:
+            if not isinstance(lv, dict):
+                continue
+            name = lv.get("name") or lv.get("lever") or ""
+            impact = lv.get("impact") or lv.get("expected_savings") or ""
+            notes = lv.get("notes") or ""
+            if name:
+                rows.append({"label": name, "value": f"Impact: {impact}; {notes}".strip()})
+    if not rows:
+        rows = _coverage_rows(section)
     blocks = []
 
     if rows:

@@ -12,7 +12,14 @@ def _coverage_items(section: Dict[str, Any]) -> List[str]:
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Handover Completion")
-    items = _coverage_items(section)
+    structured = section.get("_structured") or {}
+    items = []
+    if structured:
+        checklist = structured.get("checklist") or []
+        if isinstance(checklist, list) and checklist:
+            items = [str(i).strip() for i in checklist if isinstance(i, str) and i.strip()]
+    if not items:
+        items = _coverage_items(section)
     blocks = []
 
     if items:

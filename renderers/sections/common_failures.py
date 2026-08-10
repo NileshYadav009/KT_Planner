@@ -1,6 +1,11 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.narrative import build_block as build_narrative_block
+
+
+def _get_structured(section: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    structured = section.get("_structured")
+    return structured if isinstance(structured, dict) else None
 
 
 def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -27,6 +32,22 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Common Failures")
     rows = _coverage_rows(section)
     blocks = []
+
+    structured = _get_structured(section)
+    if structured is not None:
+        issues = structured.get("issues") or []
+        rows = []
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            rows.append({
+                "Symptom": issue.get("issue", ""),
+                "Cause": issue.get("cause", ""),
+                "Fix": issue.get("fix", ""),
+            })
+        if rows:
+            blocks.append(build_decision_table("Failure symptoms and remediation", ["Symptom", "Cause", "Fix"], rows))
+            return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
 
     if rows:
         blocks.append(build_decision_table("Failure symptoms and remediation", ["Symptom", "Cause", "Fix"], rows))

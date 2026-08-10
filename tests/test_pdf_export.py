@@ -5,6 +5,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import os
 import pytest
+import ai
+from ai import polish_coverage_sections_structured
 from main import _build_fallback_paragraphs, build_rendered_sections, render_pdf_html
 
 
@@ -88,3 +90,17 @@ def test_build_fallback_paragraphs_dedupes_repeated_content():
 
     assert len(paragraphs) == 1
     assert paragraphs[0] == "System overview content from coverage."
+
+
+def test_polish_coverage_sections_structured_handles_missing_provider():
+    sections = {
+        "common_failures": {
+            "title": "Common Failures & Fixes",
+            "fragments": [
+                "Issue: API timeout | Cause: backend queue full | Fix: increase worker count | Frequency: high"
+            ]
+        }
+    }
+
+    parsed = polish_coverage_sections_structured(sections, max_fragments_per_section=1)
+    assert isinstance(parsed, dict)

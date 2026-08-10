@@ -89,11 +89,31 @@ h1 {
 
 .toc-page {
   background: #ffffff;
+  page-break-after: always;
+  padding: 24mm 22mm;
 }
 
 .toc-page h2 {
   font-size: 22pt;
   margin-bottom: 1rem;
+}
+
+.toc-page ol {
+  padding-left: 1rem;
+}
+
+.toc-page li {
+  margin-bottom: 0.75rem;
+  font-size: 11.5pt;
+}
+
+.toc-page a {
+  color: #111827;
+  text-decoration: none;
+}
+
+.toc-page a:hover {
+  text-decoration: underline;
 }
 
 .toc-page ol {
@@ -147,7 +167,7 @@ li {
 }
 
 .table-wrapper {
-  overflow: visible;
+  overflow-x: auto;
   margin: 0 0 1rem;
 }
 
@@ -155,6 +175,16 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1rem;
+  table-layout: fixed;
+  word-break: break-word;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tr {
+  page-break-inside: avoid;
 }
 
 th, td {
@@ -162,6 +192,7 @@ th, td {
   border: 1px solid #d1d5db;
   text-align: left;
   vertical-align: top;
+  white-space: pre-wrap;
 }
 
 th {
