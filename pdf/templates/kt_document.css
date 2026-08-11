@@ -116,7 +116,10 @@ h1 {
 }
 
 .section-block {
-  page-break-inside: avoid;
+  /* Allow long sections to break across pages. Previously 'page-break-inside: avoid' caused
+     very long sections to overflow the page instead of splitting. */
+  page-break-inside: auto;
+  break-inside: auto;
   margin-bottom: 1.8rem;
 }
 
@@ -164,6 +167,16 @@ th, td {
   vertical-align: top;
 }
 
+/* Improve wrapping for long table cell content so rows don't overflow page width. */
+table {
+  table-layout: fixed;
+}
+th, td {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 th {
   background: #f3f4f6;
   font-weight: 600;
@@ -200,7 +213,8 @@ th {
 .block-card table td:first-child {
   font-weight: 600;
   color: #374151;
-  white-space: nowrap;
+  /* allow wrapping in the first column (labels) so long labels don't force overflow */
+  white-space: normal;
   width: 35%;
 }
 

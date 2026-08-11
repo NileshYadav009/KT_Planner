@@ -560,18 +560,6 @@ SECTION_POLISH_PROMPTS = {
         "Return only the formatted content, no heading.\n\n"
         "Source fragments:\n{fragments}\n\nFormatted output:"
     ),
-    "danger_zones": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a danger zone reference.\n"
-        "Format:\n"
-        "**Do not modify:**\n- [item 1]\n- [item 2]\n\n"
-        "**Why it is dangerous:** [explanation per item]\n\n"
-        "**Approval required:** [who approves, if mentioned]\n\n"
-        "Use imperative language. Do NOT add dangers not in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
     "ownership_escalation": (
         "You are a senior technical writer producing a KT document.\n"
         "Section: {title}\n\n"
@@ -682,6 +670,8 @@ def polish_coverage_sections(
     """Polish coverage sections with section-specific prompts and graceful fallback."""
     cleaned_sections = {}
     for section_id, section_data in sections.items():
+        if section_id in SECTION_STRUCTURED_PROMPTS:
+            continue
         section_input = _build_polish_inputs(
             section_id,
             section_data.get('title', section_id),

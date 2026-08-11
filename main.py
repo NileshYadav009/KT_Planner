@@ -22,6 +22,9 @@ from knowledge import build_knowledge_object
 from renderers import get_renderer
 from sentence_transformers import util
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     from markdown import markdown as markdown_to_html
 except ImportError:
