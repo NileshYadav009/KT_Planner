@@ -517,11 +517,10 @@ def build_section_paragraphs(transcript: str):
         if paragraphs:
             return paragraphs
         # If no paragraphs produced, log and return empty
-        print(f"[DEBUG] build_section_paragraphs: mapper returned empty paragraphs dict")
+        logger.debug("build_section_paragraphs: mapper returned empty paragraphs dict")
         return {}
     except Exception as e:
-        print(f"[ERROR] build_section_paragraphs failed: {e}")
-        traceback.print_exc()
+        logger.exception("build_section_paragraphs failed: %s", e)
         return {}
 
 

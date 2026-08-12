@@ -779,17 +779,23 @@ class ContextRepair:
         3. Grammar issues
         """
         triggers = []
-        
+
         if classified.sentence.audio_confidence < audio_conf_threshold:
             triggers.append("low_audio_confidence")
-        
+
         if classified.primary_classification and classified.primary_classification.confidence < semantic_conf_threshold:
             triggers.append("low_semantic_confidence")
-        
+
         # Basic grammar check
         if self._has_grammar_issues(classified.sentence.text):
             triggers.append("grammar_issues")
-        
+
+        logger.debug("should_repair: audio_conf=%s primary_conf=%s grammar_issues=%s triggers=%s",
+                 getattr(classified.sentence, 'audio_confidence', None),
+                 getattr(classified.primary_classification, 'confidence', None) if classified.primary_classification else None,
+                 self._has_grammar_issues(classified.sentence.text),
+                 triggers)
+
         return len(triggers) > 0
     
     def _has_grammar_issues(self, text: str) -> bool:
@@ -833,10 +839,13 @@ class ContextRepair:
         # Stage 1.5: Glossary-based conservative corrections (apply when audio confidence low)
         try:
             glossary_improved, did_change = apply_glossary_corrections(improved, classified.sentence.audio_confidence)
+            logger.debug("glossary: before='%s' conf=%s changed=%s after='%s'",
+                         improved, classified.sentence.audio_confidence, did_change, glossary_improved)
             if did_change:
                 improved = glossary_improved
-        except Exception:
+        except Exception as e:
             # Any glossary failures should not break pipeline
+            print(f"[ERROR] Glossary correction failed: {e}")
             pass
 
         # Stage 2: Context-based inference (within bounds)
@@ -1412,10 +1421,22 @@ def assemble_kt(
         referential = is_referential_sentence(cs.sentence.text)
 
         if cs.is_unassigned:
-            # Deduplicate unassigned sentences as well
+            # Deduplicate unassigned sentences as well. Prefer repaired text when available.
+            # Use repaired_map to include any improvements even for review-required sentences.
             norm = (cs.sentence.text or '').strip()
-            if norm and norm not in [s.text for s in unassigned]:
-                unassigned.append(cs.sentence)
+            repaired_text, _ = repaired_map.get(idx, (cs.sentence.text, None))
+            if norm and repaired_text not in [s.text for s in unassigned]:
+                # Create a lightweight Sentence object preserving timestamps and speaker
+                repaired_sentence = Sentence(
+                    text=repaired_text,
+                    start=cs.sentence.start,
+                    end=cs.sentence.end,
+                    speaker=cs.sentence.speaker,
+                    raw_text=cs.sentence.raw_text,
+                    audio_confidence=cs.sentence.audio_confidence,
+                    segment_ids=list(cs.sentence.segment_ids)
+                )
+                unassigned.append(repaired_sentence)
             continue
         # Handle referential sentences: link to previous relevant section and avoid duplication
         if referential and cs.primary_classification:
@@ -2066,13 +2087,22 @@ class ContextMappingPipeline:
         
         # STAGE 4: Repair low-confidence sentences
         repaired_map = {}
+        repaired_count = 0
         for i, cs in enumerate(classified_sentences):
-            if self.repair.should_repair(cs, self.audio_conf_threshold):
+            try:
+                should = self.repair.should_repair(cs, self.audio_conf_threshold)
+            except Exception as e:
+                logger.exception(f"Error determining should_repair for sentence {i}: {e}")
+                should = False
+            logger.debug(f"Repair decision for idx={i} audio_conf={getattr(cs.sentence,'audio_confidence',None)} should_repair={should}")
+            if should:
                 improved, repair_action = self.repair.repair(cs, classified_sentences)
                 repaired_map[i] = (improved, repair_action)
+                if repair_action:
+                    repaired_count += 1
             else:
                 repaired_map[i] = (cs.sentence.text, None)
-        logger.info(f"Stage 4: Repaired {len([r for r in repaired_map.values() if r[1]])} sentences")
+        logger.info(f"Stage 4: Repaired {repaired_count} sentences")
         
         # STAGE 5: Detect gaps
         coverage = detect_gaps(classified_sentences, self.schema_sections)

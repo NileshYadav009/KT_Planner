@@ -62,7 +62,14 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
         if match:
             return f"{match.group(1)} orders per day"
 
-    if "tool" in field_id or "technolog" in field_id or "stack" in field_id:
+    # Special-case oncall tool extraction to avoid matching generic 'tool' patterns
+    if field_id == "oncall_tool":
+        oncall_pattern = re.compile(r"\b(PagerDuty|OpsGenie|VictorOps|Splunk\s+On-Call)\b", re.IGNORECASE)
+        match = oncall_pattern.search(section_text)
+        if match:
+            return match.group(1)
+
+    if field_id != "oncall_tool" and ("tool" in field_id or "technolog" in field_id or "stack" in field_id):
         tools = PATTERN_EXTRACTORS["tools"].findall(section_text)
         if tools:
             return ", ".join(dict.fromkeys(tools))
