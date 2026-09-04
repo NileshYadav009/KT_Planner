@@ -33,7 +33,7 @@ from policy import (
 from runtime_policy import load_policy
 from devops_transcription import clean_transcript
 from entity_extractor import EntityExtractor
-from section_rules import match_section_rules, find_overview_reassignment, apply_rule_overrides
+from section_rules import match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
@@ -429,13 +429,17 @@ class ContextClassifier:
         self,
         model_name: str = "BAAI/bge-large-en-v1.5",
         similarity_threshold: float = 0.15,
-        use_cross_encoder: bool = True
+        use_cross_encoder: bool = True,
+        llm_fallback_fn=None
     ):
         """
         Args:
             model_name: HuggingFace model for embeddings (upgraded to BAAI/bge-large-en-v1.5)
             similarity_threshold: Minimum cosine similarity for assignment
             use_cross_encoder: Whether to use cross-encoder for reranking (default True)
+            llm_fallback_fn: Optional fn(prompt: str, **kwargs) -> str, used to verify
+                genuinely borderline classifications (see classify_sentence). Same
+                hook shape as ContextRepair's llm_fallback_fn — typically LLMProvider.generate.
         """
         # Lazily import heavy dependencies when sentence-transformers is installed.
         if _SENT_TRANS_SPEC:
@@ -469,7 +473,9 @@ class ContextClassifier:
         
         # Initialize entity extractor for GLiNER-based entity extraction
         self.entity_extractor = EntityExtractor()
-    
+
+        self.llm_fallback_fn = llm_fallback_fn
+
     def _encode_texts(self, texts, normalize_embeddings: bool = True, convert_to_tensor: bool = True):
         """Encode one or more texts with the classifier model."""
         try:
@@ -558,13 +564,17 @@ class ContextClassifier:
                 primary = classifications[0]
                 secondary = classifications[1:top_k]
 
+        primary, secondary, verification_note = self._maybe_verify_with_llm(sentence.text, primary, secondary)
+
         is_unassigned = primary is None
-        
+
         # Build explainability log
         explanation = ""
         alternatives = []
         if primary:
             explanation = f"Matched '{sentence.text[:60]}' to '{primary.section_title}' (score={primary.confidence:.3f})"
+            if verification_note:
+                explanation += f" | {verification_note}"
             alternatives = [c.section_id for c in secondary[:2]] if secondary else []
         else:
             explanation = f"No section matched above threshold {self.similarity_threshold} for: {sentence.text[:60]}"
@@ -602,6 +612,93 @@ class ContextClassifier:
             cs.explainability_log.reasoning = cs.explainability_log.reasoning + " | GLOSSARY_WARNINGS: " + ", ".join(warnings)
 
         return cs
+
+    def _maybe_verify_with_llm(
+        self,
+        sentence_text: str,
+        primary: Optional[Classification],
+        secondary: List[Classification],
+    ) -> Tuple[Optional[Classification], List[Classification], Optional[str]]:
+        """Selective LLM verification for genuinely borderline classifications.
+
+        Shared by classify_sentence() and ContextMappingPipeline.process()'s
+        batched classification loop, which duplicates classify_sentence's
+        primary/secondary selection for cross-encoder batching performance —
+        this logic needs to live in exactly one place so the two paths can't
+        drift apart on what counts as "borderline" or how a verified pick gets
+        applied.
+
+        Not run on every sentence — skipped entirely when llm_fallback_fn isn't
+        configured (default None) or the top pick isn't actually ambiguous.
+        Returns (primary, secondary, verification_note) — primary/secondary
+        unchanged unless the LLM both fired and picked a different candidate
+        from the ones already offered to it.
+        """
+        if not primary or not self.llm_fallback_fn:
+            return primary, secondary, None
+
+        is_borderline = (
+            (secondary and (primary.confidence - secondary[0].confidence) < 0.05)
+            or primary.confidence < (self.similarity_threshold * 1.3)
+        )
+        if not is_borderline:
+            return primary, secondary, None
+
+        verify_candidates = [primary] + secondary[:2]
+        verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates)
+        if not verified_id or verified_id == primary.section_id:
+            return primary, secondary, None
+
+        match = next((c for c in verify_candidates if c.section_id == verified_id), None)
+        if not match:
+            return primary, secondary, None
+
+        old_primary = primary
+        new_secondary = [c for c in verify_candidates if c is not match and c is not old_primary]
+        new_secondary.insert(0, old_primary)
+        note = (
+            f"LLM verification: chose {match.section_id} over "
+            f"{old_primary.section_id} (borderline: {match.confidence:.2f} vs {old_primary.confidence:.2f})"
+        )
+        return match, new_secondary, note
+
+    def _verify_classification_with_llm(self, sentence_text: str, candidates: List[Classification]) -> Optional[str]:
+        """Ask the LLM to pick the best section among the classifier's own
+        top candidates for a genuinely borderline sentence.
+
+        Can only return one of the ids already in `candidates`, or None — it
+        never introduces a new section. Any failure (no provider, malformed
+        response, exception) is swallowed and the caller keeps the classifier's
+        original top pick.
+        """
+        if not self.llm_fallback_fn or not candidates:
+            return None
+
+        candidate_ids = {c.section_id for c in candidates}
+        options = "\n".join(f"- {c.section_id}: {c.section_title}" for c in candidates)
+        prompt = (
+            "You are verifying a knowledge-transfer sentence's section assignment.\n\n"
+            f"Sentence: \"{sentence_text[:300]}\"\n\n"
+            "Candidate sections (choose the best fit, or NONE if none fit):\n"
+            f"{options}\n\n"
+            "Rules:\n"
+            "- Respond with EXACTLY one section id from the list above, or the word NONE.\n"
+            "- Do NOT invent a section id that isn't listed.\n"
+            "- No explanation, just the id or NONE.\n\n"
+            "Answer:"
+        )
+
+        try:
+            raw = self.llm_fallback_fn(prompt, temperature=0.1, max_output_tokens=20)
+            answer = (raw or "").strip().strip('."\'').lower()
+        except Exception as e:
+            logger.warning("Classification LLM verification failed: %s", e)
+            return None
+
+        for candidate_id in candidate_ids:
+            if answer == candidate_id.lower():
+                return candidate_id
+        return None
 
     def _score_sentence_candidates(
         self,
@@ -663,13 +760,19 @@ class ContextClassifier:
                 if specialized:
                     overview_penalty = 0.25
 
-            combined = float(alpha * base_sim + beta * context_sim + keyword_boost - overview_penalty)
+            entity_boost, entity_note = entity_affinity_boost(sec_id, extracted_entities)
+
+            combined = float(alpha * base_sim + beta * context_sim + keyword_boost + entity_boost - overview_penalty)
+            reason = f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}"
+            if entity_boost:
+                reason += f", Entities=+{entity_boost:.2f}({entity_note})"
+            reason += f", Combined={combined:.3f}"
             classifications.append(Classification(
                 section_id=sec_id,
                 section_title=self.section_metadata[sec_id]["title"],
                 confidence=combined,
                 similarity_score=base_sim,
-                reason=f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}, Combined={combined:.3f}",
+                reason=reason,
                 entities=extracted_entities if extracted_entities else None
             ))
 
@@ -1808,7 +1911,7 @@ class ContextMappingPipeline:
         llm_fallback_fn=None
     ):
         self.schema_sections = schema_sections
-        self.classifier = ContextClassifier(similarity_threshold=similarity_threshold)
+        self.classifier = ContextClassifier(similarity_threshold=similarity_threshold, llm_fallback_fn=llm_fallback_fn)
         self.classifier.index_schema(schema_sections)
         self.repair = ContextRepair(llm_fallback_fn=llm_fallback_fn)
         self.audio_conf_threshold = audio_confidence_threshold
@@ -1937,11 +2040,14 @@ class ContextMappingPipeline:
             filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
             primary = filtered[0] if filtered else (classifications[0] if classifications else None)
             secondary = filtered[1:3] if filtered else (classifications[1:3] if len(classifications) > 1 else [])
+            primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(s.text, primary, secondary)
             is_unassigned = primary is None
             explanation = ""
             alternatives = []
             if primary:
                 explanation = f"Matched '{s.text[:60]}' to '{primary.section_title}' (score={primary.confidence:.3f})"
+                if verification_note:
+                    explanation += f" | {verification_note}"
                 alternatives = [c.section_id for c in secondary[:2]] if secondary else []
             else:
                 explanation = f"No section matched above threshold {self.classifier.similarity_threshold} for: {s.text[:60]}"

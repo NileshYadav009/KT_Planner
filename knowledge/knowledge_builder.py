@@ -106,7 +106,10 @@ def build_knowledge_object(
         section_evidence_list = build_evidence(section_evidence.get("sentences", []))
         section_relations = build_relationships(field_objects)
 
-        knowledge_sections.append({
+        # Extract content from coverage data: support both "content" (legacy) and "fragments" (current)
+        content_data = section_cov.get("content", []) or section_cov.get("fragments", [])
+        
+        section_dict = {
             "id": section_id,
             "title": section_title,
             "section_type": section.get("type", "section"),
@@ -115,13 +118,19 @@ def build_knowledge_object(
             "confidence": float(section_cov.get("confidence", 0.0) or 0.0),
             "sentence_count": int(section_cov.get("sentence_count", 0) or 0),
             "risk": float(section_cov.get("risk", 0.0) or 0.0),
-            "coverage_content": section_cov.get("content", []),
+            "coverage_content": content_data,
             "facts": section_facts,
             "entities": section_entities,
             "evidence": section_evidence_list,
             "relationships": section_relations,
             "fields": field_objects,
-        })
+        }
+        
+        # Include structured data if available (e.g., for monitoring section)
+        if "_structured" in section_cov:
+            section_dict["_structured"] = section_cov["_structured"]
+        
+        knowledge_sections.append(section_dict)
 
     return {
         "job_id": job_id,

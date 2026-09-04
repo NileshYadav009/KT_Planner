@@ -5,6 +5,18 @@ from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
+# Load .env before reading any provider config below. This module must not
+# rely on some other module (e.g. ai.py, which also calls load_dotenv but only
+# after already importing this module) happening to load the environment
+# first — that ordering bug meant GEMINI_API_KEY/GROQ_API_KEY were silently
+# read as empty on every fresh process start regardless of what .env
+# contained, disabling every LLM-dependent feature in the app.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # Groq/OpenAI-compatible SDK support
 try:
     from openai import OpenAI

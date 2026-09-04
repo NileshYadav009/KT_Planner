@@ -31,6 +31,57 @@ PATTERN_EXTRACTORS = {
 }
 
 
+def _extract_escalation_chain(text: str) -> Optional[str]:
+    """
+    Extract escalation chain with robust multi-stage split approach.
+    Handles phrases like "Escalation path starts with an on-call engineer 
+    followed by the platform engineering manager and then the head of engineering."
+    
+    Returns steps joined with ' → ' arrow separator.
+    """
+    match = re.search(
+        r"escalation\s+(?:path|chain)?\s*(?:starts with|starting with)?\s*(.+?)(?:\.|$)",
+        text, re.IGNORECASE,
+    )
+    if not match:
+        return None
+    
+    clause = match.group(1)
+    # Split on explicit transition keywords
+    steps = re.split(r"\bfollowed by\b|\band then\b|\bthen\b", clause, flags=re.IGNORECASE)
+    steps = [s.strip(" .") for s in steps if s.strip(" .")]
+    
+    return " → ".join(steps) if len(steps) >= 2 else None
+
+
+def _extract_ownership(text: str) -> dict:
+    """
+    Extract ownership assignments from text.
+    Looks for specific patterns indicating application vs infrastructure ownership.
+    
+    Returns dict with "application_ownership" and/or "infrastructure_ownership" keys.
+    """
+    result = {}
+    
+    # Application ownership pattern
+    app = re.search(
+        r"\b(developers?|dev team)\b[^.]*?\bown[s]?\b[^.]*?\b(application code|app code|codebase)\b",
+        text, re.IGNORECASE
+    )
+    if app:
+        result["application_ownership"] = "Developers"
+    
+    # Infrastructure ownership pattern
+    infra = re.search(
+        r"\b(platform engineers?|platform engineering|infra(?:structure)? team)\b[^.]*?\bown[s]?\b[^.]*?\b(infrastructure|kubernetes)\b",
+        text, re.IGNORECASE
+    )
+    if infra:
+        result["infrastructure_ownership"] = "Platform Engineers"
+    
+    return result
+
+
 def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[Any]:
     field_type = field.get("type", "text")
     field_id = field.get("id", "")
@@ -62,13 +113,6 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
         if match:
             return f"{match.group(1)} orders per day"
 
-    # Special-case oncall tool extraction to avoid matching generic 'tool' patterns
-    if field_id == "oncall_tool":
-        oncall_pattern = re.compile(r"\b(PagerDuty|OpsGenie|VictorOps|Splunk\s+On-Call)\b", re.IGNORECASE)
-        match = oncall_pattern.search(section_text)
-        if match:
-            return match.group(1)
-
     if field_id != "oncall_tool" and ("tool" in field_id or "technolog" in field_id or "stack" in field_id):
         tools = PATTERN_EXTRACTORS["tools"].findall(section_text)
         if tools:
@@ -94,14 +138,19 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
             return match.group(1).strip().title()
 
     if "escalation" in field_id or "chain" in field_id:
-        pattern = re.compile(
-            r"(?:starts with|first|initially|beginning with)\s+(.+?)\s+(?:followed by|then|and then)\s+(.+?)(?:\s+and then\s+(.+?))?[,\.]",
-            re.IGNORECASE,
-        )
-        match = pattern.search(section_text)
+        # Use robust 3-stage extraction for escalation chains
+        return _extract_escalation_chain(section_text)
+
+    if field_id in ("application_ownership", "infrastructure_ownership"):
+        # Extract ownership from text
+        ownership_dict = _extract_ownership(section_text)
+        return ownership_dict.get(field_id)
+
+    if "oncall_tool" in field_id or "oncall" in field_id:
+        oncall_pattern = re.compile(r"\b(PagerDuty|OpsGenie|VictorOps|Splunk\s+On-Call)\b", re.IGNORECASE)
+        match = oncall_pattern.search(section_text)
         if match:
-            chain = [g.strip() for g in match.groups() if g]
-            return " → ".join(chain)
+            return match.group(1)
 
     if "blackout" in field_id or "bad_day" in field_id or "avoid" in field_id:
         events = re.findall(

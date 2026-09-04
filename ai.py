@@ -16,34 +16,24 @@ except Exception:
             return np.dot(a_norm, b_norm.T)
     util = _Util()
 
-# Enhanced modules for better accuracy
-try:
-    import librosa
-    from librosa import feature as librosa_feature
-    HAS_LIBROSA = True
-except ImportError:
-    HAS_LIBROSA = False
-
-try:
-    from scipy import signal
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-
-try:
-    import nltk
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    from nltk.tokenize import sent_tokenize
-    from nltk.corpus import stopwords
-    HAS_NLTK = True
-except ImportError:
-    HAS_NLTK = False
-
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import logging
 import time
+import os
+
+# Load environment variables from a local .env file if present, so Gemini/Groq
+# config works without manually exporting env vars before each run. Must run
+# BEFORE importing llm_provider (or anything else that reads os.getenv for
+# config at import time) below — llm_provider.py now also self-loads .env as
+# the real fix, this ordering here is defense in depth for this module too.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    # python-dotenv is optional; if it's missing we simply rely on the real env.
+    pass
+
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
@@ -55,16 +45,6 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # GEMINI LLM SETUP
 # ============================================================================
-import os
-
-# Load environment variables from a local .env file if present, so Gemini (and
-# other) config works without manually exporting env vars before each run.
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    # python-dotenv is optional; if it's missing we simply rely on the real env.
-    pass
 
 # Gemini config (Google Generative AI)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
@@ -270,8 +250,7 @@ def warmup_models():
 
 
 
-with open("kt_schema_new.json") as f:
-    SCHEMA = json.load(f)["sections"]
+from kt_schema_loader import SCHEMA
 
 SENT_MODEL: Optional[SentenceTransformer] = None
 SECTION_EMBEDS: Optional[Dict[str, np.ndarray]] = None
@@ -308,116 +287,6 @@ def _build_section_hints():
 SECTION_HINTS = _build_section_hints()
 
 WORD_RE = re.compile(r"\b\w+\b")
-
-def assess_audio_quality(audio_path: str) -> Dict[str, float]:
-    """
-    Analyze audio quality metrics before transcription.
-    Helps predict transcription accuracy and suggest improvements.
-    
-    Returns metrics for quality assessment (NEW in upgraded modules).
-    """
-    if not HAS_LIBROSA:
-        return {"status": "librosa_not_available", "score": 0.0}
-    
-    try:
-        y, sr = librosa.load(audio_path, sr=16000)
-        
-        # Compute energy and zero-crossing rate
-        rms = librosa_feature.rms(y=y)[0]
-        zcr = librosa_feature.zero_crossing_rate(y)[0]
-        
-        # Detect silence regions
-        S = librosa.feature.melspectrogram(y=y, sr=sr)
-        S_db = librosa.power_to_db(S, ref=np.max)
-        silence_frames = np.sum(S_db < -40) / S_db.shape[1]
-        
-        avg_energy = float(np.mean(rms))
-        avg_zcr = float(np.mean(zcr))
-        
-        # Quality score (0-100)
-        quality_score = (
-            min(avg_energy * 100, 50) +  # Energy contribution
-            min(avg_zcr * 10, 30) +       # Voice activity contribution
-            max(0, 20 - silence_frames * 100)  # Silence penalty
-        )
-        
-        return {
-            "score": float(quality_score),
-            "energy": avg_energy,
-            "voice_activity": avg_zcr,
-            "silence_ratio": float(silence_frames),
-            "recommendation": "good" if quality_score > 60 else "fair" if quality_score > 40 else "poor"
-        }
-    except Exception as e:
-        return {"error": str(e), "score": 0.0}
-
-def classify_with_confidence(sentence: str, section_embeddings: Dict[str, np.ndarray], 
-                            section_ids: List[str]) -> Dict:
-    """
-    Enhanced classification with confidence scores.
-    Returns section assignment with confidence level (IMPROVED).
-    """
-    model = get_sentence_model()
-    if model is None:
-        return {"error": "Model not loaded", "section": None, "confidence": 0.0}
-    
-    sent_embed = model.encode(sentence, normalize_embeddings=True)
-    
-    # Compute cosine similarities
-    similarities = util.cos_sim([sent_embed], list(section_embeddings.values()))[0]
-    similarities = similarities.cpu().numpy() if hasattr(similarities, 'cpu') else similarities
-    
-    # Get top matches
-    top_indices = np.argsort(similarities)[-1:][::-1]
-    
-    return {
-        "section": section_ids[int(top_indices[0])],
-        "confidence": float(similarities[int(top_indices[0])]),
-        "alternatives": [
-            {"section": section_ids[int(idx)], "score": float(similarities[int(idx)])}
-            for idx in top_indices[1:] if similarities[int(idx)] > CONFIDENCE_THRESHOLD * 0.8
-        ],
-        "requires_review": float(similarities[int(top_indices[0])]) < CONFIDENCE_THRESHOLD
-    }
-
-def validate_sentence_quality(sentence: str) -> Dict[str, any]:
-    """
-    Validate sentence quality using NLP metrics (NEW).
-    Detects potential transcription errors.
-    """
-    if not HAS_NLTK:
-        return {"status": "nltk_not_available", "quality_score": 0.0}
-    
-    try:
-        words = sentence.split()
-        word_count = len(words)
-        
-        # Basic metrics
-        avg_word_length = np.mean([len(w) for w in words]) if words else 0
-        
-        # Check for common transcription errors
-        quality_issues = []
-        if word_count < 3:
-            quality_issues.append("too_short")
-        if word_count > 100:
-            quality_issues.append("too_long")
-        if avg_word_length > 20:
-            quality_issues.append("unusual_word_length")
-        
-        # Scoring
-        score = 100
-        if quality_issues:
-            score -= len(quality_issues) * 10
-        
-        return {
-            "quality_score": max(0, score),
-            "word_count": word_count,
-            "avg_word_length": float(avg_word_length),
-            "issues": quality_issues,
-            "status": "acceptable" if score > 70 else "warning" if score > 40 else "review_needed"
-        }
-    except Exception as e:
-        return {"error": str(e), "quality_score": 0.0}
 
 def get_sentence_model(model_name: str = "all-MiniLM-L6-v2") -> Optional[SentenceTransformer]:
     global SENT_MODEL
@@ -475,18 +344,6 @@ def get_section_embeds() -> Dict[str, np.ndarray]:
     SECTION_EMBEDS = embeds
     return SECTION_EMBEDS
 
-def chunk_text(text: str, size: int = 200):
-    """Legacy chunking helper.
-
-    This remains available for backward compatibility but is no longer used
-    for section classification. Sentence-level classification from
-    context_mapper is preferred.
-    """
-    words = text.split()
-    for i in range(0, len(words), size):
-        yield " ".join(words[i:i + size])
-
-
 CONTEXT_CLASSIFIER: Optional[ContextClassifier] = None
 
 
@@ -530,117 +387,7 @@ PRIORITY_COVERAGE_SECTION_IDS = [
     'common_failures'
 ]
 
-SECTION_POLISH_PROMPTS = {
-    "deployment_and_rollback": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these transcript fragments into a structured deployment reference.\n"
-        "Format rules:\n"
-        "- Deployment steps: numbered list (1. 2. 3.)\n"
-        "- Use BOLD labels: **Trigger:**, **Window:**, **Approver:**, **Duration:**\n"
-        "- Rollback: separate subsection with **Rollback trigger:**, **Action:**, "
-        "**Target time:**\n"
-        "- Keep all specific values (tool names, times, branch names) exactly as given.\n"
-        "- Do NOT invent information not present in the input.\n"
-        "Return only the formatted section content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "common_failures": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a structured failure reference.\n"
-        "For each distinct issue use this format:\n"
-        "**Issue:** [name]\n"
-        "**Cause:** [root cause]\n"
-        "**Fix:** [resolution steps]\n"
-        "**Frequency:** [if mentioned]\n\n"
-        "Group related fragments into one issue block.\n"
-        "Do NOT add issues not present in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "ownership_escalation": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into an ownership and escalation reference.\n"
-        "Format:\n"
-        "**Application ownership:** [team]\n"
-        "**Infrastructure ownership:** [team]\n\n"
-        "**Escalation chain:**\n1. [first contact]\n2. [second]\n3. [third]\n\n"
-        "**Contact channel:** [Slack / PagerDuty / email if mentioned]\n\n"
-        "Do NOT add contacts not present in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "monitoring_observability": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a monitoring reference.\n"
-        "Use this EXACT format with each item on its own line:\n\n"
-        "**Monitoring stack:**\n"
-        "- [tool name]: [what it monitors]\n"
-        "- [tool name]: [what it monitors]\n\n"
-        "**First response steps:**\n"
-        "1. [step]\n"
-        "2. [step]\n\n"
-        "**Alert routing:** [tool and channel if mentioned]\n\n"
-        "Do NOT put multiple items on the same line.\n"
-        "Do NOT add information not in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "disaster_recovery": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a DR reference.\n"
-        "Format:\n"
-        "**Recovery procedure:**\n1. [step]\n\n"
-        "**Backup policy:**\n"
-        "- Schedule: [if mentioned]\n"
-        "- Retention: [if mentioned]\n\n"
-        "**DR testing:** [frequency if mentioned]\n\n"
-        "**RTO / RPO:** [if mentioned]\n\n"
-        "Do NOT add facts not in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "security_controls": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a security controls reference.\n"
-        "Format:\n"
-        "**Security controls:**\n"
-        "- [Tool]: [what it does]\n\n"
-        "Group by type if possible: Secret Management, Scanning, Access Control.\n"
-        "Do NOT add controls not in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "day1_survival_checklist": (
-        "You are a senior technical writer producing a KT document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these fragments into a Day-1 checklist.\n"
-        "Format:\n"
-        "**Access to request:**\n- [system]\n\n"
-        "**Safe first actions (read-only):**\n- [action]\n\n"
-        "**Do NOT do on Day 1:**\n- [action]\n\n"
-        "Only include groups that have content from the input.\n"
-        "Do NOT add items not present in the input.\n"
-        "Return only the formatted content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nFormatted output:"
-    ),
-    "default": (
-        "You are a senior technical writer for a Knowledge Transfer document.\n"
-        "Section: {title}\n\n"
-        "Rewrite these transcript fragments into clean, professional prose.\n"
-        "Rules:\n"
-        "- Fix grammar, casing, punctuation.\n"
-        "- Preserve all facts, names, numbers exactly.\n"
-        "- Do NOT add information not present in the input.\n"
-        "- Return only the rewritten content, no heading.\n\n"
-        "Source fragments:\n{fragments}\n\nPolished content:"
-    ),
-}
+from llm.prompts import SECTION_STRUCTURED_PROMPTS, SECTION_POLISH_PROMPTS
 
 
 def _build_polish_inputs(
@@ -658,6 +405,70 @@ def _build_polish_inputs(
         'title': section_title,
         'fragments': clipped,
         'original_count': len(cleaned)
+    }
+
+
+def _extract_structured_section(
+    section_id: str,
+    section_title: str,
+    fragments: List[str],
+) -> Optional[dict]:
+    """Extract structured JSON data from section fragments using LLM."""
+    if section_id not in SECTION_STRUCTURED_PROMPTS:
+        return None
+    
+    cleaned = [f.strip() for f in (fragments or []) if f and f.strip()]
+    if not cleaned:
+        return None
+    
+    provider = get_llm_provider()
+    if provider is None:
+        return None
+    
+    joined_fragments = "\n".join(f"- {fragment}" for fragment in cleaned[:8])
+    prompt_template = SECTION_STRUCTURED_PROMPTS[section_id]
+    prompt = prompt_template.format(
+        title=section_title,
+        fragments=joined_fragments,
+    )
+    
+    try:
+        response = provider.generate(
+            prompt,
+            temperature=0.2,
+            max_output_tokens=512,
+            stop_sequences=[],
+            system_prompt=(
+                "You are a JSON extractor for a Knowledge Transfer document. "
+                "Return ONLY valid JSON. Do not add markdown or extra text."
+            ),
+        )
+        response_text = response.strip() if isinstance(response, str) else ""
+        parsed = _extract_json_response(response_text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception as e:
+        logger.warning("Structured extraction failed for %s: %s", section_id, e)
+    
+    return None
+
+
+def wrap_structured_as_fields(structured: dict) -> Dict[str, dict]:
+    """Turn a flat {field_id: value} dict (as SECTION_STRUCTURED_PROMPTS's JSON
+    schemas produce) into the same {field_id: {"value", "confidence", "source"}}
+    shape field_populator.populate_fields() produces, so it can be merged
+    straight into populated_fields — feeding renderers and
+    knowledge_builder.build_facts/entities/relationships through the one
+    existing mechanism, no separate plumbing per section.
+
+    Deliberately generic — the prompts already return values in the exact
+    string/list shape each renderer expects (see llm/prompts.py), so no
+    per-field join/format logic belongs here.
+    """
+    return {
+        field_id: {"value": value, "confidence": 0.75, "source": "llm_structured"}
+        for field_id, value in (structured or {}).items()
+        if value
     }
 
 
@@ -754,68 +565,6 @@ def _prepare_sentences(transcript: str):
     cleaned_text = clean_transcript(transcript)
     audio_seg = AudioSegment(text=cleaned_text, start=0.0, end=0.0, avg_logprob=-1.0)
     return segment_sentences([audio_seg])
-
-
-def process_coverage_with_gemini(transcript: str, sentences_per_chunk: int = 20):
-    """Chunk transcript sentences, send each chunk to Gemini, and return structured results.
-
-    Returns a list of dicts: {"chunk_index": int, "text": str, "gemini_raw": str, "gemini_json": Optional[dict]}
-    """
-    sentences = _prepare_sentences(transcript)
-    if not sentences:
-        return []
-
-    # Prepare section catalog to help Gemini map chunks to KT sections
-    section_list = []
-    for s in SCHEMA:
-        title = s.get("title") or s.get("id")
-        section_list.append(f"{s.get('id')}: {title}")
-    section_hint = "\n".join(section_list)
-
-    # Chunk sentences
-    chunks = []
-    for i in range(0, len(sentences), sentences_per_chunk):
-        part = " ".join([sentences[j].text for j in range(i, min(i + sentences_per_chunk, len(sentences)))])
-        chunks.append(part)
-
-    results = []
-    for idx, chunk_text in enumerate(chunks):
-        prompt = f"""
-You are a KT mapping assistant. Given the list of KT sections below, read the transcript chunk and map it to the most relevant sections. Return JSON only as a list of objects with keys: section_id, confidence (0-1 float), summary.
-
-Sections:
-{section_hint}
-
-Transcript chunk:
-{chunk_text}
-
-Return JSON only.
-"""
-        try:
-            gem = gemini_refiner(prompt)
-            gem_json = None
-            try:
-                gem_json = json.loads(gem)
-            except Exception:
-                # If Gemini didn't return machine JSON, keep raw text
-                gem_json = None
-
-            results.append({
-                "chunk_index": idx,
-                "text": chunk_text,
-                "gemini_raw": gem,
-                "gemini_json": gem_json,
-            })
-        except Exception as e:
-            results.append({
-                "chunk_index": idx,
-                "text": chunk_text,
-                "gemini_raw": "",
-                "gemini_json": None,
-                "error": str(e),
-            })
-
-    return results
 
 
 def _classify_transcript_sentences(transcript: str, similarity_threshold: float = 0.20):
@@ -1028,43 +777,6 @@ def explainability_logs(analysis: dict):
                 'top_score': max(info.get('scores', [0.0])) if info.get('scores') else 0.0
             }
     return logs
-
-class KTSessionAggregator:
-    def __init__(self, schema: list, min_chunks_for_covered: int = 2):
-        self.schema = schema
-        self.min_chunks_for_covered = min_chunks_for_covered
-        self.sessions = []
-        self.aggregate = {s['id']: {'chunks': [], 'scores': []} for s in schema}
-    def add_transcript(self, transcript: str, similarity_threshold: float = 0.20):
-        res = analyze_transcript(transcript, similarity_threshold=similarity_threshold, min_chunks_for_covered=self.min_chunks_for_covered)
-        self.sessions.append(res)
-        for s in self.schema:
-            sid = s['id']
-            info = res.get(sid, {})
-            self.aggregate[sid]['chunks'].extend(info.get('chunks', []))
-            self.aggregate[sid]['scores'].extend(info.get('scores', []))
-    def aggregated_analysis(self):
-        out = {}
-        for s in self.schema:
-            sid = s['id']
-            chunks = self.aggregate[sid]['chunks']
-            scores = self.aggregate[sid]['scores']
-            if len(chunks) == 0:
-                status = 'missing'
-            elif len(chunks) < self.min_chunks_for_covered:
-                status = 'partial'
-            else:
-                status = 'covered'
-            conf = max(scores) if scores else 0.0
-            conf = float(np.clip(conf, 0.0, 1.0))
-            out[sid] = {
-                'status': status,
-                'confidence': conf,
-                'extracted_text': '\n'.join(chunks),
-                'chunks': chunks,
-                'scores': scores
-            }
-        return out
 
 def generate_report(transcript: str, similarity_threshold: float = 0.20, min_chunks_for_covered: int = 2, tenant_id: str = "", project_id: str = "", team_id: str = "", session_state: str = "In Progress"):
     analysis = analyze_transcript(transcript, similarity_threshold=similarity_threshold, min_chunks_for_covered=min_chunks_for_covered)

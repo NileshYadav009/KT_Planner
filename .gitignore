@@ -90,3 +90,9 @@ config.local.json
 *.tar.gz
 job_queue_state.json
 session_state.json
+
+# Self-learning DevOps vocabulary state (see vocabulary_learning.py) — grows
+# locally via scripts/review_vocabulary.py, not meant to be committed. The
+# bootstrap content each starts from lives in code (glossary.DEFAULT_GLOSSARY).
+glossary.json
+glossary_candidates.json

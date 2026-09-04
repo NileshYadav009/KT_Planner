@@ -543,7 +543,7 @@
       "columns_type": ["text", "text", "text", "text"]
     },
     {
-      "id": "first_30_day_plan",
+      "id": "first_30_day_ownership",
       "title": "FIRST 30-DAY OWNERSHIP PLAN",
       "required": true,
       "sub_topics": [

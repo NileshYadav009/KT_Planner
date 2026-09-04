@@ -391,3 +391,39 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
                     reasoning=f"Reassigned from system_overview via {reassignment.matched_pattern}",
                     confidence=reassignment.confidence,
                 )
+
+
+# ============================================================================
+# Entity-type -> section affinity (Phase 5 signal: "extracted entities")
+# ============================================================================
+#
+# Deliberately small and conservative. Only entity types with a strong,
+# unambiguous section affinity are listed — generic types like "tool",
+# "technology", "platform", "service" are left out on purpose: they're not
+# selective enough and would nudge nearly every sentence toward the same
+# architecture-ish sections regardless of what it's actually about.
+#
+# entity_type -> (section_id, max_boost)
+ENTITY_TYPE_SECTION_AFFINITY: Dict[str, Tuple[str, float]] = {
+    "monitoring": ("monitoring_observability", 0.10),
+    "escalation": ("ownership_escalation", 0.10),
+    "owner": ("ownership_escalation", 0.08),
+}
+
+
+def entity_affinity_boost(section_id: str, entities: Optional[Dict[str, List[str]]]) -> Tuple[float, Optional[str]]:
+    """Return (boost, note) if extracted entities support classifying this
+    sentence into `section_id`, else (0.0, None).
+
+    `entities` is the dict EntityExtractor.get_context_entities() returns,
+    e.g. {"monitoring": ["PagerDuty"], "owner": ["Platform Team"]}.
+    """
+    if not entities:
+        return 0.0, None
+
+    for entity_type, values in entities.items():
+        affinity = ENTITY_TYPE_SECTION_AFFINITY.get(entity_type)
+        if affinity and affinity[0] == section_id and values:
+            return affinity[1], f"{entity_type}:{values[0]}"
+
+    return 0.0, None

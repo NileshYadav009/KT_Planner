@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import os
 import pytest
-from main import _build_fallback_paragraphs, build_rendered_sections, render_pdf_html
+from pdf_rendering import _build_fallback_paragraphs, build_rendered_sections, render_pdf_html
 
 
 def test_render_pdf_html_returns_html_string():

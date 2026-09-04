@@ -12,10 +12,11 @@ faster-whisper>=1.1.0     # Optimized Whisper with faster inference and better a
 transformers>=4.45.0      # Hugging Face transformers for advanced NLP tasks
 sentence-transformers>=5.2.0  # Semantic embeddings for accurate section classification
 torch>=2.2.0              # PyTorch backend (required by transformers and sentence-transformers)
+gliner>=0.2.13            # Entity extraction for classification signals (entity_extractor.py)
+openai>=1.0.0             # OpenAI-compatible client, used by llm_provider.GroqProvider (Groq's API is OpenAI-compatible)
 
 # Audio/Video Processing (Enhanced Processing Pipeline)
 ffmpeg-python>=0.2.0      # Audio/video format handling
-librosa>=0.10.0           # Audio feature extraction and analysis - improves audio quality detection
 soundfile>=0.12.0         # WAV/FLAC file support for diverse audio formats
 pydub>=0.25.1             # Audio segment manipulation and normalization (NEW)
 
@@ -26,7 +27,6 @@ pandas>=2.2.0             # Data manipulation and analysis for better logging/an
 
 # Machine Learning Utilities (Detection & Scoring)
 scikit-learn>=1.5.0       # ML utilities and confidence scoring
-nltk>=3.8.1               # Natural Language Toolkit for text processing (NEW)
 markdown>=3.4.0           # Markdown rendering for PDF export
 weasyprint>=57.0          # PDF rendering support for export endpoint
 
@@ -42,6 +42,4 @@ python-jose>=3.3.0        # JWT authentication support for API security
 passlib>=1.7.4            # Password hashing and verification
 cryptography>=42.0.0      # Cryptographic recipes and primitives
 textdistance>=4.6.3       # Fuzzy string matching for transcript cleanup
-presidio-analyzer>=0.2.2  # PII detection and analysis (NEW - SaaS compliance)
-presidio-anonymizer>=0.2.2 # PII anonymization and redaction (NEW - SaaS compliance)
 google-genai>=2.7.0

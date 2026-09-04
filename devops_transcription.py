@@ -6,30 +6,13 @@ Provides:
 2. Post-processing enhancement
 3. Technical term preservation
 4. Confidence-based error correction
-5. Enhanced audio quality detection and text validation (NEW in upgraded modules)
 """
 
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Set, Tuple, Optional
 import logging
-import numpy as np
 
 logger = logging.getLogger(__name__)
-
-# Enhanced modules for better accuracy
-try:
-    from nltk.tokenize import sent_tokenize
-    from nltk import download
-    download('punkt', quiet=True)
-    HAS_NLTK = True
-except ImportError:
-    HAS_NLTK = False
-
-try:
-    from scipy import signal
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
 
 try:
     import textdistance
@@ -38,227 +21,22 @@ except ImportError:
     textdistance = None
     HAS_TEXTDISTANCE = False
 
-try:
-    from pii_anonymizer import PIIAnonymizer, anonymize_transcript_before_classification
-    HAS_PRESIDIO = True
-except ImportError:
-    HAS_PRESIDIO = False
-    logger.warning("Presidio PII anonymization not available")
-
-# ============================================================================
-# Enhanced Validation Functions (NEW - Upgraded Modules)
-# ============================================================================
-
-def validate_transcription_quality(transcript: str) -> Dict[str, any]:
-    """
-    Comprehensive quality validation for transcriptions.
-    Uses enhanced NLP and signal processing (NEW).
-    """
-    quality_report = {
-        "total_length": len(transcript),
-        "word_count": len(transcript.split()),
-        "issues": [],
-        "confidence_score": 0.0
-    }
-    
-    # Basic quality checks
-    if len(transcript) < 100:
-        quality_report["issues"].append("transcript_too_short")
-        quality_report["confidence_score"] -= 20
-    
-    if not any(c.isalpha() for c in transcript):
-        quality_report["issues"].append("no_valid_text")
-        quality_report["confidence_score"] = 0
-        return quality_report
-    
-    # Sentence-level analysis
-    if HAS_NLTK:
-        try:
-            sentences = sent_tokenize(transcript)
-            quality_report["sentence_count"] = len(sentences)
-            quality_report["avg_sentence_length"] = np.mean([len(s.split()) for s in sentences])
-            
-            # Check for fragment sentences
-            short_sentences = sum(1 for s in sentences if len(s.split()) < 3)
-            if short_sentences > len(sentences) * 0.3:
-                quality_report["issues"].append("excessive_fragments")
-                quality_report["confidence_score"] -= 10
-        except Exception as e:
-            logger.warning(f"NLTK sentence analysis failed: {e}")
-    
-    # Technical term detection
-    technical_terms = sum(1 for term in ['kubernetes', 'docker', 'aws', 'jenkins', 'terraform'] 
-                         if term.lower() in transcript.lower())
-    if technical_terms > 0:
-        quality_report["technical_terms_found"] = technical_terms
-        quality_report["confidence_score"] += 15  # Higher confidence for technical content
-    
-    # Final scoring
-    base_score = 80
-    quality_report["confidence_score"] = max(0, base_score + quality_report["confidence_score"])
-    quality_report["status"] = (
-        "excellent" if quality_report["confidence_score"] > 85 else
-        "good" if quality_report["confidence_score"] > 70 else
-        "fair" if quality_report["confidence_score"] > 50 else
-        "poor"
-    )
-    
-    return quality_report
-
-def estimate_transcription_accuracy(transcript: str, model_used: str = "base") -> float:
-    """
-    Estimate transcription accuracy based on content analysis (IMPROVED).
-    Uses patterns identified in successful KT documents.
-    """
-    accuracy_factors = 0.0
-    max_factors = 0.0
-    
-    # Factor 1: Length (longer = typically higher accuracy for transcripts)
-    max_factors += 1
-    if len(transcript) > 5000:
-        accuracy_factors += 1.0
-    elif len(transcript) > 2000:
-        accuracy_factors += 0.8
-    elif len(transcript) > 500:
-        accuracy_factors += 0.5
-    else:
-        accuracy_factors += 0.2
-    
-    # Factor 2: Structure (presence of multiple sentences/paragraphs)
-    max_factors += 1
-    sentence_count = len(re.split(r'[.!?]+', transcript))
-    if sentence_count > 20:
-        accuracy_factors += 1.0
-    elif sentence_count > 10:
-        accuracy_factors += 0.8
-    elif sentence_count > 5:
-        accuracy_factors += 0.5
-    else:
-        accuracy_factors += 0.2
-    
-    # Factor 3: Coherence (rare special characters indicate extraction errors)
-    max_factors += 1
-    special_char_ratio = sum(1 for c in transcript if ord(c) < 32 or ord(c) > 126) / max(1, len(transcript))
-    accuracy_factors += max(0, 1.0 - special_char_ratio * 5)
-    
-    # Model-specific adjustment
-    model_accuracy = {
-        "tiny": 0.85,
-        "base": 0.90,
-        "small": 0.92,
-        "medium": 0.94,
-        "large": 0.96
-    }
-    base_accuracy = model_accuracy.get(model_used, 0.90)
-    
-    # Calculate final accuracy estimate
-    normalized_score = (accuracy_factors / max_factors) if max_factors > 0 else 0.5
-    estimated_accuracy = base_accuracy * (0.8 + normalized_score * 0.2)  # Blend with model base
-    
-    return min(0.99, estimated_accuracy)  # Cap at 99%
+import glossary
+from devops_vocabulary import DEVOPS_VOCABULARY
 
 # ============================================================================
 # DevOps Terminology Corrections Dictionary
 # ============================================================================
+#
+# The static, hand-curated term list lives in devops_vocabulary.py. glossary.py's
+# glossary.json is a second, persistent layer on top of it — terms a human has
+# approved via vocabulary_learning.py's review flow (see scripts/review_vocabulary.py).
+# Both are merged here, read live via `glossary.get_glossary()` — which reloads
+# from glossary.json when the file's mtime has moved, not just a one-time import —
+# so an approval made by a different process (e.g. scripts/review_vocabulary.py)
+# takes effect in an already-running server without a restart.
 
-DEVOPS_VOCABULARY = {
-    # Container Orchestration
-    "kubernetes": ["kubernetes", "k8s", "k-8-s", "qbritis", "cubernetes", "cubernetis"],
-    "docker": ["docker", "dock-er", "dockers"],
-    
-    # Cloud Providers
-    "aws": ["aws", "a-w-s", "a w s"],
-    "gcp": ["gcp", "google cloud platform", "g-c-p"],
-    "azure": ["azure", "az-ur"],
-    
-    # CI/CD & DevOps Tools
-    "jenkins": ["jenkins", "jen-kins", "jenkins"],
-    "gitlab": ["gitlab", "git-lab", "git labs"],
-    "github": ["github", "git-hub", "git hubs"],
-    "terraform": ["terraform", "terra-form", "terr-form"],
-    "ansible": ["ansible", "ans-able", "ansi-bull"],
-    "prometheus": ["prometheus", "prom-eth-eus"],
-    "grafana": ["grafana", "gra-fan-a"],
-    "datadog": ["datadog", "data-dog"],
-    "splunk": ["splunk", "split-bank"],
-    
-    # Infrastructure & Architecture
-    "microservices": ["microservices", "micro-services", "micro services"],
-    "kubernetes": ["kubernetes", "k8s"],
-    "container": ["container", "con-tain-er"],
-    "load balancer": ["load balancer", "load-balancer"],
-    "failover": ["failover", "fail-over", "fail over"],
-    "rollback": ["rollback", "roll-back", "roll back"],
-    "deployment": ["deployment", "de-ploy-ment", "deploy-mint"],
-    "infrastructure": ["infrastructure", "infra-structure"],
-    
-    # Concepts & Processes
-    "pipeline": ["pipeline", "pipe-line"],
-    "monitoring": ["monitoring", "moni-tor-ing"],
-    "logging": ["logging", "log-ging"],
-    "metrics": ["metrics", "met-riks"],
-    "orchestration": ["orchestration", "pay-bin", "orchestration"],
-    "validation": ["validation", "valid-ation"],
-    "provisioning": ["provisioning", "pro-vision-ing"],
-    
-    # DevOps Specific Terms
-    "devops": ["devops", "dev-ops", "dev ops"],
-    "incident": ["incident", "in-ci-dent"],
-    "escalation": ["escalation", "es-cal-ay-shun"],
-    "handover": ["handover", "hand-over"],
-    "sre": ["sre", "s-r-e", "site reliability engineer"],
-    "pod": ["pod", "pods"],
-    "node": ["node", "nodes"],
-    "cluster": ["cluster", "clus-ter"],
-    "namespace": ["namespace", "name-space"],
-    "environment": ["environment", "en-vi-ron-ment"],
-    "staging": ["staging", "stage-ing"],
-    "production": ["production", "pro-duc-tion"],
-    "configuration": ["configuration", "config", "con-fig"],
-    
-    # Database & Storage
-    "database": ["database", "data-base"],
-    "postgresql": ["postgresql", "postgres", "post-gre-sql"],
-    "mongodb": ["mongodb", "mongo-db"],
-    "redis": ["redis", "red-is"],
-    "elasticsearch": ["elasticsearch", "elastic-search"],
-    "s3": ["s3", "s-3", "s three"],
-    
-    # Common Errors
-    "environment variables": ["environment variables", "android variables", "and-red variables"],
-    "secrets": ["secrets", "secret", "seekers"],
-    "uptime": ["uptime", "up-time"],
-    "downtime": ["downtime", "down-time"],
-    "latency": ["latency", "la-ten-cy"],
-    "throughput": ["throughput", "through-put"],
-    "availability": ["availability", "avail-ability"],
-    "scalability": ["scalability", "scal-ability"],
-    "reliability": ["reliability", "re-lie-ability"],
-    
-    # Operations
-    "restart": ["restart", "re-start"],
-    "scaling": ["scaling", "scal-ing"],
-    "traffic": ["traffic", "traf-fic"],
-    "spike": ["spike", "spik"],
-    "spike": ["spike", "flash"],
-    "peak": ["peak", "peek"],
-    "idle": ["idle", "eye-dul"],
-    "graceful": ["graceful", "grace-ful"],
-    "shutdown": ["shutdown", "shut-down"],
-    "startup": ["startup", "start-up"],
-    
-    # Common Phrases
-    "best practices": ["best practices", "best prac-ti-ces"],
-    "disaster recovery": ["disaster recovery", "dis-as-ter re-cov-ery"],
-    "high availability": ["high availability", "high a-vail-ability"],
-    "auto scaling": ["auto scaling", "auto-scal-ing"],
-    "load balancing": ["load balancing", "load-bal-an-cing"],
-    "version control": ["version control", "ver-shun con-trol"],
-}
-
-KNOWN_TERMS = sorted(set([
-    *[term.lower() for term in DEVOPS_VOCABULARY.keys()],
-    *[alias.lower() for aliases in DEVOPS_VOCABULARY.values() for alias in aliases],
+_STATIC_EXTRA_TERMS = [
     "payment orchestration",
     "payment process",
     "approval required",
@@ -273,10 +51,85 @@ KNOWN_TERMS = sorted(set([
     "staging",
     "slack",
     "teams",
-    "pagerduty"
-]))
-KNOWN_TERMS_SET = set(KNOWN_TERMS)
+    "pagerduty",
+]
+
+
+_KNOWN_TERMS_CACHE: Optional[Tuple[List[str], Set[str]]] = None
+_KNOWN_TERMS_CACHE_GLOSSARY_ID: Optional[int] = None
+
+
+def get_known_terms() -> Tuple[List[str], Set[str]]:
+    """Merge the static vocabulary with the live, human-approved glossary.
+
+    Cached and only rebuilt when glossary.get_glossary() actually returns a
+    different (reloaded) glossary object — a term approved via
+    scripts/review_vocabulary.py is still picked up immediately (get_glossary()
+    itself does the mtime check), but this function no longer rebuilds an
+    ~1000+-entry set from scratch on every single call. That rebuild was cheap
+    when the vocabulary was ~200 terms; after Phase 4's expansion to ~1000+ it
+    measurably slowed clean_transcript() (called once per Whisper segment), so
+    it's worth caching.
+    """
+    global _KNOWN_TERMS_CACHE, _KNOWN_TERMS_CACHE_GLOSSARY_ID
+
+    current_glossary = glossary.get_glossary()
+    if _KNOWN_TERMS_CACHE is not None and id(current_glossary) == _KNOWN_TERMS_CACHE_GLOSSARY_ID:
+        return _KNOWN_TERMS_CACHE
+
+    merged = set(_STATIC_EXTRA_TERMS)
+    merged.update(term.lower() for term in DEVOPS_VOCABULARY.keys())
+    merged.update(alias.lower() for aliases in DEVOPS_VOCABULARY.values() for alias in aliases)
+    merged.update(term.lower() for term in current_glossary.get("terms", []))
+    merged.update(acr.lower() for acr in current_glossary.get("acronyms", {}).keys())
+    terms = sorted(merged)
+
+    _KNOWN_TERMS_CACHE = (terms, set(terms))
+    _KNOWN_TERMS_CACHE_GLOSSARY_ID = id(current_glossary)
+    return _KNOWN_TERMS_CACHE
+
+
+def bucket_terms_by_word_count(terms: List[str]) -> Dict[int, Dict[str, List[str]]]:
+    """Index terms by (word count, first letter of the first word) so n-gram
+    fuzzy matching only scans same-length, same-first-letter candidates instead
+    of the whole (now 1000+ term) vocabulary per n-gram.
+
+    The word-count bucketing alone wasn't enough once the vocabulary grew ~5x in
+    Phase 4's second expansion pass — profiling a 3-sentence test transcript
+    showed ~56,000 textdistance calls (~750ms) just from clean_transcript(),
+    which runs once per Whisper segment during real transcription. The
+    first-letter filter is a standard fuzzy-matching "blocking" technique:
+    jaro-winkler itself is prefix-weighted, so a target whose first word starts
+    with a different letter than the candidate almost never scores near the
+    0.88 auto-correct threshold anyway — cutting the comparison pool ~15-20x
+    for a small, acceptable chance of missing a same-length correction whose
+    very first letter was also mis-transcribed (rare for multi-word phrases,
+    and exactly the kind of case the self-learning candidate review exists to
+    catch instead of blind auto-correction).
+    """
+    buckets: Dict[int, Dict[str, List[str]]] = {}
+    for term in terms:
+        n = len(term.split())
+        first_letter = term[0].lower() if term else ""
+        buckets.setdefault(n, {}).setdefault(first_letter, []).append(term)
+    return buckets
+
+
+def candidates_for_ngram(buckets: Dict[int, Dict[str, List[str]]], n: int, phrase: str) -> List[str]:
+    """Look up the (word count, first letter)-bucketed candidate terms for a
+    given n-gram phrase, as produced by bucket_terms_by_word_count()."""
+    first_letter = phrase[0].lower() if phrase else ""
+    return buckets.get(n, {}).get(first_letter, [])
+
+
 MIN_FUZZY_PHRASE_WORDS = 2
+# Deliberately high: two unrelated short English words routinely score 0.65-0.75
+# against each other by coincidence (e.g. "should" vs "build" = 0.70). The
+# intended use of multi-word fuzzy matching is recovering a hyphenated term that
+# got split into separate tokens (e.g. "auto scal ing" -> "auto scaling"), where
+# each word already closely resembles its target — a genuine match doesn't need
+# a low bar here.
+MIN_PER_WORD_SIMILARITY = 0.82
 
 # ============================================================================
 # Phrase-Level Corrections
@@ -424,38 +277,21 @@ def remove_repeated_phrases(text: str) -> str:
     return cleaned
 
 
-def clean_transcript(text: str, anonymize_pii: bool = True) -> str:
+def clean_transcript(text: str) -> str:
     """Normalize transcript before semantic classification.
 
     Steps:
-    1. Anonymize PII (passwords, emails, secrets, account IDs)
-    2. Normalize whitespace
-    3. Apply phrase and word corrections
-    4. Remove filler words
-    5. Collapse repeated words/phrases
-    6. Re-apply DevOps corrections over cleaned text
-    
+    1. Normalize whitespace
+    2. Apply phrase and word corrections
+    3. Remove filler words
+    4. Collapse repeated words/phrases
+    5. Re-apply DevOps corrections over cleaned text
+
     Args:
         text: Input transcript
-        anonymize_pii: Whether to anonymize sensitive data (default True)
     """
     if not text:
         return text
-
-    # Step 0: Anonymize PII if available
-    # The anonymization step that used Presidio to replace detected PII with
-    # "[REDACTED]" has been commented out because it was introducing
-    # blocking placeholders into transcripts and coverage outputs.
-    # The libraries responsible are `presidio_analyzer` and `presidio_anonymizer`.
-    #
-    # if anonymize_pii and HAS_PRESIDIO:
-    #     try:
-    #         text, anonymization_report = anonymize_transcript_before_classification(text)
-    #         if anonymization_report.get("detection_count", 0) > 0:
-    #             logger.info(f"Anonymized {anonymization_report['detection_count']} PII instances: "
-    #                        f"{anonymization_report.get('detections_by_type', {})}")
-    #     except Exception as e:
-    #         logger.warning(f"PII anonymization failed: {e}. Continuing without anonymization.")
 
     normalized = re.sub(r"[\r\n\t]+", " ", text)
     normalized = re.sub(r"\s+", " ", normalized).strip()
@@ -499,6 +335,23 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
                     "original": original,
                     "corrected": replacement,
                     "pattern": pattern
+                })
+
+        # Human-approved glossary phrases apply on every transcript, not just the
+        # low-confidence repair path in context_mapper.py's ContextRepair. These are
+        # plain text entered via the approval CLI, not regex, so match them as
+        # literal (escaped) phrases rather than raw patterns.
+        for phrase, replacement in glossary.get_glossary().get("phrase_corrections", {}).items():
+            pattern = re.escape(phrase)
+            matches = list(re.finditer(pattern, updated, re.IGNORECASE))
+            for match in matches:
+                original = match.group(0)
+                updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
+                corrections_applied.append({
+                    "type": "glossary_phrase",
+                    "original": original,
+                    "corrected": replacement,
+                    "pattern": phrase
                 })
         return updated
 
@@ -550,22 +403,48 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
     if not words:
         return text, []
 
+    known_terms, known_terms_set = get_known_terms()
+    terms_by_word_count = bucket_terms_by_word_count(known_terms)
+
     max_n = min(4, len(words))
     for n in range(max_n, MIN_FUZZY_PHRASE_WORDS - 1, -1):
         for i in range(len(words) - n + 1):
-            phrase = " ".join(words[i:i+n]).lower()
-            if phrase in KNOWN_TERMS_SET:
+            ngram_words = words[i:i+n]
+            phrase = " ".join(ngram_words).lower()
+            if phrase in known_terms_set:
+                continue
+            # Skip n-grams where a word is already an exact known term on its own.
+            # Without this, an already-correct word can get swept into a fuzzy
+            # match with an unrelated neighbor purely by jaro-winkler's prefix
+            # sensitivity — e.g. "RabbitMQ heavily" scoring 0.89 against the
+            # known alias "rabbit mq" and replacing both words, silently
+            # dropping "heavily". This got materially more likely once the
+            # vocabulary grew from ~60 to ~700+ terms (Phase 4) — more targets,
+            # more coincidental collisions.
+            if any(w.lower() in known_terms_set for w in ngram_words):
                 continue
             best_term = None
             best_score = 0.0
-            for target in KNOWN_TERMS:
+            for target in candidates_for_ngram(terms_by_word_count, n, phrase):
                 target_words = target.split()
-                if len(target_words) != n:
-                    continue
                 score = textdistance.jaro_winkler.normalized_similarity(phrase, target)
-                if score > best_score:
-                    best_score = score
-                    best_term = target
+                if score <= best_score:
+                    continue
+                # Whole-phrase jaro-winkler alone is fooled by a shared leading
+                # word: "code is"/"code should" both score ~0.9 against the known
+                # alias "code build" purely because "code " is a long shared
+                # prefix, even though "is"/"should" bear no resemblance to
+                # "build" — the match would silently replace real words. Require
+                # every individual word to at least loosely resemble its
+                # counterpart too.
+                per_word_ok = all(
+                    textdistance.jaro_winkler.normalized_similarity(w.lower(), tw) >= MIN_PER_WORD_SIMILARITY
+                    for w, tw in zip(ngram_words, target_words)
+                )
+                if not per_word_ok:
+                    continue
+                best_score = score
+                best_term = target
             if best_term and best_score >= threshold:
                 escaped_phrase = re.escape(" ".join(words[i:i+n]))
                 pattern = re.compile(rf"\b{escaped_phrase}\b", re.IGNORECASE)
