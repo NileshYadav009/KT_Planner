@@ -84,10 +84,6 @@ EXPECTED = {
         "Confluence",
         "RDS",
     ],
-    "plain_english_notes": [
-        "tribal knowledge",
-        "cache invalidation",
-    ],
     "day1_survival_checklist": [
         "new team members",
         "grafana dashboards",

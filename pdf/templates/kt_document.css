@@ -4,6 +4,9 @@
   font-family: Inter, 'Segoe UI', Arial, sans-serif;
   font-size: 11pt;
   line-height: 1.55;
+  --accent: #2563eb;
+  --accent-dark: #1d4ed8;
+  --danger: #dc2626;
 }
 
 @page {
@@ -127,8 +130,18 @@ h1 {
   font-size: 18pt;
   color: #111827;
   margin: 0 0 0.8rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 2px solid var(--accent);
   padding-bottom: 0.55rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.section-number {
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.03em;
 }
 
 .block-title {
@@ -178,14 +191,16 @@ th, td {
 }
 
 th {
-  background: #f3f4f6;
+  background: #eef2ff;
+  color: #1e293b;
   font-weight: 600;
+  border-bottom: 2px solid var(--accent);
 }
 
 .block-card {
   margin-bottom: 1.2rem;
   padding: 0.8rem 1rem;
-  border-left: 3px solid #e5e7eb;
+  border-left: 3px solid var(--accent);
   background: #fafafa;
 }
 
@@ -193,8 +208,13 @@ th {
   border-top: 1px solid #f3f4f6;
 }
 
-.block-card:has(p strong) {
-  border-left-color: #ef4444;
+/* Reserved strictly for WarningBlock content (see pdf_rendering.py's
+   render_section_blocks, which assigns this class only for block_type ==
+   "WarningBlock") — previously this used a `:has(p strong)` selector that
+   fired on any bold text, which incorrectly red-flagged sections whose
+   narrative happened to contain **markdown bold** from the LLM polish step. */
+.block-card.warning-card {
+  border-left-color: var(--danger);
   background: #fff8f8;
 }
 

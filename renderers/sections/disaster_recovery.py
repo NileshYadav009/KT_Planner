@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 from renderers.blocks.checklist import build_block as build_checklist_block
 from renderers.blocks.warning import build_block as build_warning_block
 from renderers.blocks.narrative import build_block as build_narrative_block
+from renderers.blocks.common import no_coverage_block
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
@@ -41,6 +42,6 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         if fallback:
             blocks.append(build_narrative_block(title, fallback))
         else:
-            blocks.append(build_narrative_block(title, ["Disaster recovery guidance is being synthesized from the KT content."]))
+            blocks.append(no_coverage_block(title))
 
     return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}

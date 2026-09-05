@@ -102,7 +102,6 @@ TECH_STACK_FIELD_ADDITIONS = {
 }
 
 OPTIONAL_SECTION_INCLUSION_RULES = {
-    "plain_english_notes": 0.30,
     "cost_optimization": 0.35,
     "security_controls": 0.40,
     "disaster_recovery": 0.40,

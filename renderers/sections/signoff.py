@@ -1,6 +1,5 @@
 from typing import Dict, Any, List
 from renderers.blocks.narrative import build_block as build_narrative_block
-from renderers.blocks.warning import build_block as build_warning_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.common import no_coverage_block
 
@@ -13,28 +12,24 @@ def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
-    title = section.get("title", "Security Controls")
+    title = section.get("title", "Sign-off")
     fields = section.get("fields", {})
 
-    paragraphs: List[str] = []
-    warnings: List[str] = []
-    tech_rows: List[Dict[str, str]] = []
-
-    if fields.get("security_scan_config", {}).get("value"):
-        tech_rows.append({"label": "Security scanner", "value": fields["security_scan_config"]["value"]})
-    if fields.get("vault_configuration", {}).get("value"):
-        paragraphs.append(f"Secret management is handled by {fields['vault_configuration']['value']}.")
-    if fields.get("security_issues", {}).get("value"):
-        warnings.append(fields["security_issues"]["value"])
+    rows: List[Dict[str, str]] = []
+    if fields.get("outgoing_owner", {}).get("value"):
+        rows.append({"label": "Outgoing owner", "value": str(fields["outgoing_owner"]["value"])})
+    if fields.get("incoming_owner", {}).get("value"):
+        rows.append({"label": "Incoming owner", "value": str(fields["incoming_owner"]["value"])})
+    if fields.get("date", {}).get("value"):
+        rows.append({"label": "Sign-off date", "value": str(fields["date"]["value"])})
+    if fields.get("approved", {}).get("value") is not None:
+        approved = fields["approved"]["value"]
+        rows.append({"label": "Approved by incoming owner", "value": "Yes" if approved else "Not yet"})
 
     blocks = []
-    if paragraphs:
-        blocks.append(build_narrative_block(title, paragraphs))
-    if tech_rows:
-        blocks.append(build_technology_grid("Security tools", tech_rows))
-    if warnings:
-        blocks.append(build_warning_block("Security warnings", warnings))
-    if not blocks:
+    if rows:
+        blocks.append(build_technology_grid("Sign-off record", rows))
+    else:
         fallback = _coverage_paragraphs(section)
         if fallback:
             blocks.append(build_narrative_block(title, fallback))

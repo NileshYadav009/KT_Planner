@@ -37,7 +37,9 @@ def _extract_escalation_chain(text: str) -> Optional[str]:
     Handles phrases like "Escalation path starts with an on-call engineer 
     followed by the platform engineering manager and then the head of engineering."
     
-    Returns steps joined with ' → ' arrow separator.
+    Returns steps joined with ' -> ' separator, matching the convention used by
+    the LLM structured-extraction prompt for this same field (see
+    llm/prompts.py) and parsed by knowledge/relationships.py.
     """
     match = re.search(
         r"escalation\s+(?:path|chain)?\s*(?:starts with|starting with)?\s*(.+?)(?:\.|$)",
@@ -45,13 +47,13 @@ def _extract_escalation_chain(text: str) -> Optional[str]:
     )
     if not match:
         return None
-    
+
     clause = match.group(1)
     # Split on explicit transition keywords
     steps = re.split(r"\bfollowed by\b|\band then\b|\bthen\b", clause, flags=re.IGNORECASE)
     steps = [s.strip(" .") for s in steps if s.strip(" .")]
-    
-    return " → ".join(steps) if len(steps) >= 2 else None
+
+    return " -> ".join(steps) if len(steps) >= 2 else None
 
 
 def _extract_ownership(text: str) -> dict:
@@ -236,7 +238,19 @@ def populate_fields(
     coverage: Dict[str, Any],
     llm_provider=None,
     embedding_model=None,
+    section_content: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """
+    section_content: kt.section_content (raw, timestamped sentences per section,
+    as produced by context_mapper) — optional, but without it every extracted
+    field's evidence falls back to knowledge_builder's generic "first 3
+    sentences of the section" instead of the one sentence that actually
+    supports it. This is the SAME list knowledge_builder._collect_evidence()
+    indexes into via source_chunk_index, so the index computed here must refer
+    to it specifically, not to `coverage[...]['content']` (a different,
+    polished/reordered view of the section) — using the wrong list would
+    silently attach the wrong evidence rather than just the generic fallback.
+    """
     result = {}
     for section in dynamic_schema:
         section_id = section.get("id")
@@ -254,6 +268,9 @@ def populate_fields(
             section_text = str(content)
             sentences = [section_text]
 
+        raw_sentences = ((section_content or {}).get(section_id, {}) or {}).get("sentences", [])
+        raw_sentence_texts = [s.get("text", "") for s in raw_sentences if isinstance(s, dict)]
+
         result[section_id] = {}
         _populate_fields_recursive(
             fields=fields,
@@ -261,12 +278,40 @@ def populate_fields(
             section_title=section_title,
             section_text=section_text,
             sentences=sentences,
+            raw_sentence_texts=raw_sentence_texts,
             output=result[section_id],
             llm_provider=llm_provider,
             embedding_model=embedding_model,
         )
 
     return result
+
+
+def find_source_sentence_index(value: Any, raw_sentence_texts: List[str]) -> Optional[int]:
+    """Best-effort: which raw sentence a field's extracted value most likely
+    came from, for precise per-fact evidence (see populate_fields docstring).
+    Returns None (not a guess) when nothing lines up well enough — a wrong
+    index would be worse than knowledge_builder's generic fallback, not better.
+
+    Public (no leading underscore) — also used by ai.wrap_structured_as_fields()
+    for the structured-extraction sections (security_controls, disaster_recovery,
+    ownership_escalation, monitoring_observability), which never go through
+    populate_fields() at all since they have no "fields" array in the schema.
+    """
+    if not value or not raw_sentence_texts:
+        return None
+    value_str = str(value).strip().lower()
+    if len(value_str) < 3:
+        return None
+    # Pattern extractors sometimes join multiple matches with ", " (e.g. a
+    # tool list) — no single sentence may contain the whole joined string, so
+    # also try each part on its own.
+    candidates = [value_str] + [v.strip() for v in value_str.split(",") if len(v.strip()) >= 3]
+    for idx, text in enumerate(raw_sentence_texts):
+        text_lower = text.lower()
+        if any(c in text_lower for c in candidates):
+            return idx
+    return None
 
 
 def _populate_fields_recursive(
@@ -278,7 +323,17 @@ def _populate_fields_recursive(
     output: Dict[str, Any],
     llm_provider=None,
     embedding_model=None,
+    raw_sentence_texts: Optional[List[str]] = None,
 ):
+    raw_sentence_texts = raw_sentence_texts or []
+
+    def _emit(value: Any, confidence: float, source: str):
+        entry = {"value": value, "confidence": confidence, "source": source}
+        idx = find_source_sentence_index(value, raw_sentence_texts)
+        if idx is not None:
+            entry["source_chunk_index"] = idx
+        return entry
+
     for field in fields:
         field_id = field.get("id")
         field_type = field.get("type", "text")
@@ -294,18 +349,19 @@ def _populate_fields_recursive(
                 output=output[field_id],
                 llm_provider=llm_provider,
                 embedding_model=embedding_model,
+                raw_sentence_texts=raw_sentence_texts,
             )
             continue
 
         value = _extract_by_pattern(field, section_text)
         if value is not None:
-            output[field_id] = {"value": value, "confidence": 0.90, "source": "pattern"}
+            output[field_id] = _emit(value, 0.90, "pattern")
             continue
 
         if field_type == "text" and sentences:
             value = _extract_by_semantic(field, sentences, embedding_model)
             if value is not None:
-                output[field_id] = {"value": value, "confidence": 0.65, "source": "semantic"}
+                output[field_id] = _emit(value, 0.65, "semantic")
                 continue
 
         if llm_provider and section_text.strip() and field_type != "table":
@@ -314,7 +370,7 @@ def _populate_fields_recursive(
                 raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=256, stop_sequences=["\n"])
                 val = raw.strip() if isinstance(raw, str) else ""
                 if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
-                    output[field_id] = {"value": val, "confidence": 0.75, "source": "llm"}
+                    output[field_id] = _emit(val, 0.75, "llm")
                     continue
             except Exception as exc:
                 logger.warning("LLM field fill failed for %s.%s: %s", section_id, field_id, exc)

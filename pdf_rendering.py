@@ -9,6 +9,7 @@ import os
 import re
 
 from renderers import get_renderer
+from renderers.blocks.common import NOT_COVERED_MESSAGE
 
 try:
     from markdown import markdown as markdown_to_html
@@ -57,16 +58,26 @@ def _render_paragraph_text(text: str) -> str:
 
 def render_section_blocks(rendered_sections: list) -> str:
     html = []
-    for section in rendered_sections:
-        section_title = html_escape(section.get("section_title") or section.get("section_id") or "Section")
-        section_id = section.get("section_id") or section_title.lower().replace(" ", "-")
+    for idx, section in enumerate(rendered_sections, start=1):
+        raw_section_title = section.get("section_title") or section.get("section_id") or "Section"
+        section_title = html_escape(raw_section_title)
+        section_id = section.get("section_id") or raw_section_title.lower().replace(" ", "-")
         html.append(f"<section class=\"section-block\" id=\"{html_escape(section_id)}\">")
-        html.append(f"<h2 class=\"section-title\">{section_title}</h2>")
+        html.append(
+            f"<h2 class=\"section-title\">"
+            f"<span class=\"section-number\">{idx:02d}</span>{section_title}</h2>"
+        )
         for block in section.get("blocks", []):
-            block_title = html_escape(block.get("title") or block.get("type", "Block"))
+            raw_block_title = block.get("title") or block.get("type", "Block")
             block_type = block.get("type")
-            html.append(f"<div class=\"block-card\">")
-            html.append(f"<h3 class=\"block-title\">{block_title}</h3>")
+            card_classes = "block-card warning-card" if block_type == "WarningBlock" else "block-card"
+            html.append(f"<div class=\"{card_classes}\">")
+            # Skip the block's own heading when it just repeats the section
+            # title (the common case for single-block sections) — avoids the
+            # doubled-heading pattern (h2 "FOO" immediately followed by h3
+            # "FOO") that showed up throughout the document.
+            if raw_block_title.strip().lower() != raw_section_title.strip().lower():
+                html.append(f"<h3 class=\"block-title\">{html_escape(raw_block_title)}</h3>")
             if block_type == "NarrativeBlock":
                 for p in block.get("paragraphs", []):
                     html.append(f"<div class=\"narrative-para\">{_render_paragraph_text(p)}</div>")
@@ -197,7 +208,7 @@ def _build_fallback_paragraphs(section: dict) -> list:
     if not paragraphs and section.get("description"):
         _add(str(section["description"]))
 
-    return paragraphs or ["Rendered content not available."]
+    return paragraphs or [NOT_COVERED_MESSAGE]
 
 
 def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
@@ -207,8 +218,7 @@ def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
         if block_type == "NarrativeBlock":
             paragraphs = [p for p in block.get("paragraphs", []) if isinstance(p, str) and p.strip()]
             if paragraphs:
-                lowered = [p.lower() for p in paragraphs]
-                if not any("rendered content not available" in p or "being built" in p or "synthesized" in p or "assembled" in p for p in lowered):
+                if not all(p.strip() == NOT_COVERED_MESSAGE for p in paragraphs):
                     return True
         elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock"}:
             return True

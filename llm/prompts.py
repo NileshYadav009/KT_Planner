@@ -60,6 +60,25 @@ SECTION_STRUCTURED_PROMPTS = {
         "Extract from these fragments:\n{fragments}\n\n"
         "JSON:"
     ),
+    "cost_optimization": (
+        "Return ONLY valid JSON (no markdown, no extra text):\n"
+        "{{\"levers\": [{{\"lever\": string, \"detail\": string}}]}}\n\n"
+        "- lever: the cost optimization technique (e.g. \"Spot instances\", \"Scheduled scaling\")\n"
+        "- detail: what it applies to and any specifics mentioned\n"
+        "One entry per distinct lever actually discussed. Do NOT invent levers not "
+        "present in the fragments.\n\n"
+        "Extract from these fragments:\n{fragments}\n\nJSON:"
+    ),
+    "common_failures": (
+        "Return ONLY valid JSON (no markdown, no extra text). Use null for anything not mentioned:\n"
+        "{{\"failures\": [{{\"symptom\": string, \"cause\": string, \"fix\": string, "
+        "\"frequency\": string|null, \"ticket\": string|null}}]}}\n\n"
+        "One entry per distinct failure/issue described. \"frequency\" is how often it "
+        "happens if mentioned (e.g. \"weekly\", \"during deploys\"). \"ticket\" is a "
+        "KEDB/ticket reference if mentioned. Do NOT invent failures not present in the "
+        "fragments.\n\n"
+        "Extract from these fragments:\n{fragments}\n\nJSON:"
+    ),
 }
 
 SECTION_POLISH_PROMPTS = {

@@ -1189,12 +1189,10 @@ def detect_gaps(
     """
     STAGE 5: Detect coverage gaps and compute risk.
     
-    NEW APPROACH: Group consecutive sentences into TopicBlocks to preserve paragraph continuity.
-    
-    Rules:
-    - 0 blocks → missing
-    - 1 block → weak
-    - 2+ blocks → covered
+    NEW APPROACH: Group consecutive sentences into TopicBlocks to preserve paragraph continuity,
+    then score each section's blocks with semantic_coverage_score() (confidence/depth/
+    actionability/completeness) rather than by block count alone. Status thresholds:
+    scs >= 0.65 -> covered, scs >= 0.40 -> weak, else missing.
     """
     coverage = {}
     

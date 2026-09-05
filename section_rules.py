@@ -148,17 +148,6 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         0.94,
     ),
     (
-        "plain_english_notes",
-        [
-            r"\btribal\s+knowledge\b",
-            r"\bcache\s+invalidation\s+can\s+take\s+longer\b",
-            r"\bsharp\s+edges?\b",
-            r"\bgotcha\b",
-            r"\bworkaround\b",
-        ],
-        0.96,
-    ),
-    (
         "day1_survival_checklist",
         [
             r"\bfor\s+new\s+team\s+members\b",

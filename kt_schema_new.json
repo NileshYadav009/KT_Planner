@@ -180,30 +180,6 @@
       ]
     },
     {
-      "id": "plain_english_notes",
-      "title": "Plain-English Notes",
-      "description": "Tribal knowledge, shortcuts, sharp edges, history",
-      "required": false,
-      "sub_topics": [
-        "tribal knowledge",
-        "shortcuts",
-        "sharp edges",
-        "cache invalidation",
-        "workarounds"
-      ],
-      "hints": [
-        "tribal knowledge",
-        "shortcuts",
-        "sharp edges",
-        "gotchas",
-        "workarounds",
-        "cache invalidation",
-        "takes longer than expected",
-        "history",
-        "pitfalls"
-      ]
-    },
-    {
       "id": "monitoring_observability",
       "title": "MONITORING & OBSERVABILITY",
       "required": true,

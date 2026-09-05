@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
+from renderers.blocks.common import no_coverage_block
 
 
 def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -15,14 +16,32 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
         parts = [part.strip() for part in text.split("|") if part.strip()]
         if len(parts) >= 2:
             rows.append({"label": parts[0], "value": parts[1]})
-        else:
-            rows.append({"label": text, "value": ""})
+        # Plain (non-pipe-delimited) text isn't a usable label/value pair — skip
+        # it rather than synthesizing a {"value": ""} row, which
+        # technology_grid.build_block() silently drops anyway (it requires both
+        # label AND value), leaving an empty-but-"meaningful" TechnologyGrid
+        # instead of the intended narrative fallback below.
+    return rows
+
+
+def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
+    levers = (section.get("_structured") or {}).get("levers")
+    if not isinstance(levers, list):
+        return []
+    rows = []
+    for item in levers:
+        if not isinstance(item, dict):
+            continue
+        lever = str(item.get("lever") or "").strip()
+        detail = str(item.get("detail") or "").strip()
+        if lever:
+            rows.append({"label": lever, "value": detail})
     return rows
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Cost Optimization")
-    rows = _coverage_rows(section)
+    rows = _structured_rows(section) or _coverage_rows(section)
     blocks = []
 
     if rows:
@@ -31,9 +50,11 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         content = section.get("coverage_content") or []
         if isinstance(content, str):
             content = [content]
-        blocks.append(build_narrative_block(title, [str(item).strip() for item in content if str(item).strip()]))
+        paragraphs = [str(item).strip() for item in content if str(item).strip()]
+        if paragraphs:
+            blocks.append(build_narrative_block(title, paragraphs))
 
     if not blocks:
-        blocks.append(build_narrative_block(title, ["Cost optimization recommendations are being extracted from KT coverage."]))
+        blocks.append(no_coverage_block(title))
 
     return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}

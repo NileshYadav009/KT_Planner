@@ -37,6 +37,7 @@ except Exception:
 from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
+from field_populator import find_source_sentence_index
 from llm_provider import get_llm_provider
 import requests
 
@@ -436,7 +437,7 @@ def _extract_structured_section(
         response = provider.generate(
             prompt,
             temperature=0.2,
-            max_output_tokens=512,
+            max_output_tokens=768,
             stop_sequences=[],
             system_prompt=(
                 "You are a JSON extractor for a Knowledge Transfer document. "
@@ -453,7 +454,7 @@ def _extract_structured_section(
     return None
 
 
-def wrap_structured_as_fields(structured: dict) -> Dict[str, dict]:
+def wrap_structured_as_fields(structured: dict, raw_sentence_texts: Optional[List[str]] = None) -> Dict[str, dict]:
     """Turn a flat {field_id: value} dict (as SECTION_STRUCTURED_PROMPTS's JSON
     schemas produce) into the same {field_id: {"value", "confidence", "source"}}
     shape field_populator.populate_fields() produces, so it can be merged
@@ -464,12 +465,25 @@ def wrap_structured_as_fields(structured: dict) -> Dict[str, dict]:
     Deliberately generic — the prompts already return values in the exact
     string/list shape each renderer expects (see llm/prompts.py), so no
     per-field join/format logic belongs here.
+
+    raw_sentence_texts (kt.section_content[section_id]'s sentences, if passed):
+    used to attach a precise source_chunk_index per field via the same
+    find_source_sentence_index() field_populator.populate_fields() uses —
+    without it, knowledge_builder._collect_evidence() falls back to attaching
+    the same generic "first 3 sentences of the section" to every fact in the
+    section, regardless of which one actually supports it.
     """
-    return {
-        field_id: {"value": value, "confidence": 0.75, "source": "llm_structured"}
-        for field_id, value in (structured or {}).items()
-        if value
-    }
+    fields = {}
+    for field_id, value in (structured or {}).items():
+        if not value:
+            continue
+        entry = {"value": value, "confidence": 0.75, "source": "llm_structured"}
+        if raw_sentence_texts:
+            idx = find_source_sentence_index(value, raw_sentence_texts)
+            if idx is not None:
+                entry["source_chunk_index"] = idx
+        fields[field_id] = entry
+    return fields
 
 
 def polish_coverage_sections(

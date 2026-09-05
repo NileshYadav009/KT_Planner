@@ -14,4 +14,8 @@ def build_fact(field_id: str, field: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_facts(section_id: str, fields: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return [build_fact(fid, field) for fid, field in fields.items()]
+    return [
+        build_fact(fid, field)
+        for fid, field in fields.items()
+        if field.get("value") not in (None, "", [])
+    ]

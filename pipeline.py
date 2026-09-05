@@ -176,6 +176,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             if section_id in (
                 "monitoring_observability", "security_controls",
                 "disaster_recovery", "ownership_escalation",
+                "cost_optimization", "common_failures",
             ):  # Sections with SECTION_STRUCTURED_PROMPTS (llm/prompts.py)
                 try:
                     structured = _extract_structured_section(
@@ -221,6 +222,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 coverage=coverage,
                 llm_provider=llm_provider,
                 embedding_model=embedding_model,
+                section_content=kt.section_content,
             )
         except Exception as exc:
             logger.warning("Field population failed: %s", exc)
@@ -231,8 +233,23 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # relationships) already expect. These sections have no "fields" array in
         # the schema, so populate_fields() above never produces anything for them —
         # this is additive, not an overwrite of real field-populator output.
+        #
+        # Restricted to the flat-scalar-field sections only. cost_optimization/
+        # common_failures return a *list* of records (levers/failures), which
+        # doesn't fit wrap_structured_as_fields()'s {field_id: value} shape — they
+        # stay on the `_structured` passthrough (set above) and are read directly
+        # by their renderers instead (see renderers/sections/cost_optimization.py,
+        # common_failures.py).
+        FLAT_STRUCTURED_SECTIONS = {
+            "monitoring_observability", "security_controls",
+            "disaster_recovery", "ownership_escalation",
+        }
         for section_id, structured in structured_data.items():
-            fields_from_structured = wrap_structured_as_fields(structured)
+            if section_id not in FLAT_STRUCTURED_SECTIONS:
+                continue
+            raw_sentences = (kt.section_content.get(section_id, {}) or {}).get("sentences", [])
+            raw_sentence_texts = [s.get("text", "") for s in raw_sentences if isinstance(s, dict)]
+            fields_from_structured = wrap_structured_as_fields(structured, raw_sentence_texts)
             if fields_from_structured:
                 populated_fields.setdefault(section_id, {}).update(fields_from_structured)
 

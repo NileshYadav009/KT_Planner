@@ -429,6 +429,441 @@ needs new renderer logic, not just data) — both lower-confidence, more invasiv
 fixes than the three done here. `danger_zones` and `plain_english_notes` already
 render correctly as-is, nothing to fix.
 
+## 9f. LLM provider parameter mismatch — Gemini/Groq weren't actually interchangeable (2026-09-05)
+
+User is running with Groq configured. Investigated "will the prompts built for
+Gemini work on Groq" precisely rather than assuming the provider abstraction
+was airtight just because it compiled.
+
+**Prompt text itself: yes, fully portable** — every prompt in `llm/prompts.py`
+and the ad-hoc prompts in `ai.py`/`field_populator.py`/`context_mapper.py` is
+plain text with no Gemini-specific syntax; Groq's OpenAI-compatible chat
+endpoint wraps it as a standard user message.
+
+**The generation parameters around it were not portable — a real, two-way bug**:
+every one of the 5 real call sites in this codebase (`ai.py`×2,
+`field_populator.py`, `context_mapper.py`×2) passes `max_output_tokens=`
+(Gemini's kwarg name). `GroqProvider.generate()` only checked `max_tokens=`, so
+every Groq-routed call silently ignored the caller's requested limit (512, 256,
+20, …) and always used the 1024 default instead — no error, just quietly wrong
+behavior. `GroqProvider` also never forwarded `stop_sequences` to the Groq API
+at all, so `field_populator.py`'s gap-fill (which relies on `stop_sequences=["\n"]`
+to keep an answer to one line) had no such guardrail under Groq. Mirror-image
+gap going the other way: `GeminiProvider.generate()` silently dropped
+`system_prompt` entirely, even though every structured-extraction/polish call
+site passes one expecting it to shape the response — Groq was honoring it,
+Gemini wasn't.
+
+**Fixed** in `llm_provider.py`: `GroqProvider` now reads `max_output_tokens`
+(falling back to `max_tokens` for any future OpenAI-native caller) and forwards
+non-empty `stop_sequences` as the API's `stop` parameter. `GeminiProvider` now
+forwards `system_prompt` as `system_instruction` in `GenerateContentConfig`.
+Both providers now honor the same canonical kwarg set — the actual promise of
+having an abstraction in the first place.
+
+**Also worth knowing (not a bug, a config trap)**: setting `GROQ_API_KEY` alone
+does **not** route calls to Groq. `create_llm_provider()` only returns
+`GroqProvider()` when the `LLM_PROVIDER` environment variable is literally set
+to `"groq"` — it defaults to `"gemini"` otherwise, regardless of whether a Groq
+key exists. Confirmed via `.env`: only `GEMINI_API_KEY` is set there; if
+`LLM_PROVIDER=groq` and `GROQ_API_KEY` are being set as real shell/OS
+environment variables outside this file, that's outside what this session can
+see or verify directly.
+
+**Verified**: both fixes confirmed via mocked-client unit tests (no real API
+calls needed) — `GroqProvider` now correctly passes `max_tokens=512` (was
+silently 1024) and `stop=['\n']` (was never passed) to the API call; empty
+`stop_sequences=[]` correctly omits the parameter rather than passing an empty
+list; `GeminiProvider` now correctly passes `system_instruction` when a
+`system_prompt` is given, and omits it when none is given. Full `tests/` suite
+still 7/7.
+
+## 9g. Groq model selection — llama-3.3-70b-versatile decommissioned, reasoning models don't fit this codebase's token budgets (2026-09-05)
+
+User confirmed `llama-3.3-70b-versatile` (this repo's hardcoded `GROQ_MODEL`
+default) is decommissioned on Groq. Verified live against the account's actual
+`/models` catalog rather than guessing from general knowledge — confirmed it's
+genuinely gone, and empirically tested the realistic replacement candidates at
+this codebase's tightest real budget (20 tokens, `context_mapper.py`'s
+classification verification):
+
+| Model | Result at 20-token budget |
+|---|---|
+| `openai/gpt-oss-120b` | Empty — all budget consumed by hidden reasoning tokens |
+| `openai/gpt-oss-20b` | Empty — same failure, smaller model didn't help |
+| `qwen/qwen3.6-27b` | Garbled — leaks `<think>...` chain-of-thought directly into content, truncated mid-thought |
+| `qwen/qwen3.8-27b` | **Clean `'OK'` in 2 tokens** |
+| `allam-2-7b` | Clean `'OK'` in 3 tokens (works, but 7B — smaller/less capable) |
+| `groq/compound-mini` | Clean output, but 52 tokens for a 1-word answer — an agentic/tool-orchestration model, unpredictable for strict "return only this JSON" tasks |
+
+`qwen/qwen3.8-27b` also verified on a realistic structured-JSON-extraction
+prompt (disaster_recovery's actual `SECTION_STRUCTURED_PROMPTS` template) —
+clean, correctly-keyed JSON output, no reasoning leakage, 73 tokens with
+headroom to spare inside the 512-token budget that call site uses.
+
+**Fixed**: `llm_provider.py`'s `GROQ_MODEL` default changed from the
+decommissioned `llama-3.3-70b-versatile` to `qwen/qwen3.8-27b` — verified
+end-to-end through the actual `GroqProvider.generate()` code path (not just raw
+API calls) at the 20-token classification-verification budget, confirmed
+non-empty, well-formed output.
+
+**General lesson for anyone changing `GROQ_MODEL` later**: this codebase's LLM
+call sites use short token budgets (20-1024) written for fast, direct-answer
+models. A reasoning model (anything emitting hidden chain-of-thought — the
+`openai/gpt-oss-*` family, `qwen/qwen3.6-27b` in thinking mode) will silently
+return empty or garbled content at these budgets unless either the model's
+reasoning is disabled/low-effort, or every `max_output_tokens` value in the
+codebase is substantially raised to leave headroom. Test any new model choice
+against a real call site's actual budget before assuming it works — a
+"successful" trivial test can still fail once the token budget gets tight.
+
+## 9h. Rate-limit retry — turn transient 429s into eventual success instead of silent fallback (2026-09-05)
+
+Follow-up to §9g: user's live Groq dashboard showed 35 HTTP 200 / 17 HTTP 429
+out of 52 requests in one burst minute. Every real call site already wraps
+`provider.generate()` in try/except that just logs and falls back to non-LLM
+behavior on any failure — turning a transient, recoverable rate limit into a
+permanent quality loss for that field/section, one out of every ~3 calls in
+that burst.
+
+**Fixed** in `llm_provider.py`: both `GeminiProvider` and `GroqProvider` (SDK
+and raw-HTTP paths) now retry through a shared `_call_with_rate_limit_retry()`
+helper on rate-limit errors — honoring the provider's own suggested delay when
+available (`Retry-After` header for Groq/OpenAI-compatible responses,
+`retryDelay` parsed out of Gemini's error body) and falling back to capped
+exponential backoff (1s, 2s, 4s, ... up to `LLM_RETRY_MAX_DELAY_SECONDS`, default
+60s) otherwise. Up to `LLM_RETRY_MAX_ATTEMPTS` (default 5) retries before
+re-raising — so the existing fallback-on-exception behavior at each call site
+still applies as the final safety net if a provider is *genuinely* down, not
+just rate-limited.
+
+**Verified** with the real exception types, not approximations: constructed an
+actual `openai.RateLimitError` (real `httpx.Response`, real `retry-after`
+header) and confirmed the retry logic correctly detects it, extracts the exact
+header value, waits, and returns the second call's result. Also verified the
+Gemini-style `retryDelay: '7s'` string-embedded format parses correctly, and
+that a persistently-failing call exhausts all attempts with the expected
+backoff sequence (1/2/4/8/16s) and cleanly re-raises rather than hanging.
+Full `tests/` suite still 7/7.
+
+**Trade-off worth knowing**: this makes the pipeline *slower under load*
+instead of *silently degraded* — a heavily rate-limited run can now take
+significantly longer (worst case ~31s of added wait per call that hits the
+default 5-retry ceiling) rather than finishing fast with missing LLM-derived
+content. That's the intended trade for "all requests eventually succeed."
+
+## 9i. Phase 7 — Evidence/traceability: precise per-fact evidence was silently never computed (2026-09-05)
+
+Checked "why did Continuum put this information into the KT" precisely.
+`knowledge_builder._collect_evidence()` was clearly *written* expecting precise
+per-field evidence — it checks `populated_field.get("source_chunk_index")` and,
+if present, returns just that one sentence; otherwise it falls back to a
+generic "first 3 sentences of the section" for every fact. **Nothing in the
+pipeline that actually feeds it ever set `source_chunk_index`** — confirmed by
+grep: the only place that ever computed one (`ai.map_analysis_to_fields()`) is
+a completely separate, parallel field-extraction system whose output
+(`mapped_fields`) is stored in the job dict but never passed into
+`build_knowledge_object`. Every fact in every section was silently getting the
+identical generic evidence, regardless of which sentence actually supported it.
+
+**Fixed** in two places, since sections split across two different
+field-producing code paths (found this the hard way — first live test targeted
+`disaster_recovery`, which turned out to be entirely on the *other* path):
+- `field_populator.py`: new public `find_source_sentence_index(value, raw_sentence_texts)`
+  — best-effort substring match of an extracted value against the section's
+  raw, timestamped sentences (handles comma-joined multi-value matches too).
+  `populate_fields()` now accepts `section_content` (threaded from
+  `pipeline.py`'s `kt.section_content`) and attaches `source_chunk_index` to
+  every pattern/semantic/LLM-derived field via a shared `_emit()` helper.
+- `ai.wrap_structured_as_fields()` (the Phase 6 mechanism that feeds
+  `security_controls`/`disaster_recovery`/`ownership_escalation`/
+  `monitoring_observability`, which have no `fields` array in the schema and so
+  never go through `populate_fields()` at all) now also accepts
+  `raw_sentence_texts` and calls the same shared `find_source_sentence_index()`.
+
+**Critical alignment detail**: the index computed must refer to the *exact*
+list `_collect_evidence()` later indexes into (`kt.section_content[id]['sentences']`)
+— not `coverage[id]['content']`, which `field_populator.py` already had access
+to and initially seemed like the natural thing to search, but is a different,
+polished/reordered view with a different item count. Computing an index against
+the wrong list would silently attach *wrong* evidence rather than just fall
+back to the generic (and safe) default — worse than the bug being fixed. Both
+new call sites explicitly source `raw_sentence_texts` from `kt.section_content`.
+
+**Verified**: unit tests on `find_source_sentence_index()` — correct index for
+values genuinely present in a sentence, honest `None` (not a guess) for values
+that aren't. Full `tests/` suite 7/7. Live end-to-end run (real Groq calls)
+before/after comparison on `disaster_recovery`'s 4 facts: before the second fix,
+all 4 shared identical evidence (the generic fallback); after, each fact
+correctly points to its own distinct, accurate source sentence (verified by
+reading the actual returned text, not just checking indices differ).
+
+### 9j. Phase 8 — knowledge model verification: 2 real defects found and fixed
+
+Audited `knowledge/knowledge_builder.py` and its four builders
+(`facts.py`/`entities.py`/`evidence.py`/`relationships.py`) against the brief's
+"genuine facts, not invented content" principle, now that Phase 6/7 have made
+the underlying field data real. Two defects found:
+
+1. **`build_facts()` didn't filter unfilled placeholder fields** (`knowledge/facts.py`).
+   `field_populator._populate_fields_recursive()` emits an entry for *every*
+   declared field, filled or not — unfilled ones are
+   `{"value": "", "confidence": 0.0, "source": "unfilled"}` (see
+   `field_populator.py:376`). `build_entities()` already correctly skips these
+   (`if not value: continue`), but `build_facts()` had no such guard, so the
+   knowledge object's `facts` array — and by extension the raw `/schema/{job_id}`
+   API response — carried a noise entry per unfilled field, each with
+   `_collect_evidence()`'s generic first-3-sentences fallback attached as if it
+   were real evidence for a fact that doesn't exist. `pdf_rendering.py`'s
+   `_build_fallback_paragraphs()` happened to filter these at render time
+   (`if isinstance(value, str) and value.strip()`), so the PDF itself was never
+   affected — this was purely an API/knowledge-object correctness issue, not a
+   visible rendering bug. Fixed by adding the same filter `build_entities()`
+   already uses: `if field.get("value") not in (None, "", [])`.
+   Verified: unit-checked with a 3-field input (1 real, 2 unfilled) — `build_facts`
+   now returns exactly the 1 real fact.
+
+2. **Escalation-chain separator inconsistency** (`field_populator.py` /
+   `llm/prompts.py` / `knowledge/relationships.py`). Three producers/consumers of
+   the `escalation_chain` field id disagreed on delimiter: the pattern-extraction
+   fallback `_extract_escalation_chain()` joined steps with `" → "` (unicode
+   arrow), while the Phase 6 LLM structured-extraction prompt instructs `"->"`
+   (ASCII) and `knowledge/relationships.py`'s `build_relationships()` only ever
+   split on `"->"`. Traced whether this is live: `ownership_escalation` (the
+   section that owns this field conceptually) has no `fields` array in
+   `kt_schema_new.json`, so it's populated exclusively via the Phase 6
+   LLM-structured path (`ai.wrap_structured_as_fields`, which already uses
+   `"->"`) — never via `_populate_fields_recursive`'s pattern dispatch. The only
+   schema field matching the `"escalation" in field_id` check is
+   `handover_completion.escalation_clear`, which is `type: "boolean"` and returns
+   from the boolean branch before reaching the escalation-chain dispatch. **So
+   `_extract_escalation_chain()` is current dead code** — the mismatch has no
+   live effect today, but is a landmine (same class as the id-mismatch bugs
+   found in Phases 2/5/6/7): the moment any schema field routes a text value
+   through that function, `relationships.py` would silently produce zero
+   "escalates to" relationships instead of erroring. Standardized on `"->"`
+   (matching the two call sites that are actually live) in
+   `_extract_escalation_chain()`. Verified: fed a realistic escalation sentence
+   through `_extract_escalation_chain()` → `build_relationships()` end-to-end,
+   confirmed 2 correct "escalates to" relationship triples now round-trip
+   instead of silently 0.
+
+**No other defects found** in the knowledge-model layer this pass —
+`build_entities`, `build_evidence`, `_infer_system_name`, and the `_structured`
+passthrough (still needed for `renderers/sections/monitoring.py`'s legacy
+technology-grid path, not dead) all check out correctly against their actual
+call sites.
+
+### 9k. Phase 12 — cost_optimization / common_failures structured extraction (the 2 sections Phase 6 scoped out)
+
+Picked up the 2 sections Phase 6 explicitly deferred as "different shape, more
+invasive." Confirmed precisely why: `renderers/sections/cost_optimization.py`
+and `common_failures.py` already had real `TechnologyGrid`/`DecisionTable`
+rendering code, but it only activates on pipe-delimited (`"label | value"`)
+`coverage_content` strings — nothing in the pipeline ever produces that format
+(the LLM polish step writes prose), so both sections always fell back to
+generic narrative, same failure mode as the 4 sections fixed in Phase 6.
+
+Unlike those 4 (flat scalar fields, fit `ai.wrap_structured_as_fields()`'s
+`{field_id: value}` shape), these 2 need a **list of records** (multiple
+levers / multiple failures). Reused the existing, already-wired `_structured`
+passthrough instead (`coverage[sid]['_structured']`, already forwarded by
+`knowledge_builder.py` and already consumed this way by
+`renderers/sections/monitoring.py`) rather than forcing list data through the
+flat-field mechanism.
+
+Changes: 2 new `SECTION_STRUCTURED_PROMPTS` entries (`llm/prompts.py`);
+`_extract_structured_section`'s token budget raised 512→768 (`ai.py`, headroom
+for multi-item lists, applies uniformly — safe for the existing 4 sections
+too); `pipeline.py`'s extraction-trigger tuple extended to include both new
+ids, and the `populated_fields` merge loop explicitly restricted to the
+original 4 flat-shaped sections (a `FLAT_STRUCTURED_SECTIONS` guard) so the 2
+list-shaped ones don't get wrongly flattened into a single nonsense "fact"
+holding a raw Python list; both renderers updated to read `_structured` first,
+falling back to their original pipe-parsing/narrative paths unchanged if
+absent. `common_failures.py`'s table also widened from a legacy 3-column shape
+to the full 5 columns `kt_schema_new.json` actually declares for this section
+(`Issue/Symptom, Likely Cause, How to Fix, Frequency, KEDB / Ticket Link`) —
+Frequency and Ticket Link were being structurally discarded even on the rare
+pipe-format hit.
+
+**Found and fixed one more defect while unit-verifying the renderer change**
+(not introduced by this change — pre-existing): `cost_optimization.py`'s pipe
+parser synthesized a `{"label": text, "value": ""}` row for *any* non-pipe
+text, and `renderers/blocks/technology_grid.py`'s `build_block()` silently
+drops rows where `value` is empty (requires both `label` AND `value`
+truthy) — so plain narrative coverage content with no `_structured` data
+rendered as a **silently empty TechnologyGrid** (worse: `pdf_rendering.py`'s
+`_has_meaningful_rendered_blocks()` treats any `TechnologyGrid` block as
+"meaningful" unconditionally, so it never fell through to the narrative
+fallback either — a genuinely invisible section in the PDF). Fixed by having
+the pipe parser skip non-pipe text entirely instead of synthesizing a
+value-less row, letting `render()`'s existing `if rows: ... else: narrative`
+correctly choose the narrative fallback.
+
+**Verified**: `python -m py_compile` on all 5 touched files; full `pytest
+tests/` 7/7; pure-Python renderer unit checks covering 6 cases (structured
+present for both sections; pipe fallback; the now-fixed narrative fallback;
+common_failures' non-pipe fallback; empty content) — all correct. Live
+end-to-end run (real Groq calls) with a transcript covering 3 cost levers and
+3 distinct failures: `/schema/{job_id}` confirmed `_structured.levers`
+(3 items, correctly detailed) and `_structured.failures` (3 items, correctly
+including one accurately-`null` frequency/ticket pair) exactly matching the
+source content with no invention; `rendered_sections` showed `TechnologyGrid`/
+`DecisionTable` blocks (not `NarrativeBlock`) with the full 5-column shape for
+`common_failures`; PDF export succeeded (valid `%PDF`, non-trivial size).
+
+### 9l. PDF enterprise redesign + section-mapping fixes (user-provided real PDF review)
+
+The user shared a real generated PDF (job 85F99846) and asked for an enterprise
+visual redesign plus "proper mapping" — read it page-by-page against the live
+renderer code and found the root cause of nearly every visual problem, several
+of which were genuine data bugs, not cosmetic:
+
+1. **`monitoring_observability` was wired to the wrong renderer.** The
+   registry (`renderers/sections/__init__.py`) pointed at `common.py`'s naive
+   keyword-substring `render_monitoring`, which dumped raw whole sentences as
+   "Tool" values (visible in the shared PDF as a garbled "Tool" row). A
+   correct, complete renderer already existed at `renderers/sections/monitoring.py`
+   (reads `_structured.tools`/`first_response_steps`/`alert_routing`, the
+   actual Phase 6 data) but was never registered — same bug class as every
+   id-mismatch bug found earlier this session. Fixed by rewiring the registry.
+   **While auditing the registry for this, found 3 more orphaned duplicate
+   renderer files that were never reachable at all**: `renderers/sections/
+   architecture.py`, `danger_zones.py`, `ownership.py` — each shadowed by a
+   different file with the same purpose that the registry actually used.
+   Deleted all three (confirmed zero other references first).
+2. **`day1_survival_checklist` had field-id mismatches** (`safe_first_actions`/
+   `dont_do_day1` vs the real schema ids `first_safe_actions`/
+   `actions_not_to_perform`) and never read `required_access` (a `type: table`
+   field) at all — always fell to generic narrative. Fixed the ids and added a
+   `DecisionTable` for `required_access`, reusing a newly-shared
+   `renderers/blocks/table.py:parse_table_rows()` (extracted from
+   `deployment.py`'s previously-local `_parse_table_rows`, now used by both).
+3. **`deployment_and_rollback` showed the same content 2-3 times** — `pre_deployment_checks`,
+   `post_deployment_validation`, and the `deployment_window` timeline entry
+   independently resolved to overlapping/identical text (a short transcript's
+   semantic/LLM-gap-fill matching collapsing multiple fields onto the same
+   broad chunk). Fixed with a rendering-level dedup (`_claim()`/`seen_keys` in
+   `deployment.py`, same normalize-and-compare approach `pdf_rendering.py`'s
+   fallback-paragraph builder already used) — the underlying field-population
+   collision itself is a deeper, separate problem, not tackled here.
+   **Also found and fixed a real live bug while touching this file**:
+   `deployment.py` used `re.match(...)` in one branch but never imported `re` —
+   a `NameError` waiting to fire whenever `deployment_steps` itself was
+   unpopulated but other coverage_content existed. Because `pipeline.py` wraps
+   `build_rendered_sections()` in a blanket try/except, this wouldn't have
+   crashed the app — it would have silently discarded `rendered_sections` for
+   **every section in the document**, not just deployment, degrading the whole
+   PDF to the generic coverage-based fallback path with no visible error.
+4. **`handover_completion` and `signoff` never read their real schema fields**
+   (6 boolean/select fields; 4 sign-off fields respectively) — both just
+   printed a canned "being derived from KT coverage" / "Thank you." string
+   regardless of what was actually populated. Built a real checklist for the
+   former and a new `renderers/sections/signoff.py` (key-value `TechnologyGrid`)
+   for the latter, registered in place of the generic fallback.
+5. **`open_responsibilities` was hardcoded to always render as a red
+   `WarningBlock`** regardless of content — misleading for a purely
+   informational transition-plan section — and never read its real fields
+   (`open_tasks`, `recurring_responsibilities`, both `type: table`). Fixed to
+   render real tables when populated, plain narrative otherwise.
+6. **The CSS "danger" styling used a `:has(p strong)` content-sniffing
+   selector** meant for `WarningBlock`s, but it fired on *any* paragraph
+   containing bold text — and `SECTION_POLISH_PROMPTS` (llm/prompts.py)
+   formats many sections' narrative with `**Label:**` markdown, which becomes
+   `<strong>` after markdown rendering. Result: `DAY-1 SURVIVAL CHECKLIST`,
+   `DEPLOYMENT & ROLLBACK` etc. all got flagged red/"dangerous" in the shared
+   PDF even though they weren't. Fixed by having `pdf_rendering.py`'s
+   `render_section_blocks()` assign an explicit `warning-card` class only when
+   `block_type == "WarningBlock"`, and moved the CSS rule onto that class.
+7. **Every single-block section repeated its own title twice** (section `<h2>`
+   immediately followed by an identical block `<h3>`) — visible throughout the
+   shared PDF. Fixed by skipping the block heading when it case-insensitively
+   matches the section title; sections whose blocks have genuinely distinct
+   titles (e.g. "Recovery actions", "Security tools") keep them.
+8. **At least 7 different ad hoc "being extracted/assembled/synthesized/
+   inferred/derived" placeholder strings** were scattered across renderer
+   files, all doing the same job (zero coverage) but reading like debug output
+   in a real deliverable. Replaced all of them with one shared, professionally
+   worded helper: `renderers/blocks/common.py:no_coverage_block()` — "This
+   section was not covered in the KT session. Flag it for follow-up with the
+   outgoing owner." Put in a new `renderers/blocks/common.py` rather than
+   `pdf_rendering.py` specifically to avoid a circular import (`pdf_rendering`
+   → `renderers` → `renderers.sections.*` → back to `pdf_rendering` if the
+   helper lived there). `pdf_rendering.py`'s own top-level fallback
+   (`_build_fallback_paragraphs`'s "Rendered content not available.") and its
+   `_has_meaningful_rendered_blocks()` detection (previously a fragile 4-phrase
+   substring guess) were both updated to use the same shared constant.
+9. **Found a structural dead-code bug while fixing #8**, in 3 files
+   (`first_30_day_ownership.py`, `cost_optimization.py`, `common_failures.py`):
+   each had a `... else: blocks.append(narrative_with_possibly_empty_paragraphs)`
+   branch that ran unconditionally, so the file's own trailing
+   `if not blocks: append_fallback()` was unreachable dead code — `blocks` was
+   never empty by that point, even when the narrative it just appended had zero
+   real paragraphs. This is exactly why the shared PDF showed the generic
+   top-level "Rendered content not available." for `first_30_day_ownership`
+   instead of that file's own (now-removed) ad hoc string: `pdf_rendering.py`'s
+   `_has_meaningful_rendered_blocks()` correctly rejected the empty-paragraph
+   block, forcing a fall-through to the top-level fallback one layer up. Fixed
+   all 3 by only appending the narrative block when paragraphs is non-empty.
+10. Added a section-number badge (`01`, `02`, ...) to each `<h2>` matching the
+    TOC's ordering, one accent color (`#2563eb`) for section rules/table
+    headers, red reserved strictly for the now-correctly-scoped warning cards.
+11. Removed `plain_english_notes` (the user's own suggestion — `required: false`,
+    scope substantially overlapping `danger_zones`/`common_failures`/day1's
+    "actions not to perform") from `kt_schema_new.json`, its registry entry,
+    its `SECTION_RULES` force-classification rule (`section_rules.py` — left in
+    place it would have force-routed matching sentences to a section id that
+    no longer exists), and its `OPTIONAL_SECTION_INCLUSION_RULES` entry
+    (`schema_generator.py`). Updated `tests/test_ecommerce_kt.py`'s `EXPECTED`
+    mapping to drop the now-removed section's assertion (the transcript's
+    "tribal knowledge... cache invalidation" sentence is no longer asserted to
+    land anywhere specific).
+
+**One real defect found live-testing but explicitly NOT fixed in this pass**
+(flagged for a dedicated follow-up, not silently dropped): `field_populator.py`'s
+`type == "table"` extraction (`_extract_by_pattern`) falls back to "first 10
+non-empty lines of the whole section's raw/polished text" when it finds no
+pipe-delimited or numbered-list lines — with no awareness of which specific
+field it's populating. Live-tested with a transcript that clearly stated
+day-1 access items ("request access to the cloud console, the git repository,
+the CI/CD tool, and the monitoring dashboards") *and* separate safe-first-actions
+guidance: `required_access` ended up populated with the safe-first-actions
+text instead (duplicating `first_safe_actions`'s own, separately-correct
+value), because the "first 10 lines" heuristic isn't field-aware. The new
+`day1.py` renderer (item 2 above) faithfully displays whatever it's given —
+unit-tested independently with clean synthetic data and confirmed correct — so
+this is purely an upstream extraction-quality gap, not a rendering bug. Likely
+affects other `type: table` fields across the schema whenever their
+pattern/numbered detection fails to find real tabular structure (e.g.
+`open_tasks`, `recurring_responsibilities`). Also observed a related, milder
+case: `ownership_escalation`'s `oncall_tool` field (pattern-matches specific
+tool brand names only) fell to a weak semantic match that picked the whole
+escalation-chain sentence when no tool brand appeared in that section's own
+text. Both are the same underlying issue — the semantic/table fallback paths
+in `field_populator.py` have no per-field precision guarantee — and would need
+a proper design pass (e.g. routing through the structured-JSON-extraction
+pattern already proven in Phases 6/12, rather than continuing to strengthen
+ad hoc string heuristics) rather than another point-fix.
+
+**Verified**: `python -m py_compile` on all ~24 touched/new files; full
+`pytest tests/` 7/7 (including the updated ecommerce classification test, which
+correctly no longer asserts anything about the removed section); registry
+sanity check (`RENDERER_REGISTRY` keys exactly match schema ids, including the
+new `signoff` entry, via `validate_renderer_registry()`); pure-Python unit
+checks on every fixed renderer (monitoring/day1/deployment/handover_completion/
+signoff/open_responsibilities) with synthetic data, including the dedup and
+warning-card/title-dedup HTML generation logic in `pdf_rendering.py` directly.
+Live end-to-end run (real Groq calls) against a purpose-built transcript
+covering every fixed section, followed by a full visual read of the exported
+PDF: confirmed clean monitoring tool lists, a real day-1 access table (data
+quality caveat above), deduped deployment content, real handover/sign-off
+tables, correctly-scoped warning styling (danger_zones/known_bad_days red;
+day1/deployment/ownership_escalation — all containing markdown bold — correctly
+NOT red), no doubled headings anywhere in 10 rendered pages, consistent
+"not covered" messaging for the 2 genuinely-uncovered sections, and
+`plain_english_notes` absent from both TOC and body.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

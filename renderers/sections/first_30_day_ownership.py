@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.ownership import build_block as build_ownership_table
+from renderers.blocks.common import no_coverage_block
 
 
 def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -31,9 +32,11 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         content = section.get("coverage_content") or []
         if isinstance(content, str):
             content = [content]
-        blocks.append(build_narrative_block(title, [str(item).strip() for item in content if str(item).strip()]))
+        paragraphs = [str(item).strip() for item in content if str(item).strip()]
+        if paragraphs:
+            blocks.append(build_narrative_block(title, paragraphs))
 
     if not blocks:
-        blocks.append(build_narrative_block(title, ["First 30-day ownership responsibilities are being extracted from KT coverage."]))
+        blocks.append(no_coverage_block(title))
 
     return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
