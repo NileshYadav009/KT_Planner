@@ -1261,31 +1261,42 @@ function renderBlockHtml(block){
   if(!block || !block.type) return '<p>Invalid block.</p>';
   switch(block.type){
     case 'NarrativeBlock':
-      return `<div class="doc-block-title">${block.title||'Narrative'}</div>${(block.paragraphs||[]).map(p=>`<p>${escapeHtml(p)}</p>`).join('')}`;
+      return `<div class="doc-block-title">${block.title||'Narrative'}</div>${(block.paragraphs||[]).map(p=>`<p>${marked.parseInline(String(p||''))}</p>`).join('')}`;
     case 'ChecklistBlock':
-      return `<div class="doc-block-title">${block.title||'Checklist'}</div><ul>${(block.items||[]).map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+      return `<div class="doc-block-title">${block.title||'Checklist'}</div><ul>${(block.items||[]).map(item=>`<li>${renderInlineText(item)}</li>`).join('')}</ul>`;
     case 'WarningBlock':
-      return `<div class="doc-block-title">${block.title||'Warning'}</div><div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${escapeHtml(w)}</p>`).join('')}</div>`;
+      return `<div class="doc-block-title">${block.title||'Warning'}</div><div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${renderInlineText(w)}</p>`).join('')}</div>`;
     case 'TechnologyGrid':
-      return `<div class="doc-block-title">${block.title||'Technology'}</div><div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join('')}</div>`;
+      return `<div class="doc-block-title">${block.title||'Technology'}</div><div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${renderInlineText(row.label)}</span><strong>${renderInlineText(row.value)}</strong></div>`).join('')}</div>`;
     case 'DeploymentTimeline':
-      return `<div class="doc-block-title">${block.title||'Timeline'}</div><ol>${(block.entries||[]).map(entry=>`<li><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.description)}</li>`).join('')}</ol>`;
+      return `<div class="doc-block-title">${block.title||'Timeline'}</div><ol>${(block.entries||[]).map(entry=>`<li><strong>${renderInlineText(entry.label)}:</strong> ${renderInlineText(entry.description)}</li>`).join('')}</ol>`;
     case 'OwnershipTable':
-      return `<div class="doc-block-title">${block.title||'Ownership'}</div><table class="doc-table"><tbody>${(block.rows||[]).map(row=>`<tr><td>${escapeHtml(row.role||'')}</td><td>${escapeHtml(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
+      return `<div class="doc-block-title">${block.title||'Ownership'}</div><table class="doc-table"><tbody>${(block.rows||[]).map(row=>`<tr><td>${renderInlineText(row.role||'')}</td><td>${renderInlineText(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
     case 'DecisionTable':
-      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>`<td>${escapeHtml(row[col]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>`<td>${renderInlineText(row[col]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     case 'TroubleshootingBlock':
-      return `<div class="doc-block-title">${block.title||'Troubleshooting'}</div><ol>${(block.steps||[]).map(step=>`<li>${escapeHtml(step)}</li>`).join('')}</ol>`;
+      return `<div class="doc-block-title">${block.title||'Troubleshooting'}</div><ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
       return `<div class="doc-block-title">${block.title||'Code'}</div><pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
     default:
-      return `<div class="doc-block-title">${block.title||block.type}</div><p>${escapeHtml(block.description||'')}</p>`;
+      return `<div class="doc-block-title">${block.title||block.type}</div><p>${renderInlineText(block.description||'')}</p>`;
   }
 }
 
 function escapeHtml(text){
   if(typeof text !== 'string') return '';
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* Escape + convert **bold** markdown only — for short data values inside
+   table cells/checklist items/timeline entries, where full block-level
+   markdown (marked.parseInline, used for NarrativeBlock above) isn't
+   appropriate. Mirrors pdf_rendering.py's _render_inline_text() so the UI's
+   "rendered document" tab and the exported PDF agree on how field values
+   that may carry LLM-polish markdown (e.g. "**Label:**") should display. */
+function renderInlineText(value){
+  const escaped = escapeHtml(value==null ? '' : String(value));
+  return escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
 
 function populateCoverBlock(data){

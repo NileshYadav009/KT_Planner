@@ -17,6 +17,17 @@ def _collect_evidence(
     populated_field: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     sentence_entries = section_content.get("sentences", []) if isinstance(section_content, dict) else []
+    if not sentence_entries and isinstance(section_content, dict):
+        # Same fallback field_populator.py's populate_fields() uses when
+        # computing source_chunk_index — the two independent mechanisms that
+        # populate section_content[id]['sentences'] vs. ['blocks'] can
+        # disagree, leaving 'sentences' empty for a section that has real
+        # coverage. Must use the identical list here so an index computed
+        # there still refers to the right entry here.
+        sentence_entries = [
+            s for block in (section_content.get("blocks") or [])
+            for s in (block.get("sentences") or [])
+        ]
 
     if populated_field and populated_field.get("source_chunk_index") is not None:
         index = populated_field["source_chunk_index"]

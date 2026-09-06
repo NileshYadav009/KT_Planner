@@ -864,6 +864,323 @@ NOT red), no doubled headings anywhere in 10 rendered pages, consistent
 "not covered" messaging for the 2 genuinely-uncovered sections, and
 `plain_english_notes` absent from both TOC and body.
 
+### 9m. Proactive rate limiting, literal-markdown rendering, and PDF whitespace/table-width fixes
+
+User reported the earlier reactive retry-with-backoff fix (§9g/9h) wasn't
+enough — their live Groq dashboard showed 3 successive ~1-minute bursts still
+drawing a *growing* fraction of 429s (2/35, 16/36, 20/41), and the freshly
+generated PDF showed literal `**Deployment Steps**`/`**Access to request:**`
+markdown syntax in several tables, plus large unused margins and unreadably
+cramped wide tables.
+
+**Root cause of the persistent 429s**: `_call_with_rate_limit_retry()` only
+reacts *after* a 429 (wait, retry). It never limited how many requests go out
+*before* one happens. Per that function's own comment, a single KT run already
+fires "15-25+" LLM calls in quick succession — and this session's Phase
+12/13 additions (2 more `_extract_structured_section` calls) plus Phase 5's
+per-sentence classification-verification calls push a richer transcript's
+total higher still, matching the observed ~35-41/minute bursts. Also confirmed
+`pipeline.process_upload_task` runs via FastAPI `BackgroundTasks`, so two KT
+submissions close together can have their LLM calls overlapping in the same
+window — retrying a failed call doesn't reduce how many requests are already
+in flight, it just means the same burst volume gets retried, which can still
+collide with an already-saturated window. Fixed with a **proactive**
+sliding-window throttle (`llm_provider.py`'s new `_throttle()`,
+`LLM_MAX_CALLS_PER_MINUTE` env var, default `20`) called at the start of every
+attempt inside `_call_with_rate_limit_retry()` — before the original call and
+every retry — shared process-wide (thread-safe, one bucket per real quota:
+Gemini's two labels share a bucket since both hit the same API; Groq is
+independent). This trades latency for reliability: a 40-call burst now takes
+~2 minutes spaced out instead of finishing fast with roughly half failing —
+correct tradeoff for a background job the user polls via `/status/{job_id}`.
+
+**Root cause of the literal `**bold**` markdown**: unrelated to the 429s.
+`pdf_rendering.py`'s `render_section_blocks()` only ran LLM-produced text
+through markdown rendering (`_render_paragraph_text()`) for `NarrativeBlock`
+paragraphs — every other block type (`DecisionTable`/`TechnologyGrid`/
+`OwnershipTable` cells, `ChecklistBlock` items, `WarningBlock` warnings,
+`DeploymentTimeline` descriptions) used bare `html_escape()`. Since
+`SECTION_POLISH_PROMPTS` (llm/prompts.py) formats narrative with `**Label:**`
+markdown, and the already-tracked field-population imprecision (§9l) can put
+that polished text into a field that lands in one of these other block types,
+the asterisks showed up literally. Fixed with a new `_render_inline_text()`
+helper (escape, then convert `**bold**` only — deliberately not full
+block-level markdown, which would add unwanted `<p>` wrapping inside table
+cells/list items) applied to every data-value call site listed above. Column
+headers (static schema strings, never markdown) were left on plain
+`html_escape()`.
+
+**Whitespace/table-cramping**: `@page margin: 24mm` plus `.document-body`'s
+inherited `24mm 22mm` padding stacked to ~46mm of inset per side on an A4 page
+— leaving only ~118mm (56%) of the 210mm width for content. Separately,
+`.block-card table td:first-child { width: 35%; }` applied to *every* table,
+including 5-6 column `DecisionTable`s, forcing over a third of the row into
+column 1. Fixed by reducing `@page margin` to `14mm` and giving
+`.document-body` its own tighter `padding: 0 10mm` (cover/TOC pages kept more
+spacious at `20mm 16mm`, since they're short and not data-dense) — content
+width grows to ~162mm (77%). Also tagged `<table>` elements with an explicit
+class (`kv-table` for the 2-column `TechnologyGrid`/`OwnershipTable`,
+`grid-table` for N-column `DecisionTable`) so the 35%-first-column rule could
+be scoped to `.kv-table` only, letting `.grid-table` columns size evenly
+instead.
+
+**Verified**: `python -m py_compile` on both modified files; full `pytest
+tests/` 7/7. Unit-tested `_throttle()` directly with a monkeypatched fake
+clock (`time.monotonic`/`time.sleep` swapped for a controllable counter, so
+the sliding-window logic could be verified without real 60s waits) — confirmed
+the first N calls pass through immediately, the (N+1)th correctly waits out
+the window, and Gemini/Groq buckets are independent (including the two Gemini
+labels correctly sharing one bucket). Unit-tested `_render_inline_text()` —
+correct bold conversion, correct escaping of literal HTML-special characters
+(no injection). Live end-to-end run (real Groq calls, same rich transcript
+used for §9l's verification): **zero rate-limit warnings in the server log for
+the entire run** (previously this exact class of transcript reliably produced
+some); confirmed via direct HTML generation and a full visual PDF read that
+zero `**` markdown reached the final output (bold renders correctly instead),
+the content column is visibly much wider with far less white margin, and the
+5-column Common Failures table (previously wrapping almost letter-by-letter)
+now reads cleanly. Day-1's Required Access table still shows the wrong
+underlying data — that's the pre-existing, already-tracked field-population
+imprecision (§9l), unchanged and explicitly out of scope here; this fix makes
+whatever text lands there render correctly, it doesn't change which text lands
+there.
+
+### 9n. field_populator.py's cross-field contamination — fixed, plus a deeper root cause found underneath it
+
+Picked up the field-population imprecision flagged in §9l/9m (`required_access`
+ending up with `first_safe_actions`' text). The originally-diagnosed cause was
+real: `populate_fields()` sourced every field's `section_text`/`sentences` from
+`coverage[id]['content']` — the LLM-polished narrative (a handful of large
+multi-line paragraph blocks with `**Label:**` markdown) — instead of the raw
+per-sentence transcript already available via `section_content` (threaded in
+since Phase 7, but previously used only for evidence-index lookup). Fixed by
+switching `populate_fields()` to source from `raw_sentence_texts` (real,
+individually-segmented sentences) when available, joined with `\n` so the
+`type: "table"` fallback's line-based heuristic treats each sentence as its
+own row instead of a handful of paragraph blobs.
+
+**First live re-verification showed zero change** — `required_access` still
+showed the identical old polished-markdown text. Root cause: a standalone
+debug script (bypassing the server, calling `pipeline.MAPPER_PIPELINE.process()`
+directly) showed `kt.section_content['day1_survival_checklist']['sentences']`
+was **empty** even though the section had real "weak" coverage. Traced this to
+`context_mapper.py` populating `section_content[id]['sentences']` and
+`section_content[id]['blocks']` via two independent mechanisms — a multi-label
+classification loop (appends directly to `['sentences']`) and `detect_gaps()`'s
+separate single-label topic-block grouping (backfills `['blocks']`
+unconditionally for every section with coverage, but only touches
+`['sentences']` if that section wasn't already present) — which can disagree.
+For this section, the multi-label loop found nothing, so `raw_sentence_texts`
+was empty and the code silently fell through to the exact old (polished,
+coarse) path my fix was meant to replace. Extended `populate_fields()` to
+flatten `section_content[id]['blocks'][*]['sentences']` as a fallback when the
+top-level `['sentences']` list is empty — this is the list that's actually
+reliably populated whenever a section has any coverage at all. Mirrored the
+identical fallback in `knowledge_builder.py`'s `_collect_evidence()`, since it
+must index into the *same* list `find_source_sentence_index()` computed the
+index against, or a `source_chunk_index` computed post-fix would silently
+misalign against the pre-fix list there.
+
+**Debugging detour worth recording**: the first debug script accidentally
+defaulted to Gemini (forgot to set `LLM_PROVIDER=groq`/`GROQ_API_KEY` for that
+one-off invocation) and spent over 6 hours retrying against Gemini's
+free-tier **daily** quota (20 requests/day — confirmed via the actual 429
+body's `GenerateRequestsPerDayPerProjectPerModel-FreeTier` quota metric, a
+different and far more restrictive limit than the per-minute one this session's
+throttle work targeted) before being noticed and killed (0.03s of CPU time
+accumulated over 6+ hours — pure idle retry-sleep). Not a product bug; a
+reminder that any one-off script touching `llm_provider.py` needs the same env
+vars as the real server, and that `_call_with_rate_limit_retry()` doesn't
+currently distinguish "wait 60s, it's a per-minute limit" from "this quota
+resets tomorrow" — both get the same bounded-but-still-long retry treatment.
+Noted as a minor future hardening item, not urgent since the user runs Groq
+exclusively.
+
+**Second live re-verification**: `required_access` and `first_safe_actions`
+now both show the same clean, real transcript sentence — no more markdown
+artifacts, correct `source_chunk_index` populated on both. Investigated why
+they're still identical: this specific transcript run classified the actual
+Day-1 access sentence ("request access to the cloud console, the git
+repository, the CI/CD tool, and the monitoring dashboards") into
+`deployment_and_rollback` instead of `day1_survival_checklist` — leaving only
+one real sentence in this section's pool, so both fields correctly draw from
+the only sentence available. **This is a genuine but separate bug** — a
+Stage 3/5 section-classification precision issue (`context_mapper.py`), not a
+field-population issue — confirmed via a synthetic unit test with 2
+distinctly-topical sentences available (verified the two fields correctly
+diverge in that case). Flagged as a new, explicitly out-of-scope finding, not
+fixed here.
+
+**Verified**: `python -m py_compile` on both modified files; full `pytest
+tests/` 7/7 (twice, once per fix iteration). Synthetic unit test with a
+section whose `section_content['sentences']` is empty but `['blocks']` has 2
+real, distinctly-topical sentences — confirmed the two fields populate with
+different values (no collision) and that `_collect_evidence()`'s index lookup
+correctly resolves against the same flattened-blocks list. Live end-to-end
+re-verification (real Groq calls, same transcript used throughout this
+session's PDF verification passes) confirming clean, markdown-free extraction
+and correct evidence indexing.
+
+### 9o. Phase 19 — validation layer, and Phase 20 — new test coverage for this session's fixes
+
+**Phase 19.** New `validation.py`: a lightweight, non-fatal validation layer
+for the pipeline's core artifacts. `validate_knowledge_object()` checks
+structural shape (required top-level/section keys, `status` is one of
+missing/weak/covered, `confidence`/`risk` in `[0,1]`, no duplicate section
+ids). `validate_populated_fields()` cross-checks every `populated_fields`
+section id against the dynamic schema and every field id against that
+section's actually-declared fields (including nested `type: "group"` fields,
+flattened recursively) — this is the automated version of the exact
+by-hand-discovery process that found the id-mismatch bugs in §9l (`day1.py`'s
+`safe_first_actions`/`dont_do_day1` vs. the real `first_safe_actions`/
+`actions_not_to_perform`, monitoring's old `"monitoring"` vs.
+`"monitoring_observability"`, etc.) — future instances of that bug class now
+show up in logs/API output automatically instead of requiring someone to
+notice a blank PDF section. `validate_pipeline_run()` is the combined,
+deduplicated entry point. Wired into `pipeline.py`'s `run_kt_pipeline()`
+(shared by both the transcript and audio-upload entry points) right after
+`rendered_sections` is built — logs each warning and attaches the full list
+as `job["validation_warnings"]`, which `/schema/{job_id}` now also returns
+(`api/routes.py`). Deliberately checks structure/ranges, not content
+quality — a section legitimately having zero facts because the transcript
+never covered it is not a validation error, only a coverage gap.
+
+**Phase 20.** Added 55 new tests across 5 new files, closing the
+"no coverage for this session's new code" gap flagged since the very first
+version of this document:
+- `tests/test_validation.py` (14) — the new validation layer itself.
+- `tests/test_field_populator.py` (8) — regression coverage for §9n's
+  cross-field-contamination fix (both layers: raw-sentence sourcing and the
+  blocks-fallback), `find_source_sentence_index()`.
+- `tests/test_llm_provider.py` (12) — the §9m sliding-window throttle
+  (using a monkeypatched fake clock so the tests run in milliseconds, not
+  real 60s waits) and the rate-limit-detection/retry-delay helpers.
+- `tests/test_pdf_rendering_helpers.py` (15) — §9m/§9l's `_render_inline_text()`
+  markdown fix, `.kv-table`/`.grid-table` class tagging, block-title dedup,
+  and the warning-card scoping fix (explicitly tests that a `NarrativeBlock`
+  containing markdown bold does NOT get the warning-card class — the exact
+  bug the old `:has(p strong)` CSS selector caused).
+- `tests/test_knowledge_builders.py` (6) — §9j's unfilled-field-exclusion fix
+  in `build_facts()`/`build_entities()`, and the escalation-chain
+  separator-agreement fix (`_extract_escalation_chain()` →
+  `build_relationships()` round-trip).
+
+One real test bug caught and fixed while writing these (not a product bug):
+an early `test_is_rate_limit_error_false_for_unrelated_error` test used the
+message `"not a rate limit"` as its negative-case input — which itself
+contains the substring `"rate limit"`, one of `_RATE_LIMIT_MARKERS`, so the
+function correctly matched it and the test failed for being self-contradictory,
+not because of a code defect. Reworded the test message.
+
+**Verified**: full `pytest tests/` — **62/62 passed** (7 original + 55 new),
+run together as one suite to rule out any interaction/import-order issues
+between the new test files. `python -m main` import sanity check confirms
+`validation.py`'s wiring into `pipeline.py`/`api/routes.py` doesn't break app
+startup.
+
+### 9p. Remaining phases: 15 (UI), 21 (golden test), 22 (quality score), 25 (final docs), 26 (final summary) — Phase 9 explicitly skipped
+
+Phase 9 (user-configurable KT templates) was raised again and explicitly
+declined by the user rather than built blind — it needs real auth this
+codebase has never had (`templates.py`'s RBAC trusts a plain, unverified
+`X-User-Role` header), and building an auth system wasn't something to
+default into without being asked. Documented as a deliberate choice, not a
+gap, in the new `DELIVERABLE_SUMMARY.md`.
+
+**Phase 15 (UI)**: `static/index.html` turned out to already be a complete,
+~1700-line, working frontend wired to every current endpoint — not the
+blank slate "not touched" implied. Its `renderBlockHtml()` had the exact
+same literal-markdown bug `pdf_rendering.py` had before §9m's fix (plain
+`escapeHtml()` on every block value, no markdown handling). Fixed with a JS
+`renderInlineText()` mirroring `_render_inline_text()` (escape, then convert
+`**bold**` only) for every block type except `NarrativeBlock`, which now
+uses `marked.parseInline()` (the page's already-loaded markdown library) —
+the identical asymmetry `pdf_rendering.py` already uses. **No
+browser-automation tool is available in this environment** — verification
+was a `GET /` check (200, correct content-type, both new JS identifiers
+present) plus confirming every endpoint the JS depends on still works (all
+already exercised this session), not interactive click-through testing.
+Stated plainly rather than glossed over.
+
+**Phase 21 (golden KT test)**: new `tests/test_golden_kt.py` — runs a fixed
+transcript through the real `pipeline.run_kt_pipeline()` orchestration (the
+same entry point `/kt-from-transcript` uses) end to end, with the LLM
+provider stubbed to `None` in both `pipeline.py` and `ai.py` (each holds its
+own bound reference from `from llm_provider import get_llm_provider` —
+patching `llm_provider.get_llm_provider` itself would affect neither) for
+determinism, and `pipeline.MAPPER_PIPELINE` constructed directly rather than
+via `pipeline.load_models()` (which would additionally load an unneeded
+Whisper model). Asserts specific sections reach weak/covered status, zero
+validation warnings (ties Phase 19 in as a standing regression guard),
+specialized renderers actually fire (not universal narrative fallback), and
+concrete pattern-derived facts (danger_zones mentioning "terraform" and
+"autoscaler"). A second test exports the result through WeasyPrint and
+checks for valid `%PDF` bytes. **First run failed**: `system_overview` came
+back `"missing"` — not a product bug, a test-tuning issue. The original
+2-sentence system_overview content in the synthetic transcript was thin
+enough that, without Phase 5's LLM-assisted tie-breaking (deliberately
+disabled here for determinism), it didn't reliably clear the "weak" coverage
+threshold. Fixed by strengthening the transcript's system_overview content
+to unambiguously match multiple schema hints at once, matching the same
+technique `tests/test_ecommerce_kt.py`'s proven transcript already uses.
+
+**Phase 22 (quality score tracking)**: new `quality_score.py` — aggregates
+each section's existing `status`/`confidence`/`risk` (already computed by
+`context_mapper.py`) plus Phase 19's validation warnings into a single 0-100
+score and letter grade, with required-vs-optional section weighting (a
+missing *required* section costs far more than a missing optional one) and
+a capped per-warning validation penalty. Deliberately kept separate from
+`kt.overall_coverage_percent` (already reused elsewhere as the job's
+processing "progress" value) — that number treats every section equally and
+knows nothing about validation issues; this score is meant to reflect that a
+document can have 100% section coverage and still have real structural
+problems. Wired into `pipeline.py`'s `run_kt_pipeline()`, exposed via
+`/schema/{job_id}`.
+
+**A real bug found live-verifying Phase 22, fixed immediately**: the first
+live run showed `quality_score` dragged to grade F partly by a
+**false-positive** validation penalty — `validate_populated_fields()`
+(Phase 19) was flagging `ownership_escalation`/`monitoring_observability`/
+`disaster_recovery` fields as "not declared in schema," but these sections
+*intentionally* have no `fields` array (populated via
+`ai.wrap_structured_as_fields()`'s LLM structured extraction instead, by
+design since Phase 6/12). This would have fired on every single real run,
+permanently miscrediting Phase 19/22's own new numbers. Root cause was more
+specific than "empty fields array": `ownership_escalation` can also gain a
+single *dynamic* bonus field (`oncall_tool`, tagged `"dynamic": True` by
+`schema_generator.py`'s `TECH_STACK_FIELD_ADDITIONS`, triggered when the
+transcript mentions a paging tool) — so "has any declared fields" alone
+wasn't a reliable signal that a section is a normal field_populator-driven
+one. Fixed by checking for at least one *non-dynamic* declared field before
+enforcing id validation, added 2 regression tests (the plain no-fields case
+and the hybrid dynamic-bonus-field case) to `test_validation.py`. Re-verified
+live: `validation_warnings` went from 8 (all false positives) to 0 on the
+identical job; a fresh end-to-end run on a new job also came back clean.
+
+**Phase 25 (final docs)**: `ARCHITECTURE.md`, `KT_PIPELINE.md`,
+`PDF_RENDERING.md`, `LLM_PROVIDER.md`, `TESTING.md` — concise reference docs
+(not a restatement of this file's narrative), each cross-referencing the
+specific audit sections behind non-obvious design choices so a future reader
+doesn't rediscover the same landmines this session did.
+
+**Phase 26 (final deliverable summary)**: `DELIVERABLE_SUMMARY.md` — the
+5-minute read: what was asked, what was delivered, decisions made along the
+way (Phase 9 skipped, PII anonymization removed, the UI turning out to
+already exist), and the 2 explicitly-tracked open issues found but not fixed
+(the classification-precision miss from §9n, `field_populator.py`'s
+`type: table` fallback imprecision).
+
+**Verified**: `python -m py_compile` on every new/modified file. Full
+`pytest tests/` — **74/74 passed** (62 prior + 8 new `test_quality_score.py`
++ 2 new `test_golden_kt.py`, plus 2 new regression tests added to
+`test_validation.py` during the false-positive fix). Live end-to-end run
+(real Groq calls): confirmed `/schema/{job_id}` returns a well-formed
+`quality_score` block, confirmed `validation_warnings` is genuinely empty
+(not just quiet) after the false-positive fix, confirmed zero literal `**`
+anywhere in the response data, and confirmed a valid PDF still exports
+(`%PDF-1.7` header, non-trivial size). `GET /` confirmed to serve the
+updated UI correctly.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

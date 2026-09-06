@@ -56,6 +56,20 @@ def _render_paragraph_text(text: str) -> str:
     return html_escape(text)
 
 
+def _render_inline_text(value) -> str:
+    """Escape + convert **bold** markdown only — for short data values inside
+    table cells/checklist items/timeline entries, where full block-level
+    markdown (_render_paragraph_text, which wraps output in <p>) would add
+    unwanted paragraph spacing. Needed because SECTION_POLISH_PROMPTS
+    (llm/prompts.py) formats narrative with **Label:** markdown, and some of
+    that polished text can end up inside a field value that lands in one of
+    these block types instead of a NarrativeBlock — without this, the raw
+    asterisks show up literally instead of rendering as bold.
+    """
+    escaped = html_escape(str(value) if value is not None else "")
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+
+
 def render_section_blocks(rendered_sections: list) -> str:
     html = []
     for idx, section in enumerate(rendered_sections, start=1):
@@ -84,37 +98,37 @@ def render_section_blocks(rendered_sections: list) -> str:
             elif block_type == "ChecklistBlock":
                 html.append("<ul>")
                 for item in block.get("items", []):
-                    html.append(f"<li>{html_escape(item)}</li>")
+                    html.append(f"<li>{_render_inline_text(item)}</li>")
                 html.append("</ul>")
             elif block_type == "WarningBlock":
                 for warning in block.get("warnings", []):
-                    html.append(f"<p><strong>{html_escape(warning)}</strong></p>")
+                    html.append(f"<p><strong>{_render_inline_text(warning)}</strong></p>")
             elif block_type == "TechnologyGrid":
-                html.append("<div class=\"table-wrapper\"><table>")
+                html.append("<div class=\"table-wrapper\"><table class=\"kv-table\">")
                 for row in block.get("rows", []):
                     html.append(
-                        f"<tr><td>{html_escape(row.get('label',''))}</td>"
-                        f"<td>{html_escape(row.get('value',''))}</td></tr>"
+                        f"<tr><td>{_render_inline_text(row.get('label',''))}</td>"
+                        f"<td>{_render_inline_text(row.get('value',''))}</td></tr>"
                     )
                 html.append("</table></div>")
             elif block_type == "DeploymentTimeline":
                 html.append("<ol>")
                 for entry in block.get("entries", []):
                     html.append(
-                        f"<li><strong>{html_escape(entry.get('label',''))}</strong>: {html_escape(entry.get('description',''))}</li>"
+                        f"<li><strong>{_render_inline_text(entry.get('label',''))}</strong>: {_render_inline_text(entry.get('description',''))}</li>"
                     )
                 html.append("</ol>")
             elif block_type == "OwnershipTable":
-                html.append("<div class=\"table-wrapper\"><table>")
+                html.append("<div class=\"table-wrapper\"><table class=\"kv-table\">")
                 for row in block.get("rows", []):
                     html.append(
-                        f"<tr><td>{html_escape(row.get('role',''))}</td>"
-                        f"<td>{html_escape(row.get('team',''))}</td></tr>"
+                        f"<tr><td>{_render_inline_text(row.get('role',''))}</td>"
+                        f"<td>{_render_inline_text(row.get('team',''))}</td></tr>"
                     )
                 html.append("</table></div>")
             elif block_type == "DecisionTable":
                 columns = block.get("columns", [])
-                html.append("<div class=\"table-wrapper\"><table>")
+                html.append("<div class=\"table-wrapper\"><table class=\"grid-table\">")
                 html.append("<thead><tr>")
                 for col in columns:
                     html.append(f"<th>{html_escape(col)}</th>")
@@ -122,13 +136,13 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for row in block.get("rows", []):
                     html.append("<tr>")
                     for col in columns:
-                        html.append(f"<td>{html_escape(str(row.get(col, '')))}</td>")
+                        html.append(f"<td>{_render_inline_text(row.get(col, ''))}</td>")
                     html.append("</tr>")
                 html.append("</tbody></table></div>")
             elif block_type == "TroubleshootingBlock":
                 html.append("<ol>")
                 for step in block.get("steps", []):
-                    html.append(f"<li>{html_escape(step)}</li>")
+                    html.append(f"<li>{_render_inline_text(step)}</li>")
                 html.append("</ol>")
             elif block_type == "CodeBlock":
                 html.append(

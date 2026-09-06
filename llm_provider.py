@@ -2,7 +2,9 @@ import os
 import json
 import logging
 import re
+import threading
 import time
+from collections import defaultdict, deque
 from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
@@ -66,7 +68,40 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 LLM_RETRY_MAX_ATTEMPTS = int(os.getenv("LLM_RETRY_MAX_ATTEMPTS", "5"))
 LLM_RETRY_MAX_DELAY_SECONDS = float(os.getenv("LLM_RETRY_MAX_DELAY_SECONDS", "60"))
 
+# Retrying after a 429 (above) doesn't reduce how many requests were already
+# in flight — a single KT run's 15-25+ calls can burst well past a real
+# per-minute quota regardless of how well failures are retried afterward
+# (observed live: repeated ~35-41 req/min bursts still drawing a growing
+# fraction of 429s even with retry-with-backoff already in place). This is
+# the proactive half: cap how many requests THIS PROCESS sends per minute,
+# before they go out, shared across all concurrent KT jobs (pipeline.py's
+# process_upload_task runs via FastAPI BackgroundTasks, so more than one job's
+# calls can legitimately overlap in the same window).
+LLM_MAX_CALLS_PER_MINUTE = int(os.getenv("LLM_MAX_CALLS_PER_MINUTE", "20"))
+
 _RATE_LIMIT_MARKERS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "ratelimit", "quota")
+
+_throttle_lock = threading.Lock()
+_call_timestamps: dict = defaultdict(deque)
+
+
+def _throttle(provider_label: str) -> None:
+    """Block until sending another request stays within LLM_MAX_CALLS_PER_MINUTE
+    for this provider's sliding 60s window. Gemini's two labels ("Gemini" /
+    "Gemini (HTTP fallback)") share one bucket since both hit the same quota.
+    """
+    bucket = "gemini" if provider_label.startswith("Gemini") else "groq"
+    while True:
+        with _throttle_lock:
+            now = time.monotonic()
+            dq = _call_timestamps[bucket]
+            while dq and now - dq[0] >= 60:
+                dq.popleft()
+            if len(dq) < LLM_MAX_CALLS_PER_MINUTE:
+                dq.append(now)
+                return
+            wait = 60 - (now - dq[0]) + 0.05
+        time.sleep(wait)
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -109,9 +144,15 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str):
     times. Re-raises the last error if every attempt is exhausted, so the
     caller's existing fallback-on-exception behavior still applies as the
     final safety net.
+
+    Every attempt (the original call and every retry) is throttled via
+    _throttle() first — the retry backoff alone only reacts after a 429; the
+    throttle is what actually keeps outbound request volume under the
+    account's real per-minute quota.
     """
     last_exc = None
     for attempt in range(LLM_RETRY_MAX_ATTEMPTS + 1):
+        _throttle(provider_label)
         try:
             return call_fn()
         except Exception as exc:

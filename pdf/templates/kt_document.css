@@ -11,7 +11,7 @@
 
 @page {
   size: A4;
-  margin: 24mm;
+  margin: 14mm;
   @bottom-center {
     content: "Page " counter(page) " of " counter(pages);
     font-size: 10pt;
@@ -30,7 +30,19 @@ body {
 .toc-page,
 .document-body {
   page-break-after: always;
-  padding: 24mm 22mm;
+}
+
+.cover-page,
+.toc-page {
+  padding: 20mm 16mm;
+}
+
+.document-body {
+  /* Deliberately tighter than the cover/TOC pages — this is the data-dense
+     part of the document (tables, checklists), and the previous 24mm/22mm
+     page-margin + body-padding combination left barely half the page width
+     usable, causing wide tables to wrap almost letter-by-letter. */
+  padding: 0 10mm;
 }
 
 .cover-page {
@@ -112,10 +124,6 @@ h1 {
 .toc-page a {
   color: #111827;
   text-decoration: none;
-}
-
-.document-body {
-  padding-top: 0;
 }
 
 .section-block {
@@ -230,7 +238,15 @@ th {
   margin-bottom: 0;
 }
 
-.block-card table td:first-child {
+/* Scoped to .kv-table (TechnologyGrid/OwnershipTable — always exactly 2
+   columns, label/value) rather than every table. Previously this applied
+   blanket-wide, including to 5-6 column .grid-table DecisionTables, forcing
+   35% of the row into column 1 and squeezing the rest into the remaining
+   65% — the cause of the near letter-by-letter wrapping seen in Day-1's
+   Required Access and Common Failures tables. .grid-table gets no
+   first-column override, so table-layout: fixed distributes its columns
+   evenly instead. */
+.block-card table.kv-table td:first-child {
   font-weight: 600;
   color: #374151;
   /* allow wrapping in the first column (labels) so long labels don't force overflow */

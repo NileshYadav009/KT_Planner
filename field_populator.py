@@ -260,16 +260,47 @@ def populate_fields(
             continue
 
         cov_entry = coverage.get(section_id, {})
-        content = cov_entry.get("content", [])
-        if isinstance(content, list):
-            section_text = " ".join(content)
-            sentences = [c for c in content if c.strip()]
-        else:
-            section_text = str(content)
-            sentences = [section_text]
+        sc_entry = (section_content or {}).get(section_id, {}) or {}
+        raw_sentences = sc_entry.get("sentences", [])
+        if not raw_sentences:
+            # context_mapper.py populates section_content[id]['sentences'] and
+            # section_content[id]['blocks'] via two independent mechanisms
+            # (a multi-label classification loop vs. detect_gaps()'s
+            # single-label topic-block grouping) that can disagree — a section
+            # can have real coverage (blocks) while ['sentences'] stays empty.
+            # Flatten blocks' sentences as a fallback so this doesn't silently
+            # fall through to the coarse polished-content path below.
+            raw_sentences = [
+                s for block in (sc_entry.get("blocks") or [])
+                for s in (block.get("sentences") or [])
+            ]
+        raw_sentence_texts = [
+            s.get("text", "") for s in raw_sentences
+            if isinstance(s, dict) and s.get("text", "").strip()
+        ]
 
-        raw_sentences = ((section_content or {}).get(section_id, {}) or {}).get("sentences", [])
-        raw_sentence_texts = [s.get("text", "") for s in raw_sentences if isinstance(s, dict)]
+        if raw_sentence_texts:
+            # Real per-sentence transcript text — gives the type:"table"
+            # fallback and _extract_by_semantic() fine-grained candidates
+            # instead of a handful of large LLM-polished paragraph blocks
+            # (coverage[id]['content']), which caused different fields in the
+            # same section to collide onto the same broad text (e.g.
+            # day1_survival_checklist's required_access ending up with
+            # first_safe_actions' text). Joined with "\n" (not " ") so the
+            # line-based table-extraction heuristic below treats each
+            # sentence as its own candidate row.
+            section_text = "\n".join(raw_sentence_texts)
+            sentences = raw_sentence_texts
+        else:
+            # Fallback for the rare case section_content wasn't threaded
+            # through for this section.
+            content = cov_entry.get("content", [])
+            if isinstance(content, list):
+                section_text = " ".join(content)
+                sentences = [c for c in content if c.strip()]
+            else:
+                section_text = str(content)
+                sentences = [section_text]
 
         result[section_id] = {}
         _populate_fields_recursive(

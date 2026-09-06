@@ -29,8 +29,10 @@ from knowledge import build_knowledge_object
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider
 from pdf_rendering import build_rendered_sections
+from quality_score import compute_quality_score
 from renderers.sections import validate_renderer_registry
 from schema_generator import generate_dynamic_schema
+from validation import validate_pipeline_run
 from vocabulary_learning import detect_vocabulary_candidates, record_candidates
 
 logger = logging.getLogger(__name__)
@@ -271,6 +273,39 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             logger.warning("Rendered sections build failed: %s", exc)
             knowledge_object["rendered_sections"] = []
 
+        # Non-fatal structural validation (schema/field-id consistency,
+        # expected shapes/ranges) — see validation.py. Never blocks the
+        # pipeline; just surfaces the kind of silent id-mismatch bug this
+        # session repeatedly found by hand (REPOSITORY_AUDIT.md §9l/9n) so
+        # future ones show up in logs/API output instead of a blank PDF section.
+        try:
+            validation_warnings = validate_pipeline_run(
+                knowledge_object=knowledge_object,
+                populated_fields=populated_fields,
+                dynamic_schema=dynamic_schema,
+            )
+            for warning in validation_warnings:
+                logger.warning("[validation] %s: %s", job_id, warning)
+        except Exception as exc:
+            logger.warning("Validation itself failed: %s", exc)
+            validation_warnings = []
+
+        # Document-level quality score — aggregates the per-section
+        # coverage/confidence/risk that already exist plus the validation
+        # warnings above into one number. Deliberately separate from
+        # kt.overall_coverage_percent (used below as job "progress"), which
+        # is a raw coverage percentage with no notion of required-vs-optional
+        # weighting or structural validity. See quality_score.py.
+        try:
+            quality_score = compute_quality_score(
+                coverage=coverage,
+                dynamic_schema=dynamic_schema,
+                validation_warnings=validation_warnings,
+            )
+        except Exception as exc:
+            logger.warning("Quality score computation failed: %s", exc)
+            quality_score = {}
+
         # Learn new DevOps vocabulary from this transcript. Detection only ever
         # records candidates for later human review (see vocabulary_learning.py) —
         # it never changes what clean_transcript() corrects on its own.
@@ -317,6 +352,8 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "screenshots": screenshots,
             "dynamic_schema": dynamic_schema,
             "populated_fields": populated_fields,
+            "validation_warnings": validation_warnings,
+            "quality_score": quality_score,
             "error": None
         }
     except Exception as e:

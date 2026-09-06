@@ -47,6 +47,8 @@ async def get_job_schema(job_id: str):
             if isinstance(f, dict) and f.get("source") not in ("unfilled", "")
         ),
         "knowledge_object": job.get("knowledge_object", {}),
+        "validation_warnings": job.get("validation_warnings", []),
+        "quality_score": job.get("quality_score", {}),
     }
 
 
