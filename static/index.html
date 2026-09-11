@@ -733,6 +733,11 @@
         border: 1px solid #e5e7eb;
       }
 
+      .cell-not-covered {
+        color: #9ca3af;
+        font-style: italic;
+      }
+
       /* ── Section separator ───────────────────────────────── */
       .cov-item + .cov-item .cov-title {
         padding-top: 14pt !important;
@@ -1273,7 +1278,7 @@ function renderBlockHtml(block){
     case 'OwnershipTable':
       return `<div class="doc-block-title">${block.title||'Ownership'}</div><table class="doc-table"><tbody>${(block.rows||[]).map(row=>`<tr><td>${renderInlineText(row.role||'')}</td><td>${renderInlineText(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
     case 'DecisionTable':
-      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>`<td>${renderInlineText(row[col]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>renderTableCell(row[col])).join('')}</tr>`).join('')}</tbody></table>`;
     case 'TroubleshootingBlock':
       return `<div class="doc-block-title">${block.title||'Troubleshooting'}</div><ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
@@ -1296,7 +1301,15 @@ function escapeHtml(text){
    that may carry LLM-polish markdown (e.g. "**Label:**") should display. */
 function renderInlineText(value){
   const escaped = escapeHtml(value==null ? '' : String(value));
-  return escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const bolded = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return bolded.replace(/\*(.+?)\*/g, '<em>$1</em>');
+}
+
+const NOT_COVERED_CELL = 'Not covered during KT';
+function renderTableCell(value){
+  const str = value==null ? '' : String(value);
+  if (str.trim()) return `<td>${renderInlineText(str)}</td>`;
+  return `<td class="cell-not-covered">${NOT_COVERED_CELL}</td>`;
 }
 
 function populateCoverBlock(data){

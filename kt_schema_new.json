@@ -131,13 +131,18 @@
           ]
         },
         {
-          "id": "environments",
-          "label": "Environments",
-          "type": "group",
-          "fields": [
-            { "id": "environment_list", "label": "Available Environments", "type": "multi_select", "options": ["Prod", "Staging", "QA", "Dev", "Other"], "required": true },
-            { "id": "ownership_split", "label": "Which environments DevOps owns vs supports?", "type": "text", "required": true }
-          ]
+          "id": "orders_per_day",
+          "label": "Business Volume",
+          "description": "Scale of usage, e.g. orders/requests/transactions per day",
+          "type": "text",
+          "required": false
+        },
+        {
+          "id": "customer_reach",
+          "label": "Customer Reach",
+          "description": "How broadly the system serves customers, e.g. regional or global",
+          "type": "text",
+          "required": false
         },
         {
           "id": "key_technologies",
@@ -177,6 +182,38 @@
         { "id": "architecture_link", "label": "Link to detailed architecture documentation", "type": "url", "required": true },
         { "id": "last_updated", "label": "Last Updated", "type": "date", "required": true },
         { "id": "verified_by_incoming_owner", "label": "Verified by Incoming Owner", "type": "boolean", "required": true }
+      ]
+    },
+    {
+      "id": "environments",
+      "title": "ENVIRONMENTS",
+      "required": false,
+      "sub_topics": [
+        "production characteristics",
+        "staging characteristics",
+        "non-production characteristics",
+        "known differences"
+      ],
+      "hints": [
+        "environment",
+        "environments",
+        "production environment",
+        "staging environment",
+        "staging closely mirrors production",
+        "mirrors production",
+        "mocked",
+        "payment integrations are mocked",
+        "non-production environment",
+        "spot instances used in non-production",
+        "qa environment",
+        "dev environment",
+        "sandbox"
+      ],
+      "fields": [
+        { "id": "production_notes", "label": "Production characteristics", "type": "text", "required": false },
+        { "id": "staging_notes", "label": "Staging characteristics", "type": "text", "required": false },
+        { "id": "non_production_notes", "label": "Non-production characteristics", "type": "text", "required": false },
+        { "id": "known_differences", "label": "Known differences / limitations", "type": "text", "required": false }
       ]
     },
     {
@@ -257,6 +294,7 @@
     {
       "id": "cost_optimization",
       "title": "COST OPTIMIZATION",
+      "tier": "conditional",
       "required": false,
       "sub_topics": [
         "spot instances",
@@ -437,7 +475,7 @@
     },
     {
       "id": "known_bad_days",
-      "title": "KNOWN BAD DAYS / WINDOWS",
+      "title": "OPERATIONAL CALENDAR",
       "required": true,
       "sub_topics": [
         "high traffic periods",
@@ -521,6 +559,7 @@
     {
       "id": "first_30_day_ownership",
       "title": "FIRST 30-DAY OWNERSHIP PLAN",
+      "tier": "conditional",
       "required": true,
       "sub_topics": [
         "week 1 observe and shadow",
@@ -630,6 +669,7 @@
     {
       "id": "handover_completion",
       "title": "HANDOVER COMPLETION CHECK",
+      "tier": "conditional",
       "required": true,
       "sub_topics": [
         "can deploy safely",

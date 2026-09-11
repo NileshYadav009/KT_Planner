@@ -220,11 +220,17 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bserves\s+customers?\s+globally\b",
             r"\bpayments?,?\s+inventory\s+updates?\b",
             r"\bshipment\s+orchestration\b",
-            r"\bstaging\s+environment\b.*\bmirrors?\s+production\b",
-            r"\bpayment\s+integrations?\s+are\s+mocked\b",
             r"\bwe\s+use\s+terraform\b.*\b(?:argocd|argos\s+cd|gitops)\b",
             r"\binfrastructure\s+provisioning\b",
             r"\bterraform\b.*\bargocd\b.*\bvault\b",
+        ],
+        0.97,
+    ),
+    (
+        "environments",
+        [
+            r"\bstaging\s+environment\b.*\bmirrors?\s+production\b",
+            r"\bpayment\s+integrations?\s+are\s+mocked\b",
         ],
         0.97,
     ),
@@ -416,3 +422,35 @@ def entity_affinity_boost(section_id: str, entities: Optional[Dict[str, List[str
             return affinity[1], f"{entity_type}:{values[0]}"
 
     return 0.0, None
+
+
+# Generic phrase markers for "this is non-obvious, experience-based
+# knowledge" framing — not tied to any one transcript's subject matter. Used
+# to *tag* a sentence for the Tribal Knowledge digest regardless of which
+# section it's already been classified into (see
+# knowledge_builder.append_tribal_knowledge_section) — this is additive
+# tagging, not a reclassification, so it doesn't affect SECTION_RULES above.
+TRIBAL_KNOWLEDGE_MARKERS: List[str] = [
+    r"\btribal\s+knowledge\b",
+    r"\bone\s+(?:important\s+)?(?:piece\s+of|item\s+of|thing\s+to\s+remember)\b",
+    r"\bgotcha\b",
+    r"\bheads[\s-]?up\b",
+    r"\bkeep\s+in\s+mind\b",
+    r"\bby\s+the\s+way\b",
+    # Procedural-ordering language ("do X before Y") — a generic linguistic
+    # signal for experience-based operational sequencing, not tied to any
+    # one transcript's subject.
+    r"\bbefore\s+investigating\b",
+    r"\bfirst\s+(?:thing\s+you\s+should\s+)?check\b",
+    r"\bmust\s+(?:not\s+)?\s*avoid\b",
+]
+
+_COMPILED_TRIBAL_MARKERS = [re.compile(p, re.IGNORECASE) for p in TRIBAL_KNOWLEDGE_MARKERS]
+
+
+def is_tribal_knowledge(text: str) -> bool:
+    """True if `text` reads as non-obvious, experience-based operational
+    knowledge worth surfacing in the Tribal Knowledge digest."""
+    if not text or not text.strip():
+        return False
+    return any(pattern.search(text) for pattern in _COMPILED_TRIBAL_MARKERS)

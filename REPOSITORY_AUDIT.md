@@ -1181,6 +1181,374 @@ anywhere in the response data, and confirmed a valid PDF still exports
 (`%PDF-1.7` header, non-trivial size). `GET /` confirmed to serve the
 updated UI correctly.
 
+### 9q. Fact-fidelity fixes: unmapped-findings appendix + intra-section duplicate fix (real transcript, not the golden fixture)
+
+User supplied a real generated PDF (job 7E30E3D5, "Aws E-Commerce") alongside
+its source transcript and asked for the KT format to be assessed against what
+was actually said. Two concrete, generic defects surfaced — not formatting
+bugs, the fixed-schema classification/population architecture silently
+dropping and duplicating content:
+
+1. Facts with no matching schema section vanished with no trace (tech stack,
+   Terraform/ArgoCD/Vault, ECR, quarterly DR testing, staging/payments-mocked,
+   downtime business impact — none appeared anywhere in the 9-page PDF).
+2. The exact same fallback sentence appeared verbatim in two unrelated
+   tables in one section (`open_responsibilities`'s Open Tasks and Recurring
+   Responsibilities both showing "If you are unaware about my production
+   activity, contact platform engineering before proceeding.").
+
+**Root causes, confirmed by reading current source (not assumed):**
+
+- Defect 1: `context_mapper.py`'s `assemble_kt()` already computes
+  `StructuredKT.unassigned_sentences` — a deduped list of every sentence that
+  never got a confident primary section (`:1524-1541`). `pipeline.py` never
+  read it. The data existed; it was just discarded between stages.
+- Defect 2: `field_populator.py`'s `_extract_by_pattern()` `type=="table"`
+  branch re-derived candidate lines from the *entire section's raw text*
+  independently for every table field in a section, falling back to a
+  generic `lines[:10]` slice with no "already consumed" tracking — two table
+  fields in one section (`open_tasks`/`recurring_responsibilities`) both fell
+  through to the identical fallback. Confirmed live in
+  `renderers/sections/open_responsibilities.py`, which reads exactly those
+  two field ids.
+
+**Fixes** (both deliberately schema/transcript-agnostic — no AWS-specific
+keywords, no hardcoded section names beyond the one new generic appendix):
+
+- **`knowledge/knowledge_builder.append_unmapped_findings_section()`** (new)
+  — filters `kt.unassigned_sentences` to those with ≥4 words (a generic
+  filler filter, not content-specific), and if any survive, appends one more
+  well-shaped section (`id="unmapped_findings"`) to
+  `knowledge_object["sections"]` after `build_knowledge_object()` runs.
+  Confirmed `pdf_rendering.build_rendered_sections()`/`build_toc_sections()`
+  work purely off `knowledge_object["sections"]`/`rendered_sections`, not the
+  schema — so this needed no `kt_schema_new.json` change and no
+  `validate_renderer_registry()` impact (new registry key intentionally
+  left out of that function's `sections_with_renderers` schema-membership
+  check). New `renderers/sections/unmapped_findings.py` renders it as a
+  `ChecklistBlock` via the established `renderers/blocks/*` convention (not
+  the older, unused `renderers/base.py`).
+- **`field_populator.py`** — added `used_line_keys: set`, threaded through
+  `populate_fields()` → `_populate_fields_recursive()`, shared across every
+  field (including nested groups) within one section's population pass.
+  `_extract_by_pattern()`'s table branch and `_extract_by_semantic()` (the
+  two paths whose *value* is an exact copy of a whole source sentence, unlike
+  short pattern-matched substrings like a duration or tool name) now exclude
+  already-claimed sentence text before selecting, and register what they
+  pick. A second colliding field now gets the next distinct content, or
+  correctly falls through to `{"value": "", "source": "unfilled"}" —
+  "not mentioned" beats a misleading duplicate.
+
+**Extended mid-verification**: the new schema-agnostic golden-test invariant
+(`test_golden_kt_pipeline_does_not_duplicate_field_values_within_a_section`,
+added as a standing regression guard) caught a second, broader instance of
+the same bug class on the *first* run — `system_overview`'s
+`business_criticality` and a usage-context field both independently picked
+the identical sentence via `_extract_by_semantic()`, which had no exclusion
+tracking at all (the initial plan scoped the fix to table fields only, since
+that's what the evidenced PDF bug used). Extended the same `used_line_keys`
+mechanism to the semantic-text path rather than leaving it as a known gap,
+since it's the exact same defect class the fix was already built to prevent.
+
+**Live end-to-end verification** (real Groq calls, not the LLM-stubbed
+golden fixture): resubmitted the actual AWS E-Commerce transcript as a fresh
+job (`19117dbb-...`). First attempt used a locally-started server that
+defaulted to Gemini (no `LLM_PROVIDER`/`GROQ_API_KEY` set) and got stuck
+retrying Gemini's rate limit for 20+ minutes — the same daily-free-tier-quota
+class of problem documented in §9g/9h, not a new bug. Restarted with
+`LLM_PROVIDER=groq` and it completed normally. Confirmed via `/schema/{job_id}`:
+`validation_warnings == []`; a real `unmapped_findings` section present
+containing the genuinely-unclassified sentences for this run (the tech-stack
+list and one transition sentence — most of the other previously-"dropped"
+facts turned out to classify correctly this time, e.g. `key_technologies:
+Terraform, ArgoCD, Vault` landed in `system_overview` and ECR/quarterly-DR/
+staging-mocked content all appeared somewhere in the object — meaning a good
+share of the original PDF's missing content was a symptom of the earlier
+documented LLM 429 failures during structured extraction, not a systemic
+unmapped-content problem for this transcript on a healthy run); confirmed
+`open_responsibilities`'s `open_tasks` field kept the sentence while
+`recurring_responsibilities` correctly came back empty instead of
+duplicating it. Exported and confirmed a valid `%PDF-1.7` document.
+
+**Verified**: `python -m py_compile` on all new/modified files. Fast unit
+tests green throughout (`test_field_populator.py`, `test_knowledge_builders.py`,
+`test_validation.py`). New tests: 2 in `test_field_populator.py` (two
+type:"table" fields in one section no longer collide), 4 in
+`test_knowledge_builders.py` (no-op on empty input, filler-sentence filter,
+well-shaped output passing `validate_knowledge_object()`, mutate-and-return
+contract), 1 schema-agnostic invariant in `test_golden_kt.py`. Full golden
+suite (3 tests, real embedding/cross-encoder inference, ~10-13 min on this
+machine) rerun after the semantic-field extension to confirm no regression.
+
+### 9r. Match golden-reference KT structure (Executive Overview fix + 5 new sections)
+
+User supplied a "golden reference" KT PDF for the same AWS E-Commerce
+transcript (job 7E30E3D5/E9681711) showing the target structure, and asked
+for the actual output to be brought up to that standard. Two classes of gap:
+
+1. **A real, load-bearing renderer bug**: `renderers/sections/system_overview.py`
+   read field ids (`cache_layer`, `event_streaming`, `documentation_links`,
+   `system_description`) — of which only `cache_layer`/`event_streaming`
+   exist at all, and only conditionally (`schema_generator.py`'s
+   `TECH_STACK_FIELD_ADDITIONS`, triggered by Redis/Kafka mentions).
+   `documentation_links`/`system_description` don't exist anywhere. The
+   schema's *actual* System Overview fields (`system_name`,
+   `system_in_5_lines.*`, `business_purpose.*`, `impact_if_down.*`,
+   `key_technologies`) were being populated by `field_populator.py` but
+   never read by the renderer — and since `business_criticality` (the one
+   id that *does* match) always produces a paragraph, the renderer's
+   `if not blocks: fallback to coverage_content` safety net never fired
+   either, since `blocks` was never empty. This is why System Overview
+   rendered as one sentence ("Business criticality is High.") instead of
+   the rich picture the schema was already designed to capture.
+2. **Missing structure**: golden reference has a dedicated Environments
+   section, a Tribal Knowledge digest, an Operational Calendar (peak
+   periods + cost patterns combined), a Historical Incident sub-block
+   inside Incidents & Troubleshooting, a KT Coverage & Knowledge Gaps
+   matrix, and a Quick Reference cheat-sheet — none present before.
+
+User confirmed building all of it in one pass rather than staging it.
+
+**Changes** (see `C:\Users\dell\.claude\plans\graceful-tumbling-mango.md`
+for the full plan):
+- `renderers/sections/system_overview.py` rewritten to read the real schema
+  field ids, build a "Captured knowledge" attribute table + a "Technology
+  summary" table (tools categorized via a new generic `_TECH_CATEGORY_MAP`
+  — Frontend/Backend/Database/Cache/Compute/Edge/Infrastructure/GitOps/
+  Secrets/Security/Observability/Alerting — not scoped to any one
+  transcript's stack), plus a coverage-content leftover fallback so nothing
+  the section captures can silently vanish.
+- `kt_schema_new.json`: added `orders_per_day` (named specifically so
+  `field_populator.py`'s existing `"orders" in field_id` pattern-extractor
+  check fires for free) and `customer_reach` to `system_overview`; removed
+  the nested `environments` group field (superseded by a real top-level
+  section); added a new `environments` section (production/staging/
+  non-production/known-differences fields); renamed `known_bad_days`'s
+  title to "OPERATIONAL CALENDAR".
+- `field_populator.py`: extended `PATTERN_EXTRACTORS["tools"]` to also match
+  React/Angular/Vue, FastAPI/Django/Flask/Node/Express, and Application
+  Load Balancer/ALB/"load balancer" — generic web-stack terms, not this
+  transcript's specific choices.
+- `section_rules.py`: moved the staging/mirrors-production and
+  payment-integrations-mocked patterns out of `system_overview`'s
+  `SECTION_RULES` entry into a new `environments` entry (discovered mid-
+  implementation that `find_overview_reassignment()` — the mechanism the
+  plan originally proposed — never gets a chance to run when a primary
+  `SECTION_RULES` hard-match already exists at 0.97 confidence and gets
+  inserted at classification index 0; had to fix it at the actual point of
+  precedence, not the softer fallback path). Also added
+  `TRIBAL_KNOWLEDGE_MARKERS`/`is_tribal_knowledge()` — a generic phrase-
+  marker list ("tribal knowledge", "one thing to remember", "gotcha",
+  "heads up", "keep in mind", "by the way", plus procedural-ordering
+  language like "before investigating"/"first check"/"must avoid" — the
+  golden reference's own stated extraction rule) for tagging non-obvious
+  knowledge regardless of which section it already landed in.
+- `llm/prompts.py`: extended `common_failures`'s structured-extraction JSON
+  schema with `when`/`impact`/`resolution`/`preventive_action` (nullable,
+  explicit "leave null rather than inferring" instruction).
+- `renderers/sections/common_failures.py`: renders a second "Historical
+  incident record" block for any failure entry carrying a `when` (a
+  one-off past occurrence vs. a recurring issue), defaulting missing
+  fields to "Not covered in KT" rather than inferring.
+- `renderers/sections/known_bad_days.py`: renders an added
+  "Cost-related operating patterns" table from a new `_cost_patterns` key
+  the knowledge object now carries.
+- `knowledge/knowledge_builder.py`: four new functions, all following the
+  established `append_unmapped_findings_section()` pattern (synthesize a
+  well-shaped section dict, append to `knowledge_object["sections"]`, own
+  renderer registered but excluded from `validate_renderer_registry()`'s
+  schema-membership set) —
+  - `enrich_operational_calendar()`: folds `cost_optimization`'s
+    already-built levers into `known_bad_days` as `_cost_patterns` (reads a
+    sibling section's data at the knowledge-object layer, since renderers
+    are single-section scoped — avoided changing that contract everywhere).
+  - `append_tribal_knowledge_section()`: tags sentences via
+    `is_tribal_knowledge()` across every section's raw content, plus makes
+    `danger_zones` unconditionally eligible (its whole purpose already *is*
+    non-obvious safety-critical knowledge, not just marker-matched
+    sentences within it) — both decisions keyed only by section id, so they
+    generalize to any future transcript.
+  - `append_coverage_matrix_section()`: reshapes the pipeline's existing
+    per-section `coverage[...]['status']`/`confidence` into a
+    Domain/Coverage/Assessment matrix — no new extraction.
+  - `append_quick_reference_section()`: a cheat-sheet assembled from
+    already-populated fields across other sections, via small per-source
+    extractor helpers matched to each section's *actual* shape (some have a
+    `fields` map, `common_failures`/`danger_zones` only `_structured`/
+    `coverage_content` — an early draft assumed uniform `fields` access,
+    caught and fixed before writing tests). Any row whose source is empty
+    is skipped, never fabricated.
+- 4 new renderer files (`environments.py`, `tribal_knowledge.py`,
+  `kt_coverage.py`, `quick_reference.py`) and registry wiring in
+  `renderers/sections/__init__.py`; `pipeline.py` chains all 4
+  `append_*`/`enrich_*` calls after `build_knowledge_object()`.
+
+**Verified**: `python -m py_compile` on every new/modified file. Full
+`pytest tests/` — **87 passed, 0 failed** (463s), including
+`test_ecommerce_kt.py` and all 3 `test_golden_kt.py` tests with real Groq
+calls. New tests: `tests/test_renderer_sections.py` (7 tests — the
+field-id-fix regression, tech categorization, environments table + "do not
+over-infer" callout, historical-incident block presence/absence, Operational
+Calendar cost-pattern table) and 6 new tests in `tests/test_knowledge_builders.py`
+covering all 4 new `append_*`/`enrich_*` functions, including a direct
+`validate_knowledge_object()` pass/fail check on synthesized sections.
+
+**Live end-to-end verification** (fresh job, real classification/embedding
+pipeline): resubmitted the AWS E-Commerce transcript. `validation_warnings
+== []`; all 4 new digest sections plus the new `environments` section
+present in `/schema/{job_id}`'s `knowledge_object`. Confirmed working with
+real content: System Overview's Technology Summary table correctly
+categorized Terraform→Infrastructure/ArgoCD→GitOps/Vault→Secrets/etc.;
+Environments correctly captured the staging/payments-mocked sentence (now
+routed there instead of being silently eaten by the old system_overview
+renderer bug); Tribal Knowledge produced 5 rows closely matching the golden
+reference's own 5 rows in both content and classification (Operational
+shortcut / Tribal-operational / Troubleshooting heuristic / Safety-critical
+×2); KT Coverage & Knowledge Gaps and Quick Reference both rendered with
+real, non-fabricated rows. Exported a valid `%PDF-1.7` document.
+
+Two honest caveats found during this same verification, not glossed over:
+- This local server run had no `GROQ_API_KEY` configured (only
+  `GEMINI_API_KEY` is in `.env`, and Gemini's documented daily-quota
+  exhaustion — §9g/9h — made it not worth risking for this check), so every
+  LLM-dependent structured extraction (`common_failures`,
+  `security_controls`, `disaster_recovery`, `ownership_escalation`,
+  `cost_optimization`) and LLM gap-fill failed with "Groq provider is not
+  configured" and fell back to non-LLM paths. This means the Historical
+  Incident sub-block and several Quick Reference rows (Escalation, Alert
+  trigger, System unavailable) that depend on structured extraction did not
+  get a chance to fire in *this* live run — their logic is confirmed
+  correct via direct unit tests (`test_renderer_sections.py`,
+  `test_knowledge_builders.py`) and via the `pytest tests/` run's own real
+  Groq-backed golden tests, but not re-confirmed against this exact
+  transcript end-to-end. This is a test-environment credential gap, not a
+  code defect — same class of issue as §9g/9h.
+- `system_overview`'s "Captured knowledge" table came back thinner than
+  designed on this run (only "Business volume") — several of its text
+  fields (`system_in_5_lines.business_impact`/`worst_case`,
+  `impact_if_down.what_breaks`/`who_affected`, `customer_reach`) all
+  semantically compete for the same one or two standout sentences in a
+  short transcript. The `used_line_keys` cross-field dedup mechanism (§9q,
+  extended to semantic-text fields to fix a duplicate-content bug) means
+  only the first-declared field to want a given sentence gets it — the
+  rest fall below the 0.35 semantic-match threshold on their next-best
+  candidate and end up unfilled, with the content still visible (nothing
+  is lost — it surfaces in the "Additional context" fallback paragraph)
+  but not attributed to its intended structured field. Real, worth a
+  future look if it recurs across more transcripts, but not a regression
+  introduced by this pass — it's an emergent interaction between an
+  already-verified fix and today's newly-added fields with heavy semantic
+  overlap.
+
+### 9s. Enterprise-review P0 fixes + P1 scope (evidence labeling, gap/task separation, section tiering)
+
+User supplied a 26-phase "enterprise product review" spec demanding a full
+rebuild toward a typed fact-level knowledge model, meaning-first mapping,
+contradiction detection, and fully dynamic (unbounded) section generation —
+a multi-session architectural rewrite, not a single pass. Delivered a
+review grounded in the actual codebase (not generic advice) with a
+P0/P1/P2/P3 breakdown; user chose **P1 only, this pass**, on top of 3 P0
+items committed to unconditionally.
+
+**P0-1 investigated, not reproducible — Environments duplicate-row bug**:
+user's PDF (job E47509DD) showed Staging and Non-production rows with
+identical text. Reproduced the exact real transcript through both an
+isolated `field_populator.populate_fields()` call and the full
+`pipeline.run_kt_pipeline()` twice — both times `non_production_notes`
+correctly comes back `unfilled` once `staging_notes` claims the section's
+one available sentence. The `used_line_keys` exclusion (§9q/§9r) is
+exact-string-set membership, checked unconditionally before any
+embedding-model logic runs — there is no code path that can return an
+already-claimed sentence to a second field. **Could not reproduce with the
+current code.** Live-reverified again in this same session's final
+verification pass (job c6581d81): Environments correctly shows only the
+Staging row, no duplicate. Most likely explanation for the original
+report: a server process running code from earlier in the session (Python
+doesn't hot-reload; a long-running uvicorn process keeps stale in-memory
+code after a file edit until restarted). No code change made — fabricating
+a fix for unreproducible behavior would be guessing, not engineering.
+
+**P0-2 fixed — blank DecisionTable cells now read "Not covered during
+KT"**: confirmed real (Common Failures' empty How-to-Fix cells rendered as
+literal blanks). `pdf_rendering.py:render_section_blocks()`'s
+`DecisionTable` branch now substitutes a muted `.cell-not-covered` span
+(styled in `pdf/templates/kt_document.css`) for any empty/whitespace-only
+cell value. Mirrored in `static/index.html`'s equivalent JS path
+(`renderTableCell()`) for UI/PDF parity. `TechnologyGrid` didn't need this
+— it already filters out any row missing a label or value.
+
+**P0-3 fixed — KT Coverage matrix recalibrated, no longer stuck on
+"Partial"**: the old bucketing required `status == "covered" AND
+confidence >= 0.6`, but `confidence` (mean per-block confidence score) and
+`status` (from `semantic_coverage_score()`, already required/optional- and
+density-aware) are only loosely correlated in practice — real runs showed
+status reaching "covered" while confidence stayed under 0.6, so "Strong"
+never fired even for well-covered sections. `knowledge_builder.
+append_coverage_matrix_section()` now buckets directly from the pipeline's
+own `status` (covered→Strong, weak→Partial, missing→Missing) — trusting a
+signal the pipeline already computed carefully instead of layering an
+uncalibrated second threshold on top of it.
+
+**P1-1 — evidence-state marker (explicit vs. inferred), single-point
+change**: `knowledge/facts.py`/`build_knowledge_object()` already carried
+`source` (`pattern`/`semantic`/`llm`/`llm_structured`/`unfilled`) per field
+but never surfaced it. Of these, only `source == "llm"` (field_populator.py's
+free-form gap-fill prompt) invents a value with no direct grounding
+sentence — the others are all anchored to real transcript text. Added
+`_apply_evidence_marker()` at the exact point `field_objects[fid]["value"]`
+is assembled (`knowledge_builder.py`) — appends `" *(inferred — not
+explicitly stated in the transcript)*"` to genuinely-inferred string values
+only (non-string field types like booleans/lists pass through unchanged).
+Reaches every renderer and the UI with zero renderer-file changes, since
+they all already read `field["value"]` as the display string. Extended
+`_render_inline_text()` (`pdf_rendering.py`) and its JS mirror
+(`static/index.html`'s `renderInlineText()`) to also convert single-`*...*`
+to `<em>`, alongside the existing `**...**`→`<strong>` handling.
+
+**P1-2 — Knowledge Gaps distinct from Open Tasks**:
+`open_responsibilities.py` already renders real assigned tasks correctly —
+no conflation bug there. The actual gap was no itemized "these areas were
+never discussed" list separate from those task tables.
+`append_coverage_matrix_section()` now also collects every "Missing"-
+bucketed domain into `section["_knowledge_gaps"]`; `kt_coverage.py`
+renders it as a `ChecklistBlock` after the matrix table, visually and
+structurally separate from `open_responsibilities`' Open Tasks/Recurring
+Responsibilities tables — "the KT session never covered this" is not the
+same claim as "someone agreed to do this."
+
+**P1-3 — Core/Conditional section tiering**: all ~21 schema sections
+previously always rendered, even fully empty ones, via
+`no_coverage_block()`'s boilerplate placeholder. Tagged exactly 3
+sections — `first_30_day_ownership`, `handover_completion`,
+`cost_optimization` (template-mandated boilerplate areas, not universal
+handover expectations) — with `"tier": "conditional"` in
+`kt_schema_new.json`; everything else defaults to `"core"` (unchanged
+always-render-with-placeholder behavior). `build_knowledge_object()` copies
+`tier` onto each section dict; `pdf_rendering.py:build_rendered_sections()`
+skips appending a conditional section (both from `rendered_sections` and
+its TOC entry) only when its renderer output reduces to the empty
+fallback — any section with real content, core or conditional, is
+unaffected.
+
+**Verified**: `python -m py_compile` on every modified file;
+`kt_schema_new.json` re-validated as JSON. Full `pytest tests/` —
+**108 passed, 0 failed** (450s), up from 87 (13 new tests: 3 in
+`test_knowledge_builders.py` for the recalibrated bucketing/knowledge-gaps
+list, 2 for the evidence marker's string-vs-non-string handling, 1 for
+`tier` passthrough; 4 in `test_pdf_rendering_helpers.py` for the italic
+conversion and blank-cell substitution, 3 for `build_rendered_sections()`'s
+conditional-skip behavior across core/conditional/populated cases; 2 in
+`test_renderer_sections.py` for `kt_coverage.py`'s gaps-checklist
+rendering). Live end-to-end (fresh server, job c6581d81): confirmed via
+`/schema/{job_id}` and the actual rendered HTML — `first_30_day_ownership`/
+`handover_completion` correctly absent from both `rendered_sections` and
+the TOC (19 entries, down from 21) while still correctly listed by name in
+the new Knowledge Gaps checklist inside KT Coverage; `cost_optimization`
+(also conditional, but had real content this run) correctly still
+rendered; "Not covered during KT" appears 17 times in the real HTML output
+for Common Failures' empty cells; Environments shows only the Staging row
+(re-confirming P0-1's non-reproduction finding one more time, live).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -8,6 +8,9 @@ from renderers.blocks.common import no_coverage_block
 # (Symptom/Cause/Fix) since that format never carried frequency/ticket data.
 STRUCTURED_COLUMNS = ["Issue/Symptom", "Likely Cause", "How to Fix", "Frequency", "KEDB / Ticket Link"]
 
+HISTORICAL_COLUMNS = ["Incident", "Cause", "When", "Impact", "Resolution", "Preventive action"]
+NOT_COVERED = "Not covered in KT"
+
 
 def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
     failures = (section.get("_structured") or {}).get("failures")
@@ -26,6 +29,34 @@ def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
             "How to Fix": str(item.get("fix") or "").strip(),
             "Frequency": str(item.get("frequency") or "").strip(),
             "KEDB / Ticket Link": str(item.get("ticket") or "").strip(),
+        })
+    return rows
+
+
+def _historical_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Entries carrying a "when" (a specific past occurrence, e.g. "last
+    year") describe a one-off historical incident rather than a recurring
+    issue — surface them as their own record instead of leaving that detail
+    stranded in the shared Frequency column. Never infer a missing
+    resolution/preventive action — "Not covered in KT" beats a fabricated fix."""
+    failures = (section.get("_structured") or {}).get("failures")
+    if not isinstance(failures, list):
+        return []
+    rows = []
+    for item in failures:
+        if not isinstance(item, dict):
+            continue
+        when = str(item.get("when") or "").strip()
+        symptom = str(item.get("symptom") or "").strip()
+        if not when or not symptom:
+            continue
+        rows.append({
+            "Incident": symptom,
+            "Cause": str(item.get("cause") or "").strip() or NOT_COVERED,
+            "When": when,
+            "Impact": str(item.get("impact") or "").strip() or NOT_COVERED,
+            "Resolution": str(item.get("resolution") or "").strip() or NOT_COVERED,
+            "Preventive action": str(item.get("preventive_action") or "").strip() or NOT_COVERED,
         })
     return rows
 
@@ -57,6 +88,9 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
 
     if structured_rows:
         blocks.append(build_decision_table("Failure symptoms and remediation", STRUCTURED_COLUMNS, structured_rows))
+        historical_rows = _historical_rows(section)
+        if historical_rows:
+            blocks.append(build_decision_table("Historical incident record", HISTORICAL_COLUMNS, historical_rows))
         return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
 
     rows = _coverage_rows(section)

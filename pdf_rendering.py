@@ -57,17 +57,25 @@ def _render_paragraph_text(text: str) -> str:
 
 
 def _render_inline_text(value) -> str:
-    """Escape + convert **bold** markdown only — for short data values inside
-    table cells/checklist items/timeline entries, where full block-level
-    markdown (_render_paragraph_text, which wraps output in <p>) would add
-    unwanted paragraph spacing. Needed because SECTION_POLISH_PROMPTS
-    (llm/prompts.py) formats narrative with **Label:** markdown, and some of
-    that polished text can end up inside a field value that lands in one of
-    these block types instead of a NarrativeBlock — without this, the raw
-    asterisks show up literally instead of rendering as bold.
+    """Escape + convert **bold**/*italic* markdown only — for short data
+    values inside table cells/checklist items/timeline entries, where full
+    block-level markdown (_render_paragraph_text, which wraps output in <p>)
+    would add unwanted paragraph spacing. Bold-handling exists because
+    SECTION_POLISH_PROMPTS (llm/prompts.py) formats narrative with
+    **Label:** markdown, and some of that polished text can end up inside a
+    field value that lands in one of these block types instead of a
+    NarrativeBlock — without this, the raw asterisks show up literally
+    instead of rendering as bold. Italic-handling exists for
+    knowledge_builder.py's INFERRED_MARKER (" *(inferred...)*"), so a
+    genuinely-inferred field value reads as visually distinct from a
+    transcript-grounded one wherever it's displayed.
     """
     escaped = html_escape(str(value) if value is not None else "")
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    return re.sub(r"\*(.+?)\*", r"<em>\1</em>", escaped)
+
+
+NOT_COVERED_CELL = "Not covered during KT"
 
 
 def render_section_blocks(rendered_sections: list) -> str:
@@ -136,7 +144,11 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for row in block.get("rows", []):
                     html.append("<tr>")
                     for col in columns:
-                        html.append(f"<td>{_render_inline_text(row.get(col, ''))}</td>")
+                        cell_value = row.get(col, "")
+                        if isinstance(cell_value, str) and cell_value.strip():
+                            html.append(f"<td>{_render_inline_text(cell_value)}</td>")
+                        else:
+                            html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}</td>")
                     html.append("</tr>")
                 html.append("</tbody></table></div>")
             elif block_type == "TroubleshootingBlock":
@@ -253,6 +265,19 @@ def build_rendered_sections(knowledge_object: dict) -> list:
             continue
 
         fallback_paragraphs = _build_fallback_paragraphs(section)
+
+        # Core sections (the default) always render, even fully empty, with
+        # an explicit "not covered" placeholder — that's the point: a
+        # mandatory handover area silently missing is worse than one
+        # visibly flagged. Conditional sections (kt_schema_new.json's
+        # "tier": "conditional" — template-mandated boilerplate areas like
+        # First 30-Day Ownership Plan, not universal handover expectations)
+        # are omitted entirely when truly empty instead of cluttering the
+        # document with boilerplate for a topic the transcript never
+        # touched and was never expected to.
+        if section.get("tier") == "conditional" and fallback_paragraphs == [NOT_COVERED_MESSAGE]:
+            continue
+
         rendered_sections.append({
             "section_id": section_id,
             "section_title": section.get("title") or section_id,

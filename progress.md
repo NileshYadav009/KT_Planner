@@ -1,12 +1,67 @@
 # Continuum KT Planner — Progress
 
 Handoff doc for picking this work up in a new session. Written 2026-09-04,
-updated 2026-09-06, end of a long working session on
+updated 2026-09-11, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9p. **For a 5-minute overview
-instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`.**
-This file remains the quick-orientation index; the audit is the full record.
+see **`REPOSITORY_AUDIT.md`**, sections §1-9s. **For a 5-minute overview
+instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
+(not yet updated with the §9q/§9r/§9s work below — still describes the state
+through §9p). This file remains the quick-orientation index; the audit is the
+full record.
+
+**Update 2026-09-11 (enterprise-review P0 fixes + P1 scope)**: user supplied
+a 26-phase "enterprise product review" spec asking for a full rebuild toward
+a typed fact-level knowledge model, meaning-first mapping, contradiction
+detection, and fully dynamic section generation — reviewed it honestly as a
+multi-session architectural rewrite rather than pretending to build it all
+in one pass. User chose P1-only scope on top of 3 committed P0 items.
+Investigated a reported Environments duplicate-row bug and could not
+reproduce it with current code (documented, not silently dropped — see
+§9s); fixed 2 real P0 issues (blank table cells now read "Not covered
+during KT"; KT Coverage matrix recalibrated so "Strong" actually fires,
+was stuck showing "Partial" for everything). Built the approved P1 scope:
+an evidence-state marker distinguishing genuinely-inferred field values
+from transcript-grounded ones, a Knowledge Gaps list kept structurally
+separate from Open Tasks, and Core/Conditional section tiering so
+template-boilerplate sections (First 30-Day Plan, Handover Completion
+Check) disappear entirely when empty instead of always showing "not
+covered" placeholder text. Full suite: **108 passed, 0 failed**, up from
+87. Live-verified against a fresh job — see §9s for the complete before/
+after.
+
+**Update 2026-09-07 (golden-reference structural parity)**: user supplied a
+"golden reference" KT PDF for the same AWS E-Commerce transcript and asked
+for the actual output to match it. Found and fixed a real renderer bug
+(`system_overview.py` was reading field ids that don't exist in the schema,
+so System Overview rendered as one sentence despite the schema already
+capturing much richer data) and added 5 new/restructured sections —
+Environments, Tribal Knowledge, Operational Calendar (merged with cost
+patterns), a Historical Incident sub-block in Common Failures, and a KT
+Coverage & Knowledge Gaps matrix plus Quick Reference cheat-sheet — all
+generic (schema-agnostic), none hardcoded to this transcript. Full suite:
+**87 passed, 0 failed**. Live-verified against a fresh job: all new sections
+render with real content, `validation_warnings == []`, valid PDF exported.
+Two honest caveats documented in audit §9r: this environment has no
+`GROQ_API_KEY` configured, so LLM-structured-extraction-dependent pieces
+(Historical Incident block, some Quick Reference rows) weren't re-confirmed
+against this exact live transcript (though they are covered by unit tests
+and by the pytest suite's own real-Groq golden tests); and `system_overview`'s
+attribute table came back thinner than designed on this run because several
+overlapping text fields compete for the same 1-2 standout sentences under
+the existing cross-field dedup mechanism — content isn't lost, just not
+always attributed to its intended field. See §9r for full detail.
+
+**Update 2026-09-06 (fact-fidelity fixes, post-26-phase-brief)**: the 26-phase
+brief was complete, but a real transcript/PDF comparison (job 7E30E3D5) found
+two more defects in how facts flow through the pipeline: sentences with no
+matching schema section vanished silently, and two table fields in one
+section could duplicate the same fallback content. Fixed both generically
+(no transcript-specific hardcoding) — see audit §9q for the full story,
+including a second instance of the duplicate-value bug the new golden-test
+invariant caught mid-verification (semantic text-field selection, not just
+table fallback) and a live-verification detour into a Gemini daily-quota
+stall that required switching the local server to Groq.
 
 **Update 2026-09-05 (post-handoff)**: resolved the LLM-provider items that were
 open when this file was first written. See §9f-9h in the audit and the note
@@ -158,11 +213,44 @@ left as silent gaps:
    investigation if it recurs — this is the kind of thing that quietly
    degrades document accuracy without ever throwing an error.
 2. **`field_populator.py`'s `type: "table"` fallback extraction isn't
-   field-aware** — grabs "the first available lines" regardless of which
-   specific field it's filling. The specific cross-contamination bug this
-   caused is fixed (§9n), but the underlying mechanism's precision is still
-   coarse. Likely needs routing through the structured-JSON-extraction
-   pattern already proven for `security_controls`/`disaster_recovery`/etc.
+   field-aware** — grabs "the first available *unused* lines" regardless of
+   which specific field it's filling (still no semantic matching between a
+   field's meaning and which lines it gets). The specific cross-contamination
+   bug this caused is fixed twice now — §9n fixed collision between a
+   table field and a text field reading the same broad content; §9q fixed
+   two table fields (or a table + semantic-text field) in one section
+   claiming the identical fallback slice — but the underlying "just grab
+   whatever's left" heuristic's precision is still coarse. Likely needs
+   routing through the structured-JSON-extraction pattern already proven for
+   `security_controls`/`disaster_recovery`/etc.
+3. **`system_overview`'s text fields over-compete for the same 1-2
+   sentences** (found in §9r's live verification): `system_in_5_lines.
+   business_impact`/`worst_case`, `impact_if_down.what_breaks`/
+   `who_affected`, `customer_reach` all semantically target very similar
+   content, and the cross-field dedup mechanism (§9q/§9r) means only the
+   first-declared field claims a shared standout sentence — the rest fall
+   below the semantic-match threshold and end up unfilled (content still
+   visible via the "Additional context" fallback, just not attributed to
+   the specific field it was meant for). Not a regression, but worth
+   revisiting if System Overview's attribute table keeps coming back thin.
+4. **This local environment has no `GROQ_API_KEY` configured** — only
+   `GEMINI_API_KEY` is in `.env`, and Gemini's daily free-tier quota (§9g/9h)
+   makes it unreliable for ad-hoc verification. Whoever picks this up next
+   should set `GROQ_API_KEY` before doing any live LLM-structured-extraction
+   verification (common_failures/security_controls/disaster_recovery/
+   ownership_escalation/cost_optimization all depend on it, as does LLM
+   gap-fill for any pattern/semantic-unfilled field).
+5. **The remaining P2/P3 enterprise-review scope from §9s is genuinely
+   open**: cross-section semantic deduplication (catching paraphrased
+   duplicates like "check Grafana first" vs. "start with Grafana," which
+   today's exact-normalized-text dedup misses), contradiction detection
+   (no mechanism exists at all), and the larger P3 ask — an independent,
+   typed fact-extraction layer (fact_id/type/domain/importance/
+   evidence_state/confidence/relationships) computed *before* section
+   mapping, plus fully dynamic/emergent section naming beyond the current
+   fixed schema + 4 digest sections. All three are real, multi-session
+   architectural investments, not something to bolt on incrementally —
+   scope them as their own planning pass, don't assume they're small.
 
 If picking Phase 9 back up: decide the auth approach deliberately (a
 lightweight shared-API-key-per-role model vs. real user accounts) rather

@@ -134,3 +134,51 @@ def test_find_source_sentence_index_returns_none_for_short_or_empty_value():
     assert find_source_sentence_index("", sentences) is None
     assert find_source_sentence_index("Pr", sentences) is None
     assert find_source_sentence_index(None, sentences) is None
+
+
+TWO_TABLE_FIELDS_SCHEMA = [
+    {
+        "id": "open_responsibilities",
+        "title": "Open Responsibilities",
+        "fields": [
+            {"id": "open_tasks", "type": "table"},
+            {"id": "recurring_responsibilities", "type": "table"},
+        ],
+    }
+]
+
+
+def test_two_table_fields_in_one_section_do_not_get_identical_fallback_content():
+    # Regression test: before the fix, every type:"table" field independently
+    # re-derived candidate lines from the WHOLE section text and fell back to
+    # the same generic lines[:10] slice — so a second table field in the same
+    # section (e.g. "Recurring responsibilities" alongside "Open tasks")
+    # always duplicated the first one's content verbatim instead of getting
+    # its own data or an honest "not mentioned".
+    section_content = {
+        "open_responsibilities": {
+            "sentences": [
+                {"text": "Contact platform engineering before making changes.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+                {"text": "Review the on-call runbook weekly.", "start": 3, "end": 6, "speaker": None, "audio_confidence": 0.9},
+                {"text": "Renew the TLS certificate every quarter.", "start": 6, "end": 9, "speaker": None, "audio_confidence": 0.9},
+            ],
+        }
+    }
+    coverage = {"open_responsibilities": {"content": []}}
+
+    result = populate_fields(
+        TWO_TABLE_FIELDS_SCHEMA, coverage, llm_provider=None, embedding_model=None, section_content=section_content
+    )
+    fields = result["open_responsibilities"]
+
+    open_tasks_value = fields["open_tasks"]["value"]
+    recurring_value = fields["recurring_responsibilities"]["value"]
+
+    assert open_tasks_value, "first table field should still get the available lines"
+    assert open_tasks_value != recurring_value, (
+        "second table field must not silently duplicate the first field's content"
+    )
+    # With only 3 short lines total and the first field consuming all of
+    # them, the honest outcome for the second field is "not mentioned", not
+    # a repeat of the same content.
+    assert fields["recurring_responsibilities"]["source"] == "unfilled"

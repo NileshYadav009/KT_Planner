@@ -105,6 +105,45 @@ def test_golden_kt_pipeline_end_to_end(golden_pipeline):
     assert "autoscaler" in danger_text
 
 
+def _leaf_field_values(fields: dict):
+    """Yield each leaf field's populated value string, recursing into nested
+    group fields (field_populator.py stores a group's sub-fields at
+    output[group_id][sub_id])."""
+    for value in fields.values():
+        if not isinstance(value, dict):
+            continue
+        if "value" in value:
+            if isinstance(value["value"], str) and value["value"].strip():
+                yield value["value"]
+        else:
+            yield from _leaf_field_values(value)
+
+
+def test_golden_kt_pipeline_does_not_duplicate_field_values_within_a_section():
+    # Generic, schema-agnostic regression guard (fact-fidelity fix): two
+    # different fields in the same section should never end up with the
+    # exact same populated text — that's the signature of a fallback
+    # extractor grabbing the same generic slice of text for both, not two
+    # independently-sourced facts. Applies to any transcript/schema, not
+    # just this fixture's content.
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pipeline, "get_llm_provider", lambda: None)
+    monkeypatch.setattr(ai, "get_llm_provider", lambda: None)
+    pipeline.MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA, llm_fallback_fn=None)
+    try:
+        cleaned = clean_transcript(TRANSCRIPT)
+        result = pipeline.run_kt_pipeline("golden-test-job-dedup", cleaned)
+        assert result["status"] == "completed", result.get("error")
+
+        for section_id, fields in result["populated_fields"].items():
+            values = list(_leaf_field_values(fields))
+            duplicates = {v for v in values if values.count(v) > 1}
+            assert not duplicates, f"section '{section_id}' has duplicate field values: {duplicates}"
+    finally:
+        pipeline.MAPPER_PIPELINE = None
+        monkeypatch.undo()
+
+
 def test_golden_kt_pipeline_produces_a_valid_pdf(golden_pipeline):
     from pdf_rendering import render_pdf_html
     from weasyprint import HTML

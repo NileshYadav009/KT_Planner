@@ -25,7 +25,14 @@ from ai import map_analysis_to_fields, polish_coverage_sections, _extract_struct
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript
 from field_populator import populate_fields
-from knowledge import build_knowledge_object
+from knowledge import (
+    build_knowledge_object,
+    append_unmapped_findings_section,
+    enrich_operational_calendar,
+    append_tribal_knowledge_section,
+    append_coverage_matrix_section,
+    append_quick_reference_section,
+)
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider
 from pdf_rendering import build_rendered_sections
@@ -266,6 +273,41 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             logger.warning("Knowledge object build failed: %s", exc)
             knowledge_object = {}
+
+        # Fold cost_optimization's levers into known_bad_days as a combined
+        # "Operational Calendar" (peak periods + cost-related patterns) —
+        # reads a sibling section's already-built data, no reclassification.
+        try:
+            knowledge_object = enrich_operational_calendar(knowledge_object)
+        except Exception as exc:
+            logger.warning("Operational calendar enrichment failed: %s", exc)
+
+        # Surface sentences the classifier never confidently placed in any
+        # real section instead of letting them vanish silently (see
+        # knowledge_builder.append_unmapped_findings_section docstring).
+        try:
+            knowledge_object = append_unmapped_findings_section(
+                knowledge_object, kt.unassigned_sentences
+            )
+        except Exception as exc:
+            logger.warning("Unmapped findings appendix failed: %s", exc)
+
+        # Cross-section digests synthesized from data the pipeline has
+        # already produced above — no new classification, just reshaping.
+        try:
+            knowledge_object = append_tribal_knowledge_section(knowledge_object, kt.section_content)
+        except Exception as exc:
+            logger.warning("Tribal knowledge digest failed: %s", exc)
+
+        try:
+            knowledge_object = append_coverage_matrix_section(knowledge_object, coverage, dynamic_schema)
+        except Exception as exc:
+            logger.warning("Coverage matrix digest failed: %s", exc)
+
+        try:
+            knowledge_object = append_quick_reference_section(knowledge_object)
+        except Exception as exc:
+            logger.warning("Quick reference digest failed: %s", exc)
 
         try:
             knowledge_object["rendered_sections"] = build_rendered_sections(knowledge_object)

@@ -1,6 +1,7 @@
 import logging
 
 from renderers.sections.system_overview import render as render_system_overview
+from renderers.sections.environments import render as render_environments
 from renderers.sections.architecture_reference import render as render_architecture_reference
 from renderers.sections.deployment import render as render_deployment
 from renderers.sections.monitoring import render as render_monitoring
@@ -16,12 +17,17 @@ from renderers.sections.security import render as render_security
 from renderers.sections.ownership_escalation import render as render_ownership_escalation
 from renderers.sections.day1 import render as render_day1
 from renderers.sections.signoff import render as render_signoff
+from renderers.sections.unmapped_findings import render as render_unmapped_findings
+from renderers.sections.tribal_knowledge import render as render_tribal_knowledge
+from renderers.sections.kt_coverage import render as render_kt_coverage
+from renderers.sections.quick_reference import render as render_quick_reference
 from renderers.sections.default import render as render_default
 
 logger = logging.getLogger(__name__)
 
 RENDERER_REGISTRY = {
     "system_overview": render_system_overview,
+    "environments": render_environments,
     "architecture_reference": render_architecture_reference,
     "deployment_and_rollback": render_deployment,
     "monitoring_observability": render_monitoring,
@@ -37,6 +43,15 @@ RENDERER_REGISTRY = {
     "handover_completion": render_handover_completion,
     "first_30_day_ownership": render_first_30_day_ownership,
     "signoff": render_signoff,
+    # Synthesized digest sections (see knowledge/knowledge_builder.py's
+    # append_* functions) — none of these have a counterpart in
+    # kt_schema_new.json, so none may be added to sections_with_renderers
+    # below (that set enforces "this renderer's section id must exist in
+    # the schema").
+    "unmapped_findings": render_unmapped_findings,
+    "tribal_knowledge": render_tribal_knowledge,
+    "kt_coverage": render_kt_coverage,
+    "quick_reference": render_quick_reference,
 }
 
 
@@ -66,7 +81,7 @@ def validate_renderer_registry(schema_sections: list) -> None:
     # a mismatch here means get_renderer() silently falls back to render_default
     # for a section every KT document generates.
     sections_with_renderers = {
-        "system_overview", "architecture_reference", "deployment_and_rollback",
+        "system_overview", "environments", "architecture_reference", "deployment_and_rollback",
         "monitoring_observability", "common_failures", "security_controls",
         "ownership_escalation", "day1_survival_checklist", "disaster_recovery",
         "cost_optimization", "danger_zones", "known_bad_days",

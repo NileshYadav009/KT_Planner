@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from pdf_rendering import _render_inline_text, render_section_blocks
+from pdf_rendering import _render_inline_text, render_section_blocks, build_rendered_sections
 from renderers.blocks.common import NOT_COVERED_MESSAGE, no_coverage_block
 
 
@@ -37,6 +37,19 @@ def test_render_inline_text_escapes_and_bolds_together():
 
 def test_render_inline_text_handles_none():
     assert _render_inline_text(None) == ""
+
+
+def test_render_inline_text_converts_italic_markdown():
+    # knowledge_builder.py's INFERRED_MARKER (" *(inferred...)*") relies on
+    # this so a genuinely-inferred field value reads as visually distinct.
+    result = _render_inline_text("High *(inferred — not explicitly stated in the transcript)*")
+    assert "<em>(inferred — not explicitly stated in the transcript)</em>" in result
+    assert "*" not in result
+
+
+def test_render_inline_text_bold_and_italic_together():
+    result = _render_inline_text("**Bold** and *italic*")
+    assert result == "<strong>Bold</strong> and <em>italic</em>"
 
 
 def test_no_coverage_block_uses_the_shared_message():
@@ -121,3 +134,61 @@ def test_render_section_blocks_numbers_sections_sequentially():
     html = render_section_blocks(sections)
     assert '<span class="section-number">01</span>' in html
     assert '<span class="section-number">02</span>' in html
+
+
+def test_decision_table_blank_cell_shows_not_covered_marker():
+    sections = [_section("a", "A", [
+        {"type": "DecisionTable", "title": "A", "columns": ["Symptom", "Fix"],
+         "rows": [{"Symptom": "Pool exhaustion", "Fix": ""}]},
+    ])]
+    html = render_section_blocks(sections)
+    assert '<td class="cell-not-covered">Not covered during KT</td>' in html
+    assert "<td></td>" not in html
+
+
+def test_decision_table_populated_cell_unaffected():
+    sections = [_section("a", "A", [
+        {"type": "DecisionTable", "title": "A", "columns": ["Symptom", "Fix"],
+         "rows": [{"Symptom": "Pool exhaustion", "Fix": "Scale connections"}]},
+    ])]
+    html = render_section_blocks(sections)
+    assert "Scale connections" in html
+    assert "cell-not-covered" not in html
+
+
+def _rendered_section(section, **overrides):
+    base = {
+        "id": section, "title": section, "status": "missing", "confidence": 0.0, "risk": 1.0,
+        "facts": [], "entities": [], "evidence": [], "relationships": [], "fields": {},
+        "coverage_content": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_build_rendered_sections_omits_empty_conditional_section():
+    knowledge_object = {"sections": [
+        _rendered_section("first_30_day_ownership", title="FIRST 30-DAY OWNERSHIP PLAN", tier="conditional"),
+    ]}
+    rendered = build_rendered_sections(knowledge_object)
+    assert rendered == []
+
+
+def test_build_rendered_sections_keeps_empty_core_section():
+    knowledge_object = {"sections": [
+        _rendered_section("ownership_escalation", title="OWNERSHIP & ESCALATION"),
+    ]}
+    rendered = build_rendered_sections(knowledge_object)
+    assert len(rendered) == 1
+    assert rendered[0]["section_id"] == "ownership_escalation"
+
+
+def test_build_rendered_sections_keeps_conditional_section_with_real_content():
+    knowledge_object = {"sections": [
+        _rendered_section(
+            "cost_optimization", title="COST OPTIMIZATION", tier="conditional",
+            coverage_content=["We use spot instances in non-production."],
+        ),
+    ]}
+    rendered = build_rendered_sections(knowledge_object)
+    assert len(rendered) == 1

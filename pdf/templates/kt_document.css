@@ -254,6 +254,14 @@ th {
   width: 35%;
 }
 
+/* A DecisionTable cell whose source field genuinely had no supporting
+   transcript content — deliberately visible as "Not covered during KT"
+   rather than left blank (see pdf_rendering.py's NOT_COVERED_CELL). */
+.cell-not-covered {
+  color: #9ca3af;
+  font-style: italic;
+}
+
 pre {
   background: #f8fafc;
   padding: 12px;

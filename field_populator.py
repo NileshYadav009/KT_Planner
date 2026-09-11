@@ -6,9 +6,13 @@ Populate KT fields from coverage content using pattern, semantic, and LLM passes
 
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line.strip()).lower()
 
 PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
@@ -18,7 +22,9 @@ PATTERN_EXTRACTORS = {
         r"Kubernetes|Docker|Rancher|Vault|Consul|Nexus|Artifactory|"
         r"SonarQube|Trivy|Veracode|Datadog|Splunk|ELK|Elasticsearch|"
         r"Logstash|Kibana|Redis|Kafka|RabbitMQ|PostgreSQL|MySQL|MongoDB|"
-        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|CloudFront|S3)\b",
+        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|CloudFront|S3|"
+        r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
+        r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,
     ),
     "duration": re.compile(r"\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|seconds?|secs?)\b", re.IGNORECASE),
@@ -84,7 +90,11 @@ def _extract_ownership(text: str) -> dict:
     return result
 
 
-def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[Any]:
+def _extract_by_pattern(
+    field: Dict[str, Any],
+    section_text: str,
+    exclude_line_keys: Optional[Set[str]] = None,
+) -> Optional[Any]:
     field_type = field.get("type", "text")
     field_id = field.get("id", "")
 
@@ -179,6 +189,8 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
 
     if field_type == "table":
         lines = [line.strip() for line in section_text.splitlines() if line.strip()]
+        if exclude_line_keys:
+            lines = [line for line in lines if _normalize_line(line) not in exclude_line_keys]
         if not lines:
             return None
 
@@ -195,7 +207,14 @@ def _extract_by_pattern(field: Dict[str, Any], section_text: str) -> Optional[An
     return None
 
 
-def _extract_by_semantic(field: Dict[str, Any], sentences: List[str], model=None) -> Optional[str]:
+def _extract_by_semantic(
+    field: Dict[str, Any],
+    sentences: List[str],
+    model=None,
+    exclude_line_keys: Optional[Set[str]] = None,
+) -> Optional[str]:
+    if exclude_line_keys:
+        sentences = [s for s in sentences if _normalize_line(s) not in exclude_line_keys]
     if not sentences or model is None:
         return sentences[0] if sentences else None
 
@@ -313,6 +332,12 @@ def populate_fields(
             output=result[section_id],
             llm_provider=llm_provider,
             embedding_model=embedding_model,
+            # Shared across every field (including nested group fields) in
+            # this section, so a second type:"table" field can't fall back
+            # onto the exact same generic lines[:10] slice the first one
+            # already claimed — see _populate_fields_recursive's _emit table
+            # handling below.
+            used_line_keys=set(),
         )
 
     return result
@@ -355,8 +380,10 @@ def _populate_fields_recursive(
     llm_provider=None,
     embedding_model=None,
     raw_sentence_texts: Optional[List[str]] = None,
+    used_line_keys: Optional[Set[str]] = None,
 ):
     raw_sentence_texts = raw_sentence_texts or []
+    used_line_keys = used_line_keys if used_line_keys is not None else set()
 
     def _emit(value: Any, confidence: float, source: str):
         entry = {"value": value, "confidence": confidence, "source": source}
@@ -381,17 +408,26 @@ def _populate_fields_recursive(
                 llm_provider=llm_provider,
                 embedding_model=embedding_model,
                 raw_sentence_texts=raw_sentence_texts,
+                used_line_keys=used_line_keys,
             )
             continue
 
-        value = _extract_by_pattern(field, section_text)
-        if value is not None:
-            output[field_id] = _emit(value, 0.90, "pattern")
-            continue
+        if field_type == "table":
+            value = _extract_by_pattern(field, section_text, exclude_line_keys=used_line_keys)
+            if value is not None:
+                used_line_keys.update(_normalize_line(line) for line in value.splitlines())
+                output[field_id] = _emit(value, 0.90, "pattern")
+                continue
+        else:
+            value = _extract_by_pattern(field, section_text)
+            if value is not None:
+                output[field_id] = _emit(value, 0.90, "pattern")
+                continue
 
         if field_type == "text" and sentences:
-            value = _extract_by_semantic(field, sentences, embedding_model)
+            value = _extract_by_semantic(field, sentences, embedding_model, exclude_line_keys=used_line_keys)
             if value is not None:
+                used_line_keys.add(_normalize_line(value))
                 output[field_id] = _emit(value, 0.65, "semantic")
                 continue
 

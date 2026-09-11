@@ -72,11 +72,18 @@ SECTION_STRUCTURED_PROMPTS = {
     "common_failures": (
         "Return ONLY valid JSON (no markdown, no extra text). Use null for anything not mentioned:\n"
         "{{\"failures\": [{{\"symptom\": string, \"cause\": string, \"fix\": string, "
-        "\"frequency\": string|null, \"ticket\": string|null}}]}}\n\n"
+        "\"frequency\": string|null, \"ticket\": string|null, \"when\": string|null, "
+        "\"impact\": string|null, \"resolution\": string|null, "
+        "\"preventive_action\": string|null}}]}}\n\n"
         "One entry per distinct failure/issue described. \"frequency\" is how often it "
         "happens if mentioned (e.g. \"weekly\", \"during deploys\"). \"ticket\" is a "
-        "KEDB/ticket reference if mentioned. Do NOT invent failures not present in the "
-        "fragments.\n\n"
+        "KEDB/ticket reference if mentioned. \"when\" is a specific past occurrence if "
+        "mentioned (e.g. \"last year\"), for one-off historical incidents rather than "
+        "recurring issues. \"impact\" is what happened as a result (e.g. \"major "
+        "outage\"). \"resolution\" and \"preventive_action\" are only set if the "
+        "transcript explicitly states how it was fixed or prevented going forward — "
+        "leave null rather than inferring a plausible-sounding fix. Do NOT invent "
+        "failures not present in the fragments.\n\n"
         "Extract from these fragments:\n{fragments}\n\nJSON:"
     ),
 }
