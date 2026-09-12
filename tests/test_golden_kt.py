@@ -163,3 +163,27 @@ def test_golden_kt_pipeline_produces_a_valid_pdf(golden_pipeline):
     pdf_bytes = HTML(string=html_doc, base_url=os.path.dirname(os.path.dirname(__file__))).write_pdf()
     assert isinstance(pdf_bytes, (bytes, bytearray))
     assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_run_kt_pipeline_reuses_classification_embedding_model(golden_pipeline, monkeypatch):
+    # Regression guard: field_populator.py's semantic field-matching used to
+    # load a second, separate, materially weaker embedding model
+    # (all-MiniLM-L6-v2) instead of reusing the classification stage's own
+    # BAAI/bge-large-en-v1.5 (context_mapper.py's ContextClassifier.model) —
+    # already resident in memory for this same job. Confirm the object
+    # actually passed to populate_fields() is that same model instance, not
+    # a freshly-loaded one, so this doesn't silently regress.
+    captured = {}
+    real_populate_fields = pipeline.populate_fields
+
+    def _capture(*args, **kwargs):
+        captured["embedding_model"] = kwargs.get("embedding_model")
+        return real_populate_fields(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "populate_fields", _capture)
+
+    cleaned = clean_transcript(TRANSCRIPT)
+    result = golden_pipeline.run_kt_pipeline("golden-test-job-model-reuse", cleaned)
+    assert result["status"] == "completed", result.get("error")
+
+    assert captured["embedding_model"] is pipeline.MAPPER_PIPELINE.classifier.model

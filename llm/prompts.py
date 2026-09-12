@@ -69,6 +69,26 @@ SECTION_STRUCTURED_PROMPTS = {
         "present in the fragments.\n\n"
         "Extract from these fragments:\n{fragments}\n\nJSON:"
     ),
+    "open_responsibilities": (
+        "Return ONLY valid JSON (no markdown, no extra text):\n"
+        "{{\"open_tasks\": [{{\"task\": string, \"type\": string|null, \"status\": string|null, "
+        "\"business_impact\": string|null, \"kt_done\": string|null, \"recommendation\": string|null, "
+        "\"owner_decision\": string|null}}], "
+        "\"recurring_responsibilities\": [{{\"activity\": string, \"frequency\": string|null, "
+        "\"trigger\": string|null, \"owner_before\": string|null, \"owner_after\": string|null}}]}}\n\n"
+        "A row belongs in \"open_tasks\" ONLY if it describes a concrete, "
+        "specific piece of unfinished or in-progress work being handed over "
+        "(e.g. a project, a pending decision, an unresolved ticket). A row "
+        "belongs in \"recurring_responsibilities\" ONLY if it describes an "
+        "ongoing operational duty done on a schedule or trigger.\n"
+        "Do NOT include general safety warnings, escalation/contact "
+        "instructions, danger-zone cautions, or other advice that isn't a "
+        "specific task or recurring duty — those belong elsewhere in the "
+        "document, not here. If nothing in the fragments is actually a task "
+        "or recurring responsibility, return empty arrays for both.\n"
+        "Do NOT invent tasks not present in the fragments.\n\n"
+        "Extract from these fragments:\n{fragments}\n\nJSON:"
+    ),
     "common_failures": (
         "Return ONLY valid JSON (no markdown, no extra text). Use null for anything not mentioned:\n"
         "{{\"failures\": [{{\"symptom\": string, \"cause\": string, \"fix\": string, "

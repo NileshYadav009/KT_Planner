@@ -1549,6 +1549,89 @@ rendered; "Not covered during KT" appears 17 times in the real HTML output
 for Common Failures' empty cells; Environments shows only the Staging row
 (re-confirming P0-1's non-reproduction finding one more time, live).
 
+### 9t. Missing-data pass + the embedding-model-version lever
+
+User supplied another fresh PDF (job 5C4AE89C) alongside the same transcript
+and asked two things: what's still missing, and whether upgrading a
+"library version" could meaningfully help with data capture/section
+mapping. Investigated both directly against the running code rather than
+guessing.
+
+**The "library version" question had a real, concrete answer.** Grepped
+every embedding-model reference in the codebase:
+`context_mapper.py`'s `ContextClassifier` — the *primary* sentence-to-
+section classification engine — already uses `BAAI/bge-large-en-v1.5` (a
+genuinely strong model; the code comment even says "upgraded to
+BAAI/bge-large-en-v1.5") plus `cross-encoder/ms-marco-MiniLM-L-6-v2` for
+reranking. But `field_populator.py`'s semantic *field*-matching
+(`_extract_by_semantic` — the mechanism that picks which sentence best fits
+a specific field like `system_in_5_lines.worst_case` vs. `impact_if_down.
+what_breaks`) was being handed a **second, separately-loaded, materially
+weaker** model: `pipeline.py:223` loaded `all-MiniLM-L6-v2` (a small
+6-layer/384-dim model) fresh for this one purpose, instead of reusing the
+already-resident BGE-large instance. This is exactly the mechanism behind
+an already-documented gap (progress.md's tracked issue #3 — near-synonymous
+`system_overview` fields "starving" each other for the same standout
+sentence): a stronger embedding space directly improves that
+disambiguation. Fixed by reusing `MAPPER_PIPELINE.classifier.model` (same
+BGE-large instance, zero extra load/download cost) with a safe fallback to
+the old behavior if unavailable. Verified via a new regression test
+(`test_run_kt_pipeline_reuses_classification_embedding_model`) that
+confirms the identical model object is what actually reaches
+`populate_fields()`.
+
+**Missing-data findings, root-caused individually:**
+- Amazon ECR (container registry) and "DR testing performed quarterly"
+  were absent from the rendered output entirely. Root cause: both are
+  captured by `security_controls`/`disaster_recovery`'s LLM structured-
+  extraction path, which requires a working LLM call — this local
+  environment still has no `GROQ_API_KEY` configured (same class of gap as
+  §9r/§9s). Not a code defect; confirmed the raw sentences are present in
+  `coverage_content`, just not reaching the structured fields without a
+  working LLM call.
+- **Technology Summary table was incomplete — a real, fixed gap.** System
+  Overview's table only ever reflected `key_technologies`'s own pattern-
+  match over *that section's* text, while Monitoring/Security correctly
+  routing their own tool mentions to their own dedicated sections meant
+  those tools never appeared in the "one-stop" summary the golden reference
+  target implies. Added `enrich_technology_summary()`
+  (`knowledge/knowledge_builder.py`) — folds `monitoring_observability`'s
+  `tools` and `security_controls`'s `security_scan_config` into
+  `system_overview`'s `key_technologies` value (case-insensitive dedup, no
+  reclassification of the source facts) — same enrichment-point pattern as
+  `enrich_operational_calendar()`. **Live-verified this alone wasn't
+  enough**: monitoring_observability's `fields` came back empty this run
+  (same missing-`GROQ_API_KEY` cause), so added a second fallback layer —
+  when the structured field isn't populated, run the same tools regex
+  directly against the section's raw `coverage_content` instead of losing
+  the data. Re-verified live after adding the fallback: Technology Summary
+  went from 3 categories (Infrastructure/GitOps/Secrets) to 6
+  (+Alerting/Observability/Security), all populated correctly even without
+  a working LLM call.
+- **Frontend/Backend/Database/Cache/Compute/Edge still don't appear** in
+  Technology Summary despite "The platform consists of React frontend
+  applications, Python FastAPI services, PostgreSQL databases, and Redis
+  cache layers" being visibly present in System Overview's own "Additional
+  context" narrative. Root cause identified but **not fixed this pass**:
+  `key_technologies`'s pattern-match runs over `field_populator.py`'s
+  `section_text` (built from `section_content[id]['sentences']`), which
+  apparently doesn't include that sentence even though it reaches
+  `coverage_content` (a different data view, populated via a separate
+  path — see §9n/§9q's documented `sentences` vs. `blocks`/`coverage_content`
+  divergence). Same root cause class as previously fixed instances of this
+  bug, not yet chased down for this specific instance — flagged as a
+  concrete next step in progress.md rather than patched speculatively.
+
+**Verified**: `python -m py_compile` on all modified files. New tests: 1 in
+`tests/test_golden_kt.py` (model-reuse identity check), 4 in
+`tests/test_knowledge_builders.py` (`enrich_technology_summary`'s
+structured-field path, case-insensitive dedup, coverage_content fallback,
+no-op guard). Full `pytest tests/` — **112 passed, 0 failed** (457s), up
+from 108. Live end-to-end (two consecutive fresh jobs, second after adding
+the fallback): `validation_warnings == []` both times; Technology Summary
+confirmed going from 3 → 6 populated categories on the live rerun. Valid
+PDF exported both times.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

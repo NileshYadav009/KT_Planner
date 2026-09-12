@@ -14,6 +14,8 @@ from renderers.sections.environments import render as render_environments
 from renderers.sections.common_failures import render as render_common_failures
 from renderers.sections.known_bad_days import render as render_known_bad_days
 from renderers.sections.kt_coverage import render as render_kt_coverage
+from renderers.sections.open_responsibilities import render as render_open_responsibilities
+from renderers.sections.architecture_reference import render as render_architecture_reference
 
 
 def test_system_overview_renders_real_schema_fields_not_stale_ones():
@@ -151,3 +153,104 @@ def test_kt_coverage_omits_gaps_block_when_nothing_missing():
     result = render_kt_coverage(section)
     assert len(result["blocks"]) == 2
     assert not any(b["type"] == "ChecklistBlock" for b in result["blocks"])
+
+
+def test_open_responsibilities_prefers_structured_rows_over_raw_table_fallback():
+    # llm/prompts.py's open_responsibilities structured prompt is instructed
+    # to only emit rows for genuine tasks/recurring duties and drop general
+    # safety/escalation guidance — when it produced real rows, those must be
+    # used instead of the raw type:"table" fallback (which has no way to
+    # tell a stray sentence apart from a real task).
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {
+            "open_tasks": {"value": "If you are unaware about my production activity, contact platform engineering before proceeding."},
+        },
+        "coverage_content": [],
+        "_structured": {
+            "open_tasks": [
+                {"task": "Finish migrating the batch job to EKS", "type": "Project", "status": "In progress"},
+            ],
+            "recurring_responsibilities": [
+                {"activity": "Rotate Vault secrets", "frequency": "Quarterly", "owner_before": "Outgoing owner"},
+            ],
+        },
+    }
+    result = render_open_responsibilities(section)
+    assert len(result["blocks"]) == 2
+    tasks_block, recurring_block = result["blocks"]
+    assert tasks_block["title"] == "Open tasks"
+    assert tasks_block["rows"] == [{
+        "Task / Responsibility": "Finish migrating the batch job to EKS",
+        "Type": "Project", "Current Status": "In progress", "Business Impact": "",
+        "Knowledge Transfer Done": "", "Recommendation": "", "Incoming Owner Decision": "",
+    }]
+    assert recurring_block["title"] == "Recurring responsibilities"
+    # The safety-guidance sentence in fields["open_tasks"] must not appear
+    # anywhere in the structured-preferred output.
+    rendered_text = str(result)
+    assert "production activity" not in rendered_text
+
+
+def test_open_responsibilities_falls_back_to_raw_table_without_structured_data():
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {
+            "open_tasks": {"value": "Finish migrating the batch job to EKS"},
+        },
+        "coverage_content": [],
+    }
+    result = render_open_responsibilities(section)
+    assert len(result["blocks"]) == 1
+    assert result["blocks"][0]["type"] == "DecisionTable"
+    assert result["blocks"][0]["rows"][0]["Task / Responsibility"] == "Finish migrating the batch job to EKS"
+
+
+def test_open_responsibilities_shows_no_coverage_when_nothing_available():
+    section = {"id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN", "fields": {}, "coverage_content": []}
+    result = render_open_responsibilities(section)
+    assert len(result["blocks"]) == 1
+    assert result["blocks"][0]["type"] != "DecisionTable"
+
+
+def test_architecture_reference_does_not_let_one_thin_field_hide_a_richer_fallback():
+    # Regression test: a spurious/loosely-related architecture_link value
+    # ("Confluence" instead of a real URL) used to be enough on its own to
+    # skip the raw coverage_content fallback entirely, collapsing a real
+    # 5-bullet Architecture Reference section down to a single
+    # "Architecture reference: Confluence" line.
+    section = {
+        "id": "architecture_reference", "title": "Architecture Reference",
+        "fields": {
+            "architecture_link": {"value": "Confluence"},
+        },
+        "coverage_content": [
+            "All services run on Amazon EKS.",
+            "Traffic enters through CloudFront and the application load balancer before reaching the Kubernetes workload.",
+            "One tribal knowledge item is that CloudFront cache invalidation can take longer than expected during large releases.",
+            "The primary database runs on Amazon RDS with PostgreSQL, with multiple AZs enabled.",
+            "The architecture diagram is maintained in Confluence and should be reviewed before making infrastructure changes.",
+        ],
+    }
+    result = render_architecture_reference(section)
+    assert len(result["blocks"]) == 1
+    block = result["blocks"][0]
+    assert block["type"] == "NarrativeBlock"
+    assert len(block["paragraphs"]) == 5
+    assert "Amazon EKS" in " ".join(block["paragraphs"])
+
+
+def test_architecture_reference_prefers_real_field_content_when_richer_than_fallback():
+    # When the fields genuinely captured more than the (thin/absent)
+    # fallback, they should still be used — this isn't "always prefer the
+    # fallback", only "don't let a thin field hide a richer fallback".
+    section = {
+        "id": "architecture_reference", "title": "Architecture Reference",
+        "fields": {
+            "architecture_link": {"value": "https://confluence.example.com/architecture"},
+        },
+        "coverage_content": ["See the docs."],
+    }
+    result = render_architecture_reference(section)
+    assert len(result["blocks"]) == 1
+    assert "https://confluence.example.com/architecture" in result["blocks"][0]["paragraphs"][0]

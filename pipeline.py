@@ -29,6 +29,7 @@ from knowledge import (
     build_knowledge_object,
     append_unmapped_findings_section,
     enrich_operational_calendar,
+    enrich_technology_summary,
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
@@ -186,6 +187,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 "monitoring_observability", "security_controls",
                 "disaster_recovery", "ownership_escalation",
                 "cost_optimization", "common_failures",
+                "open_responsibilities",
             ):  # Sections with SECTION_STRUCTURED_PROMPTS (llm/prompts.py)
                 try:
                     structured = _extract_structured_section(
@@ -219,8 +221,22 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             dynamic_schema = SCHEMA
 
         try:
-            from sentence_transformers import SentenceTransformer
-            embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+            # Reuse the classification stage's own embedding model
+            # (BAAI/bge-large-en-v1.5 — a materially stronger model than the
+            # small all-MiniLM-L6-v2 this used to load separately) for
+            # field_populator.py's semantic field-matching too, instead of
+            # loading a second, weaker model. Same model, already resident
+            # in memory for this job — no extra download/load cost, and a
+            # stronger embedding space directly helps the exact class of
+            # error observed live: near-synonymous fields (e.g.
+            # system_overview's business_impact/worst_case/what_breaks) or
+            # near-synonymous sections competing for the same sentence are
+            # disambiguated by embedding similarity, so a better embedding
+            # model is the highest-leverage single lever available here.
+            embedding_model = getattr(getattr(MAPPER_PIPELINE, "classifier", None), "model", None)
+            if embedding_model is None:
+                from sentence_transformers import SentenceTransformer
+                embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         except Exception:
             embedding_model = None
 
@@ -281,6 +297,16 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             knowledge_object = enrich_operational_calendar(knowledge_object)
         except Exception as exc:
             logger.warning("Operational calendar enrichment failed: %s", exc)
+
+        # Fold tool mentions correctly classified into their own dedicated
+        # sections (Monitoring's tools, Security's scanner) into System
+        # Overview's Technology Summary so it's a genuine one-stop
+        # inventory, not just whatever happened to be mentioned in the same
+        # sentences as the rest of the overview narrative.
+        try:
+            knowledge_object = enrich_technology_summary(knowledge_object)
+        except Exception as exc:
+            logger.warning("Technology summary enrichment failed: %s", exc)
 
         # Surface sentences the classifier never confidently placed in any
         # real section instead of letting them vanish silently (see

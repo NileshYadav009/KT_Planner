@@ -29,17 +29,28 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     if fields.get("platform_services", {}).get("value"):
         tech_rows.append({"label": "Platform service", "value": fields["platform_services"]["value"]})
 
+    # A handful of narrow fields (architecture_link, last_updated, ...)
+    # typically capture far less than the section's raw transcript content
+    # — never let a couple of short field-derived lines silently hide a
+    # substantially richer raw fallback. Concretely: a gap-fill that mistook
+    # "the diagram is in Confluence" for a value of architecture_link once
+    # collapsed a real 5-bullet Architecture Reference section down to a
+    # single "Architecture reference: Confluence" line, because that one
+    # non-empty paragraph was enough to skip the fallback entirely.
+    fallback = _coverage_paragraphs(section)
+    field_chars = sum(len(p) for p in paragraphs)
+    fallback_chars = sum(len(p) for p in fallback)
+    prefer_fallback = fallback_chars > field_chars
+
     blocks = []
     if tech_rows:
         blocks.append(build_technology_grid("Architecture technologies", tech_rows))
-    if paragraphs:
+    if paragraphs and not prefer_fallback:
         blocks.append(build_narrative_block(title, paragraphs))
+    elif fallback:
+        blocks.append(build_narrative_block(title, fallback))
 
     if not blocks:
-        fallback = _coverage_paragraphs(section)
-        if fallback:
-            blocks.append(build_narrative_block(title, fallback))
-        else:
-            blocks.append(no_coverage_block(title))
+        blocks.append(no_coverage_block(title))
 
     return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}

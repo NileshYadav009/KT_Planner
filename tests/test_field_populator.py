@@ -10,7 +10,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from field_populator import populate_fields, find_source_sentence_index
+from field_populator import populate_fields, find_source_sentence_index, _build_llm_gap_fill_prompt
 
 
 SCHEMA = [
@@ -182,3 +182,152 @@ def test_two_table_fields_in_one_section_do_not_get_identical_fallback_content()
     # them, the honest outcome for the second field is "not mentioned", not
     # a repeat of the same content.
     assert fields["recurring_responsibilities"]["source"] == "unfilled"
+
+
+class _StubLLM:
+    """Records every prompt it's called with and returns queued responses
+    in order — lets a test assert both what the model was told and what
+    happens with what it says back."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.prompts = []
+
+    def generate(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        return self._responses.pop(0)
+
+
+EXPLICIT_INFERRED_SCHEMA = [
+    {
+        "id": "system_overview",
+        "title": "System Overview",
+        "fields": [
+            {"id": "business_criticality", "label": "Business Criticality", "type": "single_select", "options": ["High", "Medium", "Low"]},
+            {"id": "customer_reach", "label": "Customer Reach", "type": "text"},
+        ],
+    }
+]
+
+
+def test_llm_gap_fill_tags_explicit_basis_as_llm_explicit():
+    # business_criticality's options ("high"/"medium"/"low") never appear
+    # verbatim in the transcript, so pattern extraction misses it and this
+    # falls to the LLM — which should recognize "most business critical
+    # system" as a directly-stated (if paraphrased) fact, not a guess.
+    coverage = {"system_overview": {"content": []}}
+    section_content = {
+        "system_overview": {
+            "sentences": [
+                {"text": "This is one of the company's most business critical systems.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+            ],
+        }
+    }
+    stub = _StubLLM(["High\nEXPLICIT", "global\nEXPLICIT"])
+    result = populate_fields(
+        EXPLICIT_INFERRED_SCHEMA, coverage, llm_provider=stub, embedding_model=None, section_content=section_content
+    )
+    field = result["system_overview"]["business_criticality"]
+    assert field["value"] == "High"
+    assert field["source"] == "llm_explicit"
+
+
+def test_llm_gap_fill_tags_inferred_basis_as_llm():
+    coverage = {"system_overview": {"content": []}}
+    section_content = {
+        "system_overview": {
+            "sentences": [
+                {"text": "The team ships fairly often.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+            ],
+        }
+    }
+    stub = _StubLLM(["Medium\nINFERRED", "NOT_MENTIONED\nINFERRED"])
+    result = populate_fields(
+        EXPLICIT_INFERRED_SCHEMA, coverage, llm_provider=stub, embedding_model=None, section_content=section_content
+    )
+    field = result["system_overview"]["business_criticality"]
+    assert field["value"] == "Medium"
+    assert field["source"] == "llm"
+
+
+def test_llm_gap_fill_defaults_to_inferred_when_basis_line_missing():
+    # If the model doesn't follow the two-line format, err on the safe
+    # (pre-existing) side rather than silently treating an unparseable
+    # response as explicit.
+    coverage = {"system_overview": {"content": []}}
+    section_content = {
+        "system_overview": {
+            "sentences": [
+                {"text": "Some unrelated sentence.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+            ],
+        }
+    }
+    stub = _StubLLM(["High", "NOT_MENTIONED"])
+    result = populate_fields(
+        EXPLICIT_INFERRED_SCHEMA, coverage, llm_provider=stub, embedding_model=None, section_content=section_content
+    )
+    field = result["system_overview"]["business_criticality"]
+    assert field["value"] == "High"
+    assert field["source"] == "llm"
+
+
+SIBLING_ENV_SCHEMA = [
+    {
+        "id": "environments",
+        "title": "Environments",
+        "fields": [
+            {"id": "production_notes", "label": "Production characteristics", "type": "text"},
+            {"id": "staging_notes", "label": "Staging characteristics", "type": "text"},
+            {"id": "non_production_notes", "label": "Non-production characteristics", "type": "text"},
+        ],
+    }
+]
+
+
+def test_llm_gap_fill_prompt_requires_literal_url_for_url_fields():
+    # Regression test: architecture_reference's architecture_link (type
+    # "url") once absorbed "The architecture diagram is maintained in
+    # Confluence..." as if "Confluence" were a URL, because the general
+    # paraphrase-friendly rule ("extract or normalize, even in different
+    # words") applied to every field type — collapsing the whole rendered
+    # section down to one line (see REPOSITORY_AUDIT.md). A url/date/
+    # boolean field must get the strict literal-presence rule instead.
+    field = {"id": "architecture_link", "label": "Link to detailed architecture documentation", "type": "url"}
+    prompt = _build_llm_gap_fill_prompt("Architecture Reference", field, "The architecture diagram is maintained in Confluence.")
+    assert "an actual URL" in prompt
+    assert "does NOT count" in prompt
+    assert "even in different words), extract or normalize" not in prompt
+
+
+def test_llm_gap_fill_prompt_keeps_paraphrase_leniency_for_open_ended_fields():
+    field = {"id": "business_criticality", "label": "Business Criticality", "type": "single_select", "options": ["High", "Medium", "Low"]}
+    prompt = _build_llm_gap_fill_prompt("System Overview", field, "One of the company's most business critical systems.")
+    assert "extract or normalize that value" in prompt
+    assert "an actual URL" not in prompt
+
+
+def test_llm_gap_fill_prompt_lists_already_captured_sibling_values():
+    # Only one real sentence exists; production_notes (first in schema
+    # order) will claim it via semantic match. The staging/non_production
+    # LLM prompts must be told what production_notes already captured, so
+    # the model can avoid blindly re-attributing the same staging-specific
+    # text to a different, unrelated environment.
+    coverage = {"environments": {"content": []}}
+    section_content = {
+        "environments": {
+            "sentences": [
+                {"text": "The staging environment closely mirrors production.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+            ],
+        }
+    }
+    stub = _StubLLM(["NOT_MENTIONED\nEXPLICIT", "NOT_MENTIONED\nEXPLICIT"])
+    populate_fields(
+        SIBLING_ENV_SCHEMA, coverage, llm_provider=stub, embedding_model=None, section_content=section_content
+    )
+    # production_notes should have resolved via semantic match (no LLM call
+    # needed for it), and the two LLM prompts that did fire (for staging and
+    # non_production) should reference what production_notes already has.
+    assert len(stub.prompts) == 2
+    for prompt in stub.prompts:
+        assert "Already captured for OTHER fields" in prompt
+        assert "closely mirrors production" in prompt

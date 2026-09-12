@@ -231,24 +231,84 @@ def _extract_by_semantic(
     return None
 
 
-def _build_llm_gap_fill_prompt(section_title: str, field: Dict[str, Any], available_text: str) -> str:
+def _build_llm_gap_fill_prompt(
+    section_title: str,
+    field: Dict[str, Any],
+    available_text: str,
+    already_captured: Optional[List[str]] = None,
+) -> str:
     field_label = field.get("label", field.get("id", ""))
     field_desc = field.get("description", "")
+    field_type = field.get("type", "text")
     options = field.get("options", [])
     options_str = f"\nValid options: {', '.join(options)}" if options else ""
+
+    # The "paraphrase counts as explicit" leniency below is what lets
+    # business_criticality normalize "most business critical system" -> a
+    # High/Medium/Low category — appropriate for open-ended/categorical
+    # fields. Applied to a structurally-typed field (a real URL, an actual
+    # calendar date, an explicit yes/no) it does the opposite of what's
+    # intended: it lets the model treat a loosely-related mention (e.g. "the
+    # diagram is in Confluence") as if it satisfied "link to the
+    # architecture documentation", producing a value that isn't actually a
+    # URL at all. Those types get a strict literal-presence rule instead.
+    _STRUCTURAL_TYPE_RULES = {
+        "url": "an actual URL (starting with http:// or https://, or a clearly identifiable link)",
+        "date": "an actual calendar date or timestamp",
+        "boolean": "an explicit yes/no, true/false, or clearly confirmed/denied statement",
+    }
+    structural_hint = _STRUCTURAL_TYPE_RULES.get(field_type)
+    strictness_rule = (
+        f"- '{field_label}' requires {structural_hint}. Only extract a value if "
+        f"the transcript literally contains one — a mention of a related tool, "
+        f"system, or topic (e.g. naming where something is stored, without "
+        f"giving the actual {field_type}) does NOT count. If no literal "
+        f"{field_type} is present, respond with exactly: NOT_MENTIONED\n"
+        if structural_hint else
+        f"- If the transcript specifically discusses '{field_label}' (even in "
+        f"different words), extract or normalize that value.\n"
+    )
+
+    # Sibling fields in the same section (e.g. Production / Staging /
+    # Non-production "characteristics", or per-entity rows generally) often
+    # share almost all of a sparse section's text. Without seeing what other
+    # fields already claimed, the model has no way to tell "this text is
+    # specifically about THIS field" from "this is the only text in the
+    # section, so I'll reuse it" — which silently copies one entity's facts
+    # onto an unrelated sibling entity. Generic: works for any set of
+    # sibling field labels, not just environment names.
+    already_str = ""
+    if already_captured:
+        joined = "\n".join(f"- {item}" for item in already_captured if item)
+        if joined:
+            already_str = (
+                f"\nAlready captured for OTHER fields in this section (do not "
+                f"repeat these as if they were specifically about "
+                f"'{field_label}' unless the transcript explicitly says this "
+                f"applies to '{field_label}' too):\n{joined}\n"
+            )
+
     return (
         f"You are filling a Knowledge Transfer document field.\n\n"
         f"Section: {section_title}\n"
         f"Field: {field_label}\n"
-        f"Description: {field_desc}{options_str}\n\n"
+        f"Description: {field_desc}{options_str}\n"
+        f"{already_str}\n"
         f"Available transcript content:\n{available_text}\n\n"
         f"Extract ONLY the value for '{field_label}' from the transcript above.\n"
         f"Rules:\n"
-        f"- If the information is present, extract it exactly.\n"
-        f"- If it is NOT present, respond with exactly: NOT_MENTIONED\n"
-        f"- Do NOT invent information.\n"
-        f"- Return only the extracted value, no explanation.\n\n"
-        f"Value:"
+        f"{strictness_rule}"
+        f"- If the only relevant text is actually about a DIFFERENT, similar "
+        f"item (e.g. a different environment/entity/team than '{field_label}') "
+        f"and the transcript never says it also applies to '{field_label}', "
+        f"respond with exactly: NOT_MENTIONED\n"
+        f"- If nothing relevant is present at all, respond with exactly: NOT_MENTIONED\n"
+        f"- Do NOT invent information that has no basis in the transcript above.\n\n"
+        f"Respond with EXACTLY two lines and nothing else:\n"
+        f"Line 1: the extracted value (or NOT_MENTIONED).\n"
+        f"Line 2: EXPLICIT if the transcript directly states this fact (even in "
+        f"different wording), or INFERRED if you had to reason/guess beyond "
+        f"what the transcript actually says."
     )
 
 
@@ -381,9 +441,15 @@ def _populate_fields_recursive(
     embedding_model=None,
     raw_sentence_texts: Optional[List[str]] = None,
     used_line_keys: Optional[Set[str]] = None,
+    already_captured: Optional[List[str]] = None,
 ):
     raw_sentence_texts = raw_sentence_texts or []
     used_line_keys = used_line_keys if used_line_keys is not None else set()
+    # Shared across every field (including nested group fields) in this
+    # section, so the LLM gap-fill prompt for a later field can see what
+    # earlier sibling fields already claimed and avoid copying it onto a
+    # different, unrelated entity/field. See _build_llm_gap_fill_prompt.
+    already_captured = already_captured if already_captured is not None else []
 
     def _emit(value: Any, confidence: float, source: str):
         entry = {"value": value, "confidence": confidence, "source": source}
@@ -395,6 +461,7 @@ def _populate_fields_recursive(
     for field in fields:
         field_id = field.get("id")
         field_type = field.get("type", "text")
+        field_label = field.get("label", field_id)
 
         if field_type == "group":
             output[field_id] = {}
@@ -409,6 +476,7 @@ def _populate_fields_recursive(
                 embedding_model=embedding_model,
                 raw_sentence_texts=raw_sentence_texts,
                 used_line_keys=used_line_keys,
+                already_captured=already_captured,
             )
             continue
 
@@ -417,11 +485,13 @@ def _populate_fields_recursive(
             if value is not None:
                 used_line_keys.update(_normalize_line(line) for line in value.splitlines())
                 output[field_id] = _emit(value, 0.90, "pattern")
+                already_captured.append(f"{field_label}: {value}")
                 continue
         else:
             value = _extract_by_pattern(field, section_text)
             if value is not None:
                 output[field_id] = _emit(value, 0.90, "pattern")
+                already_captured.append(f"{field_label}: {value}")
                 continue
 
         if field_type == "text" and sentences:
@@ -429,15 +499,33 @@ def _populate_fields_recursive(
             if value is not None:
                 used_line_keys.add(_normalize_line(value))
                 output[field_id] = _emit(value, 0.65, "semantic")
+                already_captured.append(f"{field_label}: {value}")
                 continue
 
         if llm_provider and section_text.strip() and field_type != "table":
             try:
-                prompt = _build_llm_gap_fill_prompt(section_title=section_title, field=field, available_text=section_text[:1500])
-                raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=256, stop_sequences=["\n"])
-                val = raw.strip() if isinstance(raw, str) else ""
+                prompt = _build_llm_gap_fill_prompt(
+                    section_title=section_title,
+                    field=field,
+                    available_text=section_text[:1500],
+                    already_captured=already_captured,
+                )
+                raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=128)
+                lines = [ln.strip() for ln in raw.splitlines() if ln.strip()] if isinstance(raw, str) else []
+                val = lines[0] if lines else ""
+                basis = lines[1].upper() if len(lines) > 1 else "INFERRED"
                 if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
-                    output[field_id] = _emit(val, 0.75, "llm")
+                    # The gap-fill prompt forbids inventing ungrounded values,
+                    # so a returned value is always an extraction — but only
+                    # tag it "llm" (which knowledge_builder marks as
+                    # *(inferred...)* in the rendered doc) when the model
+                    # itself says it had to reason beyond what's literally
+                    # stated. A directly-stated-but-paraphrased fact (e.g.
+                    # "most business critical system" -> "High") is grounded,
+                    # not inferred.
+                    source = "llm" if basis.startswith("INFER") else "llm_explicit"
+                    output[field_id] = _emit(val, 0.75, source)
+                    already_captured.append(f"{field_label}: {val}")
                     continue
             except Exception as exc:
                 logger.warning("LLM field fill failed for %s.%s: %s", section_id, field_id, exc)

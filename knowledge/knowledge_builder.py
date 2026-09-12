@@ -6,6 +6,7 @@ from .evidence import build_evidence
 from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
+from field_populator import PATTERN_EXTRACTORS
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
 UNMAPPED_FINDINGS_TITLE = "Additional Notes (Unmapped Findings)"
@@ -97,12 +98,16 @@ INFERRED_MARKER = " *(inferred — not explicitly stated in the transcript)*"
 
 def _apply_evidence_marker(value: Any, source: str) -> Any:
     """Flag genuinely-inferred values so the PDF/UI can distinguish them from
-    transcript-grounded ones, without touching every renderer: only
-    source == "llm" (field_populator.py's free-form gap-fill prompt) invents
-    a value with no direct grounding sentence — pattern/semantic/
-    llm_structured are all anchored to real transcript text and are left
-    alone. Only applies to non-empty strings; other field types (bool,
-    list, etc.) are returned unchanged.
+    transcript-grounded ones, without touching every renderer.
+
+    field_populator.py's free-form gap-fill prompt now self-classifies each
+    extraction as EXPLICIT (the transcript directly states this, even if
+    paraphrased) or INFERRED (the model had to reason/guess beyond what's
+    literally said) and tags the result "llm_explicit" or "llm"
+    accordingly — only the latter is marked here. pattern/semantic/
+    llm_structured/llm_explicit are all anchored to real transcript text and
+    are left alone. Only applies to non-empty strings; other field types
+    (bool, list, etc.) are returned unchanged.
     """
     if source == "llm" and isinstance(value, str) and value.strip():
         return value + INFERRED_MARKER
@@ -180,6 +185,87 @@ def build_knowledge_object(
     }
 
 
+def _iter_field_strings(fields: Any):
+    """Yield every string value reachable from a section's `fields` map,
+    recursing into group fields (which nest sub-fields directly rather than
+    under a "value" key). Generic — doesn't know field ids or a schema."""
+    if not isinstance(fields, dict):
+        return
+    for field in fields.values():
+        if not isinstance(field, dict):
+            continue
+        value = field.get("value")
+        if isinstance(value, str) and value.strip():
+            yield value
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    yield item
+        elif value is None:
+            # No "value" key at all likely means this is a nested group
+            # (field_populator._populate_fields_recursive stores group
+            # sub-fields directly, not under a "value" wrapper) — recurse.
+            yield from _iter_field_strings(field)
+
+
+_DEDUP_PUNCT_RE = re.compile(r"[^a-z0-9\s]+")
+
+
+def _dedup_normalize(text: str) -> str:
+    """Lowercased, punctuation-stripped, whitespace-collapsed text — looser
+    than _normalize_text() on purpose. Two mechanisms in this pipeline can
+    each independently touch the same original sentence (an LLM-polish pass
+    that fixes comma placement/wording for one section vs. a raw discourse-
+    marker-trimming step for another), so an exact/whitespace-only compare
+    misses real duplicates that a human would obviously recognize as the
+    same fact. Stripping punctuation is enough to reconcile the polish-pass
+    case; the substring check below (checked in both directions) handles
+    the trimmed-discourse-marker case."""
+    text = _DEDUP_PUNCT_RE.sub(" ", (text or "").lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _mapped_text_chunks(knowledge_object: Dict[str, Any]) -> List[str]:
+    """Normalized text of everything already classified into a real section
+    (coverage_content + every populated field value), kept as separate
+    chunks (not one joined blob) so a short, already-mapped fact can be
+    matched as a substring of a longer unassigned sentence and vice versa.
+    Generic: reads only the already-built knowledge_object, no section-id-
+    specific logic."""
+    chunks: List[str] = []
+    for section in knowledge_object.get("sections") or []:
+        content = section.get("coverage_content") or []
+        if isinstance(content, str):
+            content = [content]
+        chunks.extend(str(c) for c in content if isinstance(c, str) and c.strip())
+        chunks.extend(_iter_field_strings(section.get("fields")))
+    return [_dedup_normalize(c) for c in chunks if str(c).strip()]
+
+
+def _is_duplicate_of_mapped_content(sentence_text: str, mapped_chunks: List[str]) -> bool:
+    """True if `sentence_text` is essentially the same fact as something
+    already mapped into a real section — checked both directions since
+    either side can be the "trimmed" one (an LLM-polished paragraph is
+    often a superset of the raw sentence; a raw sentence with a leading
+    discourse marker like "Coming back to architecture, ..." is a superset
+    of the trimmed fact that made it into the real section)."""
+    normalized = _dedup_normalize(sentence_text)
+    if not normalized:
+        return False
+    for chunk in mapped_chunks:
+        if not chunk:
+            continue
+        if normalized in chunk:
+            return True
+        # Only treat the mapped side as sufficient evidence on its own when
+        # it's not a trivially short/generic fragment — avoids a short
+        # mapped field value ("Yes", "Trivy") spuriously matching an
+        # unrelated long unassigned sentence that happens to contain it.
+        if len(chunk.split()) >= 4 and chunk in normalized:
+            return True
+    return False
+
+
 def append_unmapped_findings_section(
     knowledge_object: Dict[str, Any],
     unassigned_sentences: Optional[List[Any]],
@@ -194,11 +280,22 @@ def append_unmapped_findings_section(
     changes for a different KT topic. Mutates and returns `knowledge_object`
     for convenient chaining; a no-op (returns it unchanged) when nothing
     survives the length filter, so no empty appendix/TOC entry is ever added.
+
+    context_mapper.py's classifier can independently decide the same
+    sentence both belongs in a real section (feeding that section's
+    coverage_content/fields) AND is "unassigned" (its own separate
+    mechanism) — without a cross-check, that sentence would render twice:
+    once correctly, once again here as a fabricated "gap". Anything whose
+    normalized text is already a substring of the mapped content is
+    filtered out before the word-count filter runs.
     """
     sentences = unassigned_sentences or []
+    mapped_chunks = _mapped_text_chunks(knowledge_object)
     surviving = [
         s for s in sentences
-        if isinstance(getattr(s, "text", None), str) and len(s.text.split()) >= _MIN_UNMAPPED_SENTENCE_WORDS
+        if isinstance(getattr(s, "text", None), str)
+        and len(s.text.split()) >= _MIN_UNMAPPED_SENTENCE_WORDS
+        and not _is_duplicate_of_mapped_content(s.text, mapped_chunks)
     ]
     if not surviving:
         return knowledge_object
@@ -312,6 +409,76 @@ def enrich_operational_calendar(knowledge_object: Dict[str, Any]) -> Dict[str, A
     return knowledge_object
 
 
+def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold tool mentions that correctly classified into their own dedicated
+    sections (monitoring_observability's `tools`, security_controls'
+    `security_scan_config`) into system_overview's `key_technologies` value,
+    so the Technology Summary table is a genuine one-stop inventory instead
+    of only reflecting whatever tools happened to be mentioned in the same
+    sentences as the rest of system_overview's narrative. Those tools aren't
+    reclassified or duplicated as their own facts — Monitoring/Security keep
+    owning the real content; this only extends the flat tool-name list
+    system_overview.py's renderer already categorizes into rows.
+    Generic: driven entirely by section ids and field shapes that exist for
+    any transcript, not this one's specific tool choices.
+    """
+    overview_section = _find_section(knowledge_object, "system_overview")
+    if not overview_section:
+        return knowledge_object
+
+    existing_value = (overview_section.get("fields", {}).get("key_technologies") or {}).get("value")
+    found: List[str] = [t.strip() for t in str(existing_value or "").split(",") if t.strip()]
+
+    def _raw_text(section: Optional[Dict[str, Any]]) -> str:
+        content = (section or {}).get("coverage_content") or []
+        if isinstance(content, str):
+            content = [content]
+        return " ".join(str(c) for c in content if isinstance(c, str))
+
+    monitoring_section = _find_section(knowledge_object, "monitoring_observability")
+    if monitoring_section:
+        tools = (monitoring_section.get("fields", {}).get("tools") or {}).get("value")
+        if isinstance(tools, list):
+            found.extend(str(t).strip() for t in tools if str(t).strip())
+        elif isinstance(tools, str) and tools.strip():
+            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(tools))
+        else:
+            # LLM structured extraction can fail/be unavailable and leave
+            # `fields` empty even though the raw sentences (still present in
+            # coverage_content) clearly name real tools — fall back to the
+            # same tools regex directly against the raw text rather than
+            # losing this data whenever the LLM path doesn't fire.
+            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(_raw_text(monitoring_section)))
+
+    security_section = _find_section(knowledge_object, "security_controls")
+    if security_section:
+        scan_config = (security_section.get("fields", {}).get("security_scan_config") or {}).get("value")
+        if isinstance(scan_config, str) and scan_config.strip():
+            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(scan_config))
+        else:
+            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(_raw_text(security_section)))
+
+    if not found:
+        return knowledge_object
+
+    # Dedupe case-insensitively while preserving first-seen casing/order —
+    # system_overview.py's own categorization joins same-category tools with
+    # "; ", so an uncaught duplicate here would render as "Trivy; Trivy".
+    seen = set()
+    deduped = []
+    for tool in found:
+        key = tool.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(tool)
+
+    overview_section.setdefault("fields", {}).setdefault(
+        "key_technologies", {"id": "key_technologies", "label": "Key Technologies", "type": "text", "confidence": 0.6, "source": "cross_section", "evidence": []}
+    )["value"] = ", ".join(deduped)
+
+    return knowledge_object
+
+
 # Generic, section-id-keyed heuristics for the Tribal Knowledge digest —
 # not tied to any one transcript's wording. Extend by section id if a new
 # section should carry tribal-knowledge weight, not by adding transcript-
@@ -394,6 +561,23 @@ KT_COVERAGE_SECTION_ID = "kt_coverage"
 KT_COVERAGE_TITLE = "KT Coverage & Knowledge Gaps"
 
 
+def _leaf_field_specs(fields_schema: Optional[List[Dict[str, Any]]]) -> List[tuple]:
+    """(field_id, label) for schema fields that land as their own,
+    independently-checkable field_objects entry — i.e. everything except
+    "list" fields (static reference bullets, not per-transcript extracted
+    facts) and "group" containers (field_populator nests their sub-fields
+    directly rather than surfacing the group itself as a value, so checking
+    the group id alone would always read as unfilled). Generic: driven
+    entirely by each section's own schema field list, not by section id."""
+    specs = []
+    for f in fields_schema or []:
+        ftype = f.get("type", "text")
+        if ftype in ("list", "group"):
+            continue
+        specs.append((f.get("id"), f.get("label", f.get("id"))))
+    return specs
+
+
 def append_coverage_matrix_section(
     knowledge_object: Dict[str, Any],
     coverage: Dict[str, Any],
@@ -421,14 +605,52 @@ def append_coverage_matrix_section(
         # signal stayed under an arbitrary 0.6, so "Strong" never fired.
         if status == "covered":
             bucket = "Strong"
-            assessment = f"{sentence_count} supporting sentence(s) captured with good confidence."
         elif status == "weak":
             bucket = "Partial"
-            assessment = f"{sentence_count} supporting sentence(s) captured; some detail may be missing."
         else:
             bucket = "Missing"
+
+        if bucket == "Missing":
             assessment = "Not covered in the KT session."
             gaps.append(title)
+        else:
+            # Prefer a meaningful "how many of this section's known fields
+            # actually got captured" readout over a raw sentence count —
+            # five sentences can back one field or ten, so the count alone
+            # says nothing about completeness. Falls back to the sentence
+            # count only for schema-less/digest sections (no leaf fields to
+            # check against, e.g. danger_zones' free-text list).
+            leaf_specs = _leaf_field_specs(section.get("fields"))
+            section_obj = _find_section(knowledge_object, section_id)
+            field_objects = (section_obj or {}).get("fields") or {}
+            if leaf_specs:
+                missing_labels = []
+                filled_count = 0
+                for fid, label in leaf_specs:
+                    entry = field_objects.get(fid) or {}
+                    has_value = (
+                        entry.get("source", "unfilled") != "unfilled"
+                        and entry.get("value") not in (None, "", [], {})
+                    )
+                    if has_value:
+                        filled_count += 1
+                    else:
+                        missing_labels.append(label)
+                assessment = f"{filled_count} of {len(leaf_specs)} known field(s) captured"
+                if missing_labels:
+                    shown = ", ".join(missing_labels[:4])
+                    extra = len(missing_labels) - 4
+                    if extra > 0:
+                        shown += f" (+{extra} more)"
+                    assessment += f"; missing: {shown}."
+                else:
+                    assessment += "."
+            else:
+                assessment = (
+                    f"{sentence_count} supporting sentence(s) captured with good confidence."
+                    if bucket == "Strong"
+                    else f"{sentence_count} supporting sentence(s) captured; some detail may be missing."
+                )
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})
 

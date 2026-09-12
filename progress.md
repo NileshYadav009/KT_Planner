@@ -4,11 +4,27 @@ Handoff doc for picking this work up in a new session. Written 2026-09-04,
 updated 2026-09-11, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9s. **For a 5-minute overview
+see **`REPOSITORY_AUDIT.md`**, sections §1-9t. **For a 5-minute overview
 instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
-(not yet updated with the §9q/§9r/§9s work below — still describes the state
-through §9p). This file remains the quick-orientation index; the audit is the
-full record.
+(not yet updated with the §9q/§9r/§9s/§9t work below — still describes the
+state through §9p). This file remains the quick-orientation index; the audit
+is the full record.
+
+**Update 2026-09-11, later same day (missing-data pass + embedding-model
+reuse)**: user asked what's still missing and whether a "library version"
+upgrade could help. Found a real, concrete answer: `field_populator.py`'s
+semantic field-matching was loading a separate, materially weaker embedding
+model (`all-MiniLM-L6-v2`) instead of reusing the classification stage's own
+already-loaded, much stronger `BAAI/bge-large-en-v1.5` — fixed by reusing
+the same model instance (zero extra load cost). Also fixed a real gap:
+System Overview's Technology Summary table only reflected tools mentioned
+in that section's own text, missing tools correctly routed to Monitoring/
+Security's own sections — added `enrich_technology_summary()` plus a
+fallback to raw sentence text when LLM structured extraction isn't
+available (this environment still has no working `GROQ_API_KEY`). Verified
+live: Technology Summary went from 3 populated categories to 6. Full
+suite: **112 passed, 0 failed**, up from 108. One root cause identified but
+**not yet fixed** — see item 6 below. See audit §9t for full detail.
 
 **Update 2026-09-11 (enterprise-review P0 fixes + P1 scope)**: user supplied
 a 26-phase "enterprise product review" spec asking for a full rebuild toward
@@ -80,8 +96,10 @@ warnings on a full pipeline run that previously drew some. Also fixed literal
 `**bold**` markdown showing up in tables/checklists (a rendering gap, not
 LLM-related) and a real PDF whitespace/table-width problem. See audit §9m.
 
-**Nothing from this session is committed yet.** Everything below is sitting in
-the working tree. Run `git status` before doing anything else.
+Everything through the §9s update was committed by the user (`05adb17
+"updates"`). The §9t work above (model reuse + Technology Summary
+enrichment) is not yet committed as of this update — run `git status`
+before doing anything else to confirm current state.
 
 ---
 
@@ -251,6 +269,20 @@ left as silent gaps:
    fixed schema + 4 digest sections. All three are real, multi-session
    architectural investments, not something to bolt on incrementally —
    scope them as their own planning pass, don't assume they're small.
+6. **`key_technologies`'s pattern-match misses sentences that are visibly
+   present in the same section's rendered "Additional context"** (found in
+   §9t): "The platform consists of React frontend applications..." shows up
+   in System Overview's narrative fallback but never reaches
+   `key_technologies`'s own regex pass, so Frontend/Backend/Database/Cache/
+   Compute/Edge never appear in the Technology Summary even though the
+   sentence is clearly classified to `system_overview`. Root cause
+   pattern already documented elsewhere (§9n/§9q) — `field_populator.py`'s
+   `section_text` (built from `section_content[id]['sentences']`) and
+   `coverage_content` (the "Additional context" fallback's source) are two
+   different data views of the same section that can diverge. Not yet
+   root-caused for this specific instance or fixed — worth a dedicated
+   trace of exactly which sentences land in which of the two views for a
+   section like `system_overview` that has many competing fields.
 
 If picking Phase 9 back up: decide the auth approach deliberately (a
 lightweight shared-API-key-per-role model vs. real user accounts) rather

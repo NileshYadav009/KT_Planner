@@ -18,6 +18,7 @@ from knowledge.knowledge_builder import (
     build_knowledge_object,
     append_unmapped_findings_section,
     enrich_operational_calendar,
+    enrich_technology_summary,
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
@@ -160,6 +161,65 @@ def _section(section_id, title, **extra):
     return base
 
 
+def test_append_unmapped_findings_section_drops_sentences_already_mapped_elsewhere():
+    # context_mapper.py's classifier can independently decide the same
+    # sentence both belongs in a real section AND is "unassigned" — without
+    # a cross-check that sentence renders twice (once correctly, once again
+    # as a fabricated appendix "gap"). A sentence whose text is already part
+    # of another section's coverage_content (even folded into a larger
+    # narrative paragraph) must not survive into Unmapped Findings.
+    ko = {
+        "sections": [{
+            "id": "system_overview", "title": "System Overview", "status": "covered",
+            "confidence": 0.9, "risk": 0.1, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "fields": {},
+            "coverage_content": [
+                "The platform consists of React frontend applications, Python FastAPI "
+                "services, PostgreSQL databases, and Redis cache layers. It processes "
+                "50,000 orders per day."
+            ],
+        }],
+        "summary": {"section_count": 1, "covered_sections": 1},
+    }
+    sentences = [
+        # Same fact as system_overview's narrative above, just with
+        # different comma placement (LLM-polish vs. raw wording) — must be
+        # dropped.
+        _sentence("The platform consists of React frontend applications, Python FastAPI services, PostgreSQL, databases and Redis cache layers."),
+        # Genuinely never mapped anywhere — must survive.
+        _sentence("We also maintain a separate internal admin tool nobody has documented."),
+    ]
+    result = append_unmapped_findings_section(ko, sentences)
+    appended = next(s for s in result["sections"] if s["id"] == "unmapped_findings")
+    assert len(appended["coverage_content"]) == 1
+    assert "admin tool" in appended["coverage_content"][0]
+
+
+def test_append_unmapped_findings_section_drops_sentence_with_leading_discourse_marker():
+    # A raw sentence can carry a discourse marker ("Coming back to
+    # architecture, ...") that a real section's classifier trims off before
+    # storing the fact — the unassigned copy is then a superset (not an
+    # exact/substring-after-punctuation-strip match) of the mapped one. Must
+    # still be recognized as the same fact.
+    ko = {
+        "sections": [{
+            "id": "architecture_reference", "title": "Architecture Reference", "status": "covered",
+            "confidence": 0.9, "risk": 0.1, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "fields": {},
+            "coverage_content": ["All services run on Amazon EKS."],
+        }],
+        "summary": {"section_count": 1, "covered_sections": 1},
+    }
+    sentences = [
+        _sentence("Coming back to architecture, all services run on Amazon EKS."),
+        _sentence("We also maintain a separate internal admin tool nobody has documented."),
+    ]
+    result = append_unmapped_findings_section(ko, sentences)
+    appended = next(s for s in result["sections"] if s["id"] == "unmapped_findings")
+    assert len(appended["coverage_content"]) == 1
+    assert "admin tool" in appended["coverage_content"][0]
+
+
 def test_enrich_operational_calendar_pulls_cost_optimization_levers():
     ko = {
         "sections": [
@@ -180,6 +240,71 @@ def test_enrich_operational_calendar_noop_when_sections_missing():
     result = enrich_operational_calendar(ko)
     calendar = result["sections"][0]
     assert "_cost_patterns" not in calendar
+
+
+def test_enrich_technology_summary_pulls_monitoring_and_security_tools():
+    ko = {
+        "sections": [
+            _section("system_overview", "SYSTEM OVERVIEW", fields={
+                "key_technologies": {"value": "Terraform, ArgoCD, Vault", "confidence": 0.9, "source": "pattern"}
+            }),
+            _section("monitoring_observability", "MONITORING & OBSERVABILITY", fields={
+                "tools": {"value": ["Prometheus", "Grafana", "CloudWatch", "PagerDuty"], "confidence": 0.75, "source": "llm_structured"}
+            }),
+            _section("security_controls", "SECURITY", fields={
+                "security_scan_config": {"value": "Trivy for container image scanning", "confidence": 0.75, "source": "llm_structured"}
+            }),
+        ],
+        "summary": {},
+    }
+    result = enrich_technology_summary(ko)
+    overview = next(s for s in result["sections"] if s["id"] == "system_overview")
+    tools = [t.strip() for t in overview["fields"]["key_technologies"]["value"].split(",")]
+    assert set(tools) == {"Terraform", "ArgoCD", "Vault", "Prometheus", "Grafana", "CloudWatch", "PagerDuty", "Trivy"}
+
+
+def test_enrich_technology_summary_dedupes_case_insensitively():
+    ko = {
+        "sections": [
+            _section("system_overview", "SYSTEM OVERVIEW", fields={
+                "key_technologies": {"value": "Trivy", "confidence": 0.9, "source": "pattern"}
+            }),
+            _section("security_controls", "SECURITY", fields={
+                "security_scan_config": {"value": "Trivy for container image scanning", "confidence": 0.75, "source": "llm_structured"}
+            }),
+        ],
+        "summary": {},
+    }
+    result = enrich_technology_summary(ko)
+    overview = next(s for s in result["sections"] if s["id"] == "system_overview")
+    tools = [t.strip() for t in overview["fields"]["key_technologies"]["value"].split(",")]
+    assert tools.count("Trivy") == 1
+
+
+def test_enrich_technology_summary_falls_back_to_raw_coverage_content():
+    # When structured extraction fails/is unavailable (fields stays empty),
+    # the raw sentences are still right there in coverage_content — must not
+    # lose the tool mentions just because the LLM path didn't fire.
+    ko = {
+        "sections": [
+            _section("system_overview", "SYSTEM OVERVIEW", fields={
+                "key_technologies": {"value": "Terraform", "confidence": 0.9, "source": "pattern"}
+            }),
+            _section("monitoring_observability", "MONITORING & OBSERVABILITY", fields={},
+                      coverage_content=["We use Prometheus, Grafana and CloudWatch for monitoring."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_technology_summary(ko)
+    overview = next(s for s in result["sections"] if s["id"] == "system_overview")
+    tools = {t.strip() for t in overview["fields"]["key_technologies"]["value"].split(",")}
+    assert tools == {"Terraform", "Prometheus", "Grafana", "CloudWatch"}
+
+
+def test_enrich_technology_summary_noop_without_system_overview():
+    ko = {"sections": [_section("monitoring_observability", "MONITORING")], "summary": {}}
+    result = enrich_technology_summary(ko)
+    assert result is ko
 
 
 def test_append_tribal_knowledge_section_tags_marker_phrases_by_source_section():
@@ -233,6 +358,43 @@ def test_append_coverage_matrix_section_buckets_directly_from_status():
         "ARCHITECTURE REFERENCE": "Partial",
         "COST OPTIMIZATION": "Missing",
     }
+
+
+def test_append_coverage_matrix_section_reports_field_level_coverage():
+    # A raw sentence count says nothing about completeness (five sentences
+    # might back one field or ten) — when the section has a real fields
+    # schema, the assessment should say how many of those known fields
+    # actually got captured instead.
+    ko = {
+        "sections": [{
+            "id": "system_overview", "title": "SYSTEM OVERVIEW", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "coverage_content": [],
+            "fields": {
+                "business_criticality": {"value": "High", "source": "llm_explicit"},
+                "customer_reach": {"value": "global", "source": "llm_explicit"},
+                "impact_if_down": {"value": "", "source": "unfilled"},
+            },
+        }],
+        "summary": {},
+    }
+    dynamic_schema = [{
+        "id": "system_overview", "title": "SYSTEM OVERVIEW",
+        "fields": [
+            {"id": "business_criticality", "label": "Business Criticality", "type": "single_select"},
+            {"id": "customer_reach", "label": "Customer Reach", "type": "text"},
+            {"id": "impact_if_down", "label": "Impact if Down", "type": "text"},
+        ],
+    }]
+    coverage = {"system_overview": {"status": "covered", "confidence": 0.8, "sentence_count": 5}}
+
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    row = matrix["_coverage_rows"][0]
+    assert row["Coverage"] == "Strong"
+    assert "2 of 3 known field(s) captured" in row["Assessment"]
+    assert "Impact if Down" in row["Assessment"]
+    assert "supporting sentence" not in row["Assessment"]
 
 
 def test_append_coverage_matrix_section_collects_knowledge_gaps_separately():
@@ -306,6 +468,31 @@ def test_build_knowledge_object_marks_llm_inferred_values_only():
     assert "inferred" in fields["business_criticality"]["value"]
     assert fields["system_name"]["value"] == "Order Service"
     assert fields["key_technologies"]["value"] == "Terraform"
+
+
+def test_build_knowledge_object_does_not_mark_llm_explicit_values():
+    # field_populator.py tags an LLM gap-fill "llm_explicit" (not "llm")
+    # when the model itself judges the fact was directly stated, just
+    # paraphrased (e.g. "most business critical system" -> "High"). That
+    # must render unmodified, same as pattern/semantic — only the model's
+    # own "I had to guess" case ("llm") gets the inferred marker.
+    dynamic_schema = [_minimal_schema("system_overview", "SYSTEM OVERVIEW", [
+        {"id": "business_criticality", "type": "single_select"},
+        {"id": "customer_reach", "type": "text"},
+    ])]
+    populated_fields = {
+        "system_overview": {
+            "business_criticality": {"value": "High", "confidence": 0.75, "source": "llm_explicit"},
+            "customer_reach": {"value": "global", "confidence": 0.75, "source": "llm_explicit"},
+        }
+    }
+    coverage = {"system_overview": {"status": "covered", "confidence": 0.8, "sentence_count": 3}}
+
+    ko = build_knowledge_object("job1", coverage, dynamic_schema, populated_fields)
+    fields = ko["sections"][0]["fields"]
+
+    assert fields["business_criticality"]["value"] == "High"
+    assert fields["customer_reach"]["value"] == "global"
 
 
 def test_build_knowledge_object_leaves_non_string_values_unmarked():
