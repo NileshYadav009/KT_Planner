@@ -399,7 +399,15 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
 
     corrections = []
     corrected = text
-    words = re.findall(r"\b[\w/]+\b", text)
+    # Keep apostrophes attached to their word (don't split "it's" into "it"
+    # + "s") — a bare "s" token from any ordinary contraction ("it's the",
+    # "that's the", "there's a") was landing in an n-gram that fuzzy-matches
+    # the known term "s three" (used to correct mis-heard "S3") with a very
+    # high score, silently corrupting "it's the X" into "it's three X" in
+    # any transcript with that common contraction. Real "s three" mishearing
+    # of a spoken "S3" (no apostrophe involved) still tokenizes and matches
+    # exactly as before — this only removes the spurious trigger.
+    words = re.findall(r"\b[\w/']+\b", text)
     if not words:
         return text, []
 

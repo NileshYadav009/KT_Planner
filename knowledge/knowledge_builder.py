@@ -6,7 +6,7 @@ from .evidence import build_evidence
 from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
-from field_populator import PATTERN_EXTRACTORS
+from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
 UNMAPPED_FINDINGS_TITLE = "Additional Notes (Unmapped Findings)"
@@ -83,14 +83,35 @@ def _infer_system_name(
     if isinstance(content_list, str):
         content_list = [content_list]
     combined = " ".join(str(c) for c in content_list)
-    match = re.search(
-        r"\b([A-Za-z0-9][A-Za-z0-9\s\-]{2,40}?)\s+(?:platform|system|application|service)\b",
+    # re.search (not finditer) used to take the leftmost match unconditionally
+    # — since "the system"/"the platform" is an extremely common phrase, the
+    # non-greedy capture frequently landed on a bare stopword ("The") instead
+    # of a real name. finditer + a stopword-rejection guard keeps trying
+    # later candidates in the same text until a substantive one is found.
+    for match in re.finditer(
+        r"\b([A-Za-z0-9][A-Za-z0-9\s\-']{2,40}?)\s+(?:platform|system|application|service)\b",
         combined,
         re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).strip().title()
+    ):
+        name = _trim_name_capture(match.group(1).strip())
+        if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+            return name.title()
     return "KT Document"
+
+
+def _flatten_schema_fields(fields_schema: Optional[List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    """Flatten a schema section's field list into {field_id: field_def},
+    recursing into "group" fields (whose sub-fields are what populate_fields()
+    actually stores flat entries for). Used to recover a populated field's
+    real label/type, since the populated entry itself never carries them."""
+    flat: Dict[str, Dict[str, Any]] = {}
+    for f in fields_schema or []:
+        fid = f.get("id")
+        if fid:
+            flat[fid] = f
+        if f.get("type") == "group":
+            flat.update(_flatten_schema_fields(f.get("fields")))
+    return flat
 
 
 INFERRED_MARKER = " *(inferred — not explicitly stated in the transcript)*"
@@ -132,10 +153,21 @@ def build_knowledge_object(
         section_evidence = section_content.get(section_id, {})
 
         raw_fields = populated_fields.get(section_id, {})
+        # field_populator.py's populated entries are {"value", "confidence",
+        # "source", ...} only — they never carry the schema's own "label"/
+        # "type" (those live on the SCHEMA field definition, a different
+        # dict). Reading field.get("label", fid) straight off the populated
+        # entry always fell through to the bare field id, and field.get(
+        # "type", "text") always returned "text" regardless of the real
+        # declared type (url/date/boolean/single_select/...) — silently
+        # wrong for every field in every section, just rarely visible
+        # because most renderers hardcode their own display labels instead
+        # of trusting knowledge_object["sections"][x]["fields"][id]["label"].
+        schema_fields_by_id = _flatten_schema_fields(section.get("fields"))
         field_objects = {fid: {
             "id": fid,
-            "label": field.get("label", fid),
-            "type": field.get("type", "text"),
+            "label": (schema_fields_by_id.get(fid) or {}).get("label", fid),
+            "type": (schema_fields_by_id.get(fid) or {}).get("type", "text"),
             "value": _apply_evidence_marker(field.get("value"), field.get("source", "unfilled")),
             "confidence": float(field.get("confidence", 0.0) or 0.0),
             "source": field.get("source", "unfilled"),

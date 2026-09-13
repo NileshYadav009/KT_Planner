@@ -1,14 +1,109 @@
 # Continuum KT Planner — Progress
 
 Handoff doc for picking this work up in a new session. Written 2026-09-04,
-updated 2026-09-11, end of a long working session on
+updated 2026-09-13, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9t. **For a 5-minute overview
+see **`REPOSITORY_AUDIT.md`**, sections §1-9w. **For a 5-minute overview
 instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
-(not yet updated with the §9q/§9r/§9s/§9t work below — still describes the
+(not yet updated with the §9q-§9w work below — still describes the
 state through §9p). This file remains the quick-orientation index; the audit
 is the full record.
+
+**Update 2026-09-13, third pass same day (title bug + full section-mapping
+audit against a live app-generated PDF)**: user generated a real PDF
+through the running app after §9v's fixes and found the document title
+itself broken ("Is Named The Cloud Nat Order Processing"), then asked for
+a full top-to-bottom section-mapping re-evaluation. Fixed the title bug
+precisely (the fallback's stopword-rejection guard correctly skipped a
+bare "The" but then accepted "is named the Cloud NAT Order Processing"
+wholesale since it has real words in it — added `_trim_name_capture()` to
+strip leading verb/filler words off ANY captured name, shared by both the
+primary and fallback extraction paths, plus a proper "system name IS X"
+direct-statement pattern for the primary path). Also confirmed the
+generic-transition-sentence bug flagged unfixed in §9v was still live
+("Let's talk about environments." winning Environments' Production row)
+and fixed it properly this time, with careful end-anchoring specifically
+to avoid a worse regression — an earlier, unanchored version would have
+also silently dropped a REAL business-purpose fact that happens to share
+an opening phrase with a pure transition sentence in the same
+comma-joined utterance; explicitly tested that this doesn't happen. Full
+suite: **151 passed, 0 failed**, up from 146. Then ran a complete
+section-by-section audit of the live PDF against where each sentence
+ideally belongs (full table in audit §9w) — found the remaining gaps
+cluster into 4 recognizable bug classes rather than being scattered/
+random: (1) real, on-topic content still landing in Unmapped Findings
+instead of its correct section (a classification-precision gap, the
+deepest item here), (2) LLM-structured-extraction field/content mismatches
+confined to 3 sections sharing flat-field prompts (Ownership & Escalation,
+Sign-off, Open Responsibilities), (3) a literal "preamble restates the
+section's own topic" clutter pattern (Day-1 checklist), (4) one specific
+3-word junk fragment appearing in two places (Danger Zones + Tribal
+Knowledge). None of these four fixed this pass — each documented with
+enough specificity that a future pass doesn't need to re-diagnose from
+scratch. See audit §9w for the full before/after table.
+
+**Update 2026-09-13, later same day (adversarial end-to-end pass with a
+working LLM)**: user supplied a working `GROQ_API_KEY` (unblocking live LLM
+verification after §9u's work was constrained by an exhausted Gemini
+quota) and asked for 4 self-authored, deliberately adversarial DevOps KT
+transcripts to be run fully end-to-end to find weaknesses. Found and fixed
+2 real bugs: (1) a genuine **data-corruption** bug (worse than data loss)
+— `devops_transcription.py`'s fuzzy term-correction step tokenized on a
+regex that splits contractions on the apostrophe ("it's" → "it" + "s"),
+and the resulting bare "s" token fuzzy-matched the glossary term "s three"
+(used to fix mis-heard "S3") with a very high score, silently corrupting
+ordinary sentences like "It's the old claims processing system" into
+"It's **three** old claims processing system" — not a rare edge case,
+since "it's the"/"that's the" are among the most common contraction
+patterns in English; (2) `system_name` inference was wrong or
+meaningless in 3 of 4 transcripts (a single word "The"; the actively wrong
+word "Site" grabbed from an unrelated sentence; "KT Document" when a real
+name was stated) — two regexes both counted bare "."/"," as valid name
+terminators (so *any* "for the X." sentence could be mistaken for a name
+introduction) and couldn't handle compound intro phrasing ("this is the
+handover for the X platform"). Both fixed at the root, with a shared
+stopword-rejection guard so a fallback match is never worse than the
+intended "KT Document" default. Full suite: **146 passed, 0 failed**, up
+from 137. See audit §9v for the full before/after and the residual,
+not-yet-fixed vocabulary-gap finding (GCP/legacy-Java/ML-pipeline content
+landing in Unmapped Findings because the schema's hints are AWS/K8s-biased
+— the concrete, now-confirmed version of §9u's "fixed section catalog"
+design-question answer, but narrower and more tractable than a full
+topic-discovery rewrite).
+
+**Update 2026-09-13 (cross-transcript bug hunt: two new real transcripts)**:
+user supplied two brand-new transcripts (AWS E-Commerce; a "Cloud NAT Order
+Processing Platform" DevOps KT) plus their generated PDFs, asked for a
+priority bug pass on section mapping/clutter, and a design answer on making
+the template dynamic rather than hardcoded. Found and fixed 6 generic bugs:
+(1) a regression from the previous day's evidence-marker work — the
+paraphrase-leniency in the LLM gap-fill prompt let a structurally-typed
+field (`architecture_link`, type `url`) accept "Confluence" as if it were a
+URL, and that one bad value was enough to make the renderer skip its whole
+5-bullet fallback, collapsing the section to one line; fixed both at the
+prompt (structurally-typed fields now get a strict rule) and the renderer
+(never let a thin field hide a richer fallback); (2) Environments
+Production/Staging duplication was *still* reproducing despite the prior
+sibling-awareness fix — root cause was presence-only checking, not
+position; fixed with a "which sibling entity is mentioned first"
+positional signal; (3) keyword-hint matching had zero plural tolerance
+(`"replacement can deploy safely"` never matched "...replacements can
+deploy safely..."), a real, high-value, schema-wide miss found via
+Handover Completion scoring 0/6 fields despite explicit transcript
+statements; (4) KT-session meta-commentary ("This is a...sample KT using
+the Continuum application...", "Today this KT is about DevOps...") was
+winning real sections by default — now filtered out before sentences are
+even classifiable; (5) `first_30_day_ownership`'s renderer never read real
+field data, only a pipe-delimited format natural speech never produces;
+(6) found while fixing #5 — `build_knowledge_object()` never actually
+recovered a populated field's real schema label/type, silently defaulting
+every field's label to its bare id and every type to `"text"` (masked
+everywhere else because renderers hardcode their own labels). Full suite:
+**137 passed, 0 failed**, up from 120. Live-verified LLM-free (today's
+Gemini free-tier quota was already exhausted) against both real
+transcripts — see audit §9u for the complete before/after and the
+residual, not-yet-fixed issues found along the way.
 
 **Update 2026-09-11, later same day (missing-data pass + embedding-model
 reuse)**: user asked what's still missing and whether a "library version"
@@ -283,6 +378,136 @@ left as silent gaps:
    root-caused for this specific instance or fixed — worth a dedicated
    trace of exactly which sentences land in which of the two views for a
    section like `system_overview` that has many competing fields.
+7. **Disaster Recovery / production_notes still occasionally pick up
+   generic filler** (found in §9u's live verification, after the §9u meta-
+   commentary and sibling-identity fixes): a 4-word fragment ("There would
+   be no gaps.") and a generic transition sentence ("Let's talk about
+   environments.") respectively — much smaller misses than before those
+   fixes, but not zero. The identity-word filter only disqualifies a
+   sentence that names a *different* sibling; a sentence naming *no*
+   sibling at all still passes to whichever field asks first. Tightening
+   that trades recall for precision and deserves its own pass, not a
+   rushed addition.
+8. **Sign-off and `ownership_escalation`'s `oncall_tool` field
+   mis-mapping** (found in §9u): Sign-off's Outgoing/Incoming owner fields
+   picked up unrelated sentences (a task-decision-authority remark, a bare
+   "Thank you much."), Approved-by picked up a spurious "Yes" from an
+   unrelated "say yes/no" sentence elsewhere in the transcript, and
+   `oncall_tool` picked up escalation-channel prose instead of a tool name.
+   All are `llm/prompts.py` structured-extraction precision issues in
+   prompts shared across many sections — not safely fixable without live-
+   testing against a working LLM quota (see item 4).
+9. **`_infer_system_name()` can produce a document title unrelated to the
+   transcript's explicitly stated system name** (found in §9u): one live
+   run titled the document "Business Purpose And Criticality" (a spoken
+   sub-topic transition) instead of "Cloud Nat Order Processing Platform"
+   (the transcript's own explicit "The system name is..." statement).
+   Noticed, not root-caused.
+10. **A junk fragment can appear as a standalone fact** (found in §9u):
+    "The danger zone." rendered as both a stray bullet in Danger Zones and
+    a fake Tribal Knowledge row. A safe, generic fix needs a "this fragment
+    has no verb, it's just a restated topic label" detector, which needs
+    POS tagging — this codebase has no such infrastructure anywhere yet
+    (checked; no spaCy/nltk.pos_tag usage exists). Deferred rather than
+    built on a fragile keyword-blocklist approximation that would likely
+    misfire on legitimate short facts elsewhere.
+11. **True dynamic topic discovery is still out of scope, and was asked
+    about directly in §9u**: the pipeline is already dynamic in section
+    *inclusion* (which of the ~20 known `kt_schema_new.json` sections
+    appear depends on transcript coverage) and in tech-stack-triggered
+    field addition, but the section *catalog* itself is fixed —
+    classification maps each sentence to the best-scoring section among a
+    pre-defined list, so a transcript's major topic that isn't already one
+    of those ~20 has nowhere accurate to go. Real topic-discovery (segment
+    the transcript into topic-coherent chunks independently of the known
+    catalog first, then match each chunk to the closest known section or
+    mint an ad-hoc one) is the same class of work as the P2/P3 typed-fact-
+    model rewrite in item 5 — a dedicated multi-session architecture effort,
+    not an incremental add.
+12. **Vendor/stack vocabulary gap in Architecture Reference and Deployment
+    & Rollback hints, now empirically confirmed** (found in §9v via 3
+    non-AWS adversarial transcripts): GCP terms (Pub/Sub, Cloud Run,
+    BigQuery, GKE), legacy Java deployment terms (WAR file, Tomcat), and
+    ML-pipeline terms (Airflow DAG, data lake, model promotion) all landed
+    in Unmapped Findings instead of their obviously-correct real section,
+    because those two sections' hints in `kt_schema_new.json` are written
+    almost entirely around AWS/Kubernetes/container vocabulary. Narrower
+    and more tractable than item 11's full topic-discovery question —
+    widening the hint lists to be more vendor-agnostic doesn't need an
+    architecture change, just more complete hints — but real content loss
+    on any transcript describing a non-AWS/non-container stack. Not
+    attempted this pass; a good, contained next piece of work.
+13. **`system_name`'s fallback path can't distinguish a real proper name
+    from a generic descriptive phrase** (found in §9v): the regex-level
+    bugs (bare punctuation as a false terminator, single-"the" skip limit,
+    unconditional leftmost match) are fixed, but on a transcript with no
+    catchy proper name, the fallback's ceiling is "a coherent if awkward
+    description" (e.g. "Is The Legacy Claims Processing"), not a real
+    name — that's a semantic-judgment problem (effectively needs NER),
+    not something a regex can fully solve. Also worth checking: in one
+    live re-run (transcript D, which does explicitly state a real name,
+    "CorePay") the fix verified correct in isolation didn't take effect
+    end-to-end — the primary field-level extraction path came back empty
+    before ever reaching the now-fixed regex in that specific run, so it
+    fell to the coverage_content fallback where the LLM's own polishing
+    pass had already reworded the sentence past recognition. Worth tracing
+    exactly why the field-level path came back empty there if this
+    recurs.
+14. **Real, on-topic content still lands in Unmapped Findings instead of
+    its obviously-correct section** (found in §9w via a live app-generated
+    PDF, not a synthetic test): "In terms of business criticality, this
+    system is high." and "The reason why the business depends on it is
+    that every revenue generating flow passes through this platform."
+    are both clearly System Overview content, explicitly stated, yet
+    ended up unassigned — which is *why* business_criticality rendered as
+    "(inferred)" rather than explicit: the LLM gap-fill never saw the
+    explicit sentence because classification routed it elsewhere first.
+    Same underlying gap explains Handover Completion Check scoring 0/6
+    despite the transcript explicitly stating all 5 confirmations
+    ("The replacements can deploy safely...") in one place, and
+    Architecture Reference picking up "Artifacts are built and deployed
+    in Kubernetes." (which is actually Deployment step 3) while the
+    numbered deployment steps it belongs with are scattered across
+    Unmapped Findings (Step 1's trigger, orphaned) and nowhere visible
+    (Step 2). This is a genuine `context_mapper.py` classification-
+    precision gap, not a clutter or evidence-labeling issue — the deepest
+    and least-tractable item in this list. Worth a dedicated investigation
+    with real transcript examples in hand (this file has several now) if
+    picked up.
+15. **LLM-structured-extraction field/content mismatches confined to
+    sections with flat-field prompts** (found in §9w, same class flagged
+    in §9u): Ownership & Escalation's `oncall_tool` picks up escalation-
+    *channel* prose ("The escalation channel is the on-call slack
+    channel.") instead of a tool name; Sign-off's Outgoing/Incoming owner
+    fields pick up unrelated sentences (a task-decision-authority remark,
+    a bare "Thank you much.") and Approved-by picks up a spurious "Yes"
+    from an unrelated "say yes/no" sentence elsewhere; Open
+    Responsibilities' own static "rules" boilerplate text still renders as
+    if it were a real task in at least one live case despite §9u's
+    structured-extraction fix (which should exclude exactly this) — worth
+    a live LLM-available re-check to see whether the fix simply isn't
+    firing or the prompt's judgment call is genuinely borderline on this
+    phrasing. All three share `llm/prompts.py`'s structured-extraction
+    prompts — not safely fixable without live-testing against a working
+    LLM quota.
+16. **A literal "preamble restates the section's own topic" clutter
+    pattern** (found in §9w): Day-1 Survival Checklist's captured value is
+    "Day 1 survival checklist. Now the day 1 survival checklist requires
+    access including..." — the speaker re-announcing the current topic
+    before giving the actual content, with the announcement baked
+    verbatim into the extracted field value instead of being stripped. A
+    generalizable fix would detect and strip a leading clause that
+    fuzzy-matches the section's own title/hints from any extracted field
+    value — not attempted this pass.
+17. **One specific 3-word junk fragment appearing in two places** (same
+    item as the "danger zone." fragment noted in earlier sessions, now
+    confirmed still live in §9w): "The danger zone." renders as both a
+    stray bullet in Danger Zones and a fake Tribal Knowledge row. Needs a
+    "this fragment has no verb, it's just a restated topic label"
+    detector — this codebase still has no POS-tagging infrastructure
+    (checked again this pass; no spaCy/nltk.pos_tag usage anywhere),
+    deliberately not built on a fragile keyword-blocklist approximation
+    that would likely misfire on legitimate short facts elsewhere.
 
 If picking Phase 9 back up: decide the auth approach deliberately (a
 lightweight shared-API-key-per-role model vs. real user accounts) rather

@@ -10,7 +10,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from field_populator import populate_fields, find_source_sentence_index, _build_llm_gap_fill_prompt
+from field_populator import (
+    populate_fields, find_source_sentence_index, _build_llm_gap_fill_prompt, _extract_by_semantic,
+    _extract_by_pattern,
+)
 
 
 SCHEMA = [
@@ -307,11 +310,13 @@ def test_llm_gap_fill_prompt_keeps_paraphrase_leniency_for_open_ended_fields():
 
 
 def test_llm_gap_fill_prompt_lists_already_captured_sibling_values():
-    # Only one real sentence exists; production_notes (first in schema
-    # order) will claim it via semantic match. The staging/non_production
-    # LLM prompts must be told what production_notes already captured, so
-    # the model can avoid blindly re-attributing the same staging-specific
-    # text to a different, unrelated environment.
+    # Only one real sentence exists, and its subject is staging (it only
+    # mentions "production" as a comparison target). production_notes
+    # (first in schema order) must NOT claim it just by running first —
+    # staging_notes should resolve it via semantic match instead, and the
+    # non_production_notes LLM prompt (which fires after staging_notes has
+    # already captured a value) must be told about that value so it doesn't
+    # blindly re-attribute staging-specific text to a different environment.
     coverage = {"environments": {"content": []}}
     section_content = {
         "environments": {
@@ -321,13 +326,110 @@ def test_llm_gap_fill_prompt_lists_already_captured_sibling_values():
         }
     }
     stub = _StubLLM(["NOT_MENTIONED\nEXPLICIT", "NOT_MENTIONED\nEXPLICIT"])
-    populate_fields(
+    result = populate_fields(
         SIBLING_ENV_SCHEMA, coverage, llm_provider=stub, embedding_model=None, section_content=section_content
     )
-    # production_notes should have resolved via semantic match (no LLM call
-    # needed for it), and the two LLM prompts that did fire (for staging and
-    # non_production) should reference what production_notes already has.
+    fields = result["environments"]
+    assert fields["staging_notes"]["value"] == "The staging environment closely mirrors production."
+    assert fields["staging_notes"]["source"] == "semantic"
+    # production_notes and non_production_notes both correctly fall through
+    # to LLM gap-fill instead of claiming a sentence that's really about
+    # staging.
     assert len(stub.prompts) == 2
-    for prompt in stub.prompts:
-        assert "Already captured for OTHER fields" in prompt
-        assert "closely mirrors production" in prompt
+    assert any(
+        "Already captured for OTHER fields" in p and "closely mirrors production" in p
+        for p in stub.prompts
+    )
+
+
+def test_extract_by_semantic_identity_filter_picks_correct_sibling_by_first_mention():
+    # Direct unit test of the disambiguation logic (no embedding model
+    # needed — the identity filter runs before the model is even
+    # consulted). The sentence names both "staging" and "production", but
+    # "staging" is mentioned first, so it's the real subject.
+    field = {"id": "production_notes", "label": "Production characteristics", "type": "text"}
+    sentence = "The staging environment closely mirrors production."
+    result = _extract_by_semantic(
+        field, [sentence], model=None,
+        own_identity_word="production", other_identity_words=["staging", "non-production"],
+    )
+    assert result is None  # disqualified — not claimed by production_notes
+
+    staging_field = {"id": "staging_notes", "label": "Staging characteristics", "type": "text"}
+    result = _extract_by_semantic(
+        staging_field, [sentence], model=None,
+        own_identity_word="staging", other_identity_words=["production", "non-production"],
+    )
+    assert result == sentence  # correctly claimed by staging_notes
+
+
+def test_extract_by_semantic_identity_filter_is_noop_when_own_word_mentioned_first():
+    field = {"id": "production_notes", "label": "Production characteristics", "type": "text"}
+    sentence = "Production runs multi-AZ, unlike staging."
+    result = _extract_by_semantic(
+        field, [sentence], model=None,
+        own_identity_word="production", other_identity_words=["staging", "non-production"],
+    )
+    assert result == sentence
+
+
+# Regression tests for the system_name pattern extractor, found via a
+# 4-transcript adversarial test pass: it either missed real names entirely
+# (compound intro phrasing like "this is the handover for the X platform")
+# or, worse, confidently grabbed the wrong thing (any "for the X." sentence
+# anywhere in the section, not just a real name introduction, since bare
+# "." / "," used to count as a valid terminator).
+SYSTEM_NAME_FIELD = {"id": "system_name", "label": "System Name", "type": "text"}
+
+
+def test_system_name_extracts_simple_handing_over_phrasing():
+    text = "Hi, I'm handing over the Ledger Analytics platform today."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Ledger Analytics"
+
+
+def test_system_name_extracts_compound_handover_for_phrasing():
+    # "this is the handover for the X platform" has 4 structural/filler
+    # words between the trigger and the real name — a single optional
+    # "the" wasn't enough, so this used to match nothing at all.
+    text = "Good morning, this is the handover for the CorePay payments processing platform."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Corepay Payments Processing"
+
+
+def test_system_name_does_not_false_positive_on_unrelated_for_the_x_sentence():
+    # "for the site." is an ordinary sentence fragment, not a name
+    # introduction — must not be mistaken for one just because "for the X."
+    # happens to match the old, too-permissive terminator list.
+    text = "The platform trains and serves the product-recommendation models for the site."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) is None
+
+
+def test_system_name_returns_none_when_no_proper_name_is_stated():
+    text = "It's the old claims processing system, it's been around forever."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) is None
+
+
+# Regression tests for a live-app bug: "The system name is cloud nat order
+# processing platform." (no trigger phrase this regex recognized at all)
+# fell all the way to _infer_system_name()'s fallback, which grabbed "is
+# named the Cloud NAT Order Processing" as the document TITLE — a real
+# capture containing substantive words, so it passed the stopword-only
+# rejection guard, but with leading verb/filler words ("is named the")
+# baked in because nothing trimmed them off a capture that wasn't rejected
+# outright.
+def test_system_name_extracts_direct_system_name_is_x_statement():
+    text = "The system name is cloud nat order processing platform."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Cloud Nat Order Processing"
+
+
+def test_system_name_extracts_is_named_x_without_trailing_descriptor():
+    text = "The system is named Meridian."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Meridian"
+
+
+def test_system_name_is_named_pattern_does_not_false_positive_on_unrelated_is_sentence():
+    # "The service is down" must never be mistaken for a name introduction
+    # just because it matches "<noun> is <word>" — "is" alone (without
+    # "named"/"called") is far too generic a trigger to allow a bare
+    # punctuation terminator.
+    text = "The service is down right now, we are investigating."
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) is None

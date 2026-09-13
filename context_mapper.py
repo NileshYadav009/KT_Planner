@@ -118,6 +118,93 @@ class AudioSegment:
         return float(conf)
 
 
+def _compile_hint_patterns(keywords: List[str]) -> List[Tuple[re.Pattern, float]]:
+    """Precompile each schema hint into a plural-tolerant regex, paired with
+    its keyword-boost weight (multi-word hints are a stronger signal than a
+    single common word).
+
+    Plain substring/`\\b<word>\\b` matching (the prior implementation) breaks
+    on the most ordinary English variation — a hint written as "replacement
+    can deploy safely" never matches a transcript sentence that says "The
+    replacements can deploy safely." because of the one extra trailing "s".
+    Every hint is exposed to this same gap, not just that one, so the fix
+    belongs here rather than as a one-off wording tweak to a single hint.
+    Generic: works for any schema's hints, not tied to a specific section
+    or transcript.
+    """
+    patterns: List[Tuple[re.Pattern, float]] = []
+    for hint in keywords or []:
+        hint_lower = str(hint or "").lower().strip()
+        if not hint_lower:
+            continue
+        words = hint_lower.split()
+        boost = 0.08 if len(words) > 1 else 0.05
+        pattern_str = r"\b" + r"\s+".join(re.escape(w) + r"'?s?" for w in words) + r"\b"
+        try:
+            patterns.append((re.compile(pattern_str, re.IGNORECASE), boost))
+        except re.error:
+            continue
+    return patterns
+
+
+# Sentences that are commentary about the KT recording/tool itself (e.g.
+# "This is a small sample KT using the Continuum application as the first
+# KT planner.", "Continuum is a good application.", "Today this KT is
+# about DevOps...") rather than a fact about the system being handed over.
+# Left in the transcript, these are pure noise at best (landing in
+# Unmapped Findings) and actively harmful at worst — observed live,
+# Architecture Reference, Disaster Recovery, and System Overview's
+# Customer Reach field each ended up carrying tool self-promotion or
+# scene-setting filler instead of real content, because a short, topically
+# generic meta-sentence can score as the "least bad" match for some
+# section when nothing else claims it. Generic: keyed to the tool's own
+# name and common meta-commentary/transition phrasing, not to any specific
+# transcript's technical content.
+_KT_META_COMMENTARY_PATTERNS = [
+    re.compile(r"\bcontinuum\b", re.IGNORECASE),
+    re.compile(r"\bkt\s+planner\b", re.IGNORECASE),
+    re.compile(r"\bsample\s+kt\b", re.IGNORECASE),
+    re.compile(
+        r"\bthis\s+(?:kt|call|video|session|hand[\s-]?over)\b.{0,40}\b"
+        r"(?:is about|will (?:be )?(?:cover|discuss)|should|serve[sd]?|"
+        r"is (?:a )?(?:small |sample )?(?:overview|sample)|is sufficient)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\boptimize\s+the\s+kt\b", re.IGNORECASE),
+    re.compile(r"^\s*let\s+me\s+start\s+with\b", re.IGNORECASE),
+    re.compile(r"^\s*(?:i\s+)?think\s+this\s+is\s+(?:enough|sufficient)\.?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:please\s+)?feel\s+free\s+to\s+reach\s+out\b", re.IGNORECASE),
+    re.compile(r"\blet\s+me\s+know\s+if\s+you\s+can\s+help\s+me\s+improve\s+it\b", re.IGNORECASE),
+    # Topic-transition announcements ("let's talk about X", "we will be
+    # discussing X", "second, the next part is X") — these name an UPCOMING
+    # topic rather than stating a fact, and (observed live) can win a real
+    # section by default when nothing else scores well, e.g. "Let's talk
+    # about environments." landing in Environments' own Production row.
+    # End-anchored (`$`) and restricted to plain word/space characters
+    # after the trigger — deliberately conservative so a longer sentence
+    # that happens to OPEN with this phrasing but continues into a real,
+    # comma-separated fact ("Now, come into the business purpose, the
+    # problem this system solves is...") is left alone rather than having
+    # that real content silently dropped along with the transition prefix.
+    re.compile(r"\blet'?s\s+(?:talk\s+about|move\s+to|discuss|move\s+on\s+to)\s+[A-Za-z0-9\s]{2,40}[.!?]?\s*$", re.IGNORECASE),
+    re.compile(r"\bwe\s+will\s+be\s+(?:talking\s+about|discussing)\s+[A-Za-z0-9\s]{2,40}[.!?]?\s*$", re.IGNORECASE),
+    re.compile(
+        r"^\s*(?:first|second|third|fourth|fifth|next|now),?\s+(?:the\s+)?[A-Za-z0-9\s]{0,30}\bpart\b"
+        r"[A-Za-z0-9\s]{0,60}\b(?:discuss|talk|cover)[A-Za-z0-9\s]{0,40}[.!?]?\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*there\s+(?:would|will)\s+be\s+no\s+gaps\.?\s*$", re.IGNORECASE),
+]
+
+
+def is_kt_session_meta_commentary(text: str) -> bool:
+    """True for sentences about the KT recording/tool itself rather than
+    the system being handed over — see _KT_META_COMMENTARY_PATTERNS."""
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _KT_META_COMMENTARY_PATTERNS)
+
+
 # ============================================================================
 # STAGE 2: Sentence Segmentation
 # ============================================================================
@@ -210,10 +297,18 @@ def segment_sentences(
         refined_sentences.append(st)
 
     sentence_texts = refined_sentences
-    
+
     current_pos = 0
     for sent_text in sentence_texts:
         if not sent_text.strip():
+            continue
+
+        # Drop KT-session/tool meta-commentary before it can become a
+        # classifiable Sentence at all — see is_kt_session_meta_commentary.
+        # current_pos is only advanced by sentences actually kept below, so
+        # skipping one here doesn't disturb the char-position search for
+        # whatever real sentence follows it in full_text.
+        if is_kt_session_meta_commentary(sent_text):
             continue
         
         # Locate in full text
@@ -491,15 +586,17 @@ class ContextClassifier:
     def index_schema(self, schema_sections: List[Dict]) -> None:
         """Index schema sections for fast lookup."""
         self._section_hints = {}  # Store hints for keyword matching
+        self._section_hint_patterns = {}  # Precompiled, plural-tolerant hint regexes
         for sec in schema_sections:
             sec_id = sec.get("id")
             title = sec.get("title", sec_id)
             description = sec.get("description", "")
             keywords = sec.get("hints", [])  # Use 'hints' from schema
-            
+
             # Store hints for keyword-based boosting in classify_sentence
             self._section_hints[sec_id] = keywords
-            
+            self._section_hint_patterns[sec_id] = _compile_hint_patterns(keywords)
+
             # Build rich section text
             section_text = f"{title} {description} {' '.join(keywords)}"
             embedding = self._encode_texts(section_text)
@@ -740,19 +837,11 @@ class ContextClassifier:
                     context_sim = float(np.mean(sims))
 
             keyword_boost = 0.0
-            hints = getattr(self, '_section_hints', {}).get(sec_id, [])
-            if hints:
-                for hint in hints:
-                    hint_lower = hint.lower().strip()
-                    if not hint_lower:
-                        continue
-                    if " " in hint_lower:
-                        if hint_lower in sent_text_lower:
-                            keyword_boost += 0.08
-                    else:
-                        if re.search(rf"\b{re.escape(hint_lower)}\b", sent_text_lower):
-                            keyword_boost += 0.05
-                keyword_boost = min(0.35, keyword_boost)
+            hint_patterns = getattr(self, '_section_hint_patterns', {}).get(sec_id, [])
+            for pattern, boost in hint_patterns:
+                if pattern.search(sent_text_lower):
+                    keyword_boost += boost
+            keyword_boost = min(0.35, keyword_boost)
 
             overview_penalty = 0.0
             if sec_id == "system_overview":

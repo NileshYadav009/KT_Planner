@@ -508,6 +508,76 @@ def test_build_knowledge_object_leaves_non_string_values_unmarked():
     assert ko["sections"][0]["fields"]["can_deploy"]["value"] is True
 
 
+def test_build_knowledge_object_system_name_fallback_rejects_bare_stopwords():
+    # Regression test: the fallback regex used to take the leftmost "<X>
+    # platform/system/..." match unconditionally via re.search, and since
+    # "the system"/"the platform" is an extremely common phrase, it
+    # frequently landed on a bare stopword ("The") — worse than the
+    # explicit "KT Document" default. No populated system_name field
+    # here — this exercises the coverage_content fallback path directly.
+    coverage = {"system_overview": {"content": ["Before we start, the system needs a restart sometimes."]}}
+    ko = build_knowledge_object("job1", coverage, [], {})
+    assert ko["system_name"] == "KT Document"
+
+
+def test_build_knowledge_object_system_name_fallback_keeps_contraction_intact():
+    # A second, related bug found alongside the stopword one: the capture
+    # character class didn't include apostrophes, so "It's the old claims
+    # system" matched starting mid-word ("s the old claims") instead of
+    # from "It's" — same root-cause class as the "s three" fuzzy-match
+    # corruption bug in devops_transcription.py (contractions splitting on
+    # the apostrophe), just surfacing in a different regex.
+    coverage = {"system_overview": {"content": ["It's the old claims system, been around forever."]}}
+    ko = build_knowledge_object("job1", coverage, [], {})
+    assert not ko["system_name"].lower().startswith("s the")
+    assert ko["system_name"].lower().startswith("it")
+
+
+def test_build_knowledge_object_system_name_fallback_trims_leading_verb_filler():
+    # Live-app regression: "The system is named the Cloud NAT Order
+    # Processing Platform." (an LLM-polished rewrite of "The system name
+    # is X") has no field-level trigger match at all (no "handing over"/
+    # "this is"/etc immediately before the name), so it fell to this
+    # fallback — which correctly rejected "The" (bare stopword) via
+    # finditer, but then accepted "is named the Cloud NAT Order
+    # Processing" wholesale as the next candidate, since it contains real
+    # substantive words and so passed the stopword-only guard. The
+    # document title ended up "Is Named The Cloud Nat Order Processing".
+    coverage = {
+        "system_overview": {
+            "content": ["The system is named the Cloud NAT Order Processing Platform."]
+        }
+    }
+    ko = build_knowledge_object("job1", coverage, [], {})
+    assert ko["system_name"] == "Cloud Nat Order Processing"
+
+
+def test_build_knowledge_object_recovers_real_label_and_type_from_schema():
+    # Regression test: populated field entries (field_populator.py's
+    # {"value", "confidence", "source"} shape) never carry the schema's own
+    # "label"/"type" — field.get("label", fid) and field.get("type", "text")
+    # always fell through to the bare field id and a hardcoded "text"
+    # respectively, for every field in every section. Silently wrong
+    # everywhere, just rarely visible because most renderers hardcode their
+    # own display labels instead of trusting fields[id]["label"].
+    dynamic_schema = [_minimal_schema("first_30_day_ownership", "FIRST 30-DAY OWNERSHIP PLAN", [
+        {"id": "week1", "label": "Week 1", "type": "text"},
+        {"id": "verified", "label": "Verified", "type": "boolean"},
+    ])]
+    populated_fields = {
+        "first_30_day_ownership": {
+            "week1": {"value": "Observe, shadow, read-only", "confidence": 0.65, "source": "semantic"},
+            "verified": {"value": True, "confidence": 0.75, "source": "pattern"},
+        }
+    }
+    ko = build_knowledge_object("job1", {}, dynamic_schema, populated_fields)
+    fields = ko["sections"][0]["fields"]
+    assert fields["week1"]["label"] == "Week 1"
+    assert fields["week1"]["type"] == "text"
+    assert fields["verified"]["label"] == "Verified"
+    assert fields["verified"]["type"] == "boolean"
+
+
 def test_build_knowledge_object_carries_section_tier():
     dynamic_schema = [
         _minimal_schema("system_overview", "SYSTEM OVERVIEW", [], tier=None),

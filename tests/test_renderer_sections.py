@@ -16,6 +16,7 @@ from renderers.sections.known_bad_days import render as render_known_bad_days
 from renderers.sections.kt_coverage import render as render_kt_coverage
 from renderers.sections.open_responsibilities import render as render_open_responsibilities
 from renderers.sections.architecture_reference import render as render_architecture_reference
+from renderers.sections.first_30_day_ownership import render as render_first_30_day_ownership
 
 
 def test_system_overview_renders_real_schema_fields_not_stale_ones():
@@ -254,3 +255,36 @@ def test_architecture_reference_prefers_real_field_content_when_richer_than_fall
     result = render_architecture_reference(section)
     assert len(result["blocks"]) == 1
     assert "https://confluence.example.com/architecture" in result["blocks"][0]["paragraphs"][0]
+
+
+def test_first_30_day_ownership_renders_real_per_week_fields():
+    # Regression test: the renderer only ever read coverage_content via a
+    # pipe-delimited ("Role | Team") parser, which natural speech never
+    # produces — so even when populate_fields() successfully captured all
+    # 4 week fields, the rendered table showed one row with a blank second
+    # column instead of 4 real rows.
+    section = {
+        "id": "first_30_day_ownership", "title": "FIRST 30-DAY OWNERSHIP PLAN",
+        "fields": {
+            "week1": {"label": "Week 1", "value": "Observe, Shadow, and Read Only."},
+            "week2": {"label": "Week 2", "value": "Non-prod changes."},
+            "week3": {"label": "Week 3", "value": "Prod deployment with supervision."},
+            "week4": {"label": "Week 4", "value": "Independent ownership in 4th week."},
+        },
+        "coverage_content": [],
+    }
+    result = render_first_30_day_ownership(section)
+    assert len(result["blocks"]) == 1
+    rows = result["blocks"][0]["rows"]
+    assert len(rows) == 4
+    assert rows[0] == {"role": "Week 1", "team": "Observe, Shadow, and Read Only."}
+    assert all(row["team"] for row in rows)
+
+
+def test_first_30_day_ownership_falls_back_to_coverage_content_without_fields():
+    section = {
+        "id": "first_30_day_ownership", "title": "FIRST 30-DAY OWNERSHIP PLAN",
+        "fields": {}, "coverage_content": ["Week 1 | Observe and shadow"],
+    }
+    result = render_first_30_day_ownership(section)
+    assert result["blocks"][0]["rows"] == [{"role": "Week 1", "team": "Observe and shadow"}]

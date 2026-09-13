@@ -14,6 +14,39 @@ logger = logging.getLogger(__name__)
 def _normalize_line(line: str) -> str:
     return re.sub(r"\s+", " ", line.strip()).lower()
 
+
+# Structural/stop words that don't make a valid system name on their own —
+# used to reject a regex capture that only matched filler ("The") rather
+# than a real name. Shared with knowledge/knowledge_builder.py's
+# _infer_system_name() fallback, which has the identical failure mode.
+SYSTEM_NAME_STOPWORDS = {
+    "the", "a", "an", "this", "that", "it", "site", "system", "platform",
+    "application", "service", "app", "thing", "handover", "kt", "session", "call",
+}
+
+# Leading words to strip off a captured name before the stopword-only
+# rejection check above ever runs — a capture can contain real substantive
+# words (so it isn't rejected outright) while still starting with verb/
+# filler words that leaked in because the trigger-phrase regex didn't
+# anticipate every way of introducing a name. E.g. "The system IS NAMED
+# THE Cloud NAT Order Processing Platform" (trigger "is") has no matching
+# trigger phrase at all, so the whole "is named the Cloud NAT Order
+# Processing" run got captured as if it were the name — this strips the
+# leading "is named the" off that capture rather than requiring every
+# possible introduction phrasing to be enumerated as its own trigger.
+_NAME_LEADING_FILLER_WORDS = {
+    "is", "was", "are", "were", "named", "called", "known", "as",
+    "the", "a", "an", "this", "that", "it",
+    "for", "about", "handing", "over", "welcome", "to", "handover",
+}
+
+
+def _trim_name_capture(name: str) -> str:
+    words = name.split()
+    while words and words[0].lower() in _NAME_LEADING_FILLER_WORDS:
+        words.pop(0)
+    return " ".join(words)
+
 PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
     "tools": re.compile(
@@ -141,13 +174,61 @@ def _extract_by_pattern(
             return ", ".join(channels)
 
     if field_id == "system_name":
+        # Two patterns: (1) "the system name IS X" / "the system IS NAMED/
+        # CALLED X" — direct statements where the descriptor word (system)
+        # comes BEFORE the trigger verb, not after the name; (2) the more
+        # general "handing over/this is/for/... X platform" introduction
+        # style, where the descriptor word comes right after the name.
+        # Checked in this order since a direct "system name is X" statement
+        # is the strongest, least ambiguous signal when present.
+        direct_match = re.search(
+            r"\b(?:system|platform|application|service)(?:'s)?\s+(?:name\s+)?"
+            r"(?:is|was|are|were)\s+(?:(?:the|a|an)\s+)?"
+            r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)\s+(?:platform|system|application|service)\b",
+            section_text,
+            re.IGNORECASE,
+        )
+        if not direct_match:
+            # "is/was NAMED/CALLED X[.]" — narrower than bare "is X[.]"
+            # ("the service is down." must never match), but "named"/
+            # "called" is specific enough to safely allow a bare
+            # punctuation terminator when there's no trailing descriptor
+            # word ("The system is named Meridian.").
+            direct_match = re.search(
+                r"\b(?:is|was|are|were)\s+(?:named|called)\s+(?:(?:the|a|an)\s+)?"
+                r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)(?:\s+(?:platform|system|application|service)\b|[.,]|$)",
+                section_text,
+                re.IGNORECASE,
+            )
+        if direct_match:
+            name = _trim_name_capture(direct_match.group(1).strip())
+            if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+                return name.title()
+
         match = re.search(
-            r"(?:handing over|this is|for|about)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-]{2,50}?)(?:\s+platform|\s+system|\s+application|\s+service|\.|\,)",
+            # Trigger phrase, then 0-3 structural filler words ("the",
+            # "handover", "for", ...) before the actual name — a single
+            # optional "the" wasn't enough for "this is the handover for
+            # the CorePay platform" (4 filler words between trigger and
+            # name), so that phrasing matched nothing at all. The name
+            # must end at a real descriptor word (platform/system/
+            # application/service) — bare "." or "," used to also count,
+            # which let ANY "for the X." sentence anywhere in the section
+            # (not just a real name introduction) match and steal "X" as
+            # the system name, e.g. "...models for the site." wrongly
+            # produced "Site".
+            r"(?:handing over|this is|handover for|welcome to|for|about)\s+"
+            r"(?:(?:the|a|an|handover|kt|session|call|for)\s+){0,4}"
+            r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)\s+(?:platform|system|application|service)\b",
             section_text,
             re.IGNORECASE,
         )
         if match:
-            return match.group(1).strip().title()
+            name = _trim_name_capture(match.group(1).strip())
+            # Reject a capture that's only structural/stop words — a real
+            # system name has at least one substantive word.
+            if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+                return name.title()
 
     if "escalation" in field_id or "chain" in field_id:
         # Use robust 3-stage extraction for escalation chains
@@ -207,14 +288,68 @@ def _extract_by_pattern(
     return None
 
 
+def _field_identity_word(label: str) -> str:
+    """The first meaningful word of a field label, used as a lightweight
+    'entity name' signal for sections whose sibling fields are per-entity
+    variants of the same shape (e.g. "Production characteristics" /
+    "Staging characteristics" / "Non-production characteristics"). Generic:
+    derived purely from the schema's own field labels, not any fixed list
+    of entity names."""
+    words = re.findall(r"[A-Za-z][A-Za-z\-]*", label or "")
+    return words[0].lower() if words else ""
+
+
 def _extract_by_semantic(
     field: Dict[str, Any],
     sentences: List[str],
     model=None,
     exclude_line_keys: Optional[Set[str]] = None,
+    own_identity_word: Optional[str] = None,
+    other_identity_words: Optional[List[str]] = None,
 ) -> Optional[str]:
     if exclude_line_keys:
         sentences = [s for s in sentences if _normalize_line(s) not in exclude_line_keys]
+
+    if other_identity_words:
+        def _primary_entity_is_other(s: str) -> bool:
+            # Presence alone isn't enough — "The staging environment
+            # closely mirrors production." names BOTH "staging" and
+            # "production" (the latter only as a comparison target), so a
+            # simple "does it mention my own word" check still lets
+            # Production wrongly claim a sentence that's really about
+            # Staging. Whichever identity word is mentioned FIRST is
+            # almost always the sentence's actual subject — a much
+            # stronger signal than mere co-occurrence.
+            s_lower = s.lower()
+            own_pos = None
+            if own_identity_word:
+                m = re.search(rf"\b{re.escape(own_identity_word)}\b", s_lower)
+                own_pos = m.start() if m else None
+            other_pos = None
+            for w in other_identity_words:
+                if not w:
+                    continue
+                m = re.search(rf"\b{re.escape(w)}\b", s_lower)
+                if m and (other_pos is None or m.start() < other_pos):
+                    other_pos = m.start()
+            if other_pos is None:
+                return False  # no other sibling entity named — fine
+            if own_pos is None:
+                return True  # a different entity named, mine isn't
+            return other_pos < own_pos
+
+        # A candidate sentence whose true subject is a DIFFERENT sibling
+        # entity (e.g. Staging, in a section with Production/Staging/
+        # Non-production fields) is almost certainly not about this field
+        # — even when it's the only text available. Without this, a
+        # sparse section's one real sentence gets claimed by whichever
+        # sibling field simply runs first in schema order, regardless of
+        # which entity it's actually about (the concrete bug: "The
+        # staging environment closely mirrors production..." was copied
+        # onto BOTH Production and Staging because Production ran first
+        # and had nothing to disqualify it).
+        sentences = [s for s in sentences if not _primary_entity_is_other(s)]
+
     if not sentences or model is None:
         return sentences[0] if sentences else None
 
@@ -451,6 +586,19 @@ def _populate_fields_recursive(
     # different, unrelated entity/field. See _build_llm_gap_fill_prompt.
     already_captured = already_captured if already_captured is not None else []
 
+    # Identity words for sibling TEXT fields at this nesting level — only
+    # meaningful (and only computed) when 2+ siblings actually have
+    # different leading label words, so this is a no-op for every section
+    # that isn't shaped like a per-entity trio (environments' Production/
+    # Staging/Non-production being the motivating case). See
+    # _extract_by_semantic's other_identity_words for how it's used.
+    identity_words = {
+        f.get("id"): _field_identity_word(f.get("label", ""))
+        for f in fields
+        if f.get("type", "text") == "text"
+    }
+    use_identity_filter = len({w for w in identity_words.values() if w}) > 1
+
     def _emit(value: Any, confidence: float, source: str):
         entry = {"value": value, "confidence": confidence, "source": source}
         idx = find_source_sentence_index(value, raw_sentence_texts)
@@ -495,7 +643,17 @@ def _populate_fields_recursive(
                 continue
 
         if field_type == "text" and sentences:
-            value = _extract_by_semantic(field, sentences, embedding_model, exclude_line_keys=used_line_keys)
+            own_word = identity_words.get(field_id) if use_identity_filter else None
+            other_words = (
+                [w for fid, w in identity_words.items() if fid != field_id and w]
+                if use_identity_filter else None
+            )
+            value = _extract_by_semantic(
+                field, sentences, embedding_model,
+                exclude_line_keys=used_line_keys,
+                own_identity_word=own_word,
+                other_identity_words=other_words,
+            )
             if value is not None:
                 used_line_keys.add(_normalize_line(value))
                 output[field_id] = _emit(value, 0.65, "semantic")
