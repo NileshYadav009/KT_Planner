@@ -47,6 +47,40 @@ def _trim_name_capture(name: str) -> str:
         words.pop(0)
     return " ".join(words)
 
+
+# Verbs that commonly introduce an enumerated list in natural speech ("For
+# new team members, REVIEW X, Y, and Z" / "you'll NEED A, B, C"). Used to
+# drop a sentence's leading preamble clause before splitting the rest into
+# individual items.
+_ENUMERATION_INTRO_RE = re.compile(
+    r"\b(?:review|reviewing|access|accessing|includes?|including|requires?|"
+    r"requiring|needs?|needing|uses?|using|covers?|covering|involves?|"
+    r"involving)\b\s*:?\s*",
+    re.IGNORECASE,
+)
+
+
+def _split_enumerated_items(text: str) -> List[str]:
+    """Split a single comma/and-joined sentence that names several distinct
+    items (tools, access types, ...) into one string per item.
+
+    A table field with schema-declared fixed row labels (e.g. day-1's
+    "Cloud Console" / "Git Repository" / ... rows) describes discrete
+    things, but real speech states them as one flowing sentence rather than
+    one-per-row ("review Pub/Sub, Dataflow, BigQuery, GKE, Airflow...").
+    Without this split, that whole sentence lands in a single row/cell
+    instead of becoming several distinct row items.
+    """
+    s = text.strip().rstrip(".")
+    intro_matches = list(_ENUMERATION_INTRO_RE.finditer(s))
+    if intro_matches:
+        # Use the LAST enumeration-introducing verb, so a leading clause
+        # like "For new team members, review X, Y, Z" keeps only "X, Y, Z".
+        s = s[intro_matches[-1].end():]
+    parts = re.split(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*", s)
+    return [p.strip(" .") for p in parts if p.strip(" .")]
+
+
 PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
     "tools": re.compile(
@@ -282,6 +316,27 @@ def _extract_by_pattern(
         numbered_rows = [line for line in lines if re.match(r"^(?:\d+\.|step\b)", line, re.IGNORECASE)]
         if numbered_rows:
             return "\n".join(numbered_rows)
+
+        if field.get("rows"):
+            # This field declares a fixed set of row labels (currently only
+            # day1's required_access: Cloud Console/Git Repository/CI-CD
+            # Tool/Monitoring/Secrets Location) -- it describes several
+            # discrete things, not one blob of text. Real speech states
+            # them as a single comma-joined sentence rather than one
+            # sentence per row, so expand any such sentence into one row
+            # per named item instead of dumping the whole sentence into a
+            # single row/cell.
+            expanded: List[str] = []
+            for line in lines[:10]:
+                has_enough_commas = line.count(",") >= 2
+                has_and_join = line.count(",") >= 1 and re.search(r"\band\b", line, re.IGNORECASE)
+                if has_enough_commas or has_and_join:
+                    items = _split_enumerated_items(line)
+                    if len(items) >= 3:
+                        expanded.extend(items)
+                        continue
+                expanded.append(line)
+            return "\n".join(expanded[:20])
 
         return "\n".join(lines[:10])
 

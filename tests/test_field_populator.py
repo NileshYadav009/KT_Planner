@@ -433,3 +433,46 @@ def test_system_name_is_named_pattern_does_not_false_positive_on_unrelated_is_se
     # punctuation terminator.
     text = "The service is down right now, we are investigating."
     assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) is None
+
+
+# Regression tests for a bug found via a real-world critique of 3 generated
+# KT PDFs (AWS/Azure/GCP): day1_survival_checklist's required_access field
+# declares 5 fixed row labels (Cloud Console/Git Repository/CI-CD Tool/
+# Monitoring/Secrets Location) in kt_schema_new.json, but real speech states
+# the required tools as ONE comma-joined sentence ("For new team members,
+# review Grafana dashboards, GitHub repositories, Kubernetes namespaces, and
+# pipelines.") rather than one sentence per row. The old table-type pattern
+# fallback just joined up to 10 raw lines verbatim, so that whole sentence
+# landed in a single row's first cell instead of becoming one row per item.
+REQUIRED_ACCESS_FIELD = {
+    "id": "required_access",
+    "type": "table",
+    "rows": ["Cloud Console", "Git Repository", "CI/CD Tool", "Monitoring", "Secrets Location"],
+}
+
+
+def test_required_access_table_splits_enumerated_sentence_into_rows():
+    text = (
+        "For new team members, review Grafana dashboards, GitHub repositories, "
+        "Kubernetes namespaces, and pipelines."
+    )
+    value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
+    lines = value.split("\n")
+    assert lines == ["Grafana dashboards", "GitHub repositories", "Kubernetes namespaces", "pipelines"]
+
+
+def test_required_access_table_does_not_split_a_real_non_enumerated_sentence():
+    # A normal instruction sentence with a single comma and no "and"-joined
+    # list must survive intact, not get mangled by the enumeration splitter.
+    text = "If you are unsure about an ongoing production activity, contact platform engineering before proceeding."
+    value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
+    assert value.split("\n") == [text]
+
+
+def test_required_access_table_without_declared_rows_keeps_old_behavior():
+    # A table-type field that does NOT declare fixed row labels (every
+    # other table field in the schema) must be unaffected by this fix.
+    field = {"id": "some_other_table", "type": "table"}
+    text = "For new team members, review Grafana dashboards, GitHub repositories, and pipelines."
+    value = _extract_by_pattern(field, text)
+    assert value == text

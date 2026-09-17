@@ -46,3 +46,30 @@ def test_genuine_s3_mention_without_apostrophe_is_unaffected():
     text = "We store all our backups in s three for durability."
     corrected, _ = apply_devops_corrections(text)
     assert "s three" in corrected.lower() or "s3" in corrected.lower()
+
+
+def test_providers_not_corrupted_into_process_by_prefix_bias():
+    # Found via a real transcript (AWS e-commerce KT): jaro-winkler weights a
+    # shared prefix heavily, so "providers" scores 0.83 against the known
+    # glossary term "process" (both start "pro...") even though the words
+    # mean completely different things -- silently corrupting "Some payment
+    # providers are mocked in staging" into "Some payment process are mocked
+    # in staging". A plain Levenshtein similarity check (0.56 for this pair,
+    # well below genuine corrections like "rabbitmq"/"rabbit" at 0.75) isn't
+    # fooled by the shared prefix and blocks it.
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "Some payment providers are mocked in staging."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert "provider" in corrected.lower()
+    assert "process" not in corrected.lower()
+    assert corrections == []
+
+
+def test_genuine_multiword_fuzzy_corrections_still_work():
+    # Guards against the Levenshtein guard being too strict and blocking
+    # real corrections it wasn't meant to touch.
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "We rely on rabid mq heavily for async messaging."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert "rabbit mq" in corrected.lower()
+    assert corrections and corrections[0]["corrected"] == "rabbit mq"

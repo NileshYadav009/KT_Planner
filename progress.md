@@ -1,14 +1,125 @@
 # Continuum KT Planner — Progress
 
 Handoff doc for picking this work up in a new session. Written 2026-09-04,
-updated 2026-09-13, end of a long working session on
+updated 2026-09-15, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9w. **For a 5-minute overview
+see **`REPOSITORY_AUDIT.md`**, sections §1-9aa. **For a 5-minute overview
 instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
-(not yet updated with the §9q-§9w work below — still describes the
+(not yet updated with the §9q-§9aa work below — still describes the
 state through §9p). This file remains the quick-orientation index; the audit
 is the full record.
+
+**Update 2026-09-15 (ground-truth line-by-line audit with real source
+transcripts)**: user supplied the actual source transcripts (not just the
+generated PDFs) for AWS/Azure/GCP KT documents and asked for a rigorous
+line-by-line audit against real ground truth (spelling, data loss,
+section-mapping errors), a precise hardcoded-vs-dynamic answer, and a
+judgment call on which sections are overhead (explicitly: ask before
+removing any). Ran all 3 real transcripts through the actual pipeline
+(LLM-free) and inspected real pre-polish per-sentence classification data
+rather than reverse-engineering rendered PDF prose. Found and fixed a
+second real fuzzy-correction data-corruption bug (same class as the S3 bug
+in §9v): jaro-winkler's heavy prefix-weighting let "providers" score 0.83
+against the unrelated glossary term "process" (shared "pro..." prefix),
+silently corrupting "Some payment providers are mocked in staging" into
+"...payment process are mocked...". Fixed with an added Levenshtein
+similarity guard (0.56 for this pair vs. 0.75 for genuine corrections)
+that isn't fooled by a shared prefix alone. Also found and precisely
+root-caused (but deliberately did NOT blind-fix, given regression risk) a
+more serious bug: dense architecture/tech-stack sentences that are
+immediately followed by a secrets-management sentence get misclassified
+into `security_controls` — confirmed in 2 of 3 real transcripts, and
+confirmed as the exact cause of "Cache Layer" always showing "missing" in
+the coverage matrix even when Redis is explicitly named; for AWS this
+sentence (naming the primary database, cache layer, and async queue)
+doesn't appear ANYWHERE in the 13-page rendered PDF at all — a genuine,
+severe, silent total-content-loss bug. Isolated testing proved the defect
+is NOT in the classifier's scoring formula (both the raw scorer and full
+`classify_sentence()` correctly pick the right section in isolation, with
+or without neighbor context) — it lives in `ContextMappingPipeline
+.process()`'s block-building/topic-continuity orchestration layer, which
+needs a proper eval harness before it's safe to touch (ties to the
+feedback-persistence + eval-harness recommendation from the "how do we
+improve section-mapping accuracy" discussion earlier this session).
+Documented with full reproduction detail for a future pass. Answered the
+hardcoded-vs-dynamic question precisely: the section skeleton is a static
+template, but a technology-triggered field set (`schema_generator
+.generate_dynamic_schema()`, confirmed working correctly — e.g. GCP's
+matrix correctly has no "Cache Layer" field since no Redis is mentioned)
+and 100% of section content are genuinely dynamic per-transcript. Full
+suite: **163 passed, 0 failed**, up from 161. See audit §9aa. The
+"which sections are overhead" judgment call and any section removal are
+intentionally left for the user's explicit decision, not made
+unilaterally.
+
+**Update 2026-09-14, later same day (3 targeted fixes from an external
+critique of 3 real generated PDFs)**: user pasted a lengthy architectural
+critique of fresh AWS/Azure/GCP KT PDFs proposing a full rewrite around
+typed "Knowledge Objects"; verified its specific claims against the code
+rather than taking them at face value. The proposed rewrite is the same
+idea already evaluated and deliberately deferred earlier this session
+(§9s) — declined to reopen that call — but 3 of its specific findings
+were independently confirmed with concrete root causes and fixed: (1)
+`common_failures`'s "How to Fix" column was being fabricated by the LLM,
+not extracted — the structured-extraction prompt guarded `resolution`/
+`preventive_action` against invented content but not `cause`/`fix`, which
+was even declared non-nullable; fixed by extending the same grounding
+instruction to all four fields; (2) `day1_survival_checklist`'s required-
+access table dumped a whole raw sentence ("For new team members, review
+Pub/Sub, Dataflow, BigQuery, GKE, ...") into a single cell instead of one
+row per tool — the schema's only field declaring fixed row labels, but
+that metadata was never actually used; fixed with a new sentence-splitter
+scoped specifically to fields declaring `rows`, so no other table field's
+behavior changes; (3) `handover_completion` could show only "KT status:
+Complete" with none of the 5 substantive readiness checks visible at all
+when they were never captured, reading as a false all-clear even in
+documents whose own coverage matrix listed that section as Missing —
+fixed to always list all 5 checks (defaulting to "Not covered during KT"),
+relabel the closing line so it can't read as a computed verdict, and add
+an explicit caveat when none of the checks were confirmed. Full suite:
+**161 passed, 0 failed**, up from 153. See audit §9z.
+
+**Update 2026-09-14 (MP3 upload transcribing almost nothing — silence-trim
+bug)**: user reported uploading an `.mp3` produced no usable transcript.
+Reproduced end-to-end with a genuine MP3 run through the real `/upload`
+code path (not guessed): the job "completed" but returned a 12-character
+transcript out of ~20s of real speech. Root cause: the silence-trimming
+step in `pipeline.py` used `ffmpeg`'s `silenceremove` with `stop_periods=1`
+on a single forward pass — that setting doesn't trim trailing silence, it
+stops the entire filtered output at the FIRST silence gap found anywhere
+in the stream and discards everything after it. Confirmed in isolation: a
+19.53s clip with one natural pause between sentences came out as 1.43s.
+Not mp3-specific — this silently truncates any real recording with a
+normal pause between sentences, which unit tests never exercised since
+they call the pipeline with transcript text directly, bypassing audio
+trimming entirely. Fixed by extracting the step into
+`pipeline.trim_leading_trailing_silence()` using the standard
+reverse/trim/reverse/trim/reverse technique, which only ever touches
+leading/trailing silence. Re-verified with the same real MP3: full
+241-character transcript now comes back correctly. New regression test
+file `tests/test_audio_trimming.py` (synthetic ffmpeg-generated clips, no
+TTS/Whisper needed) guards both the "mid-stream pause must survive" case
+and the "leading/trailing silence must still get trimmed" case. Full
+suite: **153 passed, 0 failed**, up from 151. See audit §9y.
+
+**Update 2026-09-14 (enterprise UI redesign, static/index.html)**: user
+asked for the app's single-page UI to look "Enterprise level," with light
+and dark mode, keeping all useful features. Added a full CSS
+custom-property theme-token system (light default, dark via both OS
+preference and a manual `#themeToggle` persisted to `localStorage`,
+applied pre-paint to avoid a flash of the wrong theme). Replaced all emoji
+icons with inline SVGs. Fixed a genuinely dead sidebar — 6 nav links
+pointed at sections that don't exist in this app — with real anchors into
+sections that do, plus scroll-spy active-state tracking. Wired up
+drag-and-drop on the upload zone (CSS for it already existed; the JS
+listeners never had). Enhanced toasts with 4 auto-inferred types. All
+existing functional JS (polling, rendering, the dynamic form, exports, PDF
+download) preserved verbatim — verified via JS syntax parsing, a full
+DOM-id cross-reference (38 refs, 0 missing), HTML/CSS balance checks, and
+headless-Chrome screenshots in both themes plus a populated-data state via
+an iframe test harness. No backend or renderer files touched. See audit
+§9x.
 
 **Update 2026-09-13, third pass same day (title bug + full section-mapping
 audit against a live app-generated PDF)**: user generated a real PDF

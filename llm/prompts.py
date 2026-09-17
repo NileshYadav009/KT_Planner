@@ -91,7 +91,7 @@ SECTION_STRUCTURED_PROMPTS = {
     ),
     "common_failures": (
         "Return ONLY valid JSON (no markdown, no extra text). Use null for anything not mentioned:\n"
-        "{{\"failures\": [{{\"symptom\": string, \"cause\": string, \"fix\": string, "
+        "{{\"failures\": [{{\"symptom\": string, \"cause\": string|null, \"fix\": string|null, "
         "\"frequency\": string|null, \"ticket\": string|null, \"when\": string|null, "
         "\"impact\": string|null, \"resolution\": string|null, "
         "\"preventive_action\": string|null}}]}}\n\n"
@@ -100,9 +100,12 @@ SECTION_STRUCTURED_PROMPTS = {
         "KEDB/ticket reference if mentioned. \"when\" is a specific past occurrence if "
         "mentioned (e.g. \"last year\"), for one-off historical incidents rather than "
         "recurring issues. \"impact\" is what happened as a result (e.g. \"major "
-        "outage\"). \"resolution\" and \"preventive_action\" are only set if the "
-        "transcript explicitly states how it was fixed or prevented going forward — "
-        "leave null rather than inferring a plausible-sounding fix. Do NOT invent "
+        "outage\"). \"cause\", \"fix\", \"resolution\" and \"preventive_action\" are "
+        "each only set if the transcript explicitly states that specific thing — a "
+        "stated symptom does NOT imply a stated cause or fix. Never fill any of these "
+        "four with a plausible-sounding root cause or remediation step drawn from your "
+        "own general troubleshooting knowledge; leave the field null instead. It is "
+        "normal and expected for most of these four fields to be null. Do NOT invent "
         "failures not present in the fragments.\n\n"
         "Extract from these fragments:\n{fragments}\n\nJSON:"
     ),

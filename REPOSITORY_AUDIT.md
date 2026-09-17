@@ -2055,6 +2055,318 @@ Knowledge). None of these four are fixed this pass — each is flagged with
 enough specificity (exact root cause, exact fix shape, exact risk) that a
 future pass doesn't need to re-diagnose them from scratch.
 
+### 9x. Enterprise UI redesign for static/index.html (light/dark theme)
+
+User asked for the app's single-page UI (`static/index.html`) to look
+"Enterprise level," with light and dark mode, keeping all useful features
+and no functional regressions.
+
+**Changed**: a CSS custom-property theme-token system (light defaults on
+`:root`, dark tokens duplicated under both
+`@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`
+and `:root[data-theme="dark"]` so both OS-level and manual-toggle dark mode
+work), a `#themeToggle` button persisting the choice to
+`localStorage['kt-theme']`, applied via an inline `<head>` script before
+first paint (avoids a flash of the wrong theme). All emoji icons replaced
+with inline SVGs matching the existing card-header icon style. The sidebar
+nav previously had 6 links to sections that don't exist in this app
+(Architecture, Troubleshooting, Runbooks, AI Insights, Exports, Settings)
+— replaced with real anchors to sections that do exist (Dashboard, Upload,
+AI Summary, Coverage, Document, KT Form) plus `IntersectionObserver`-based
+scroll-spy active-state tracking. The upload zone had drag-and-drop CSS
+(`.upload-zone.drag`) with no JS ever wired to it — added
+`dragenter`/`dragover`/`dragleave`/`drop` handlers that assign
+`fileInput.files` and dispatch a synthetic `change` event, so the existing
+upload handler needed no changes. The toast system gained 4 visually
+distinct types (success/error/warning/info), inferred from message content
+by default (`inferToastType()`) so every existing `showToast(msg)` call
+site kept working unchanged.
+
+**Verified**: this file has no automated test coverage, so verification
+was structural + visual rather than `pytest`-based. Structural: all 3
+`<script>` blocks parse with `new Function()` (0 syntax errors); all 38
+`getElementById()` references cross-referenced against real element ids (0
+missing); HTML tags and CSS braces balanced. Visual: served the static
+file over a throwaway local HTTP server and captured headless-Chrome
+screenshots in both themes, plus a populated-data state (metrics, alerts,
+coverage accordion, edit modal) via an iframe + `contentWindow` harness
+that invokes the page's own rendering functions with mock data — confirmed
+correct theming and layout in all captured states. One bug self-caught
+during the rewrite before it shipped: `toggleTranscript.textContent = ...`
+would have deleted the button's new SVG icon (since `textContent`
+replaces all children); fixed to only touch the trailing text node via
+`toggleTranscript.lastChild.textContent`.
+
+**Explicitly not changed**: any backend/pipeline code, the `@media print`
+PDF-preview stylesheet (already correct, separate concern), or any DOM
+element id (so no `/schema`, `/feedback`, `/export/pdf` etc. wiring could
+regress).
+
+### 9y. MP3 uploads transcribing almost nothing — silence-trim filter was discarding audio after the first pause
+
+User reported: uploading an `.mp3` file produced no usable transcript.
+Reproduced end-to-end (not guessed) by running a genuine MP3 (real
+`libmp3lame` encoding, not a renamed WAV) through the exact same code path
+`api/routes.py`'s `/upload` endpoint uses — `tempfile.NamedTemporaryFile`
+with the real extension discarded, into `pipeline.process_upload_task()`.
+Result: job completed "successfully" but the transcript was 12 characters
+("Hi everyone.") out of ~20 seconds of real speech.
+
+**Root cause**: `process_upload_task()`'s silence-trimming step used a
+single forward `ffmpeg` `silenceremove` pass with
+`stop_periods=1, stop_silence=0.5, stop_threshold=-50dB`. `stop_periods`
+does not mean "trim trailing silence" — per ffmpeg's own filter semantics,
+it stops the *entire filter's output* the moment it finds the first
+silence gap meeting the duration/threshold anywhere in the stream, and
+discards everything after that point. Confirmed by isolating just this
+filter step outside the pipeline: a 19.53s clip with one natural pause
+between two sentences came out as 1.43s — everything after the first pause
+was gone. This is not mp3-specific — it silently truncates *any* upload
+(wav, mp4, etc.) with a normal pause between sentences, which is
+effectively all real speech; it likely went unnoticed because unit tests
+call `run_kt_pipeline()` directly with transcript text, bypassing this
+audio-trimming code path entirely, and prior manual QA audio may have
+happened to have no detectable pause under the -50dB/0.5s threshold.
+
+**Fixed**: extracted the trimming step into a standalone
+`pipeline.trim_leading_trailing_silence()` function using the standard
+reverse → trim-leading → reverse → trim-leading → reverse technique
+(`silenceremove` with only `start_periods`, `areverse`, the same
+`silenceremove` again, `areverse` again) — this trims silence from the
+start and end only and never touches mid-stream audio, since
+`stop_periods` is no longer used at all. Re-ran the same real-MP3
+reproduction after the fix: full 241-character transcript came back
+correctly (vs. 12 before).
+
+**Verified**: `tests/test_audio_trimming.py` (new) — two tests using
+synthetic tone/silence/tone clips built via ffmpeg's `lavfi` sources
+(fast, no TTS or Whisper model needed): one confirms a mid-stream pause no
+longer truncates the rest of the clip (guards this exact regression), the
+other confirms leading/trailing silence is still actually trimmed (guards
+against overcorrecting into a no-op). Full `pytest tests/` (excluding the
+slow golden test): **153 passed, 0 failed**, up from 151.
+
+### 9z. Three targeted fixes from an external critique of 3 real generated KT PDFs
+
+User pasted a lengthy architectural critique (apparently AI-generated
+elsewhere) of 3 fresh KT PDFs the app had produced (AWS E-Commerce, Azure
+Banking, GCP Data & ML), arguing the pipeline is "schema-first instead of
+knowledge-first" and proposing a full rewrite around typed, evidence-backed
+"Knowledge Objects" extracted independently of section structure. Asked
+whether the critique was useful and what could be improved from it.
+
+**Response**: verified the critique's claims against the actual code rather
+than taking them at face value. Several claims couldn't be checked (they
+referenced transcript content not present in the shared PDFs); the proposed
+full rewrite is the same idea already evaluated and explicitly deferred
+earlier this session (the 26-phase enterprise-review plan, §9s) — declined
+to reopen that call. But 3 of the critique's specific findings were
+independently confirmed in the code with concrete root causes, and the user
+asked for all 3 to be fixed:
+
+1. **`common_failures`'s "How to Fix" column was fabricated, not
+   extracted.** `llm/prompts.py`'s structured-extraction prompt told the
+   model to leave `resolution`/`preventive_action` null unless the
+   transcript explicitly stated them, but said nothing of the kind about
+   `cause`/`fix` — and declared `fix` non-nullable in the JSON schema it
+   hands the model. That asymmetry is exactly why 3 unrelated transcripts
+   all produced suspiciously uniform, generic remediation text ("Check the
+   messaging flow and determine whether processing is keeping up", "Check
+   Airflow when workflows or DAGs fail") that reads like invented
+   troubleshooting advice, not transcribed speech. Fixed by making
+   `cause`/`fix` explicitly nullable and extending the existing
+   "leave null rather than inferring a plausible-sounding fix" instruction
+   to cover all four fields (`cause`, `fix`, `resolution`,
+   `preventive_action`), not just the two that already had it.
+2. **`day1_survival_checklist`'s required-access table dumped a whole raw
+   sentence into one cell.** The schema's `required_access` field is the
+   only field in the whole schema that declares fixed row labels (Cloud
+   Console/Git Repository/CI-CD Tool/Monitoring/Secrets Location,
+   `kt_schema_new.json`) — but that `"rows"` metadata was never actually
+   read anywhere in extraction or rendering. Real speech states the
+   required tools as one comma-joined sentence ("For new team members,
+   review Pub/Sub, Dataflow, BigQuery, GKE, Airflow, Vertex AI, Terraform,
+   Argo CD, Secret Manager, and PagerDuty."), and
+   `field_populator._extract_by_pattern()`'s `type: "table"` fallback just
+   joined up to 10 raw lines verbatim — since this was all one line, the
+   entire sentence became one row's "Item" cell (confirmed in all 3 PDFs).
+   Fixed with a new `_split_enumerated_items()` helper: strips a leading
+   introductory clause (up through the last verb like "review"/"access"/
+   "requires"/...) then splits the rest on commas/"and" into one item per
+   row — scoped specifically to `field.get("rows")` being present (i.e.
+   only `required_access`, today), so no other table-type field's
+   behavior changes. A sentence with too few commas/no "and"-join (a real
+   single instruction, not an enumeration) is deliberately left intact
+   rather than mis-split.
+3. **`handover_completion`'s "KT status: Complete" read as a false
+   all-clear.** When none of the 5 boolean readiness checks (can_deploy,
+   understands_rollback, ...) were captured but a closing `kt_status`
+   remark was, the renderer produced ONLY a "KT status: Complete" line —
+   no visible indication that the 5 substantive checks were never
+   confirmed, even in documents whose own coverage matrix listed this
+   exact section as Missing. `renderers/sections/handover_completion.py`
+   now always lists all 5 checks (defaulting to "Not covered during KT"
+   instead of being omitted), relabels the closing line from "KT status:"
+   to "Closing remark from the KT session:" so it can't be mistaken for a
+   computed completeness verdict, and appends an explicit caveat when none
+   of the 5 checks were actually confirmed.
+
+**Verified**: `tests/test_llm_prompts.py` (new) guards the prompt wording
+itself, since a live LLM call can't be asserted on deterministically.
+`tests/test_field_populator.py` gained 3 tests for the enumeration
+splitter (splits a real transcript-shaped sentence correctly, leaves a
+non-enumerated sentence intact, and confirms every other table field is
+unaffected since none declare `rows`). `tests/test_renderer_sections.py`
+gained 3 tests for `handover_completion` (uncaptured checks show
+alongside the caveat, no caveat when checks are genuinely confirmed, and
+the empty-section fallback still works). End-to-end sanity check: fed the
+exact GCP transcript sentence through the real `populate_fields()` →
+`render_day1()` pipeline and confirmed it produces 10 separate tool rows
+instead of one blob. Full `pytest tests/` (excluding the slow golden
+test): **161 passed, 0 failed**, up from 153.
+
+### 9aa. Ground-truth line-by-line audit with real source transcripts + a confirmed, root-caused (not-yet-fixed) section-mapping bug
+
+User supplied the *actual source transcripts* (not just the generated PDFs)
+for the AWS/Azure/GCP KT documents reviewed in §9x/§9y/§9z, asked for a
+line-by-line audit for spelling errors, data loss, and section-mapping
+errors against real ground truth, confirmation of whether the pipeline is
+still schema-first/hardcoded vs. genuinely dynamic, and a judgment call on
+which rendered sections are genuinely useful vs. overhead (with an explicit
+instruction to ask before removing anything).
+
+**Method**: rather than reverse-engineering the PDF's LLM-polished prose,
+ran all 3 real transcripts through `pipeline.run_kt_pipeline()` directly
+(LLM-free) and inspected the actual per-sentence `coverage[section_id]
+["sentences"]` data — the real, pre-polish classification ground truth.
+This is far more reliable than reading rendered output, which already
+reorders/merges/paraphrases.
+
+**Confirmed and fixed**:
+
+1. **A second real fuzzy-correction data-corruption bug** (same class as
+   the S3/apostrophe bug in §9v): `devops_transcription.py`'s
+   `apply_fuzzy_term_corrections()` silently corrupted the AWS transcript's
+   "Some payment **providers** are mocked in staging" into "Some payment
+   **process** are mocked in staging". Root cause: jaro-winkler weights a
+   shared prefix heavily and barely penalizes the rest of a word —
+   "providers" vs. the known glossary term "process" both start "pro..."
+   and score 0.83 (above the 0.82 per-word threshold), even though the
+   words mean completely different things and their plain Levenshtein
+   similarity is only 0.56 (vs. 0.75 for genuine corrections like
+   "rabbitmq"/"rabbit"). Fixed by requiring a Levenshtein-similarity check
+   (`MIN_PER_WORD_LEVENSHTEIN = 0.6`) alongside the existing jaro-winkler
+   check — a metric that isn't fooled by a shared prefix alone. Verified
+   the exact corruption no longer happens, and that genuine multi-word
+   corrections (a deliberately introduced "rabid mq" → "rabbit mq" typo)
+   still work.
+
+**Confirmed as real but NOT fixed this pass — root-caused precisely,
+fix deferred as too risky to rush**:
+
+2. **Architecture/tech-stack sentences misclassify into `security_controls`
+   when immediately followed by a secrets-management sentence — the
+   direct cause of "Cache Layer" always showing "missing" in the coverage
+   matrix even when Redis is explicitly named.** Reproduced in 2 of 3 real
+   transcripts: AWS's "Amazon RDS PostgreSQL is the primary database,
+   Redis is used for caching and short-lived session data, and Amazon SQS
+   handles asynchronous order processing. Amazon ECR stores container
+   images." (immediately followed by "Vault is used for sensitive secret
+   management.") and Azure's equivalent tech-stack sentence (immediately
+   followed by "Azure Key Vault is used for secret management.") both
+   landed in `security_controls` instead of `system_overview` /
+   `architecture_reference`. Consequence confirmed against the real
+   rendered AWS PDF (job A1E1432E): this sentence — naming the primary
+   database, cache layer, and async queue — **does not appear anywhere in
+   the 13-page document at all**, not even in Unmapped Findings, because
+   `security_controls`'s renderer only surfaces specific structured fields
+   (secret manager, scanner) and has no general-context fallback the way
+   `system_overview` does. This is a genuine, severe, silent total-loss
+   bug, not a misfiling.
+
+   Root-caused precisely rather than guessed: isolated
+   `ContextClassifier._score_sentence_candidates()` (pure embedding +
+   keyword + entity scoring, no context blending) correctly ranks
+   `architecture_reference` first for this sentence with a wide margin,
+   both with and without the following Vault sentence as context. Isolated
+   `ContextClassifier.classify_sentence()` (adds cross-encoder reranking
+   and rule matching on top) **also** correctly picks `architecture_reference`
+   as primary, both with and without context. Since the bug reproduces in
+   the full `ContextMappingPipeline.process()` run but NOT in either
+   isolated per-sentence classification path, the defect is not in the
+   scoring formula itself — it lives somewhere in `process()`'s block-
+   building / topic-continuity orchestration layer (`TopicMemory`, ~line
+   1804, and/or the batch cross-encoder reranking at ~line 2090), which is
+   several hundred lines of state-machine-shaped logic that batches and
+   groups sentences before finalizing section assignment.
+
+   **Deliberately not fixed this pass**: modifying that orchestration layer
+   blind, without a proper before/after eval harness, risks silently
+   regressing the 161 tests and the golden fixture that already depend on
+   its exact current behavior for correctly-working continuity cases (this
+   is the same class of risk flagged in the "improve section-mapping
+   accuracy" architecture discussion earlier this session — see that
+   response's ranked recommendation list). Documented here with enough
+   precision (exact isolation method, exact code region, exact reproducing
+   input) that a future pass can go straight to a fix without re-deriving
+   root cause from scratch.
+
+3. **GCP: "This platform processes approximately 3 terabytes of data per
+   day." landed in `disaster_recovery`** instead of `system_overview` —
+   same *class* of bug as #2 (a sentence pulled out of its obvious home
+   section by neighboring content), not independently re-diagnosed given
+   the above.
+
+**Verified as NOT reproducible / not a pipeline bug**: the user's prior
+AWS PDF (job A1E1432E, page 5) showed "Graphana dashboards" (misspelled)
+in the Day-1 checklist, but the exact transcript text supplied in this
+round spells it correctly ("Grafana"), and re-running that exact text
+through the pipeline reproduces the correct spelling. Since
+`apply_fuzzy_term_corrections()` only operates on 2+ word phrases
+(`MIN_FUZZY_PHRASE_WORDS = 2`) and never touches single words, there is no
+plausible code path that would turn a correctly-spelled single-word
+"Grafana" into "Graphana" — most likely explanation is the text actually
+submitted to the app for that job differed slightly from the text pasted
+back for this review. Not chased further per this session's standing
+"could not reproduce" precedent (§9s item 1) rather than guessing at a fix
+for behavior that doesn't reproduce.
+
+**Positive confirmation — 3 fixes from §9z verified working on a fresh
+real-world PDF generation**: the AWS PDF (job A1E1432E) was generated
+*after* §9z's fixes shipped (the Azure/GCP PDFs in this same round carry
+the same job IDs as §9x's — i.e. stale, pre-fix). In the fresh AWS PDF:
+the Day-1 checklist correctly shows 4 separate tool rows (not one
+run-on sentence) confirming the enumeration-splitter fix; Common Failures'
+"How to Fix" column shows genuinely-stated content ("Verify the secret
+references...", literally in the transcript) where the transcript states
+a fix and "Not covered during KT" where it doesn't (e.g. database
+connection pool exhaustion, Redis memory saturation) — no fabricated
+generic advice, confirming the anti-hallucination prompt fix; and
+Handover Completion Check shows the full 5-item checklist plus the
+"Closing remark from the KT session: Complete" relabel and caveat,
+confirming that fix.
+
+**Is section/field generation hardcoded or dynamic?** — answered
+precisely rather than a yes/no: the base **structure** (which ~17 sections
+exist, their ids/titles/required flags, and each section's *baseline*
+fields) is a static template (`kt_schema_new.json`) — every KT document
+gets the same section list regardless of content, by design. But two
+things ARE genuinely dynamic per-transcript: (1) `schema_generator
+.generate_dynamic_schema()` scans the whole transcript for ~9 technology
+trigger patterns (Redis/Kafka/Vault/ArgoCD/Trivy/PagerDuty/Terraform/
+Confluence/etc., `TECH_STACK_FIELD_ADDITIONS`) and injects extra fields
+into the relevant section ONLY when that technology is actually mentioned
+— confirmed working correctly in this audit: GCP's coverage matrix has no
+"Cache Layer" field at all (no Redis mentioned) while AWS/Azure's both do
+(Redis/Azure Cache for Redis mentioned) — exactly the intended behavior,
+though bug #2 above then stops that correctly-anticipated field from
+actually being populated; (2) every section's actual *content* — the
+prose, table rows, structured extraction — is 100% derived from that
+specific transcript's classified sentences, never copy-pasted or
+templated boilerplate. So: fixed section skeleton, dynamic field set,
+fully dynamic content — not a fixed-fill-in-the-blanks template, and not
+a from-scratch discovered structure either.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

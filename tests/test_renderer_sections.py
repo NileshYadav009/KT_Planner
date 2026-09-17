@@ -17,6 +17,7 @@ from renderers.sections.kt_coverage import render as render_kt_coverage
 from renderers.sections.open_responsibilities import render as render_open_responsibilities
 from renderers.sections.architecture_reference import render as render_architecture_reference
 from renderers.sections.first_30_day_ownership import render as render_first_30_day_ownership
+from renderers.sections.handover_completion import render as render_handover_completion
 
 
 def test_system_overview_renders_real_schema_fields_not_stale_ones():
@@ -288,3 +289,62 @@ def test_first_30_day_ownership_falls_back_to_coverage_content_without_fields():
     }
     result = render_first_30_day_ownership(section)
     assert result["blocks"][0]["rows"] == [{"role": "Week 1", "team": "Observe and shadow"}]
+
+
+# Regression tests for a bug found via a real-world critique of 3 generated
+# KT PDFs: when none of the 5 boolean readiness checks (can_deploy,
+# understands_rollback, ...) were captured but a "kt_status" closing remark
+# was, the old renderer produced ONLY a "KT status: Complete" line with no
+# other content in the section at all -- reading as "handover fully done"
+# even though none of the substantive readiness checks were confirmed, and
+# even when the document's own coverage matrix listed this exact section as
+# Missing. The fix always lists all 5 checks (defaulting to "Not covered
+# during KT" when absent) and relabels the closing remark so it can't be
+# mistaken for a computed completeness verdict.
+def test_handover_completion_shows_uncaptured_checks_alongside_closing_remark():
+    section = {
+        "id": "handover_completion", "title": "HANDOVER COMPLETION CHECK",
+        "fields": {"kt_status": {"value": "Complete"}},
+        "coverage_content": [],
+    }
+    result = render_handover_completion(section)
+    checklist = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")
+    assert len(checklist["items"]) == 5
+    assert all("Not covered during KT" in item for item in checklist["items"])
+
+    narrative = next(b for b in result["blocks"] if b["type"] == "NarrativeBlock")
+    joined = " ".join(narrative["paragraphs"])
+    assert "KT status:" not in joined
+    assert "Closing remark from the KT session: Complete" in joined
+    assert "does not by itself confirm" in joined
+
+
+def test_handover_completion_no_caveat_when_checks_are_actually_confirmed():
+    section = {
+        "id": "handover_completion", "title": "HANDOVER COMPLETION CHECK",
+        "fields": {
+            "kt_status": {"value": "Complete"},
+            "can_deploy": {"value": True},
+            "understands_rollback": {"value": True},
+        },
+        "coverage_content": [],
+    }
+    result = render_handover_completion(section)
+    narrative = next(b for b in result["blocks"] if b["type"] == "NarrativeBlock")
+    joined = " ".join(narrative["paragraphs"])
+    assert "does not by itself confirm" not in joined
+
+    checklist = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")
+    assert "Replacement can deploy safely: Confirmed" in checklist["items"]
+    assert "Understands rollback: Confirmed" in checklist["items"]
+    assert "Knows danger zones: Not covered during KT" in checklist["items"]
+
+
+def test_handover_completion_falls_back_to_no_coverage_when_nothing_captured():
+    section = {
+        "id": "handover_completion", "title": "HANDOVER COMPLETION CHECK",
+        "fields": {}, "coverage_content": [],
+    }
+    result = render_handover_completion(section)
+    assert len(result["blocks"]) == 1
+    assert result["blocks"][0]["type"] != "ChecklistBlock" or not result["blocks"][0].get("items")

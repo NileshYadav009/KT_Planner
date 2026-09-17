@@ -435,6 +435,31 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     return result
 
 
+def trim_leading_trailing_silence(input_path: str, output_path: str) -> bool:
+    """Trim silence from the start and end of an audio file only.
+
+    NOTE: a single forward `silenceremove` pass with `stop_periods` set does
+    NOT trim trailing silence -- it stops the whole filter output at the
+    FIRST silence gap found anywhere in the stream and discards everything
+    after it. Any real recording with a normal pause between sentences would
+    have most of its audio silently dropped before Whisper ever saw it.
+    Trimming trailing silence safely requires reversing the stream, trimming
+    leading silence again, then reversing back -- never `stop_periods`.
+
+    Returns True and writes `output_path` on success, False otherwise.
+    """
+    (
+        ffmpeg.input(input_path)
+        .filter_('silenceremove', start_periods=1, start_silence=0.5, start_threshold='-50dB')
+        .filter_('areverse')
+        .filter_('silenceremove', start_periods=1, start_silence=0.5, start_threshold='-50dB')
+        .filter_('areverse')
+        .output(output_path)
+        .run(quiet=True, overwrite_output=True)
+    )
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+
 def process_upload_task(job_id: str, input_path: str, audio_path: str):
     """Background task for transcription and classification from an uploaded audio file."""
     try:
@@ -458,12 +483,10 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
             # If conversion fails, try the original file directly
             pass
 
-        # Trim long silent sections to speed up transcription
+        # Trim only leading/trailing silence to speed up transcription.
         try:
             trimmed_path = f"{input_path}.trimmed.wav"
-            # remove silence at start/end and long pauses (ffmpeg silenceremove)
-            ffmpeg.input(audio_to_use).filter_('silenceremove', start_periods=1, start_silence=0.5, start_threshold='-50dB', stop_periods=1, stop_silence=0.5, stop_threshold='-50dB').output(trimmed_path).run(quiet=True, overwrite_output=True)
-            if os.path.exists(trimmed_path) and os.path.getsize(trimmed_path) > 0:
+            if trim_leading_trailing_silence(audio_to_use, trimmed_path):
                 audio_to_use = trimmed_path
         except Exception:
             # If trimming fails, continue with original audio

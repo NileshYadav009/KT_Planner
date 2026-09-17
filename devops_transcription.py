@@ -131,6 +131,18 @@ MIN_FUZZY_PHRASE_WORDS = 2
 # a low bar here.
 MIN_PER_WORD_SIMILARITY = 0.82
 
+# jaro-winkler weights a shared PREFIX heavily and barely penalizes the rest
+# of the word, so two genuinely different words that happen to start the
+# same way can still clear MIN_PER_WORD_SIMILARITY -- e.g. "providers" vs.
+# the known term "process" score 0.83 (both start "pro...") even though
+# Levenshtein similarity is only 0.56, and a real transcript's "Some payment
+# providers are mocked in staging" was silently corrupted into "Some payment
+# process are mocked in staging". Requiring a plain edit-distance similarity
+# too (which isn't fooled by a shared prefix alone) blocks that without
+# affecting genuine corrections, which score well above this on both
+# metrics (e.g. "rabbitmq"/"rabbit"=0.75, "graphana"/"grafana"=0.75).
+MIN_PER_WORD_LEVENSHTEIN = 0.6
+
 # ============================================================================
 # Phrase-Level Corrections
 # ============================================================================
@@ -447,6 +459,7 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                 # counterpart too.
                 per_word_ok = all(
                     textdistance.jaro_winkler.normalized_similarity(w.lower(), tw) >= MIN_PER_WORD_SIMILARITY
+                    and textdistance.levenshtein.normalized_similarity(w.lower(), tw) >= MIN_PER_WORD_LEVENSHTEIN
                     for w, tw in zip(ngram_words, target_words)
                 )
                 if not per_word_ok:
