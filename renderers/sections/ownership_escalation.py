@@ -27,11 +27,24 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     if fields.get("infrastructure_ownership", {}).get("value"):
         rows.append({"role": "Infrastructure ownership", "team": fields["infrastructure_ownership"]["value"]})
 
+    # Kept as its own paragraph, deliberately never folded into the
+    # ownership table above: a general "contact X when unsure" instruction
+    # is operational guidance about what to do, not a statement of who
+    # formally owns the system (or the on-call tool's name) — conflating
+    # them was a real bug (a real transcript's "If you are unsure about a
+    # change, involve the appropriate platform or application owner."
+    # ended up mislabeled as the On-call tool's NAME in a live PDF).
+    guidance_paragraphs: List[str] = []
+    if fields.get("operational_escalation_guidance", {}).get("value"):
+        guidance_paragraphs.append(fields["operational_escalation_guidance"]["value"])
+
     blocks = []
     if paragraphs:
         blocks.append(build_narrative_block(title, paragraphs))
     if rows:
         blocks.append(build_ownership_table(title, rows))
+    if guidance_paragraphs:
+        blocks.append(build_narrative_block("Operational escalation guidance", guidance_paragraphs))
     if not blocks:
         fallback = _coverage_paragraphs(section)
         if fallback:

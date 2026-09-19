@@ -30,6 +30,7 @@ from knowledge import (
     append_unmapped_findings_section,
     enrich_operational_calendar,
     enrich_technology_summary,
+    enrich_architecture_knowledge,
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
@@ -307,6 +308,17 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             knowledge_object = enrich_technology_summary(knowledge_object)
         except Exception as exc:
             logger.warning("Technology summary enrichment failed: %s", exc)
+
+        # Architecture Reference's own field schema is 3 admin facts (doc
+        # link, last-updated, verified-by) — real architecture knowledge
+        # (the actual components/services the system runs on) lives in
+        # whichever section's sentences happened to mention it. Surface it
+        # as its own digest so the section isn't judged solely by whether
+        # those 3 admin fields were discussed.
+        try:
+            knowledge_object = enrich_architecture_knowledge(knowledge_object)
+        except Exception as exc:
+            logger.warning("Architecture knowledge enrichment failed: %s", exc)
 
         # Surface sentences the classifier never confidently placed in any
         # real section instead of letting them vanish silently (see

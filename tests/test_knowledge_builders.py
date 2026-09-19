@@ -19,6 +19,7 @@ from knowledge.knowledge_builder import (
     append_unmapped_findings_section,
     enrich_operational_calendar,
     enrich_technology_summary,
+    enrich_architecture_knowledge,
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
@@ -307,6 +308,64 @@ def test_enrich_technology_summary_noop_without_system_overview():
     assert result is ko
 
 
+def test_enrich_architecture_knowledge_pulls_components_from_any_section():
+    # architecture_reference's own field schema is 3 admin facts only — the
+    # actual component stack gets classified wherever its sentences
+    # naturally landed (system_overview here), and must still surface as
+    # this section's own knowledge digest rather than being lost.
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE"),
+            _section(
+                "system_overview", "SYSTEM OVERVIEW",
+                coverage_content=[
+                    "The platform runs a React frontend backed by FastAPI services on Amazon EKS.",
+                    "The primary database is Amazon RDS PostgreSQL, with Redis for caching and SQS for async jobs.",
+                    "Traffic is served through CloudFront and an Application Load Balancer, with images stored in Amazon ECR.",
+                ],
+            ),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    components = {c.lower() for c in arch["_architecture_components"]}
+    assert components == {
+        "react", "fastapi", "amazon eks", "amazon rds", "postgresql",
+        "redis", "sqs", "cloudfront", "application load balancer", "amazon ecr",
+    }
+
+
+def test_enrich_architecture_knowledge_dedupes_case_insensitively():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=["All services run on Amazon EKS."]),
+            _section("system_overview", "SYSTEM OVERVIEW",
+                     coverage_content=["We standardized on amazon eks for orchestration."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    lowered = [c.lower() for c in arch["_architecture_components"]]
+    assert lowered.count("amazon eks") == 1
+
+
+def test_enrich_architecture_knowledge_noop_without_architecture_reference():
+    ko = {"sections": [_section("system_overview", "SYSTEM OVERVIEW")], "summary": {}}
+    result = enrich_architecture_knowledge(ko)
+    assert result is ko
+
+
+def test_enrich_architecture_knowledge_noop_when_nothing_detected():
+    ko = {"sections": [_section("architecture_reference", "ARCHITECTURE REFERENCE",
+                                 coverage_content=["Nothing technical was discussed here."])], "summary": {}}
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    assert "_architecture_components" not in arch
+
+
 def test_append_tribal_knowledge_section_tags_marker_phrases_by_source_section():
     ko = {"sections": [], "summary": {}}
     section_content = {
@@ -395,6 +454,47 @@ def test_append_coverage_matrix_section_reports_field_level_coverage():
     assert "2 of 3 known field(s) captured" in row["Assessment"]
     assert "Impact if Down" in row["Assessment"]
     assert "supporting sentence" not in row["Assessment"]
+
+
+def test_append_coverage_matrix_section_splits_knowledge_from_metadata_for_metadata_role_sections():
+    # architecture_reference's 3 leaf fields (doc link, last updated,
+    # verified-by) are purely administrative metadata — real architecture
+    # knowledge lives in _architecture_components instead. Reporting "0 of
+    # 3 known field(s) captured" there reads as "nothing was captured" even
+    # when the transcript described a rich, real component stack. A
+    # fields_role: "metadata" section with knowledge items must report both
+    # halves instead of collapsing to the raw field count.
+    ko = {
+        "sections": [{
+            "id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "coverage_content": [],
+            "_architecture_components": ["EKS", "React", "CloudFront", "ALB", "FastAPI", "RDS", "Redis", "SQS", "ECR"],
+            "fields": {
+                "architecture_link": {"value": "", "source": "unfilled"},
+                "last_updated": {"value": "", "source": "unfilled"},
+                "verified_by_incoming_owner": {"value": "", "source": "unfilled"},
+            },
+        }],
+        "summary": {},
+    }
+    dynamic_schema = [{
+        "id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "fields_role": "metadata",
+        "fields": [
+            {"id": "architecture_link", "label": "Documentation link", "type": "url"},
+            {"id": "last_updated", "label": "Last updated", "type": "date"},
+            {"id": "verified_by_incoming_owner", "label": "Verified by incoming owner", "type": "boolean"},
+        ],
+    }]
+    coverage = {"architecture_reference": {"status": "covered", "confidence": 0.8, "sentence_count": 6}}
+
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    row = matrix["_coverage_rows"][0]
+    assert row["Coverage"] == "Strong"
+    assert "9 component(s) identified" in row["Assessment"]
+    assert "EKS" in row["Assessment"]
+    assert "0 of 3 metadata field(s) discussed" in row["Assessment"]
 
 
 def test_append_coverage_matrix_section_collects_knowledge_gaps_separately():

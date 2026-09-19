@@ -157,6 +157,7 @@
       "id": "architecture_reference",
       "title": "Architecture Reference",
       "required": true,
+      "fields_role": "metadata",
       "sub_topics": [
         "architecture link",
         "last updated",

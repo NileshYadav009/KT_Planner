@@ -91,7 +91,7 @@ PATTERN_EXTRACTORS = {
         r"Kubernetes|Docker|Rancher|Vault|Consul|Nexus|Artifactory|"
         r"SonarQube|Trivy|Veracode|Datadog|Splunk|ELK|Elasticsearch|"
         r"Logstash|Kibana|Redis|Kafka|RabbitMQ|PostgreSQL|MySQL|MongoDB|"
-        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|CloudFront|S3|"
+        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|Amazon\s+SQS|CloudFront|S3|SQS|"
         r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
         r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,

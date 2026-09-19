@@ -511,6 +511,49 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
     return knowledge_object
 
 
+def enrich_architecture_knowledge(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+    """Architecture Reference's own field schema holds only 3 administrative
+    facts (doc link, last-updated, verified-by) — the real architecture
+    knowledge (which services/frameworks the system is built on) gets
+    classified across whatever sections the sentences naturally land in
+    (system_overview, architecture_reference, environments, ...), so a
+    transcript with a rich architecture discussion but no stated Confluence
+    link used to render the section as "0 of 3 fields" as if nothing had
+    been captured at all. This scans every section's raw transcript content
+    for known infrastructure/framework names (the same PATTERN_EXTRACTORS
+    tools regex enrich_technology_summary already uses) and attaches the
+    deduplicated list to architecture_reference as `_architecture_components`
+    — real knowledge, kept independent of which section's field schema
+    happened to hold the sentence that mentioned it.
+    """
+    arch_section = _find_section(knowledge_object, "architecture_reference")
+    if not arch_section:
+        return knowledge_object
+
+    found: List[str] = []
+    for section in knowledge_object.get("sections") or []:
+        content = section.get("coverage_content") or []
+        if isinstance(content, str):
+            content = [content]
+        text = " ".join(str(c) for c in content if isinstance(c, str))
+        if text:
+            found.extend(PATTERN_EXTRACTORS["tools"].findall(text))
+
+    if not found:
+        return knowledge_object
+
+    seen = set()
+    deduped: List[str] = []
+    for term in found:
+        key = term.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(term)
+
+    arch_section["_architecture_components"] = deduped
+    return knowledge_object
+
+
 # Generic, section-id-keyed heuristics for the Tribal Knowledge digest —
 # not tied to any one transcript's wording. Extend by section id if a new
 # section should carry tribal-knowledge weight, not by adding transcript-
@@ -655,6 +698,7 @@ def append_coverage_matrix_section(
             leaf_specs = _leaf_field_specs(section.get("fields"))
             section_obj = _find_section(knowledge_object, section_id)
             field_objects = (section_obj or {}).get("fields") or {}
+            knowledge_items = (section_obj or {}).get("_architecture_components") or []
             if leaf_specs:
                 missing_labels = []
                 filled_count = 0
@@ -668,15 +712,40 @@ def append_coverage_matrix_section(
                         filled_count += 1
                     else:
                         missing_labels.append(label)
-                assessment = f"{filled_count} of {len(leaf_specs)} known field(s) captured"
-                if missing_labels:
-                    shown = ", ".join(missing_labels[:4])
-                    extra = len(missing_labels) - 4
+
+                # A section whose leaf fields are purely administrative
+                # metadata (e.g. architecture_reference's doc link / last
+                # updated / verified-by) can have real knowledge captured
+                # elsewhere in the section (its own _architecture_components
+                # digest) even when none of those admin fields were ever
+                # discussed. Reporting only "0 of 3 fields" there reads as
+                # "nothing was captured" when the opposite is true — split
+                # the assessment into knowledge captured vs. metadata
+                # discussed instead of collapsing both into one field count.
+                if section.get("fields_role") == "metadata" and knowledge_items:
+                    shown_items = ", ".join(knowledge_items[:8])
+                    extra = len(knowledge_items) - 8
                     if extra > 0:
-                        shown += f" (+{extra} more)"
-                    assessment += f"; missing: {shown}."
+                        shown_items += f" (+{extra} more)"
+                    assessment = (
+                        f"{len(knowledge_items)} component(s) identified ({shown_items}); "
+                        f"{filled_count} of {len(leaf_specs)} metadata field(s) discussed"
+                    )
+                    if missing_labels:
+                        shown = ", ".join(missing_labels[:4])
+                        assessment += f" (missing: {shown})."
+                    else:
+                        assessment += "."
                 else:
-                    assessment += "."
+                    assessment = f"{filled_count} of {len(leaf_specs)} known field(s) captured"
+                    if missing_labels:
+                        shown = ", ".join(missing_labels[:4])
+                        extra = len(missing_labels) - 4
+                        if extra > 0:
+                            shown += f" (+{extra} more)"
+                        assessment += f"; missing: {shown}."
+                    else:
+                        assessment += "."
             else:
                 assessment = (
                     f"{sentence_count} supporting sentence(s) captured with good confidence."

@@ -2600,6 +2600,169 @@ tests for `disaster_recovery` (the new field renders as its own line;
 absent when not captured, no stray block). Full `pytest tests/`
 (excluding the slow golden test): **165 passed, 0 failed**, up from 163.
 
+### 9dd. Full architectural spec supplied; fact-checked against real code, one more concrete bug fixed, gaps ranked honestly
+
+User supplied a complete, 31-section architectural spec ("Enterprise
+Knowledge Transfer Document Architect") describing the full
+knowledge-first vision — evidence rules, a fact-ledger coverage model, one
+sentence producing multiple section-independent knowledge objects,
+section-specific rendering styles, validation gates. This is the same
+vision as the earlier "Knowledge Objects" critique (§9x) and the 26-phase
+review (§9s), now written out completely.
+
+**Verified against real code rather than reacting wholesale**: confirmed
+several things the spec assumes are already true (the "Not discussed
+during KT" posture, per-field evidence/source tracking exposed via
+`/schema/{job_id}`, Day-1-as-checklist, Danger Zones as warning blocks,
+Tribal Knowledge's Knowledge/Value/Classification shape, Quick Reference's
+situation/action table, and `common_failures`' anti-hallucination guard
+from §9cc) already match the spec as written, with no changes needed.
+
+**Found and fixed one more concrete bug the spec's §17 predicts almost
+exactly** — *"'contact Platform Engineering' ... does NOT automatically
+mean ownership."* Checked a real Azure transcript's rendered output: *"If
+you are unsure about a change, involve the appropriate platform or
+application owner"* was rendering as **"On-call tool: If you are unsure
+about a change..."** — `llm/prompts.py`'s `ownership_escalation`
+structured-JSON schema had only 4 fields (`oncall_tool` /
+`escalation_chain` / `application_ownership` / `infrastructure_ownership`)
+and none was a clean fit for general escalation guidance, so the LLM
+shoved it into `oncall_tool` (defined as "the on-call/paging tool, e.g.
+PagerDuty") — the same schema-gap class as §9cc's DR-testing-frequency
+bug, not a new mechanism. Fixed by adding a dedicated
+`operational_escalation_guidance` field (with an explicit instruction not
+to conflate it with a tool name or an ownership statement) and rendering
+it as its own block in `renderers/sections/ownership_escalation.py`,
+visually separate from the ownership table.
+
+**Verified**: `tests/test_renderer_sections.py` gained a test confirming
+the guidance text and the on-call tool name land in separate blocks, not
+merged into one ownership-table row. Full `pytest tests/` (excluding the
+slow golden test): **168 passed, 0 failed**, up from 165.
+
+**Ranked the spec's remaining gaps honestly rather than starting a rewrite
+blind**:
+
+1. **§3's core principle — one sentence producing multiple,
+   section-independent knowledge objects — is not implemented.** Checked
+   precisely: `context_mapper.py`'s `ClassifiedSentence.
+   multi_section_assignments` field exists and is read at render time, but
+   is never actually populated with more than the single
+   `primary_classification.section_id` — the name suggests multi-section
+   support that was never built. This is the single largest, most
+   invasive gap in the spec: implementing it touches classification,
+   coverage, and field population simultaneously, not a narrow fix.
+2. **§22-23's dual-metric, fact-ledger coverage model** (a `fact_id` /
+   `mapping_status` audit trail per extracted fact) doesn't exist — the
+   current coverage matrix is template-field-count based only.
+3. **§27's section-specific visual rendering** (architecture as a flow
+   diagram, deployment as a timeline) is partially present —
+   `renderers/blocks/timeline.py` already exists as a block type, but
+   `deployment_and_rollback`'s renderer doesn't use it (still plain
+   bullets), and there's no flow-diagram renderer for architecture at all.
+
+Deliberately did not start on any of these three without the user picking
+one — each is large enough to warrant its own properly-scoped pass, per
+this session's established practice for genuinely architectural asks
+(§9s, §9x). Offered to save the spec as the project's standing design
+reference and asked which of the three (or continue with narrower,
+quickly-verifiable fixes matching this round's pattern) to take on next.
+
+### 9ee. Architecture Reference: separated real knowledge from template metadata
+
+User picked a concrete instance of gap #2 from §9dd (no fact/knowledge
+model independent of template fields), phrased as a design principle:
+*"Don't let the template define what knowledge exists."* Concrete example
+given: a real PDF showed **"Architecture Reference: 0 of 3 fields"** even
+though the transcript clearly described a real component stack (EKS,
+React, CloudFront, ALB, FastAPI, RDS PostgreSQL, Redis, SQS, ECR) — the
+"0 of 3" read as "nothing captured" when the opposite was true. Asked for
+two things kept visually distinct: an **Architecture Knowledge** block
+(the real components, independent of any field) and an **Architecture
+Metadata** block (the template's 3 admin facts — doc link / last updated /
+verified-by — each shown explicitly, "Not discussed" when genuinely
+absent, rather than silently vanishing).
+
+**Root cause, confirmed against real code**: `architecture_reference`'s
+schema (`kt_schema_new.json`) only ever defined 3 fields, all
+administrative — a documentation link, a last-updated date, a
+verified-by-incoming-owner boolean. There was no field anywhere to hold
+"what this system is actually built on." The section's own renderer
+(`renderers/sections/architecture_reference.py`) already referenced
+`key_components`/`platform_services` fields in its logic — but neither
+was ever defined in the schema or populated by anything; dead code left
+over from an earlier, incomplete attempt at exactly this. Meanwhile
+`knowledge/knowledge_builder.py`'s `append_coverage_matrix_section()`
+computed its per-section Assessment purely from
+`"{filled_count} of {len(leaf_specs)} known field(s) captured"` — for a
+metadata-only section with 0 fields ever discussed, that number is
+technically accurate but actively misleading, since it implies the whole
+section is empty.
+
+**Fix — reused already-existing, already-proven machinery rather than
+inventing new extraction**:
+- `field_populator.py`'s `PATTERN_EXTRACTORS["tools"]` regex already
+  matches almost the exact component list the user gave (Amazon EKS/RDS/
+  ECR, CloudFront, React, Fast API, Redis, Application Load Balancer/ALB,
+  etc.) — used since §9cc-era by `enrich_technology_summary()` to build
+  System Overview's Technology Summary. Only gap: bare `SQS` wasn't in the
+  pattern (Kafka/RabbitMQ were, but not SQS) — added `Amazon\s+SQS|...SQS`
+  alternatives.
+- New `knowledge/knowledge_builder.py:enrich_architecture_knowledge()`
+  (modeled directly on `enrich_technology_summary()`): scans every
+  section's raw `coverage_content` with that same tools regex — not just
+  `architecture_reference`'s own content, since a sentence naming a real
+  component can land in `system_overview` or elsewhere depending on
+  classifier routing, and the whole point is that this knowledge shouldn't
+  be scoped to wherever the sentence happened to get classified. Dedupes
+  case-insensitively, attaches the result to `architecture_reference`'s
+  section dict as `_architecture_components` (same passthrough-key
+  convention as `_cost_patterns`/`_tribal_rows`). Wired into
+  `pipeline.py` right after `enrich_technology_summary`.
+- `kt_schema_new.json`: tagged `architecture_reference` with
+  `"fields_role": "metadata"` — a generic, reusable signal (not hardcoded
+  to this one section id) that a section's leaf fields are administrative,
+  not knowledge-bearing.
+- `append_coverage_matrix_section()`: when a section has `fields_role ==
+  "metadata"` AND real `_architecture_components`, the Assessment now
+  reads as two independent halves — `"9 component(s) identified (EKS,
+  React, CloudFront, ...); 0 of 3 metadata field(s) discussed"` — instead
+  of collapsing both into one misleading field count. Sections without
+  this tag (everything else) keep today's exact behavior — verified via
+  the existing (unmodified) `test_append_coverage_matrix_section_reports_
+  field_level_coverage` still passing unchanged.
+- `renderers/sections/architecture_reference.py`: rewritten to always
+  render two separate blocks — "Architecture Knowledge" (the detected
+  component list, falling back to raw `coverage_content` when no
+  components were detected at all, preserving the §9cc-era
+  thin-field-hides-richer-fallback protection) and "Architecture
+  Metadata" (all 3 admin fields explicitly, `"Not discussed"` for any
+  unfilled one, via `technology_grid`'s existing label/value block — no
+  new block type needed). Removed the dead `key_components`/
+  `platform_services` references this replaces.
+- `static/index.html` needed no changes — it renders `NarrativeBlock`/
+  `TechnologyGrid` generically already, with no section-specific
+  special-casing for `architecture_reference`.
+
+**Verified**: new tests in `tests/test_knowledge_builders.py`
+(`enrich_architecture_knowledge` pulls components from any section,
+dedupes case-insensitively, no-ops without `architecture_reference` or
+without any match; the coverage-matrix metadata/knowledge split) and
+`tests/test_renderer_sections.py` (knowledge+metadata render as two
+blocks; raw-content fallback still works with zero components detected;
+all-undiscussed metadata reads "Not discussed" across the board, never
+silently omitted). Full `pytest tests/` — **178 passed, 0 failed**, up
+from 168, including the golden end-to-end pipeline test (full real-model
+run, not just unit-level).
+
+This is a narrow, concretely-scoped slice of §9dd's gap #2 (no
+fact/knowledge model independent of template fields) — not the full
+fact-ledger/dual-metric coverage model the spec describes, and not
+generalized to every section yet (only `architecture_reference`, the
+section the user pointed at). `fields_role: "metadata"` is written
+generically enough to extend to another metadata-only section later
+without new mechanism, should one turn up.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

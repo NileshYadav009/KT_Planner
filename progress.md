@@ -4,11 +4,67 @@ Handoff doc for picking this work up in a new session. Written 2026-09-04,
 updated 2026-09-19, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9cc. **For a 5-minute overview
+see **`REPOSITORY_AUDIT.md`**, sections §1-9dd. **For a 5-minute overview
 instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
-(not yet updated with the §9q-§9cc work below — still describes the
+(not yet updated with the §9q-§9dd work below — still describes the
 state through §9p). This file remains the quick-orientation index; the audit
 is the full record.
+
+**Update 2026-09-19, later same day (full architectural spec supplied;
+fact-checked, one more bug fixed, gaps ranked)**: user supplied a complete
+31-section "Enterprise KT Document Architect" spec — the same
+knowledge-first vision as §9s/§9x, now written out in full (evidence
+rules, fact-ledger coverage, one-sentence-to-multiple-knowledge-objects,
+section-specific rendering, validation gates). Verified it against real
+code rather than reacting wholesale: several things it assumes are already
+true (Not-discussed posture, per-field evidence tracking, Day-1-as-
+checklist, Danger-Zones-as-warnings, common_failures' anti-hallucination
+guard) already match with no changes needed. Found and fixed one more
+concrete bug the spec's §17 predicts almost exactly: a real transcript's
+general escalation guidance ("If you are unsure about a change, involve
+the appropriate owner") was rendering as if it were the On-call tool's
+NAME, because `ownership_escalation`'s structured-extraction schema had
+no field for general guidance separate from a tool name/ownership
+statement — same schema-gap class as §9cc's DR-testing-frequency bug.
+Fixed with a dedicated `operational_escalation_guidance` field, rendered
+in its own block. Full suite: **168 passed, 0 failed**, up from 165.
+Ranked the spec's 3 real remaining gaps honestly instead of starting a
+rewrite blind: (1) one sentence producing multiple, section-independent
+knowledge objects isn't implemented — confirmed the `multi_section_
+assignments` field exists but is never actually populated beyond one
+section, the single largest gap; (2) no fact-ledger dual-metric coverage
+model (today's coverage is template-field-count only); (3) section-
+specific visual rendering (architecture flow diagrams, deployment as a
+timeline) is partial — a timeline block type exists but isn't wired to
+deployment_and_rollback. Asked the user to pick one to scope properly
+next rather than starting any of the three unprompted. See audit §9dd.
+
+**Update 2026-09-19, later still (Architecture Reference: knowledge vs.
+metadata split)**: user picked gap #2 from §9dd concretely — "don't let
+the template define what knowledge exists" — pointing at a real PDF
+showing "Architecture Reference: 0 of 3 fields" despite the transcript
+clearly describing a real component stack (EKS, React, CloudFront, ALB,
+FastAPI, RDS PostgreSQL, Redis, SQS, ECR). Root cause: `architecture_
+reference`'s schema only ever had 3 administrative fields (doc link, last
+updated, verified-by) — no field for the actual component stack — and the
+coverage matrix's assessment collapsed to a raw field-count that read as
+"nothing captured" when real knowledge existed, just not shaped to fit
+those 3 fields. Fixed by reusing the tools-detection regex already proven
+in `enrich_technology_summary()` (added one gap: SQS wasn't in it) in a
+new `enrich_architecture_knowledge()` that scans every section's raw
+content and attaches the deduped component list to `architecture_
+reference` as `_architecture_components`, independent of which section a
+sentence classified into. Tagged the section `"fields_role": "metadata"`
+in the schema (generic, reusable) so the coverage matrix now reports
+knowledge-captured and metadata-discussed as two separate numbers instead
+of one misleading field count. Renderer now always shows two blocks:
+"Architecture Knowledge" (detected components, falling back to raw
+content when none detected) and "Architecture Metadata" (all 3 admin
+fields explicit, "Not discussed" when genuinely absent). Full suite:
+**178 passed, 0 failed**, up from 168, golden end-to-end test included.
+Scoped narrowly to `architecture_reference` only (the section the user
+pointed at), not a full fact-ledger rewrite — mechanism is generic enough
+to extend to another metadata-only section later. See audit §9ee.
 
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred

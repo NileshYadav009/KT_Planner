@@ -19,6 +19,7 @@ from renderers.sections.architecture_reference import render as render_architect
 from renderers.sections.first_30_day_ownership import render as render_first_30_day_ownership
 from renderers.sections.handover_completion import render as render_handover_completion
 from renderers.sections.disaster_recovery import render as render_disaster_recovery
+from renderers.sections.ownership_escalation import render as render_ownership_escalation
 
 
 def test_system_overview_renders_real_schema_fields_not_stale_ones():
@@ -216,12 +217,48 @@ def test_open_responsibilities_shows_no_coverage_when_nothing_available():
     assert result["blocks"][0]["type"] != "DecisionTable"
 
 
-def test_architecture_reference_does_not_let_one_thin_field_hide_a_richer_fallback():
+def test_architecture_reference_separates_knowledge_from_metadata():
+    # architecture_reference's schema only holds 3 administrative fields
+    # (doc link, last updated, verified-by) — real architecture knowledge
+    # (the detected component stack) must render as its own "Architecture
+    # Knowledge" block, independent of whether those 3 admin fields were
+    # ever discussed, and "Architecture Metadata" must always list all 3
+    # explicitly rather than silently omitting an undiscussed one.
+    section = {
+        "id": "architecture_reference", "title": "Architecture Reference",
+        "fields": {
+            "architecture_link": {"value": "Confluence"},
+        },
+        "_architecture_components": ["EKS", "React", "CloudFront", "ALB", "FastAPI", "RDS", "Redis", "SQS", "ECR"],
+    }
+    result = render_architecture_reference(section)
+    assert len(result["blocks"]) == 2
+
+    knowledge_block = result["blocks"][0]
+    assert knowledge_block["type"] == "NarrativeBlock"
+    assert knowledge_block["title"] == "Architecture Knowledge"
+    assert "EKS" in knowledge_block["paragraphs"][0]
+    assert "SQS" in knowledge_block["paragraphs"][0]
+
+    metadata_block = result["blocks"][1]
+    assert metadata_block["type"] == "TechnologyGrid"
+    assert metadata_block["title"] == "Architecture Metadata"
+    values = {row["label"]: row["value"] for row in metadata_block["rows"]}
+    assert values == {
+        "Documentation link": "Confluence",
+        "Last updated": "Not discussed",
+        "Verified by incoming owner": "Not discussed",
+    }
+
+
+def test_architecture_reference_falls_back_to_raw_content_when_no_components_detected():
     # Regression test: a spurious/loosely-related architecture_link value
     # ("Confluence" instead of a real URL) used to be enough on its own to
     # skip the raw coverage_content fallback entirely, collapsing a real
     # 5-bullet Architecture Reference section down to a single
-    # "Architecture reference: Confluence" line.
+    # "Architecture reference: Confluence" line. Without a detected
+    # component list, Architecture Knowledge must fall back to the raw
+    # section content instead of disappearing.
     section = {
         "id": "architecture_reference", "title": "Architecture Reference",
         "fields": {
@@ -236,27 +273,24 @@ def test_architecture_reference_does_not_let_one_thin_field_hide_a_richer_fallba
         ],
     }
     result = render_architecture_reference(section)
-    assert len(result["blocks"]) == 1
-    block = result["blocks"][0]
-    assert block["type"] == "NarrativeBlock"
-    assert len(block["paragraphs"]) == 5
-    assert "Amazon EKS" in " ".join(block["paragraphs"])
+    assert len(result["blocks"]) == 2
+    knowledge_block = result["blocks"][0]
+    assert knowledge_block["title"] == "Architecture Knowledge"
+    assert len(knowledge_block["paragraphs"]) == 5
+    assert "Amazon EKS" in " ".join(knowledge_block["paragraphs"])
 
 
-def test_architecture_reference_prefers_real_field_content_when_richer_than_fallback():
-    # When the fields genuinely captured more than the (thin/absent)
-    # fallback, they should still be used — this isn't "always prefer the
-    # fallback", only "don't let a thin field hide a richer fallback".
-    section = {
-        "id": "architecture_reference", "title": "Architecture Reference",
-        "fields": {
-            "architecture_link": {"value": "https://confluence.example.com/architecture"},
-        },
-        "coverage_content": ["See the docs."],
-    }
+def test_architecture_reference_marks_undiscussed_metadata_fields_not_discussed_even_with_no_knowledge():
+    section = {"id": "architecture_reference", "title": "Architecture Reference", "fields": {}}
     result = render_architecture_reference(section)
-    assert len(result["blocks"]) == 1
-    assert "https://confluence.example.com/architecture" in result["blocks"][0]["paragraphs"][0]
+    metadata_block = result["blocks"][-1]
+    assert metadata_block["title"] == "Architecture Metadata"
+    values = {row["label"]: row["value"] for row in metadata_block["rows"]}
+    assert values == {
+        "Documentation link": "Not discussed",
+        "Last updated": "Not discussed",
+        "Verified by incoming owner": "Not discussed",
+    }
 
 
 def test_first_30_day_ownership_renders_real_per_week_fields():
@@ -386,3 +420,31 @@ def test_disaster_recovery_omits_testing_frequency_line_when_not_captured():
     }
     result = render_disaster_recovery(section)
     assert not any(b["type"] == "NarrativeBlock" for b in result["blocks"])
+
+
+def test_ownership_escalation_separates_guidance_from_oncall_tool_name():
+    # Regression test for a real bug found on a live PDF: a general
+    # "contact X when unsure" instruction ended up rendered as if it were
+    # the on-call tool's NAME ("On-call tool: If you are unsure about a
+    # change, involve the appropriate platform or application owner.")
+    # because the structured-extraction schema had no field for operational
+    # guidance separate from oncall_tool. Fixed with a dedicated field;
+    # this guards the renderer keeps them in visually separate blocks.
+    section = {
+        "id": "ownership_escalation", "title": "OWNERSHIP & ESCALATION",
+        "fields": {
+            "oncall_tool": {"value": "PagerDuty"},
+            "operational_escalation_guidance": {
+                "value": "If you are unsure about a change, involve the appropriate platform or application owner."
+            },
+        },
+        "coverage_content": [],
+    }
+    result = render_ownership_escalation(section)
+
+    ownership_table = next(b for b in result["blocks"] if b["type"] == "OwnershipTable")
+    assert {"role": "On-call tool", "team": "PagerDuty"} in ownership_table["rows"]
+    assert not any(row["team"].startswith("If you are unsure") for row in ownership_table["rows"])
+
+    guidance_block = next(b for b in result["blocks"] if b["title"] == "Operational escalation guidance")
+    assert "If you are unsure about a change" in guidance_block["paragraphs"][0]

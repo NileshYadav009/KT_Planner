@@ -3,6 +3,15 @@ from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.common import no_coverage_block
 
+# (field_id, display label) for the 3 template-defined administrative facts
+# this section's schema actually has. These are metadata about the
+# architecture doc, never the architecture knowledge itself.
+_METADATA_FIELD_SPECS = [
+    ("architecture_link", "Documentation link"),
+    ("last_updated", "Last updated"),
+    ("verified_by_incoming_owner", "Verified by incoming owner"),
+]
+
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     content = section.get("coverage_content") or []
@@ -15,40 +24,33 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Architecture Reference")
     fields = section.get("fields", {})
 
-    tech_rows: List[Dict[str, str]] = []
-    paragraphs: List[str] = []
-
-    if fields.get("architecture_link", {}).get("value"):
-        paragraphs.append(f"Architecture reference: {fields['architecture_link']['value']}")
-    if fields.get("diagram_link", {}).get("value"):
-        paragraphs.append(f"Architecture diagram: {fields['diagram_link']['value']}")
-    if fields.get("architecture_summary", {}).get("value"):
-        paragraphs.append(fields["architecture_summary"]["value"])
-    if fields.get("key_components", {}).get("value"):
-        tech_rows.append({"label": "Component", "value": fields["key_components"]["value"]})
-    if fields.get("platform_services", {}).get("value"):
-        tech_rows.append({"label": "Platform service", "value": fields["platform_services"]["value"]})
-
-    # A handful of narrow fields (architecture_link, last_updated, ...)
-    # typically capture far less than the section's raw transcript content
-    # — never let a couple of short field-derived lines silently hide a
-    # substantially richer raw fallback. Concretely: a gap-fill that mistook
-    # "the diagram is in Confluence" for a value of architecture_link once
-    # collapsed a real 5-bullet Architecture Reference section down to a
-    # single "Architecture reference: Confluence" line, because that one
-    # non-empty paragraph was enough to skip the fallback entirely.
-    fallback = _coverage_paragraphs(section)
-    field_chars = sum(len(p) for p in paragraphs)
-    fallback_chars = sum(len(p) for p in fallback)
-    prefer_fallback = fallback_chars > field_chars
-
     blocks = []
-    if tech_rows:
-        blocks.append(build_technology_grid("Architecture technologies", tech_rows))
-    if paragraphs and not prefer_fallback:
-        blocks.append(build_narrative_block(title, paragraphs))
-    elif fallback:
-        blocks.append(build_narrative_block(title, fallback))
+
+    # Architecture Knowledge: the real components/services this system is
+    # built on (knowledge_builder.enrich_architecture_knowledge), detected
+    # across the whole transcript independent of which section's sentences
+    # happened to mention them. This used to be entirely invisible here —
+    # the section's only fields are the 3 admin facts below, so a rich
+    # architecture discussion with no stated Confluence link rendered as
+    # "0 of 3 fields" as if nothing had been captured at all.
+    components = section.get("_architecture_components") or []
+    if components:
+        blocks.append(build_narrative_block("Architecture Knowledge", [", ".join(components)]))
+    else:
+        fallback = _coverage_paragraphs(section)
+        if fallback:
+            blocks.append(build_narrative_block("Architecture Knowledge", fallback))
+
+    # Architecture Metadata: always render all 3 admin fields explicitly,
+    # one row each, with "Not discussed" for anything genuinely never
+    # mentioned — rather than silently omitting the row or letting an
+    # empty administrative field make the section look incomplete overall.
+    metadata_rows = []
+    for field_id, label in _METADATA_FIELD_SPECS:
+        value = fields.get(field_id, {}).get("value")
+        display_value = str(value) if value not in (None, "", []) else "Not discussed"
+        metadata_rows.append({"label": label, "value": display_value})
+    blocks.append(build_technology_grid("Architecture Metadata", metadata_rows))
 
     if not blocks:
         blocks.append(no_coverage_block(title))
