@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from devops_transcription import apply_devops_corrections
+
 logger = logging.getLogger(__name__)
 
 
@@ -493,7 +495,13 @@ def _build_llm_gap_fill_prompt(
         f"and the transcript never says it also applies to '{field_label}', "
         f"respond with exactly: NOT_MENTIONED\n"
         f"- If nothing relevant is present at all, respond with exactly: NOT_MENTIONED\n"
-        f"- Do NOT invent information that has no basis in the transcript above.\n\n"
+        f"- Do NOT invent information that has no basis in the transcript above.\n"
+        f"- Spell every tool, product, and proper noun EXACTLY as it appears in "
+        f"the transcript above — do not correct, respell, or normalize it even "
+        f"if a different spelling looks more familiar to you.\n"
+        f"- If the relevant sentence states more than one fact about "
+        f"'{field_label}' (e.g. two related details joined by \"and\"), include "
+        f"all of them — do not silently drop part of a compound statement.\n\n"
         f"Respond with EXACTLY two lines and nothing else:\n"
         f"Line 1: the extracted value (or NOT_MENTIONED).\n"
         f"Line 2: EXPLICIT if the transcript directly states this fact (even in "
@@ -520,6 +528,31 @@ def populate_fields(
     polished/reordered view of the section) — using the wrong list would
     silently attach the wrong evidence rather than just the generic fallback.
     """
+    # Dynamic fields (schema_generator.py's TECH_STACK_FIELD_ADDITIONS) are
+    # triggered by a keyword match against the WHOLE transcript's combined
+    # text, then attached to one fixed "home" section per technology (e.g.
+    # "redis" -> cache_layer on system_overview). But classification is
+    # independent of that and can legitimately route the actual sentence
+    # elsewhere — a Redis sentence bundled with other architecture facts
+    # (primary database, queue) correctly lands in architecture_reference,
+    # not system_overview. When that happens the field's own section never
+    # sees the supporting sentence and it stays unfilled forever even though
+    # the fact is right there, one section over. This combined pool (built
+    # once, from every section's own real sentences) lets dynamic fields
+    # specifically fall back to a transcript-wide search instead of being
+    # confined to their home section — see the `field.get("dynamic")` branch
+    # in _populate_fields_recursive below. Non-dynamic fields never use this.
+    all_sentence_texts: List[str] = []
+    for sec_id, sc in (section_content or {}).items():
+        for s in (sc or {}).get("sentences", []) or []:
+            if isinstance(s, dict) and s.get("text", "").strip():
+                all_sentence_texts.append(s["text"])
+    if not all_sentence_texts:
+        for cov_entry_ in coverage.values():
+            content = cov_entry_.get("content", [])
+            if isinstance(content, list):
+                all_sentence_texts.extend(c for c in content if isinstance(c, str) and c.strip())
+
     result = {}
     for section in dynamic_schema:
         section_id = section.get("id")
@@ -588,6 +621,7 @@ def populate_fields(
             # already claimed — see _populate_fields_recursive's _emit table
             # handling below.
             used_line_keys=set(),
+            dynamic_field_fallback_sentences=all_sentence_texts,
         )
 
     return result
@@ -632,9 +666,11 @@ def _populate_fields_recursive(
     raw_sentence_texts: Optional[List[str]] = None,
     used_line_keys: Optional[Set[str]] = None,
     already_captured: Optional[List[str]] = None,
+    dynamic_field_fallback_sentences: Optional[List[str]] = None,
 ):
     raw_sentence_texts = raw_sentence_texts or []
     used_line_keys = used_line_keys if used_line_keys is not None else set()
+    dynamic_field_fallback_sentences = dynamic_field_fallback_sentences or []
     # Shared across every field (including nested group fields) in this
     # section, so the LLM gap-fill prompt for a later field can see what
     # earlier sibling fields already claimed and avoid copying it onto a
@@ -680,6 +716,7 @@ def _populate_fields_recursive(
                 raw_sentence_texts=raw_sentence_texts,
                 used_line_keys=used_line_keys,
                 already_captured=already_captured,
+                dynamic_field_fallback_sentences=dynamic_field_fallback_sentences,
             )
             continue
 
@@ -726,6 +763,16 @@ def _populate_fields_recursive(
                 raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=128)
                 lines = [ln.strip() for ln in raw.splitlines() if ln.strip()] if isinstance(raw, str) else []
                 val = lines[0] if lines else ""
+                if val:
+                    # The model paraphrases/rewrites rather than quoting
+                    # verbatim, and can introduce its own typo on a known
+                    # tool/product name in the process (observed on a real
+                    # transcript: "Security scanning is performed using
+                    # Trivy." -> field value "Trivi for security scanning").
+                    # Run the same known-terms correction real transcript
+                    # text gets, so a value that drifts away from a canonical
+                    # spelling the glossary already knows gets pulled back.
+                    val, _ = apply_devops_corrections(val)
                 basis = lines[1].upper() if len(lines) > 1 else "INFERRED"
                 if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
                     # The gap-fill prompt forbids inventing ungrounded values,
@@ -742,5 +789,32 @@ def _populate_fields_recursive(
                     continue
             except Exception as exc:
                 logger.warning("LLM field fill failed for %s.%s: %s", section_id, field_id, exc)
+
+        # Last resort, dynamic fields only (see populate_fields' docstring
+        # comment on dynamic_field_fallback_sentences for why): the field's
+        # own section had nothing, but the technology that triggered this
+        # field's existence might have been classified into a different
+        # section entirely. Retry pattern + semantic extraction against every
+        # section's sentences combined, not just this one.
+        if field.get("dynamic") and field_type == "text" and dynamic_field_fallback_sentences:
+            fallback_text = "\n".join(dynamic_field_fallback_sentences)
+            value = _extract_by_pattern(field, fallback_text)
+            source = "pattern"
+            confidence = 0.90
+            if value is None:
+                value = _extract_by_semantic(field, dynamic_field_fallback_sentences, embedding_model)
+                source = "semantic"
+                confidence = 0.65
+            if value is not None:
+                # Deliberately no source_chunk_index here: that index is
+                # meant to point into THIS section's own sentence list (see
+                # knowledge_builder._collect_evidence()) — a value found via
+                # the cross-section fallback pool has no correct index into
+                # it, and attaching a wrong one would silently misattribute
+                # evidence, which is worse than the generic fallback doing
+                # without a precise index at all.
+                output[field_id] = {"value": value, "confidence": confidence, "source": source}
+                already_captured.append(f"{field_label}: {value}")
+                continue
 
         output[field_id] = {"value": "", "confidence": 0.0, "source": "unfilled"}

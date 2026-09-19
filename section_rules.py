@@ -123,13 +123,24 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         0.95,
     ),
     (
+        # Deliberately does NOT include "amazon ecr" / "container images" --
+        # those used to be here to match one synthetic test transcript where
+        # a container-registry mention happened to share a sentence with a
+        # security-scanning statement ("...using Trevi and container images
+        # are stored in Amazon ECR."), which the "trevi" pattern above
+        # already catches on its own. As a general rule they were far too
+        # broad: any real transcript's plain architecture fact ("Amazon ECR
+        # stores container images.") force-matched into security_controls
+        # with 0.95 confidence, overriding the classifier's own (correct)
+        # judgment that it belongs in architecture_reference -- confirmed as
+        # the root cause of that exact misclassification in 2 of 3 real
+        # audited transcripts (AWS's ECR mention, Azure's equivalent "Container
+        # images are stored in Azure Container Registry").
         "security_controls",
         [
             r"\bsecurity\s+scanning\b",
             r"\btrivy\b",
             r"\btrevi\b",
-            r"\bamazon\s+ecr\b",
-            r"\bcontainer\s+images?\s+are\s+stored\b",
             r"\bvault\s+for\s+secret\b",
             r"\bsecret\s+management\b",
         ],
@@ -284,7 +295,12 @@ def find_overview_reassignment(text: str) -> Optional[SectionRuleMatch]:
 
     exclusion_patterns = [
         ("disaster_recovery", r"\b(daily\s+backups?|rds\s+snapshots?|restore|recovery\s+procedure|disaster\s+recovery\s+testing|retained\s+for\s+30\s+days)\b"),
-        ("security_controls", r"\b(trivy|security\s+scanning|vault|secret\s+management|amazon\s+ecr|container\s+images?)\b"),
+        # "amazon ecr" / "container images" deliberately excluded here too --
+        # see the matching comment on SECTION_RULES' security_controls entry
+        # above for why (they're plain architecture facts, not a security
+        # signal, and wrongly pulling system_overview content toward
+        # security_controls was the same root cause either way).
+        ("security_controls", r"\b(trivy|security\s+scanning|vault|secret\s+management)\b"),
         ("cost_optimization", r"\b(spot\s+instances?|scheduled\s+scaling|cost\s+optimization|non-production|low\s+traffic)\b"),
         ("danger_zones", r"\b(never\s+modify|do\s+not\s+touch|dangerous\s+area|terraform\s+state|autoscaler\s+configuration)\b"),
         ("ownership_escalation", r"\b(on-call\s+engineer|escalation\s+path|platform\s+engineering\s+manager|head\s+of\s+engineering|contact\s+platform\s+engineering)\b"),

@@ -18,6 +18,7 @@ from renderers.sections.open_responsibilities import render as render_open_respo
 from renderers.sections.architecture_reference import render as render_architecture_reference
 from renderers.sections.first_30_day_ownership import render as render_first_30_day_ownership
 from renderers.sections.handover_completion import render as render_handover_completion
+from renderers.sections.disaster_recovery import render as render_disaster_recovery
 
 
 def test_system_overview_renders_real_schema_fields_not_stale_ones():
@@ -348,3 +349,40 @@ def test_handover_completion_falls_back_to_no_coverage_when_nothing_captured():
     result = render_handover_completion(section)
     assert len(result["blocks"]) == 1
     assert result["blocks"][0]["type"] != "ChecklistBlock" or not result["blocks"][0].get("items")
+
+
+def test_disaster_recovery_renders_dr_testing_frequency():
+    # Regression test for a real bug found auditing a live KT PDF: the
+    # structured-extraction JSON schema for disaster_recovery
+    # (llm/prompts.py's SECTION_STRUCTURED_PROMPTS) had no field for DR
+    # testing cadence at all, so a transcript sentence like "Daily backups
+    # are retained for 30 days and DR testing is performed quarterly."
+    # silently lost the "quarterly" half — none of rto_steps/rpo_steps/
+    # known_failure_scenarios/recovery_contact was a clean fit for it, so
+    # the LLM had nowhere to put it. Fixed by adding a dedicated
+    # dr_testing_frequency field; this test guards the renderer's half of
+    # that fix (the LLM extraction prompt itself isn't unit-testable here).
+    section = {
+        "id": "disaster_recovery", "title": "DISASTER RECOVERY",
+        "fields": {
+            "rpo_steps": {"value": "Daily backups retained for 30 days"},
+            "dr_testing_frequency": {"value": "quarterly"},
+        },
+        "coverage_content": [],
+    }
+    result = render_disaster_recovery(section)
+    narrative = next(b for b in result["blocks"] if b["type"] == "NarrativeBlock")
+    assert "DR testing frequency: quarterly" in narrative["paragraphs"]
+
+    checklist = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")
+    assert "Daily backups retained for 30 days" in checklist["items"]
+
+
+def test_disaster_recovery_omits_testing_frequency_line_when_not_captured():
+    section = {
+        "id": "disaster_recovery", "title": "DISASTER RECOVERY",
+        "fields": {"rpo_steps": {"value": "Daily backups retained for 30 days"}},
+        "coverage_content": [],
+    }
+    result = render_disaster_recovery(section)
+    assert not any(b["type"] == "NarrativeBlock" for b in result["blocks"])

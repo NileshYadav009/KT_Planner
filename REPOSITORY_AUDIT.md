@@ -2225,7 +2225,7 @@ exact GCP transcript sentence through the real `populate_fields()` →
 instead of one blob. Full `pytest tests/` (excluding the slow golden
 test): **161 passed, 0 failed**, up from 153.
 
-### 9aa. Ground-truth line-by-line audit with real source transcripts + a confirmed, root-caused (not-yet-fixed) section-mapping bug
+### 9aa. Ground-truth line-by-line audit with real source transcripts + a confirmed section-mapping bug (later fixed — see §9bb)
 
 User supplied the *actual source transcripts* (not just the generated PDFs)
 for the AWS/Azure/GCP KT documents reviewed in §9x/§9y/§9z, asked for a
@@ -2261,8 +2261,8 @@ reorders/merges/paraphrases.
    corrections (a deliberately introduced "rabid mq" → "rabbit mq" typo)
    still work.
 
-**Confirmed as real but NOT fixed this pass — root-caused precisely,
-fix deferred as too risky to rush**:
+**Confirmed as real, initially root-caused only partway — see §9bb for the
+actual fix**:
 
 2. **Architecture/tech-stack sentences misclassify into `security_controls`
    when immediately followed by a secrets-management sentence — the
@@ -2284,32 +2284,17 @@ fix deferred as too risky to rush**:
    `system_overview` does. This is a genuine, severe, silent total-loss
    bug, not a misfiling.
 
-   Root-caused precisely rather than guessed: isolated
+   Initially isolated (this round) to NOT be in the scoring formula: both
    `ContextClassifier._score_sentence_candidates()` (pure embedding +
-   keyword + entity scoring, no context blending) correctly ranks
-   `architecture_reference` first for this sentence with a wide margin,
-   both with and without the following Vault sentence as context. Isolated
-   `ContextClassifier.classify_sentence()` (adds cross-encoder reranking
-   and rule matching on top) **also** correctly picks `architecture_reference`
-   as primary, both with and without context. Since the bug reproduces in
-   the full `ContextMappingPipeline.process()` run but NOT in either
-   isolated per-sentence classification path, the defect is not in the
-   scoring formula itself — it lives somewhere in `process()`'s block-
-   building / topic-continuity orchestration layer (`TopicMemory`, ~line
-   1804, and/or the batch cross-encoder reranking at ~line 2090), which is
-   several hundred lines of state-machine-shaped logic that batches and
-   groups sentences before finalizing section assignment.
-
-   **Deliberately not fixed this pass**: modifying that orchestration layer
-   blind, without a proper before/after eval harness, risks silently
-   regressing the 161 tests and the golden fixture that already depend on
-   its exact current behavior for correctly-working continuity cases (this
-   is the same class of risk flagged in the "improve section-mapping
-   accuracy" architecture discussion earlier this session — see that
-   response's ranked recommendation list). Documented here with enough
-   precision (exact isolation method, exact code region, exact reproducing
-   input) that a future pass can go straight to a fix without re-deriving
-   root cause from scratch.
+   keyword + entity scoring) and the full `classify_sentence()` (adds
+   cross-encoder reranking and rule matching) correctly picked
+   `architecture_reference` for this sentence when tested with a *narrow*
+   single-neighbor context window. That narrow test turned out to be the
+   wrong reproduction — the real pipeline uses a much wider ±2-sentence
+   window (5 sentences total, `ContextMappingPipeline.process()`, ~line
+   2050). Reproducing with that exact wider window (§9bb) surfaced the
+   actual cause: not the context window at all, but a **hardcoded
+   `SECTION_RULES` regex** — see §9bb for the real fix.
 
 3. **GCP: "This platform processes approximately 3 terabytes of data per
    day." landed in `disaster_recovery`** instead of `system_overview` —
@@ -2366,6 +2351,254 @@ specific transcript's classified sentences, never copy-pasted or
 templated boilerplate. So: fixed section skeleton, dynamic field set,
 fully dynamic content — not a fixed-fill-in-the-blanks template, and not
 a from-scratch discovered structure either.
+
+### 9bb. The actual root cause and fix for §9aa's section-mapping bug: a badly-scoped hardcoded rule, not a scoring or orchestration defect
+
+User re-supplied the same 3 real transcripts and asked to check whether the
+transcription data was being routed to the correct sections, and to fix it
+this time rather than continue documenting it.
+
+**What §9aa got wrong**: its isolated reproduction used a *single*-neighbor
+context window and concluded the defect must live in `process()`'s
+block-building/topic-continuity orchestration (several hundred lines,
+too risky to touch blind). Re-tested with the pipeline's actual context
+window — `ContextMappingPipeline.process()` builds `context_texts[i]` from
+a **±2 sentence window** (5 sentences total, not 1) before scoring — and
+that wider, faithful reproduction immediately surfaced the real cause:
+
+```
+security_controls   combined=0.950  Rule match: \bamazon\s+ecr\b
+architecture_reference  combined=0.825  Semantic=0.654, Context=0.691, ...
+```
+
+The FIRST-place result isn't a scored classification at all — it's a
+**hardcoded `SECTION_RULES` regex match** (`section_rules.py`), inserted
+unconditionally at confidence 0.95/0.96 ahead of every scored candidate,
+completely bypassing the classifier (which — as §9aa's narrower test had
+already shown — correctly favors `architecture_reference` on its own).
+Two near-identical rule lists both contained the same overly broad
+patterns:
+
+- `SECTION_RULES`'s `security_controls` entry (`section_rules.py:126-137`):
+  included `r"\bamazon\s+ecr\b"` and `r"\bcontainer\s+images?\s+are\s+stored\b"`
+  alongside genuine security terms (`trivy`, `vault for secret`, `secret
+  management`).
+- `find_overview_reassignment()`'s `security_controls` exclusion pattern
+  (`section_rules.py:298`): the same `amazon\s+ecr|container\s+images?`
+  bundled into one regex.
+
+**Where these came from**: `tests/test_ecommerce_kt.py`'s synthetic
+transcript has one sentence — *"Security scanning is performed using
+Trevi and container images are stored in Amazon ECR."* — where an ECR
+mention genuinely co-occurs with a security-scanning statement. Whoever
+wrote the rule generalized from that one sentence into "ECR / container
+images ⇒ security," which is wrong for any transcript (i.e. every real one
+audited: AWS, Azure) where a container-registry mention is just an
+ordinary architecture fact with no security content at all. This is
+exactly why the AWS PDF's *"Amazon RDS PostgreSQL is the primary database,
+Redis is used for caching..., Amazon SQS handles... Amazon ECR stores
+container images."* — a pure architecture sentence — vanished from the
+entire 13-page document (§9aa item 2): a 0.95-confidence hard rule
+override left `architecture_reference`/`system_overview` no chance to
+claim it, and `security_controls`'s renderer has no general-context
+fallback to catch it either.
+
+**Fixed**: removed `amazon\s+ecr` / `container\s+images?...` from both
+rule lists. The `trevi` pattern already independently matches the
+`test_ecommerce_kt.py` sentence the rule was originally built for, so
+removing the redundant, overly-broad patterns doesn't change that test's
+outcome — confirmed directly (`match_section_rules()` still returns
+`security_controls` for that sentence via `trevi` alone) and via the full
+suite.
+
+**Verified three ways**:
+1. Full `pytest tests/` (excluding golden): **163 passed, 0 failed** — no
+   regressions, including `test_ecommerce_kt.py`'s explicit assertion that
+   "ECR" still ends up in `security_controls` for its security-scanning
+   sentence.
+2. Direct rule-matching check: the AWS/Azure architecture sentences now
+   return no rule match at all (falling through correctly to the
+   classifier, which already scores them right), while the genuine
+   `test_ecommerce_kt.py` security sentence still matches.
+3. **End-to-end with a real Groq LLM** (`qwen/qwen3.8-27b`, user-supplied
+   key used only as a transient env var for this test run, never written
+   to any file): ran both real AWS and Azure transcripts through the full
+   `pipeline.run_kt_pipeline()`. AWS's database/cache/queue sentence now
+   lands in `architecture_reference` (previously `security_controls`,
+   previously invisible in the rendered PDF entirely); Azure's equivalent
+   tech-stack sentence (Angular/.NET/AKS/Azure SQL/Service Bus/Redis
+   Cache/Blob storage) likewise now lands in `architecture_reference`.
+   `security_controls` for both now correctly contains only the genuine
+   security sentences (Vault/Key Vault, Trivy).
+
+Note on process: a from-scratch LLM-free verification run was also
+started but hung for ~110 minutes rather than the usual ~2 — traced to a
+leftover Gemini API key in the environment causing `_maybe_verify_with_llm()`
+to retry against an exhausted free-tier quota (5 retries × up to 59s each)
+for every low-confidence sentence across two full transcripts. Killed and
+superseded by the Groq run above, which gave a cleaner and more realistic
+confirmation (real LLM active, matching how the app is actually used)
+anyway.
+
+**GCP's "This platform processes approximately 3 terabytes of data per
+day." landing in `disaster_recovery`** (§9aa item 3) is a separate
+instance of a sentence being pulled from its obvious home section — not
+re-diagnosed this round; no `SECTION_RULES` entry obviously explains it,
+so if revisited it needs its own isolation pass rather than assuming the
+same cause.
+
+### 9cc. A rigorous external re-review of the same AWS transcript, fact-checked line by line: 1 non-bug, 2 real bugs fixed, 1 real bug precisely scoped and deferred
+
+User pasted a detailed, structured self-review (their own analysis, not ours)
+of the fresh post-§9bb AWS PDF against the exact source transcript, listing
+~13 numbered findings with 🟢/🟠/🔴 severity markers, and asked for the
+gaps to be fixed generically (for any transcript, not this one specifically).
+
+**Method, as established this session**: verified every claim against real
+code and a real pipeline run (Groq, `qwen/qwen3.8-27b`, user-supplied key
+used only as a transient env var) before touching anything — several of
+the critique's specific claims turned out to be wrong on inspection, one
+turned out to be right but for a completely different reason than guessed,
+and this pass also caught and fixed a real bug in the session's OWN test
+tooling (see "operational note" below).
+
+**Confirmed NOT a bug**: the critique's #3 ("Customer Reach" wrongly
+marked missing) is wrong. `kt_schema_new.json`'s `customer_reach` field
+description is explicit: *"How broadly the system serves customers, e.g.
+regional or global"* — geographic/market scope, not delivery channel. The
+transcript's "processes customer orders across web and mobile channels" is
+a real fact, but it answers a different question than what this field
+asks; the transcript never states anything about geographic reach, so
+"unfilled" is honest, not a mapping failure. Did not touch this.
+
+**Confirmed and fixed — bug #1: dynamic fields orphaned from their own
+supporting content.** `schema_generator.py`'s `TECH_STACK_FIELD_ADDITIONS`
+detects a trigger keyword (e.g. "redis") by scanning the WHOLE transcript's
+combined text across every section, but attaches the resulting field to
+one fixed "home" section per technology (cache_layer -> system_overview).
+Classification is independent of that assumption and can legitimately
+route the actual sentence elsewhere — confirmed via a real pipeline run:
+the Redis sentence correctly classifies into `architecture_reference`
+(bundled with the primary-database/queue facts, per §9bb), but
+`cache_layer` lives in `system_overview`, which never sees that sentence
+and stays permanently `unfilled` even though the fact is one section over.
+This is the real, root-caused version of what the critique's #3/#11
+gestured at (their guess, "mapping didn't propagate to the field," was
+directionally right but attributed to the wrong section).
+
+Fixed generically in `field_populator.py`, not by special-casing
+`cache_layer`: `populate_fields()` now builds a combined pool of every
+section's own real sentences once, and threads it down through
+`_populate_fields_recursive()` as `dynamic_field_fallback_sentences`. A
+field only ever uses this pool as a last resort — after its own section's
+pattern/semantic/LLM-gap-fill attempts all come up empty — and only when
+`field.get("dynamic")` is true (i.e. one of `schema_generator.py`'s
+tech-triggered fields; every ordinary schema field is completely
+unaffected). Deliberately does NOT attach `source_chunk_index` for a
+fallback-sourced value: that index is meant to point into the field's OWN
+section's sentence list (see `knowledge_builder._collect_evidence()`), and
+a value found via the cross-section pool has no correct index into it —
+attaching a wrong one would silently misattribute evidence, worse than the
+generic fallback doing without a precise one.
+
+**Confirmed and fixed — bug #2: `disaster_recovery`'s structured-extraction
+schema had no field for DR-testing cadence at all.** The transcript states
+*"Daily backups are retained for 30 days **and DR testing is performed
+quarterly**."* in one sentence; the rendered PDF kept only the backup half.
+Root-caused precisely: `llm/prompts.py`'s `SECTION_STRUCTURED_PROMPTS
+["disaster_recovery"]` JSON schema only defines `rto_steps` / `rpo_steps` /
+`known_failure_scenarios` / `recovery_contact` — none of which is a clean
+fit for "how often DR testing itself happens" (`rpo_steps` is specifically
+backup/retention, not testing cadence), so the model had nowhere to put
+this fact and dropped it. Not an LLM failure to extract — a genuine schema
+gap. Fixed by adding a dedicated `dr_testing_frequency` field to the JSON
+schema (with an explicit instruction not to merge it into `rpo_steps` or
+drop it when it shares a sentence with a backup fact) and wiring it into
+`renderers/sections/disaster_recovery.py` as its own line — `ai.
+wrap_structured_as_fields()` is already fully generic over JSON keys, so
+no other plumbing was needed.
+
+**Confirmed real, precisely scoped, deliberately NOT fixed this pass —
+compound-sentence field population is "first sufficient source wins," not
+"gather everything relevant, then synthesize."** The critique's #6
+("staging limitation lost") is real: the transcript's *"Some payment
+providers are mocked in staging, and production uses multiple availability
+zones while some non-production resources use a smaller configuration."*
+is one compound sentence touching all three Environment fields at once.
+Root-caused precisely (LLM-free reproduction, no guessing): `staging_notes`
+finds a genuinely good semantic match on the PRECEDING sentence ("Staging
+does not completely represent production.") and stops there — pattern/
+semantic/LLM-gap-fill is a cascade where the first method to succeed wins
+and the field-population loop moves on, so `staging_notes` never gets a
+chance to ALSO pull its specific clause out of the second, compound
+sentence, even though `production_notes`/`non_production_notes` correctly
+do (their own semantic match against sentence 1 fails, so THEY fall
+through to LLM gap-fill against sentence 2 and correctly extract their own
+slice). This is a real architectural gap, not a one-line fix: making every
+field gather ALL its relevant sentences before settling on a value (rather
+than stopping at the first sufficient one) touches the core extraction
+cascade every field in the schema goes through, with real risk of
+duplicated/redundant merged text and extra LLM calls per field. Given the
+regression surface (this cascade is exercised by effectively every
+existing field-population test), deliberately not rushed through blind —
+documented here with the exact mechanism and reproduction so a future pass
+can design the redesign properly rather than re-derive this from scratch.
+
+**Also strengthened (defensive, can't introduce new false positives) as a
+partial mitigation for both the DR/environments drops and a separately
+observed issue**: `field_populator.py`'s `_build_llm_gap_fill_prompt()`
+now explicitly instructs the model to (a) spell every tool/product/proper
+noun exactly as the transcript does — never "correct" or normalize it —
+and (b) include every fact in a compound, multi-clause sentence rather
+than silently keeping only part of it. Also applied the same known-terms
+correction real transcript text already gets
+(`devops_transcription.apply_devops_corrections()`) to any LLM gap-fill
+value, catching multi-word corruptions the model might introduce during
+paraphrasing.
+
+**Investigated and deliberately reverted: single-word fuzzy correction for
+LLM output.** The critique's #8 (Trivy -> Trivi, an LLM-introduced typo
+during paraphrasing — confirmed via a real Groq run producing "Trivi for
+security scanning" as a field value from a transcript that correctly says
+"Trivy") looked fixable the same way as the earlier provider/process bug
+(§9aa): fuzzy-match short LLM-output words against the known-terms
+glossary. Built it, tested it directly, and it corrupted an ordinary
+English word in the very first test — "scanning" fuzzy-matched to
+"scaling" (an unrelated known term) and got silently rewritten. This is
+exactly the coincidental-collision risk `MIN_PER_WORD_SIMILARITY`'s own
+comment already warned about for the *multi-word* case, confirmed to be
+even worse for single words as the original code's design deliberately
+avoided. Reverted immediately rather than shipping a new corruption bug
+in place of fixing an old one. The multi-word `apply_devops_corrections()`
+call above is the safe version of this same idea that survived.
+
+**Operational note — a stuck-task bug in this session's OWN test tooling,
+not the product**: mid-investigation, a "run with Groq" verification
+command hung for ~90 minutes exactly like the earlier Gemini-quota hangs
+in §9y/§9bb, *despite* `LLM_PROVIDER=groq` and a valid Groq key being set
+on the command line. Root-caused: the diagnostic script (reused from an
+earlier LLM-free test) had `os.environ.pop("LLM_PROVIDER", ...)` etc. at
+its own top, unconditionally deleting the just-set Groq env vars before
+`import pipeline` ever read them — `llm_provider.py`'s `LLM_PROVIDER_NAME`
+is captured once at import time via `os.getenv("LLM_PROVIDER", "gemini")`,
+so with the var gone it silently defaulted to Gemini, and the project's
+`.env` file (a real but quota-exhausted `GEMINI_API_KEY`, loaded by
+`ai.py`'s `load_dotenv()`) supplied just enough credential to make that
+default look like a legitimate configuration rather than fail fast. Killed
+the stuck task, removed the `os.environ.pop()` lines, reran — completed in
+the normal ~2-3 minutes. Purely a scratchpad-script mistake, not a
+codebase defect, but worth noting here since it's now happened twice with
+the same signature and the same fix (this is the reason a *future*
+diagnostic script in this project should never blanket-clear LLM env vars
+when the caller intends to inject specific ones).
+
+**Verified**: `tests/test_dynamic_schema.py` gained 2 tests (the
+cross-section fallback firing and finding the right value with no
+`source_chunk_index`; confirms non-dynamic fields are completely
+unaffected by the fallback). `tests/test_renderer_sections.py` gained 2
+tests for `disaster_recovery` (the new field renders as its own line;
+absent when not captured, no stray block). Full `pytest tests/`
+(excluding the slow golden test): **165 passed, 0 failed**, up from 163.
 
 ## 9. Fix from this audit already worth doing next
 

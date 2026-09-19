@@ -28,6 +28,8 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         warnings.extend([x.strip() for x in str(fields["known_failure_scenarios"]["value"]).split("\n") if x.strip()])
     if fields.get("recovery_contact", {}).get("value"):
         paragraphs.append(f"Recovery contact: {fields['recovery_contact']['value']}")
+    if fields.get("dr_testing_frequency", {}).get("value"):
+        paragraphs.append(f"DR testing frequency: {fields['dr_testing_frequency']['value']}")
 
     blocks = []
     if checklist_items:

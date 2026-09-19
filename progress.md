@@ -1,14 +1,89 @@
 # Continuum KT Planner — Progress
 
 Handoff doc for picking this work up in a new session. Written 2026-09-04,
-updated 2026-09-15, end of a long working session on
+updated 2026-09-19, end of a long working session on
 `feature/Dynamic_Schema_Builder`. For the detailed technical narrative behind
 every item below — file paths, line numbers, before/after, verification steps —
-see **`REPOSITORY_AUDIT.md`**, sections §1-9aa. **For a 5-minute overview
+see **`REPOSITORY_AUDIT.md`**, sections §1-9cc. **For a 5-minute overview
 instead of either of these two detailed files, read `DELIVERABLE_SUMMARY.md`**
-(not yet updated with the §9q-§9aa work below — still describes the
+(not yet updated with the §9q-§9cc work below — still describes the
 state through §9p). This file remains the quick-orientation index; the audit
 is the full record.
+
+**Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
+real bugs, correctly rejected 1 false claim, precisely scoped and deferred
+1 real architectural gap)**: user pasted their own structured, numbered
+review of the fresh post-§9bb AWS PDF against the source transcript.
+Verified every claim against real code and a real Groq-backed pipeline run
+before touching anything (established practice this session). Rejected
+one claim as not a bug: "Customer Reach" marked missing is correct
+behavior — the field is explicitly defined as geographic/market scope
+("regional or global"), and the transcript never discusses that; the
+critique conflated it with delivery channel (web/mobile), a different
+fact entirely. Fixed two real, precisely root-caused bugs: (1) dynamic
+schema fields (`schema_generator.py`'s tech-triggered fields, e.g.
+`cache_layer`) are detected from the WHOLE transcript but attached to one
+fixed "home" section per technology — when the classifier legitimately
+routes the actual sentence to a different section (confirmed: the Redis
+sentence correctly lands in `architecture_reference`, not
+`system_overview`), the field never sees it and stays permanently
+unfilled; fixed generically in `field_populator.py` with a cross-section
+fallback pool used only by dynamic fields as a last resort, with no
+`source_chunk_index` attached (a wrong index would misattribute evidence,
+worse than none); (2) `disaster_recovery`'s structured-extraction JSON
+schema had no field at all for "how often DR testing happens" (only
+backup/RTO/contact fields existed), so "DR testing is performed
+quarterly" — sharing a sentence with a real backup fact — had nowhere to
+go and was silently dropped; added a dedicated `dr_testing_frequency`
+field end to end. Investigated and deliberately reverted a single-word
+fuzzy-correction attempt for LLM-introduced typos (Trivy -> Trivi,
+confirmed via live Groq output) after it corrupted "scanning" into
+"scaling" in its very first test — shipped only the safe multi-word
+version instead, plus prompt-level instructions (spell proper nouns
+exactly, don't drop compound-sentence detail) as a lower-risk mitigation.
+Precisely scoped but deliberately did NOT fix a real architectural gap:
+compound sentences touching multiple sibling fields (e.g. Environments'
+Production/Staging/Non-production) use a "first sufficient source wins"
+cascade per field, so a field that finds a good match on one sentence
+never gets to also pull its own relevant clause out of a second,
+compound sentence — confirmed via LLM-free reproduction exactly which
+sentence and which extraction stage is responsible; redesigning this
+touches the core extraction cascade every field goes through, too large a
+regression surface to rush. Also hit and fixed (in tooling, not the
+product) the same stuck-Groq-run signature as before — this time
+traced to the diagnostic script itself deleting the just-set Groq env
+vars before they were read, not a real `.env`/quota issue; documented so
+it doesn't recur. Full suite: **165 passed, 0 failed**, up from 163. See
+audit §9cc.
+
+**Update 2026-09-18 (the real fix for §9aa's section-mapping bug: a
+hardcoded rule, not orchestration)**: user re-supplied the same 3 real
+transcripts and asked to actually fix the mapping this time. §9aa's
+narrower single-neighbor test had wrongly concluded the defect lived in
+`ContextMappingPipeline.process()`'s block-building/topic-continuity
+orchestration; re-testing with the pipeline's REAL ±2-sentence context
+window immediately surfaced the true cause instead — a hardcoded
+`SECTION_RULES` regex (`section_rules.py`) matching `amazon ecr` /
+`container images...` and force-routing to `security_controls` at 0.95
+confidence, completely bypassing the classifier (which was already
+correctly picking `architecture_reference` on its own). Traced to a single
+synthetic test transcript where an ECR mention happened to share a
+sentence with a security-scanning statement, over-generalized into a rule
+that broke every real transcript where ECR/container-image mentions are
+just ordinary architecture facts. Fixed by removing the two overly broad
+patterns from both places they appeared (`SECTION_RULES` and
+`find_overview_reassignment()`'s exclusion list) — the original test still
+passes via its other, genuinely-security pattern (`trevi`). Verified full
+suite (**163 passed, 0 failed**) and, more importantly, end-to-end with a
+real Groq LLM (`qwen/qwen3.8-27b`, user-supplied key used only as a
+transient env var, never persisted to any file): both AWS's and Azure's
+architecture/tech-stack sentences now land in `architecture_reference`
+instead of vanishing into `security_controls`. Also hit and worked around
+an operational issue: a separate LLM-free verification attempt hung for
+~110 minutes due to a leftover Gemini API key causing rate-limit retry
+storms across every sentence — killed once the Groq run gave cleaner,
+more realistic confirmation anyway. See audit §9bb.
+
 
 **Update 2026-09-15 (ground-truth line-by-line audit with real source
 transcripts)**: user supplied the actual source transcripts (not just the

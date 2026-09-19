@@ -40,11 +40,16 @@ SECTION_STRUCTURED_PROMPTS = {
     ),
     "disaster_recovery": (
         "Return ONLY valid JSON (no markdown, no extra text). Use null for anything not mentioned:\n"
-        "{{\"rto_steps\": string|null, \"rpo_steps\": string|null, \"known_failure_scenarios\": string|null, \"recovery_contact\": string|null}}\n\n"
+        "{{\"rto_steps\": string|null, \"rpo_steps\": string|null, \"known_failure_scenarios\": string|null, "
+        "\"recovery_contact\": string|null, \"dr_testing_frequency\": string|null}}\n\n"
         "- rto_steps: recovery time objective steps/procedure, each step on its own line (\\n-separated)\n"
-        "- rpo_steps: recovery point objective / backup details, each item on its own line (\\n-separated)\n"
+        "- rpo_steps: recovery point objective / backup details (schedule, retention), each item on its "
+        "own line (\\n-separated)\n"
         "- known_failure_scenarios: known DR failure scenarios, each on its own line (\\n-separated)\n"
         "- recovery_contact: who to contact for recovery, if mentioned\n"
+        "- dr_testing_frequency: how often DR/recovery testing itself is performed (e.g. \"quarterly\", "
+        "\"twice per year\") — this is separate from rpo_steps' backup schedule; do not merge the two or "
+        "drop this if the fragments state it alongside a backup/retention fact in the same sentence\n"
         "Do NOT invent RTO/RPO values or contacts not present in the fragments.\n\n"
         "Extract from these fragments:\n{fragments}\n\n"
         "JSON:"
