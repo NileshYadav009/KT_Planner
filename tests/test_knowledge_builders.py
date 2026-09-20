@@ -330,9 +330,12 @@ def test_enrich_architecture_knowledge_pulls_components_from_any_section():
     result = enrich_architecture_knowledge(ko)
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
     components = {c.lower() for c in arch["_architecture_components"]}
+    # Bare "SQS" canonicalizes to "Amazon SQS" (see
+    # _canonicalize_component_term) — the same service, one display form
+    # regardless of which form this particular mention used.
     assert components == {
         "react", "fastapi", "amazon eks", "amazon rds", "postgresql",
-        "redis", "sqs", "cloudfront", "application load balancer", "amazon ecr",
+        "redis", "amazon sqs", "cloudfront", "application load balancer", "amazon ecr",
     }
 
 
@@ -350,6 +353,108 @@ def test_enrich_architecture_knowledge_dedupes_case_insensitively():
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
     lowered = [c.lower() for c in arch["_architecture_components"]]
     assert lowered.count("amazon eks") == 1
+
+
+def test_enrich_architecture_knowledge_does_not_let_one_sections_raw_sentences_starve_another_sections_coverage_content():
+    # Regression test for a real, live bug: a section's raw section_content
+    # ['sentences'] and its coverage_content are populated by two
+    # independent mechanisms that can disagree (see field_populator.py's
+    # populate_fields() docstring) — a section can have real
+    # coverage_content while its own raw ['sentences'] stays empty. The
+    # coverage_content scan used to be gated on "found nothing anywhere
+    # yet" (an all-or-nothing fallback), so the instant ANY section's raw
+    # sentences produced a match, every OTHER section's coverage_content
+    # was silently skipped for the rest of the run. Live symptom: a real
+    # AWS transcript's "Amazon RDS PostgreSQL is the primary database...
+    # Amazon SQS handles asynchronous order processing" and "The back end
+    # consists of Python FastAPI microservices" sentences were visibly
+    # rendered elsewhere in the KT (system_overview's own coverage_content)
+    # but never reached the component list or diagram, because a
+    # DIFFERENT section's raw sentences (e.g. one mentioning Redis) had
+    # already produced a match first.
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE"),
+            _section(
+                "system_overview", "SYSTEM OVERVIEW",
+                # coverage_content has the real facts, but raw
+                # section_content['sentences'] for this section (below)
+                # is EMPTY — simulating the real divergence.
+                coverage_content=[
+                    "Amazon RDS PostgreSQL is the primary database, Redis is used for caching and short-lived session data, and Amazon SQS handles asynchronous order processing.",
+                    "The back end consists of Python FastAPI microservices.",
+                ],
+            ),
+            _section("environments", "ENVIRONMENTS", coverage_content=[]),
+        ],
+        "summary": {},
+    }
+    # A DIFFERENT section's raw section_content sentences produce a match
+    # FIRST (in iteration order) — this must not starve system_overview's
+    # coverage_content scan below.
+    section_content = {
+        "environments": {"sentences": [{"text": "A previous major incident was caused by Redis memory saturation."}]},
+        "system_overview": {"sentences": []},
+    }
+    result = enrich_architecture_knowledge(ko, section_content)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    components = {c.lower() for c in arch["_architecture_components"]}
+    assert "amazon rds" in components
+    assert "amazon sqs" in components
+    assert "fastapi" in components
+    assert "redis" in components
+
+
+def test_enrich_architecture_knowledge_recognizes_azure_vocabulary():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=[
+                          "The platform runs on Azure Kubernetes Service, or AKS.",
+                          "Azure SQL is the primary database.",
+                          "Azure Service Bus provides asynchronous messaging.",
+                          "Container images are stored in Azure Container Registry, or ACR.",
+                          "Azure Key Vault is used for secret management.",
+                          "External traffic is handled through Azure Front Door and Application Gateway.",
+                      ]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    components = {c.lower() for c in arch["_architecture_components"]}
+    assert "azure kubernetes service" in components
+    assert "azure sql" in components
+    assert "azure service bus" in components
+    assert "azure container registry" in components
+    assert "azure key vault" in components
+    assert "azure front door" in components
+    assert "application gateway" in components
+
+
+def test_enrich_architecture_knowledge_canonicalizes_bare_acronyms_to_branded_names():
+    # A transcript commonly states the full/branded name once and uses the
+    # bare acronym on every later mention — both must collapse to ONE
+    # display entry, not show up as two different-looking components.
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=[
+                          "Amazon RDS PostgreSQL is the primary database.",
+                          "For disaster recovery, RDS snapshots are restored.",
+                          "Images are stored in Amazon ECR.",
+                          "GitHub Actions builds images and pushes them to ECR.",
+                      ]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    lowered = [c.lower() for c in arch["_architecture_components"]]
+    assert lowered.count("amazon rds") == 1
+    assert lowered.count("amazon ecr") == 1
+    assert "rds" not in lowered
+    assert "ecr" not in lowered
 
 
 def test_enrich_architecture_knowledge_noop_without_architecture_reference():
@@ -420,11 +525,33 @@ def test_enrich_architecture_knowledge_attaches_a_flow_diagram_when_a_request_fl
     assert "Amazon EKS" in arch["_architecture_diagram"]
 
 
-def test_enrich_architecture_knowledge_omits_diagram_when_no_request_flow_terms_present():
+def test_enrich_architecture_knowledge_diagram_has_no_main_chain_when_only_supporting_infrastructure_is_named():
+    # Terraform (IaC) and Jenkins (CI/CD) are recognized supporting-
+    # infrastructure layers with their own diagram sections (see
+    # architecture_diagram.py) — a diagram DOES get generated, but it must
+    # have no request-flow chain/Customer node, since nothing resembling
+    # a frontend/compute/data-layer position was ever named.
     ko = {
         "sections": [
             _section("architecture_reference", "ARCHITECTURE REFERENCE",
                       coverage_content=["We use Terraform and Jenkins for infrastructure automation."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    diagram = arch.get("_architecture_diagram")
+    assert diagram is not None
+    assert "Customer" not in diagram
+    assert "Terraform" in diagram
+    assert "Jenkins" in diagram
+
+
+def test_enrich_architecture_knowledge_omits_diagram_entirely_when_nothing_recognized():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=["We reviewed the team's on-call rotation schedule."]),
         ],
         "summary": {},
     }

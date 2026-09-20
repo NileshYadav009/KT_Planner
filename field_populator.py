@@ -87,11 +87,25 @@ PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
     "tools": re.compile(
         r"\b(Prometheus|Grafana|CloudWatch|PagerDuty|OpsGenie|Jenkins|"
-        r"GitLab\s*CI|GitHub\s*Actions|ArgoCD|Flux|Helm|Terraform|Ansible|"
+        r"GitLab\s*CI|GitHub\s*Actions|ArgoCD|Flux|Helm|Terraform|Bicep|Ansible|"
         r"Kubernetes|Docker|Rancher|Vault|Consul|Nexus|Artifactory|"
         r"SonarQube|Trivy|Veracode|Datadog|Splunk|ELK|Elasticsearch|"
         r"Logstash|Kibana|Redis|Kafka|RabbitMQ|PostgreSQL|MySQL|MongoDB|"
-        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|Amazon\s+SQS|CloudFront|S3|SQS|"
+        # AWS: prefixed forms listed before their bare acronym so a
+        # transcript that says "Amazon RDS" once and bare "RDS" afterwards
+        # (an extremely common real-speech pattern) still captures the
+        # fuller name at its first mention — see the term-canonicalization
+        # step in knowledge_builder.py that collapses these to one display
+        # name regardless of which form each individual mention used.
+        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|Amazon\s+SQS|CloudFront|S3|SQS|RDS|ECR|"
+        # Azure equivalents of the same architectural roles above.
+        r"Azure\s+Kubernetes\s+Service|AKS|Azure\s+SQL|"
+        r"Azure\s+Service\s+Bus|Service\s+Bus|"
+        r"Azure\s+Blob\s+Storage|Blob\s+Storage|"
+        r"Azure\s+Front\s+Door|Application\s+Gateway|"
+        r"Azure\s+Container\s+Registry|ACR|"
+        r"Azure\s+DevOps|Azure\s+Key\s+Vault|Key\s+Vault|"
+        r"Azure\s+Monitor|Application\s+Insights|"
         r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
         r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,

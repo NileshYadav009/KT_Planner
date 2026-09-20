@@ -512,6 +512,29 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
     return knowledge_object
 
 
+# A transcript very commonly says a service's full/branded name once
+# ("Amazon RDS", "Azure Key Vault") and its bare acronym on every later
+# mention ("RDS", "Key Vault") — both forms are separately valid
+# PATTERN_EXTRACTORS["tools"] matches, which without this would show up as
+# two different-looking entries in the same flat component list ("Amazon
+# RDS, ..., RDS") even though they name the exact same thing. Collapses
+# every captured form to one canonical display name before dedup.
+_CANONICAL_TERM_ALIASES = {
+    "rds": "Amazon RDS",
+    "ecr": "Amazon ECR",
+    "sqs": "Amazon SQS",
+    "acr": "Azure Container Registry",
+    "aks": "Azure Kubernetes Service",
+    "key vault": "Azure Key Vault",
+    "service bus": "Azure Service Bus",
+    "blob storage": "Azure Blob Storage",
+}
+
+
+def _canonicalize_component_term(term: str) -> str:
+    return _CANONICAL_TERM_ALIASES.get(term.strip().lower(), term)
+
+
 def enrich_architecture_knowledge(
     knowledge_object: Dict[str, Any],
     section_content: Optional[Dict[str, Any]] = None,
@@ -533,11 +556,12 @@ def enrich_architecture_knowledge(
       those components verbatim — a bare component name ("Redis") says
       nothing about its ROLE; the sentence that mentioned it usually does
       ("Redis is used for caching and short-lived session data"). Sourced
-      from section_content's raw per-sentence data (kt.section_content)
-      when available for clean, atomic sentences; falls back to the
-      coarser coverage_content (possibly LLM-polished, multi-sentence
-      chunks) otherwise. Never paraphrased or generated — verbatim
-      transcript text only.
+      from BOTH section_content's raw per-sentence data (kt.section_content,
+      clean atomic sentences) AND coverage_content (coarser, possibly
+      LLM-polished multi-sentence chunks) — not an either/or fallback, since
+      a section's raw ['sentences'] and its coverage_content are populated
+      by two independent mechanisms that can disagree (see below). Never
+      paraphrased or generated — verbatim transcript text only.
     - `_architecture_diagram`: a top-down "mental model" diagram built from
       the component list's coarse layer classification (see
       architecture_diagram.py) — None when nothing resembling a
@@ -565,28 +589,51 @@ def enrich_architecture_knowledge(
             for s in (sc or {}).get("sentences", []) or []:
                 _scan_text((s or {}).get("text", "") if isinstance(s, dict) else "")
 
-    if not descriptive_sentences:
-        # No raw per-sentence data threaded through (or none of it matched)
-        # — fall back to coverage_content. Coarser granularity (an entry
-        # here may be an LLM-polished, multi-sentence chunk rather than one
-        # atomic sentence) but still real, transcript-grounded text.
-        for section in knowledge_object.get("sections") or []:
-            content = section.get("coverage_content") or []
-            if isinstance(content, str):
-                content = [content]
-            for item in content:
-                _scan_text(str(item))
+    # Always ALSO scan coverage_content — never gated on "found nothing at
+    # all yet". context_mapper.py populates a section's raw ['sentences']
+    # and its ['content']/coverage_content via two independent mechanisms
+    # that can disagree (documented in field_populator.py's
+    # populate_fields()): a section can have real coverage_content while
+    # its own raw ['sentences'] stays empty or incomplete. A single
+    # "nothing found anywhere yet" gate here would silently drop a REAL
+    # component the instant any OTHER section's raw sentences matched
+    # something first — confirmed live: a transcript's "Amazon RDS
+    # PostgreSQL is the primary database... Amazon SQS handles async order
+    # processing" and "The back end consists of Python FastAPI
+    # microservices" sentences were visibly rendered elsewhere in the KT
+    # (system_overview's own content) yet never reached the component list
+    # or diagram, because some other section's sentences had already
+    # produced a match first. Duplicate matches across both sources are
+    # harmless — dedup below collapses them.
+    for section in knowledge_object.get("sections") or []:
+        content = section.get("coverage_content") or []
+        if isinstance(content, str):
+            content = [content]
+        for item in content:
+            _scan_text(str(item))
 
     if not found:
         return knowledge_object
 
-    seen = set()
+    seen: Dict[str, int] = {}
     deduped: List[str] = []
     for term in found:
-        key = term.lower()
+        canon = _canonicalize_component_term(term)
+        key = canon.lower()
         if key not in seen:
-            seen.add(key)
-            deduped.append(term)
+            seen[key] = len(deduped)
+            deduped.append(canon)
+        else:
+            # The regex captures verbatim casing from wherever it first
+            # matched — a tool named mid-sentence in lowercase ("...modify
+            # terraform state manually...") can otherwise permanently win
+            # the display slot over a later, properly-capitalized mention
+            # ("Terraform is used for infrastructure provisioning...")
+            # purely because of scan order. Prefer whichever form is
+            # actually capitalized.
+            existing = deduped[seen[key]]
+            if existing[:1].islower() and canon[:1].isupper():
+                deduped[seen[key]] = canon
 
     seen_sentences = set()
     deduped_sentences: List[str] = []

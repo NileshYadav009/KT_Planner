@@ -2969,6 +2969,130 @@ about — using a generic, reusable mechanism (the layer-classification
 table extends by adding more terms, not more logic) rather than anything
 hardcoded to this one transcript's AWS stack.
 
+### 9hh. Architecture diagram: two real live bugs silently dropping components, plus the diagram expanded to cover supporting infrastructure
+
+User supplied two real generated KTs (AWS E-Commerce, Azure Banking) and
+their exact source transcripts, and the §9gg diagram feature had failed
+badly on both: the AWS KT's component list and diagram were missing
+FastAPI, RDS/PostgreSQL, and SQS entirely (mentioned once, clearly, early
+in the transcript) even though later, unrelated mentions of RDS/ECR made
+it into "Architecture Details"; the Azure KT's diagram rendered as
+literally just `Customer -> Kubernetes` — almost the entire real Azure
+stack (AKS, Azure SQL, Service Bus, Blob Storage, Front Door, Application
+Gateway, ACR, Bicep, Azure DevOps, Key Vault, Azure Monitor, Application
+Insights) never appeared anywhere. User also supplied a richer target
+diagram shape — the main request-flow tree plus separate CI/CD, IaC,
+secrets, observability, and alerting flows — and asked for the full model,
+not just the request path.
+
+**Root-caused two distinct, real bugs rather than guessing**:
+
+1. **`enrich_architecture_knowledge()`'s `coverage_content` scan was
+   gated on a global "nothing found anywhere yet" check** (`if not
+   descriptive_sentences: ... scan coverage_content`) instead of always
+   running. `context_mapper.py` populates a section's raw
+   `section_content[...]['sentences']` and its `coverage_content` via two
+   independent mechanisms that can disagree (already documented in
+   `field_populator.py`'s `populate_fields()` — a section can have real
+   `coverage_content` while its own raw `sentences` list stays empty or
+   incomplete). The instant ANY section's raw sentences produced even one
+   match, every OTHER section's `coverage_content` — including the exact
+   sentences naming FastAPI/RDS/SQS, visibly rendered elsewhere in the same
+   PDF — was silently skipped for the rest of that run. This is the same
+   class of "two population mechanisms can disagree" bug already known
+   from field_populator.py, not a new mechanism — should have been caught
+   by extending that existing awareness to this new enrichment function
+   when it was written in §9gg, not found only after a live failure.
+   Fixed: both sources are now always scanned unconditionally; duplicate
+   matches across the two harmlessly collapse in the existing dedup step.
+
+2. **`PATTERN_EXTRACTORS["tools"]` (`field_populator.py`) only recognized
+   AWS-prefixed forms ("Amazon RDS", "Amazon ECR") and had zero Azure
+   vocabulary at all.** Real speech routinely states a service's full name
+   once and its bare acronym on every later mention ("Amazon RDS
+   PostgreSQL is the primary database" ... "RDS snapshots are restored") —
+   the bare form was never matched. Fixed: added bare `RDS`/`ECR`
+   alternatives (ordered after their `Amazon\s+` prefixed forms so the
+   fuller name still wins when present), and a full set of Azure
+   equivalents (AKS/Azure Kubernetes Service, Azure SQL, Azure/bare Service
+   Bus, Azure/bare Blob Storage, Azure Front Door, Application Gateway,
+   Azure Container Registry/ACR, Bicep, Azure DevOps, Azure/bare Key Vault,
+   Azure Monitor, Application Insights).
+
+**Two follow-on cosmetic bugs, caught while verifying the fix rather than
+assumed away**:
+
+3. Adding bare-acronym alternatives reintroduced the exact "same service,
+   two different-looking entries" risk that already existed for bare `SQS`
+   (which the regex already both-forms-matched even before this round) —
+   "Amazon RDS" and "RDS" would show as two separate list entries. Fixed
+   with a small canonicalization map
+   (`_CANONICAL_TERM_ALIASES`/`_canonicalize_component_term`, applied
+   before dedup) collapsing acronym forms to their branded display name
+   regardless of which form a given mention used.
+4. The regex captures a term's verbatim casing from wherever it first
+   matched — a tool named mid-sentence in lowercase ("...modify terraform
+   state manually...") could permanently win the display slot over a
+   later, properly-capitalized mention purely because of scan order.
+   Fixed: dedup now prefers a capitalized form over an already-stored
+   all-lowercase one for the same term.
+
+**Diagram expanded per the user's requested shape** (`architecture_diagram.py`
+substantially rewritten): beyond the main request-flow tree (unchanged
+logic from §9gg, now fed correct/complete data), added — each rendered
+only when actually named, never fabricated: a CI/CD pipeline flow
+(cicd tool -> CI -> registry -> gitops tool -> compute hub, gracefully
+shortened when some steps weren't named); standalone arrows for IaC
+("Terraform ──► Infrastructure") and secrets ("Vault ──► Secrets"); a
+converging observability line listing every monitoring tool named
+("Prometheus, Grafana, CloudWatch ──► Observability"); a standalone
+alerting arrow. Deliberately kept every new piece in the same vertical
+chain/tree style already proven in §9gg rather than attempting the user's
+exact horizontal-arrow, multi-column mockup layout — precise
+character-width alignment for arbitrary label lengths is a real source of
+broken-looking output, and this session has already hit exactly that class
+of bug once this round (the stray-arrow-before-fan-out fix in §9gg); the
+structural shape (which flows exist, what feeds what) matches the user's
+request, the line-drawing style stays deliberately simple and robust.
+
+**Verified end-to-end against both real failing transcripts**, not just
+synthetic fixtures — reconstructed each transcript's actual sentence
+content and ran it through the real `enrich_architecture_knowledge()` +
+`build_architecture_flow_diagram()` path: the AWS transcript now correctly
+surfaces FastAPI/Amazon RDS/Amazon SQS/Amazon ECR/GitHub Actions/
+Terraform/Vault/Prometheus+Grafana+CloudWatch/PagerDuty across the main
+tree and all five supporting flows; the Azure transcript (previously just
+`Customer -> Kubernetes`) now renders the full chain (Angular -> Azure
+Front Door -> Application Gateway -> Azure Kubernetes Service -> {Azure
+SQL, Redis, Azure Service Bus}), the ACR registry note, the Azure DevOps
+-> CI -> ACR -> Flux -> AKS pipeline, and all four remaining supporting
+arrows.
+
+**Tests**: rewrote `tests/test_architecture_diagram.py` for the new
+multi-section output (full-diagram coverage of every section;
+supporting-infrastructure-only input still renders its own sections
+instead of nothing; CI/CD flow degrades gracefully when only partially
+named; a full Azure-vocabulary case). Added 5 new tests to
+`tests/test_knowledge_builders.py`: a direct regression test reproducing
+the exact live failure pattern (one section's raw sentences matching first
+must not starve a different section's real `coverage_content`); full Azure
+vocabulary recognition; acronym canonicalization collapsing to one entry;
+diagram-without-main-chain for supporting-infrastructure-only input; one
+existing test's expectation corrected for the now-canonicalized "sqs" ->
+"Amazon SQS" behavior. Full `pytest tests/` — **206 passed, 0 failed,
+651.13s (0:10:51)** — normal timing, no flakiness.
+
+This is the second time in two rounds (see §9ff) that live verification
+against real data caught something unit tests alone had missed — synthetic
+test fixtures in §9gg all happened to use component names that were
+already in the regex/already scanned by whichever source path fired first,
+so the coverage gap in both the regex and the fallback-gating logic never
+surfaced until real transcripts with a realistic mix of AWS+Azure
+vocabulary and bare-acronym-after-first-mention phrasing were run through
+it. Reinforces this session's standing practice: a synthetic unit test
+passing is necessary but not sufficient — real transcript verification is
+what actually catches this class of bug.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

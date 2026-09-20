@@ -118,6 +118,37 @@ branches) by manually checking generated output against the user's own
 mockup before calling it done. Full suite: **199 passed, 0 failed, 9:00**
 — normal timing, no flakiness. See audit §9gg.
 
+**Update 2026-09-20, later same day (two real live bugs in the diagram
+feature, found via real KTs — fixed, plus diagram expanded)**: user
+supplied two real generated KTs (AWS E-Commerce, Azure Banking) with their
+source transcripts — the AWS diagram was missing FastAPI/RDS/SQS entirely
+despite being clearly stated early in the transcript, and the Azure
+diagram rendered as just "Customer -> Kubernetes", nearly the whole real
+stack invisible. Root-caused two real bugs, not guesses: (1)
+`enrich_architecture_knowledge()`'s `coverage_content` scan was gated on a
+global "nothing found anywhere yet" check instead of always running —
+since a section's raw per-sentence data and its `coverage_content` are
+populated by two independent mechanisms that can disagree (already known
+from field_populator.py, should have been applied here from the start),
+the instant ANY section's raw sentences matched something, every OTHER
+section's real content was silently skipped for the rest of the run; (2)
+the tools-detection regex only recognized "Amazon RDS"/"Amazon ECR" with
+the prefix (bare "RDS" mentioned later in speech never matched) and had
+zero Azure vocabulary — added bare acronyms plus the full Azure
+equivalent set (AKS, Azure SQL, Service Bus, Blob Storage, Front Door,
+Application Gateway, ACR, Bicep, Azure DevOps, Key Vault, Azure Monitor,
+Application Insights). Also fixed two follow-on cosmetic issues caught
+while verifying: acronym/branded-name duplicates ("RDS" and "Amazon RDS"
+as two entries) now canonicalize to one, and a term first seen in
+lowercase mid-sentence no longer permanently wins over a later properly-
+capitalized mention. Also expanded the diagram itself per the user's
+requested shape: separate CI/CD pipeline, IaC, secrets, observability, and
+alerting flows alongside the main request-flow tree, each shown only when
+actually named. Verified end-to-end by reconstructing both real failing
+transcripts and running them through the actual code path, not just
+synthetic fixtures — both now render fully. Full suite: **206 passed, 0
+failed, 10:51** — normal timing. See audit §9hh.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered
