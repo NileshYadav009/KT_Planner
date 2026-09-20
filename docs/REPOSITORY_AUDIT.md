@@ -2763,6 +2763,212 @@ section the user pointed at). `fields_role: "metadata"` is written
 generically enough to extend to another metadata-only section later
 without new mechanism, should one turn up.
 
+### 9ff. Performance: batched embeddings, parallel LLM calls, context-aware classification verification — and a mid-round revert
+
+User asked two things: (1) can section mapping / data capture be improved
+further, and (2) can PDF generation be made faster without losing quality.
+Investigated the actual pipeline for concrete, safe (not speculative)
+opportunities rather than guessing at either.
+
+**Speed — three real findings, one of which had to be walked back**:
+
+1. **`context_mapper.py:semantic_chunk_sentences()`** computed its initial
+   per-sentence embeddings with `[model.encode(s.text, ...) for s in
+   sentences]` — one `model.encode()` call per sentence in a Python loop,
+   instead of one batched call for the whole list. sentence-transformers
+   batches its forward pass internally, so per-call Python/tokenization
+   overhead (dominant for short sentences on CPU) was being paid once per
+   sentence instead of once per transcript. Changed to a single
+   `model.encode([s.text for s in sentences], ...)` call — mathematically
+   identical embeddings, same merge decisions, just computed in one batched
+   pass. Verified both the real model and the no-dependency fallback
+   `SentenceTransformer` shim (used when the real library import fails)
+   already accept and correctly handle a list input. New
+   `tests/test_semantic_chunking.py` (4 tests) locks in unchanged chunking
+   behavior (no text lost, near-identical short sentences still merge).
+
+2. **Independent per-section LLM network calls were fully sequential** in
+   three places — `ai.py:polish_coverage_sections()`'s per-section prose
+   polish loop, `pipeline.py`'s per-section structured-JSON-extraction loop
+   (up to 7 sections), and (initially — see the revert below)
+   `field_populator.py:populate_fields()`'s per-section gap-fill loop.
+   Confirmed first that this was actually safe: `llm_provider.py`'s
+   `_throttle()` (the sliding-window rate limiter added because a KT run's
+   15-25+ LLM calls already burst past free-tier per-minute quotas) is
+   already thread-safe (`threading.Lock`-guarded shared deque) — dispatching
+   calls concurrently can only make them start sooner, never send more
+   requests per minute than before, since every thread still funnels
+   through the same throttle. Added `LLM_PARALLEL_WORKERS` (default 4,
+   env-configurable, `llm_provider.py`) and dispatched each independent
+   per-section call through a `ThreadPoolExecutor`, keeping the exact same
+   per-section error handling (one section's failure doesn't abort the
+   others). Also added a fast path in both surviving call sites: when
+   `get_llm_provider()`/`provider` is `None` (the common case in tests and
+   any deployment without an LLM key configured), skip the thread pool
+   entirely and run the plain sequential loop — spinning up worker threads
+   with nothing to overlap (every call would no-op immediately) is pure
+   overhead for zero benefit.
+
+3. **Classification verification's LLM prompt had strictly less context
+   than the classifier that produced the ambiguous candidates it's
+   verifying.** `ContextMappingPipeline.process()`'s own embedding scoring
+   already looks at a ±2-sentence window per sentence
+   (`context_texts`/`context_embeddings`) — but
+   `_verify_classification_with_llm()` (fired only for genuinely borderline
+   sentences, i.e. the hardest cases) built its prompt from the bare
+   sentence text alone. Added an optional `context_text` parameter threaded
+   through `_maybe_verify_with_llm()` → `_verify_classification_with_llm()`,
+   wired to the already-computed `context_texts[i]` at the real call site
+   in `process()`'s batched loop. Included in the prompt only when it adds
+   real information (non-empty and different from the bare sentence, to
+   keep the common case's prompt/token cost unchanged). `classify_sentence()`'s
+   single-sentence call site (no neighbor window available) keeps passing
+   no context, defaulting to identical behavior to before. New
+   `tests/test_classification_verification.py` (5 tests, using a lightweight
+   `SimpleNamespace` bound to the real unbound methods rather than loading
+   the heavy BAAI model) covers: context included when it adds information,
+   omitted when absent or degenerate (equals the bare sentence), and
+   `_maybe_verify_with_llm` correctly forwards it end to end.
+
+**The revert — a real mistake caught by testing, not assumed away**: after
+shipping all three, full `pytest tests/` (182 passed) took **1129.52s
+(18:49)** — more than double the pre-change baseline of 523.90s (8:43) for
+4 fewer tests. First fix (guarding the thread pool behind "is there a
+provider at all") helped but a follow-up rerun of just the 4 heaviest test
+files still took 29 minutes and threw a `RuntimeError` in
+`test_ecommerce_kt_mapping` — a test that passed cleanly in isolation
+immediately after. Root cause: unlike the other two call sites,
+`field_populator.py`'s per-section loop does real **CPU-bound** work before
+any LLM call ever happens — `_extract_by_semantic()`'s embedding-based
+field matching, which runs for essentially every field regardless of
+whether that field ever reaches the LLM gap-fill step. Parallelizing that
+across sections meant running multiple sections' embedding computations
+genuinely concurrently (PyTorch releases the GIL during its C/C++ compute),
+which is real CPU parallelism, not I/O overlap — a real oversubscription
+risk on this project's explicitly resource-constrained laptop target (the
+same constraint the user raised earlier this session re: library/model
+sizing), and a plausible cause of both the slowdown and the transient
+`RuntimeError`. **Reverted `field_populator.py`'s parallelization entirely**
+back to the original plain sequential per-section loop — its LLM gap-fill
+calls remain sequential for now. The other two call sites (`ai.py`'s
+polish, `pipeline.py`'s structured extraction) do no embedding/CPU-bound
+work of their own before their LLM call — they only wrap `provider.generate()`
+itself — so they were kept.
+
+**Verified after the revert**: full `pytest tests/` — **187 passed, 0
+failed**, **635.23s (10:35)**, no flakiness — back in line with the 523.90s
+pre-change baseline once the 9 new tests' own real cost (both new test
+files load real, if small, embedding models) is accounted for.
+
+**Section mapping / data capture**: most of the concrete, quickly-verifiable
+gaps in this area were already fixed across earlier rounds this session
+(§9bb-§9ee). The one new finding (context-aware classification verification,
+above) was implemented. The remaining honest answer, unchanged from §9dd:
+the largest lever left is the unimplemented one-sentence-to-multiple-
+knowledge-objects gap (`multi_section_assignments`), which is a multi-session
+architectural change, not something to start blind here.
+
+### 9gg. Architecture Reference: in-depth descriptive detail + a generated "mental model" flow diagram
+
+User's concrete follow-up on §9ee: the flat component list ("Architecture
+Knowledge") was correctly capturing every tool/service name, but with no
+depth — a bare "Redis" says nothing about *how* it's used. User wanted (1)
+the flat list kept exactly as-is, plus real descriptive detail alongside
+it, and (2) an actual generated architecture diagram — giving two concrete
+ASCII mockups: a linear `Customer -> React -> CloudFront -> ALB -> EKS`
+chain fanning out at EKS to `{FastAPI, RDS, Redis, SQS}`, with `Amazon ECR`
+shown separately (registry, not part of the runtime request path). This is
+a concrete, scoped slice of §9dd's gap #3 (section-specific visual
+rendering — "architecture as a flow diagram" was explicitly named there as
+unimplemented).
+
+**Part 1 — in-depth detail** (`knowledge/knowledge_builder.py:
+enrich_architecture_knowledge()`): extended to also scan for the actual
+transcript sentences that named each detected component (not just the bare
+names), attached as `_architecture_sentences`. Sourced from `section_content`
+(kt.section_content — the same raw per-sentence data field_populator.py's
+`populate_fields()` already threads through) when available, for clean,
+atomic sentences rather than a section's possibly LLM-polished multi-
+sentence `coverage_content`; falls back to `coverage_content` when raw
+per-sentence data isn't available. Always verbatim transcript text, never
+paraphrased or generated — matches this session's standing anti-
+hallucination principle. `pipeline.py`'s call site now passes
+`kt.section_content` through (previously only passed `knowledge_object`).
+Rendered as a new "Architecture Details" block in
+`renderers/sections/architecture_reference.py`, directly below the
+existing "Architecture Knowledge" list — the flat list itself is
+unchanged, exactly as asked.
+
+**Part 2 — flow diagram** (new `architecture_diagram.py`): deliberately
+**not** a general relationship extractor that parses arbitrary transcript
+sentences for "X connects to Y" phrasing — that class of extraction is
+fragile and hard to generalize correctly across arbitrary transcripts (the
+kind of blind-guessing this session has consistently avoided, e.g. §9bb's
+correction of §9aa's wrong hypothesis). Instead: a small, extensible
+lookup (`_LAYER_TERMS`) classifies each already-detected component name
+into a coarse architectural layer — frontend / cdn / load_balancer /
+compute / service / database / cache / queue / registry. Deliberately
+conservative: supporting infrastructure (monitoring, alerting, CI/CD, IaC,
+secrets, security scanning) is left unmapped on purpose, so it can never
+get force-fit into a request-flow diagram it was never actually part of
+(confirmed via test: Terraform/GitHub Actions/Prometheus/Grafana/
+CloudWatch/PagerDuty/Vault/Helm never appear in the diagram even when
+present in the component list). `build_architecture_flow_diagram()` then
+renders the classified layers as a top-down ASCII tree (`Customer` ->
+chain layers in order -> fan-out from the compute hub to
+service/database/cache/queue, `├──`/`└──` tree branches, matching the
+user's first mockup), with the registry (ECR) drawn separately below,
+never part of the request-flow chain. Returns `None` — no diagram
+rendered at all — when nothing resembling a request-flow position was
+named (e.g. a transcript that only discussed IaC/monitoring tooling), and
+falls back to a flat sequential chain (no fan-out) when component/database/
+cache/queue terms are present but no compute/orchestration hub (EKS/
+Kubernetes/Docker/Rancher) was ever named — avoids fabricating a branch
+point the transcript never stated.
+
+**Rendering**: found `renderers/base.py:build_code_block()` and
+`pdf_rendering.py`'s `CodeBlock` handling (`<pre><code>...</code></pre>`,
+already styled in `pdf/templates/kt_document.css` and already wired in
+`static/index.html`'s JS renderer) already fully implemented and unused
+by any section — exactly the right vehicle for monospace ASCII art, no new
+rendering machinery needed anywhere. Added
+`renderers/blocks/code.py` (thin wrapper matching every other block
+type's per-file convention, e.g. `narrative.py`) and a new "High-Level
+Architecture" block in `architecture_reference.py`'s renderer, appended
+only when a diagram was actually generated.
+
+**A real formatting bug caught before shipping**: the first version put a
+"▼" arrow immediately before the fan-out branches started (`EKS -> │ -> ▼
+-> ├── FastAPI`), which visually implies flowing into one node directly
+below rather than branching into several — didn't match the user's own
+mockup (which has just "│" into the first "├──", no arrow). Fixed: the
+downward arrow only appears between successive **chain** steps; the
+transition into a fan-out is a plain connecting line. Caught by manually
+inspecting real generated output against the user's mockup before
+declaring this done, not just by the unit tests passing (the tests didn't
+happen to pin the exact line-by-line format at that transition point).
+
+**Verified**: `tests/test_architecture_diagram.py` (6 new tests — full
+chain+hub+fanout+registry matches expected structure and excludes
+supporting-infrastructure noise; PostgreSQL/Amazon RDS synonym collapses
+to one fan-out branch, not two; no-hub falls back to a flat chain instead
+of inventing a branch point; registry-only renders standalone; no
+recognizable layer terms returns `None`; empty input returns `None`).
+Extended `tests/test_knowledge_builders.py` (+5: verbatim sentence capture
+from `section_content`, `coverage_content` fallback, diagram attached when
+a request flow is present, diagram omitted when only supporting
+infrastructure is named) and `tests/test_renderer_sections.py` (+2: both
+new blocks render with correct type/content when present, both are
+cleanly absent — no empty headings — when not). Full `pytest tests/` —
+**199 passed, 0 failed**, up from 187, **540.25s (0:09:00)** — back to
+normal timing, no flakiness (see §9ff's timing regression/revert for why
+this was checked carefully this time).
+
+Scoped narrowly to `architecture_reference` — the section the user asked
+about — using a generic, reusable mechanism (the layer-classification
+table extends by adding more terms, not more logic) rather than anything
+hardcoded to this one transcript's AWS stack.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

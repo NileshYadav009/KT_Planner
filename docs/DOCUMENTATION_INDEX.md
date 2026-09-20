@@ -13,8 +13,8 @@ Your one-stop reference for everything about the new enterprise-grade semantic p
 ### 👤 **I'm a Business User / Knowledge Transfer Manager**
 Start here:
 1. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - 5-minute overview
-2. [README.md](README.md) - System overview
-3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Full feature guide (archived)
+2. [README.md](../README.md) - System overview
+3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](../archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Full feature guide (archived)
 
 **Key Points:**
 - ✅ Zero duplication guaranteed
@@ -41,7 +41,7 @@ Start here:
 ### 👨‍💻 **I'm a Developer / Engineer**
 Start here:
 1. [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md) - Complete technical guide
-2. [README.md](README.md) - Architecture overview
+2. [README.md](../README.md) - Architecture overview
 3. `enterprise_semantic_mapper.py` - Source code with comments
 
 **Your Job:**
@@ -54,7 +54,7 @@ Start here:
 
 ### 🏗️ **I'm a DevOps / Infrastructure Engineer**
 Start here:
-1. [README.md](README.md) - Deployment setup
+1. [README.md](../README.md) - Deployment setup
 2. [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#-extending-for-production) - Production checklist
 3. Source code comments
 
@@ -70,7 +70,7 @@ Start here:
 Start here:
 1. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Feature overview
 2. [TESTING_AND_VALIDATION.md](TESTING_AND_VALIDATION.md#-validation-report-template) - Validation metrics
-3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Deep feature guide (archived)
+3. [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](../archive/ENTERPRISE_SEMANTIC_UPGRADE.md) - Deep feature guide (archived)
 
 **Key Metrics to Track:**
 - Duplicate rate (0.0% ✓)
@@ -276,7 +276,7 @@ New Way:
 ### "I have a question about..."
 
 **Feature Usage:**
-→ QUICK_REFERENCE.md or [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md)
+→ QUICK_REFERENCE.md or [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](../archive/ENTERPRISE_SEMANTIC_UPGRADE.md)
 
 **Testing/Validation:**
 → TESTING_AND_VALIDATION.md
@@ -407,6 +407,6 @@ We believe Continuum Enterprise will transform how you manage knowledge transfer
 
 **Questions?** Start with the documentation for your role above.
 **Ready to begin?** Head to QUICK_REFERENCE.md for a 5-minute start.
-**Want deep knowledge?** [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](archive/ENTERPRISE_SEMANTIC_UPGRADE.md) has everything.
+**Want deep knowledge?** [archive/ENTERPRISE_SEMANTIC_UPGRADE.md](../archive/ENTERPRISE_SEMANTIC_UPGRADE.md) has everything.
 
 **Happy knowledge transferring! 🚀**

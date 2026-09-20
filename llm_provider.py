@@ -79,6 +79,19 @@ LLM_RETRY_MAX_DELAY_SECONDS = float(os.getenv("LLM_RETRY_MAX_DELAY_SECONDS", "60
 # calls can legitimately overlap in the same window).
 LLM_MAX_CALLS_PER_MINUTE = int(os.getenv("LLM_MAX_CALLS_PER_MINUTE", "20"))
 
+# A single KT run's 15-25+ LLM calls are spread across several independent
+# per-section loops (structured extraction, prose polish, field gap-fill
+# across different sections) that used to run strictly one call at a time —
+# the dominant cost was simply waiting for each network round trip to finish
+# before starting the next, unrelated one. _throttle() above is already
+# thread-safe (a lock-guarded sliding window shared by every caller), so
+# dispatching independent calls concurrently is safe: it can only make those
+# calls start sooner, never exceed LLM_MAX_CALLS_PER_MINUTE — the throttle
+# still enforces that ceiling exactly as before, across however many threads
+# are calling it. Kept modest by default to avoid hammering a provider with
+# simultaneous connections beyond what the per-minute quota already implies.
+LLM_PARALLEL_WORKERS = int(os.getenv("LLM_PARALLEL_WORKERS", "4"))
+
 _RATE_LIMIT_MARKERS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "ratelimit", "quota")
 
 _throttle_lock = threading.Lock()

@@ -366,6 +366,73 @@ def test_enrich_architecture_knowledge_noop_when_nothing_detected():
     assert "_architecture_components" not in arch
 
 
+def test_enrich_architecture_knowledge_captures_verbatim_descriptive_sentences():
+    # A bare component name ("Redis") says nothing about its role — the
+    # sentence that named it usually does. Must come from real per-sentence
+    # section_content (clean, atomic sentences) when available, verbatim.
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE"),
+        ],
+        "summary": {},
+    }
+    section_content = {
+        "architecture_reference": {
+            "sentences": [
+                {"text": "Amazon RDS PostgreSQL is the primary database."},
+                {"text": "Redis is used for caching and short-lived session data."},
+                {"text": "This sentence names nothing technical at all."},
+            ]
+        }
+    }
+    result = enrich_architecture_knowledge(ko, section_content)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    sentences = arch["_architecture_sentences"]
+    assert "Amazon RDS PostgreSQL is the primary database." in sentences
+    assert "Redis is used for caching and short-lived session data." in sentences
+    assert "This sentence names nothing technical at all." not in sentences
+
+
+def test_enrich_architecture_knowledge_falls_back_to_coverage_content_without_section_content():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=["All services run on Amazon EKS."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    assert arch["_architecture_sentences"] == ["All services run on Amazon EKS."]
+
+
+def test_enrich_architecture_knowledge_attaches_a_flow_diagram_when_a_request_flow_is_present():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=["React talks to CloudFront and an Application Load Balancer in front of Amazon EKS, which uses Amazon RDS."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    assert "_architecture_diagram" in arch
+    assert "Amazon EKS" in arch["_architecture_diagram"]
+
+
+def test_enrich_architecture_knowledge_omits_diagram_when_no_request_flow_terms_present():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=["We use Terraform and Jenkins for infrastructure automation."]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    assert "_architecture_diagram" not in arch
+
+
 def test_append_tribal_knowledge_section_tags_marker_phrases_by_source_section():
     ko = {"sections": [], "summary": {}}
     section_content = {

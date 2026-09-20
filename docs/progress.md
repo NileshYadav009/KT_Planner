@@ -66,6 +66,58 @@ Scoped narrowly to `architecture_reference` only (the section the user
 pointed at), not a full fact-ledger rewrite — mechanism is generic enough
 to extend to another metadata-only section later. See audit §9ee.
 
+**Update 2026-09-19, later still (performance: batched embeddings,
+parallel LLM calls, context-aware verification — plus a mid-round
+revert)**: user asked whether section mapping/data capture and PDF
+generation speed could both improve. Found and fixed 3 real things:
+batched `semantic_chunk_sentences()`'s per-sentence embedding calls into
+one call (same embeddings, less per-call overhead); parallelized 3
+independent per-section LLM call loops (prose polish, structured
+extraction, and initially field gap-fill) via a thread-safe rate limiter
+that was already in place (`llm_provider.py`'s `_throttle()`), so
+concurrent dispatch sends no more requests per minute than sequential did;
+gave the classification-verification LLM prompt the same ±2-sentence
+context window the classifier itself already uses, instead of a bare
+sentence, for the hardest/most ambiguous cases only. Shipped all three,
+then found a real problem via testing: full suite time more than doubled
+(523.90s -> 1129.52s) and a rerun of the heaviest 4 test files threw a
+flaky `RuntimeError`. Root cause: `field_populator.py`'s per-section loop
+does real CPU-bound embedding work (not just the LLM call) before ever
+reaching the network, so parallelizing it across sections meant genuine
+concurrent CPU compute (PyTorch releases the GIL for this) — a real
+oversubscription risk on this project's resource-constrained laptop
+target. Reverted that one call site back to sequential; kept the other two
+(prose polish, structured extraction), which only wrap `provider.generate()`
+itself with no CPU-bound work of their own. Re-verified: full suite back
+to **187 passed, 0 failed, 635.23s** (in line with the 523.90s baseline
+once the 9 new tests' own real cost is counted), no more flakiness. See
+audit §9ff.
+
+**Update 2026-09-20 (Architecture Reference: in-depth detail + generated
+flow diagram)**: user's concrete follow-up on the earlier knowledge/
+metadata split — the flat component list was right but had no depth (a
+bare "Redis" says nothing about its role), and wanted an actual generated
+architecture diagram, giving two mockups (linear chain fanning out at the
+compute hub to backing services, registry shown separately). Added: (1)
+`_architecture_sentences` — the real transcript sentences (verbatim,
+never paraphrased) that named each component, sourced from raw per-
+sentence `section_content` with a `coverage_content` fallback, rendered as
+a new "Architecture Details" block under the unchanged flat list; (2) new
+`architecture_diagram.py` — classifies detected components into coarse
+layers (frontend/cdn/load_balancer/compute/service/database/cache/queue/
+registry) via a small extensible lookup, deliberately NOT a general
+sentence-relationship parser (too fragile to generalize), and renders a
+top-down ASCII tree diagram as a new "High-Level Architecture" block,
+reusing an already-built-but-unused `CodeBlock` type
+(`renderers/base.py`/`pdf_rendering.py`) — no new rendering machinery
+needed. Returns no diagram at all when nothing resembling a request-flow
+position was named, and falls back to a flat chain (no fan-out) when no
+compute/orchestration hub was ever stated, rather than fabricating either.
+Caught and fixed a real formatting bug (a stray arrow before the fan-out
+branches) by manually checking generated output against the user's own
+mockup before calling it done. Full suite: **199 passed, 0 failed, 9:00**
+— normal timing, no flakiness. See audit §9gg.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered

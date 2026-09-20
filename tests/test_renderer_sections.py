@@ -293,6 +293,45 @@ def test_architecture_reference_marks_undiscussed_metadata_fields_not_discussed_
     }
 
 
+def test_architecture_reference_renders_details_and_diagram_blocks_when_present():
+    section = {
+        "id": "architecture_reference", "title": "Architecture Reference",
+        "fields": {},
+        "_architecture_components": ["React", "CloudFront", "Amazon EKS", "Amazon RDS"],
+        "_architecture_sentences": [
+            "Amazon RDS PostgreSQL is the primary database.",
+            "Redis is used for caching and short-lived session data.",
+        ],
+        "_architecture_diagram": "Customer\n   │\n   ▼\nReact",
+    }
+    result = render_architecture_reference(section)
+    titles = [b["title"] for b in result["blocks"]]
+    assert "Architecture Knowledge" in titles
+    assert "Architecture Details" in titles
+    assert "High-Level Architecture" in titles
+    assert "Architecture Metadata" in titles
+
+    details_block = next(b for b in result["blocks"] if b["title"] == "Architecture Details")
+    assert details_block["type"] == "NarrativeBlock"
+    assert "Redis is used for caching and short-lived session data." in details_block["paragraphs"]
+
+    diagram_block = next(b for b in result["blocks"] if b["title"] == "High-Level Architecture")
+    assert diagram_block["type"] == "CodeBlock"
+    assert diagram_block["code"] == "Customer\n   │\n   ▼\nReact"
+
+
+def test_architecture_reference_omits_details_and_diagram_blocks_when_absent():
+    section = {
+        "id": "architecture_reference", "title": "Architecture Reference",
+        "fields": {},
+        "_architecture_components": ["Amazon EKS"],
+    }
+    result = render_architecture_reference(section)
+    titles = [b["title"] for b in result["blocks"]]
+    assert "Architecture Details" not in titles
+    assert "High-Level Architecture" not in titles
+
+
 def test_first_30_day_ownership_renders_real_per_week_fields():
     # Regression test: the renderer only ever read coverage_content via a
     # pipe-delimited ("Role | Team") parser, which natural speech never

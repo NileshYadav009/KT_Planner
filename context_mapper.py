@@ -411,7 +411,13 @@ def semantic_chunk_sentences(
         return sentences
 
     model = _get_semantic_chunk_model()
-    encodings = [model.encode(s.text, convert_to_tensor=True) for s in sentences]
+    # One batched encode() call instead of N individual ones — same model,
+    # mathematically identical embeddings, but sentence-transformers batches
+    # the forward pass internally so per-call Python/tokenization overhead
+    # (dominant for short sentences on CPU) is paid once instead of once per
+    # sentence. Both the real model and the no-dependency SentenceTransformer
+    # fallback above already accept a list and return one embedding per item.
+    encodings = model.encode([s.text for s in sentences], convert_to_tensor=True)
     chunks: List[Sentence] = []
     current = sentences[0]
     current_emb = encodings[0]
@@ -715,6 +721,7 @@ class ContextClassifier:
         sentence_text: str,
         primary: Optional[Classification],
         secondary: List[Classification],
+        context_text: str = "",
     ) -> Tuple[Optional[Classification], List[Classification], Optional[str]]:
         """Selective LLM verification for genuinely borderline classifications.
 
@@ -724,6 +731,14 @@ class ContextClassifier:
         this logic needs to live in exactly one place so the two paths can't
         drift apart on what counts as "borderline" or how a verified pick gets
         applied.
+
+        context_text: optional surrounding-sentence text (the same ±2-window
+        the classifier's own embedding scoring already uses, when the caller
+        has it available) — passed through to give the LLM at least as much
+        context as the classifier had. Defaults to "" for callers (like
+        classify_sentence()'s single-sentence path) that don't have a
+        neighbor window on hand; verification still works exactly as before
+        in that case.
 
         Not run on every sentence — skipped entirely when llm_fallback_fn isn't
         configured (default None) or the top pick isn't actually ambiguous.
@@ -742,7 +757,7 @@ class ContextClassifier:
             return primary, secondary, None
 
         verify_candidates = [primary] + secondary[:2]
-        verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates)
+        verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates, context_text)
         if not verified_id or verified_id == primary.section_id:
             return primary, secondary, None
 
@@ -759,7 +774,9 @@ class ContextClassifier:
         )
         return match, new_secondary, note
 
-    def _verify_classification_with_llm(self, sentence_text: str, candidates: List[Classification]) -> Optional[str]:
+    def _verify_classification_with_llm(
+        self, sentence_text: str, candidates: List[Classification], context_text: str = ""
+    ) -> Optional[str]:
         """Ask the LLM to pick the best section among the classifier's own
         top candidates for a genuinely borderline sentence.
 
@@ -773,8 +790,26 @@ class ContextClassifier:
 
         candidate_ids = {c.section_id for c in candidates}
         options = "\n".join(f"- {c.section_id}: {c.section_title}" for c in candidates)
+        # The classifier's own embedding scoring already sees a ±2-sentence
+        # window around the target (ContextMappingPipeline.process()'s
+        # context_embeddings) — a sentence like "It happens during flash
+        # sales." is only classifiable with the surrounding sentences that
+        # say what "it" is. Verification only fires for the hardest,
+        # already-ambiguous cases, so it should never see strictly less
+        # context than the classifier had when it produced the ambiguous
+        # candidates in the first place. Only included when it actually adds
+        # something beyond the bare sentence, to keep the prompt/tokens
+        # small for the (common) case where there's no useful neighbor text.
+        context_block = ""
+        trimmed_context = (context_text or "").strip()
+        if trimmed_context and trimmed_context != sentence_text.strip():
+            context_block = (
+                f"Surrounding context (for reference only — classify ONLY the sentence below):\n"
+                f"\"{trimmed_context[:500]}\"\n\n"
+            )
         prompt = (
             "You are verifying a knowledge-transfer sentence's section assignment.\n\n"
+            f"{context_block}"
             f"Sentence: \"{sentence_text[:300]}\"\n\n"
             "Candidate sections (choose the best fit, or NONE if none fit):\n"
             f"{options}\n\n"
@@ -2127,7 +2162,9 @@ class ContextMappingPipeline:
             filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
             primary = filtered[0] if filtered else (classifications[0] if classifications else None)
             secondary = filtered[1:3] if filtered else (classifications[1:3] if len(classifications) > 1 else [])
-            primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(s.text, primary, secondary)
+            primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(
+                s.text, primary, secondary, context_text=context_texts[i]
+            )
             is_unassigned = primary is None
             explanation = ""
             alternatives = []

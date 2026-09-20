@@ -54,8 +54,18 @@ KT_Planner/
 │   ├── api/
 │   ├── models/
 │   └── services/
-├── docs/                       # Pipeline and technical documentation
-│   └── CONTEXT_MAPPING_PIPELINE.md
+├── docs/                       # All project documentation (*.md), except this README
+│   ├── CONTEXT_MAPPING_PIPELINE.md
+│   ├── DOCUMENTATION_INDEX.md  # Index of active documentation files
+│   ├── QUICK_REFERENCE.md      # Short project overview and quick start
+│   ├── QUICK_START.md          # Setup and run instructions
+│   ├── DEVELOPERS_GUIDE.md     # Developer guide and architecture notes
+│   ├── TESTING_AND_VALIDATION.md # Testing and validation instructions
+│   ├── CODE_ORGANIZATION.md    # Code layout and responsibilities
+│   ├── REQUIREMENTS_AUDIT.md   # Dependency and compliance checklist
+│   ├── REPOSITORY_AUDIT.md     # Full session-by-session technical audit trail
+│   ├── progress.md             # Handoff/orientation doc for picking work back up
+│   └── ...                     # ARCHITECTURE.md, TESTING.md, etc.
 ├── scripts/                    # Small helper scripts for manual workflows
 │   ├── check_kt.py
 │   ├── generate_audio.py
@@ -76,14 +86,7 @@ KT_Planner/
 ├── generate_audio.py           # Audio generation or processing utility
 ├── glossary.json               # Glossary term definitions
 ├── glossary.py                 # Glossary support and corrections
-├── DOCUMENTATION_INDEX.md      # Index of active documentation files
 ├── README.md                   # This file
-├── QUICK_REFERENCE.md          # Short project overview and quick start
-├── QUICK_START.md              # Setup and run instructions
-├── DEVELOPERS_GUIDE.md         # Developer guide and architecture notes
-├── TESTING_AND_VALIDATION.md   # Testing and validation instructions
-├── CODE_ORGANIZATION.md        # Code layout and responsibilities
-├── REQUIREMENTS_AUDIT.md       # Dependency and compliance checklist
 ├── requirements.txt            # Python dependencies
 ├── kt_schema_new.json          # Active schema definition
 ├── policy.json                 # Runtime policy configuration
@@ -261,4 +264,4 @@ Tell me which of those you'd like next.
 - The active schema configuration is `kt_schema_new.json`.
 - `archive/` contains older documentation and artifacts moved out of the core setup.
 - `app/` currently contains placeholder folders for future API, model, and service code.
-- Use `QUICK_REFERENCE.md` for a short operational overview and `DEVELOPERS_GUIDE.md` for deeper implementation details.
+- Use `docs/QUICK_REFERENCE.md` for a short operational overview and `docs/DEVELOPERS_GUIDE.md` for deeper implementation details.

@@ -7,6 +7,7 @@ from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
+from architecture_diagram import build_architecture_flow_diagram
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
 UNMAPPED_FINDINGS_TITLE = "Additional Notes (Unmapped Findings)"
@@ -511,7 +512,10 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
     return knowledge_object
 
 
-def enrich_architecture_knowledge(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+def enrich_architecture_knowledge(
+    knowledge_object: Dict[str, Any],
+    section_content: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Architecture Reference's own field schema holds only 3 administrative
     facts (doc link, last-updated, verified-by) — the real architecture
     knowledge (which services/frameworks the system is built on) gets
@@ -521,23 +525,57 @@ def enrich_architecture_knowledge(knowledge_object: Dict[str, Any]) -> Dict[str,
     link used to render the section as "0 of 3 fields" as if nothing had
     been captured at all. This scans every section's raw transcript content
     for known infrastructure/framework names (the same PATTERN_EXTRACTORS
-    tools regex enrich_technology_summary already uses) and attaches the
-    deduplicated list to architecture_reference as `_architecture_components`
-    — real knowledge, kept independent of which section's field schema
-    happened to hold the sentence that mentioned it.
+    tools regex enrich_technology_summary already uses) and attaches:
+    - `_architecture_components`: the deduplicated flat component list —
+      real knowledge, kept independent of which section's field schema
+      happened to hold the sentence that mentioned it.
+    - `_architecture_sentences`: the real transcript sentences that named
+      those components verbatim — a bare component name ("Redis") says
+      nothing about its ROLE; the sentence that mentioned it usually does
+      ("Redis is used for caching and short-lived session data"). Sourced
+      from section_content's raw per-sentence data (kt.section_content)
+      when available for clean, atomic sentences; falls back to the
+      coarser coverage_content (possibly LLM-polished, multi-sentence
+      chunks) otherwise. Never paraphrased or generated — verbatim
+      transcript text only.
+    - `_architecture_diagram`: a top-down "mental model" diagram built from
+      the component list's coarse layer classification (see
+      architecture_diagram.py) — None when nothing resembling a
+      request-flow position was named.
     """
     arch_section = _find_section(knowledge_object, "architecture_reference")
     if not arch_section:
         return knowledge_object
 
+    tools_pattern = PATTERN_EXTRACTORS["tools"]
     found: List[str] = []
-    for section in knowledge_object.get("sections") or []:
-        content = section.get("coverage_content") or []
-        if isinstance(content, str):
-            content = [content]
-        text = " ".join(str(c) for c in content if isinstance(c, str))
-        if text:
-            found.extend(PATTERN_EXTRACTORS["tools"].findall(text))
+    descriptive_sentences: List[str] = []
+
+    def _scan_text(text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+        matches = tools_pattern.findall(text)
+        if matches:
+            found.extend(matches)
+            descriptive_sentences.append(text)
+
+    if section_content:
+        for sc in section_content.values():
+            for s in (sc or {}).get("sentences", []) or []:
+                _scan_text((s or {}).get("text", "") if isinstance(s, dict) else "")
+
+    if not descriptive_sentences:
+        # No raw per-sentence data threaded through (or none of it matched)
+        # — fall back to coverage_content. Coarser granularity (an entry
+        # here may be an LLM-polished, multi-sentence chunk rather than one
+        # atomic sentence) but still real, transcript-grounded text.
+        for section in knowledge_object.get("sections") or []:
+            content = section.get("coverage_content") or []
+            if isinstance(content, str):
+                content = [content]
+            for item in content:
+                _scan_text(str(item))
 
     if not found:
         return knowledge_object
@@ -550,7 +588,22 @@ def enrich_architecture_knowledge(knowledge_object: Dict[str, Any]) -> Dict[str,
             seen.add(key)
             deduped.append(term)
 
+    seen_sentences = set()
+    deduped_sentences: List[str] = []
+    for text in descriptive_sentences:
+        key = text.lower()
+        if key not in seen_sentences:
+            seen_sentences.add(key)
+            deduped_sentences.append(text)
+
     arch_section["_architecture_components"] = deduped
+    if deduped_sentences:
+        arch_section["_architecture_sentences"] = deduped_sentences
+
+    diagram = build_architecture_flow_diagram(deduped)
+    if diagram:
+        arch_section["_architecture_diagram"] = diagram
+
     return knowledge_object
 
 

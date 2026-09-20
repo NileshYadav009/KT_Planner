@@ -14,6 +14,7 @@ access to them — main.py's startup handler just calls load_models().
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import List, Optional
 
@@ -36,7 +37,7 @@ from knowledge import (
     append_quick_reference_section,
 )
 from kt_schema_loader import SCHEMA
-from llm_provider import get_llm_provider
+from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from pdf_rendering import build_rendered_sections
 from quality_score import compute_quality_score
 from renderers.sections import validate_renderer_registry
@@ -181,21 +182,51 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             logger.warning("Batch coverage polish failed: %s", e)
             polished_sections = {}
 
-        # Extract structured data for sections with structured prompts
+        # Extract structured data for sections with structured prompts. Each
+        # section's extraction is an independent LLM call (its own prompt,
+        # its own result slot) — dispatched concurrently instead of one at a
+        # time so the dominant cost (waiting out each network round trip
+        # serially) doesn't stack across up to 7 sections. The provider's
+        # rate throttle is shared/thread-safe, so this sends no more
+        # requests per minute than running them one at a time did.
         structured_data = {}
-        for section_id, section_payload in coverage.items():
+        structured_section_ids = [
+            section_id for section_id in coverage
             if section_id in (
                 "monitoring_observability", "security_controls",
                 "disaster_recovery", "ownership_escalation",
                 "cost_optimization", "common_failures",
                 "open_responsibilities",
-            ):  # Sections with SECTION_STRUCTURED_PROMPTS (llm/prompts.py)
+            )  # Sections with SECTION_STRUCTURED_PROMPTS (llm/prompts.py)
+        ]
+
+        def _extract_one(section_id: str):
+            section_payload = coverage[section_id]
+            return _extract_structured_section(
+                section_id,
+                section_payload.get('title', section_id),
+                section_payload.get('fragments', [])
+            )
+
+        # Only worth a thread pool when there's an LLM provider to actually
+        # wait on — _extract_structured_section() no-ops immediately without
+        # one, so spinning up worker threads for that would be pure
+        # overhead with nothing to overlap.
+        if structured_section_ids and get_llm_provider() is not None:
+            with ThreadPoolExecutor(max_workers=min(LLM_PARALLEL_WORKERS, len(structured_section_ids))) as pool:
+                futures = {pool.submit(_extract_one, sid): sid for sid in structured_section_ids}
+                for future in as_completed(futures):
+                    section_id = futures[future]
+                    try:
+                        structured = future.result()
+                        if structured:
+                            structured_data[section_id] = structured
+                    except Exception as e:
+                        logger.warning("Structured extraction failed for %s: %s", section_id, e)
+        else:
+            for section_id in structured_section_ids:
                 try:
-                    structured = _extract_structured_section(
-                        section_id,
-                        section_payload.get('title', section_id),
-                        section_payload.get('fragments', [])
-                    )
+                    structured = _extract_one(section_id)
                     if structured:
                         structured_data[section_id] = structured
                 except Exception as e:
@@ -316,7 +347,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # as its own digest so the section isn't judged solely by whether
         # those 3 admin fields were discussed.
         try:
-            knowledge_object = enrich_architecture_knowledge(knowledge_object)
+            knowledge_object = enrich_architecture_knowledge(knowledge_object, kt.section_content)
         except Exception as exc:
             logger.warning("Architecture knowledge enrichment failed: %s", exc)
 

@@ -626,6 +626,8 @@ def populate_fields(
 
     return result
 
+    return result
+
 
 def find_source_sentence_index(value: Any, raw_sentence_texts: List[str]) -> Optional[int]:
     """Best-effort: which raw sentence a field's extracted value most likely

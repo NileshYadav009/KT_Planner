@@ -38,7 +38,8 @@ from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
 from field_populator import find_source_sentence_index
-from llm_provider import get_llm_provider
+from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 logger = logging.getLogger(__name__)
@@ -529,7 +530,7 @@ def polish_coverage_sections(
             return prompt_text.replace('Source fragments:', rule + 'Source fragments:')
         return rule + prompt_text
 
-    for sid, section in cleaned_sections.items():
+    def _polish_one(sid: str, section: dict) -> List[str]:
         prompt_template = SECTION_POLISH_PROMPTS.get(sid, SECTION_POLISH_PROMPTS["default"])
         joined_fragments = "\n".join(f"- {fragment}" for fragment in section["fragments"])
         prompt = prompt_template.format(
@@ -549,10 +550,21 @@ def polish_coverage_sections(
                 ),
             )
             cleaned_text = response.strip() if isinstance(response, str) else ""
-            results[sid] = [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
+            return [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
         except Exception as e:
             logger.warning("Polish failed for %s: %s", sid, e)
-            results[sid] = _local_cleanup_list(section["fragments"])
+            return _local_cleanup_list(section["fragments"])
+
+    # Each section's polish call is fully independent (its own prompt, its
+    # own result slot) — dispatching them concurrently instead of one at a
+    # time removes the dominant cost (waiting out each network round trip
+    # serially) without changing a single prompt or outcome. The provider's
+    # own rate throttle is shared/thread-safe, so this can't send more
+    # requests per minute than the sequential version did.
+    with ThreadPoolExecutor(max_workers=min(LLM_PARALLEL_WORKERS, len(cleaned_sections)) or 1) as pool:
+        futures = {pool.submit(_polish_one, sid, section): sid for sid, section in cleaned_sections.items()}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
 
     return results
 
