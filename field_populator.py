@@ -87,7 +87,7 @@ PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
     "tools": re.compile(
         r"\b(Prometheus|Grafana|CloudWatch|PagerDuty|OpsGenie|Jenkins|"
-        r"GitLab\s*CI|GitHub\s*Actions|ArgoCD|Flux|Helm|Terraform|Bicep|Ansible|"
+        r"GitLab\s*CI|GitHub\s*Actions|Argo\s*CD|Flux|Helm|Terraform|Bicep|Ansible|"
         r"Kubernetes|Docker|Rancher|Vault|Consul|Nexus|Artifactory|"
         r"SonarQube|Trivy|Veracode|Datadog|Splunk|ELK|Elasticsearch|"
         r"Logstash|Kibana|Redis|Kafka|RabbitMQ|PostgreSQL|MySQL|MongoDB|"
@@ -106,6 +106,16 @@ PATTERN_EXTRACTORS = {
         r"Azure\s+Container\s+Registry|ACR|"
         r"Azure\s+DevOps|Azure\s+Key\s+Vault|Key\s+Vault|"
         r"Azure\s+Monitor|Application\s+Insights|"
+        # GCP equivalents of the same architectural roles above.
+        r"Google\s+Kubernetes\s+Engine|GKE|"
+        r"Pub\s*/\s*Sub|"
+        r"BigQuery|Cloud\s+SQL|Firestore|Bigtable|Cloud\s+Spanner|"
+        r"Memorystore|"
+        r"Artifact\s+Registry|Container\s+Registry|"
+        r"Secret\s+Manager|"
+        r"Cloud\s+Monitoring|Cloud\s+Logging|Stackdriver|"
+        r"Cloud\s+Build|"
+        r"Dataflow|Airflow|Vertex\s+AI|Cloud\s+Storage|"
         r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
         r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,

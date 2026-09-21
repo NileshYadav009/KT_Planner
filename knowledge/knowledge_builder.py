@@ -528,6 +528,8 @@ _CANONICAL_TERM_ALIASES = {
     "key vault": "Azure Key Vault",
     "service bus": "Azure Service Bus",
     "blob storage": "Azure Blob Storage",
+    "gke": "Google Kubernetes Engine",
+    "argo cd": "ArgoCD",
 }
 
 

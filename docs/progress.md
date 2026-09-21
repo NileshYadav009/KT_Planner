@@ -149,6 +149,68 @@ transcripts and running them through the actual code path, not just
 synthetic fixtures — both now render fully. Full suite: **206 passed, 0
 failed, 10:51** — normal timing. See audit §9hh.
 
+**Update 2026-09-20, later still (GCP vocabulary gap + 3 more real diagram
+bugs, found via a 5-KT broad quality review)**: user supplied 5 generated
+KTs (2 AWS, 1 Azure, 1 GCP for the first time) and asked for a general
+quality review. GCP KT's diagram was nearly empty — same vocabulary-gap
+bug class as the Azure fix, just never extended to a third cloud
+provider. Fixed: (1) added full GCP vocabulary (GKE, Pub/Sub, BigQuery,
+Cloud SQL/Firestore/Bigtable/Spanner, Memorystore, Artifact Registry,
+Secret Manager, Cloud Monitoring/Logging) plus 3 new standalone diagram
+categories for roles that don't fit a web-request-flow chain at all
+(Airflow -> Workflow Orchestration, Vertex AI -> Machine Learning,
+Dataflow -> Data Processing); (2) the diagram was fabricating a "Customer"
+root for backend-only systems whenever a compute hub was named, even with
+zero evidence of a customer-facing entry point (no frontend/CDN/load-
+balancer) — fixed by only drawing "Customer" when a real entry layer was
+actually named; (3) the compute hub's label was scan-order-dependent —
+two AWS KTs from materially the same transcript showed different hub
+labels ("Amazon EKS" vs generic "Kubernetes") — fixed with a specificity
+preference so the most-branded name present always wins, regardless of
+order; (4) "Argo CD" (two words, its own official stylization) wasn't
+recognized at all by the regex, the gitops layer, or the transcription
+corrector — only no-space "ArgoCD" was — fixed at all three layers. Also
+found and fixed 3 more transcription artifacts via close PDF reading: "pub
+slash sub" never converted to "Pub/Sub" (persisted verbatim through an
+entire GCP KT), "Graphana" typo never corrected to "Grafana", "pager
+duty"/"pager-duty" never normalized to "PagerDuty" — each fixed as an
+exact single-token/phrase correction, same safe pattern as the existing
+"trevi"->"Trivy" fix. Tightened the Historical Incident Record's
+extraction prompt (when/impact fields were absorbing severity language
+like "a previous major incident" instead of an actual date or concrete
+effect) — flagged but did NOT fix a separate blank-Incident-cell
+inconsistency in one KT that current renderer code shouldn't be able to
+produce; needs live data to diagnose if it recurs. Also flagged (not
+fixed): a GCP Day-1 checklist row where a run-on source sentence merged
+two unrelated list items into one garbled table entry. Full suite: **214
+passed, 0 failed, 8:26** — normal timing. See audit §9ii.
+
+**Update 2026-09-20, later still (the real spelling-correction bug: known
+variants were being skipped, not corrected)**: user asked for "all devops
+known keywords" to be covered for autocorrection. Investigated first
+rather than assuming anything was missing — `devops_vocabulary.py`
+already has ~600 canonical terms with spoken-variant lists across every
+major cloud/CI-CD/IaC/observability/security/database/networking tool.
+Found the REAL bug instead: `apply_fuzzy_term_corrections()` flattens
+canonical keys AND all their listed variants into one set, then skips
+"correcting" anything already in that set — since variants are explicitly
+"the ways Whisper is likely to mis-transcribe" the canonical term, a
+listed variant like "pager duty" or "rabbit mq" was being treated as
+already-acceptable and left completely untouched. Confirmed live before
+fixing: `apply_fuzzy_term_corrections("pager duty is used for alerting
+and rabbit mq handles messaging.")` returned the text completely
+unchanged. Fixed at the mechanism level with a new
+`get_canonical_key_map()` (same caching pattern as the existing
+`get_known_terms()`) so a matched variant now corrects to its canonical
+key, affecting all ~600 vocabulary entries at once going forward — not
+just the two tested. Layered ~30 hand-curated proper-case
+`PHRASE_CORRECTIONS` on top for the highest-traffic brand names that
+commonly split into separate words (MongoDB, DynamoDB, CodePipeline,
+OpenTelemetry, SonarQube, RabbitMQ, Azure Cosmos DB, etc.), deliberately
+excluding any variant that's also an ordinary English word/phrase (e.g.
+"customize" for kustomize) to avoid false positives. Full suite: **218
+passed, 0 failed, 9:22** — normal timing. See audit §9jj.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered

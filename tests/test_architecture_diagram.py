@@ -142,3 +142,65 @@ def test_azure_vocabulary_produces_a_full_diagram():
     assert "Azure Key Vault ──► Secrets" in diagram
     assert "Azure Monitor, Application Insights ──► Observability" in diagram
     assert "PagerDuty ──► Alerting" in diagram
+
+
+def test_gcp_vocabulary_produces_a_full_diagram_without_fabricating_a_customer_entry():
+    # Regression test for a real live bug: a GCP data/ML platform transcript
+    # (no frontend/CDN/load-balancer ever mentioned — it's not a
+    # customer-facing web system) produced a diagram that started with
+    # "Customer -> Kubernetes" even though no customer-facing entry point
+    # was ever named, and the GCP-specific vocabulary (Pub/Sub, BigQuery,
+    # GKE, Dataflow, Airflow, Vertex AI, Artifact Registry, Secret Manager,
+    # Cloud Monitoring/Logging) was entirely unrecognized (only GitHub
+    # Actions/Terraform/Kubernetes/Grafana showed up at all).
+    components = [
+        "GitHub Actions", "Terraform", "Google Kubernetes Engine", "Grafana",
+        "ArgoCD", "Artifact Registry", "Secret Manager", "Pub/Sub",
+        "Dataflow", "BigQuery", "Airflow", "Vertex AI", "Cloud Monitoring",
+        "Cloud Logging", "PagerDuty",
+    ]
+    diagram = build_architecture_flow_diagram(components)
+    assert diagram is not None
+
+    # No customer-facing layer (frontend/CDN/load-balancer) was named, so
+    # no "Customer" root should be fabricated.
+    assert "Customer" not in diagram
+
+    assert "Google Kubernetes Engine" in diagram
+    assert "├── BigQuery" in diagram or "└── BigQuery" in diagram
+    assert "├── Pub/Sub" in diagram or "└── Pub/Sub" in diagram
+    assert "Artifact Registry\n └── Container images" in diagram
+    assert "GitHub Actions" in diagram and "ArgoCD" in diagram
+    assert "Terraform ──► Infrastructure" in diagram
+    assert "Secret Manager ──► Secrets" in diagram
+    assert "Grafana, Cloud Monitoring, Cloud Logging ──► Observability" in diagram
+    assert "PagerDuty ──► Alerting" in diagram
+    assert "Airflow ──► Workflow Orchestration" in diagram
+    assert "Vertex AI ──► Machine Learning" in diagram
+    assert "Dataflow ──► Data Processing" in diagram
+
+
+def test_compute_hub_prefers_specific_branded_name_over_generic_kubernetes():
+    # Regression test: a transcript that names both a specific managed-K8s
+    # product ("Amazon EKS") AND generic "Kubernetes" (very common — e.g.
+    # "Amazon EKS... Kubernetes workloads...") used to label the hub with
+    # whichever term the scan happened to see FIRST, which is order-
+    # dependent and inconsistent run to run. Must always prefer the
+    # specific/branded name when both are present, regardless of order.
+    components_specific_first = ["Amazon EKS", "React", "Kubernetes", "Redis"]
+    components_generic_first = ["Kubernetes", "React", "Amazon EKS", "Redis"]
+    for components in (components_specific_first, components_generic_first):
+        diagram = build_architecture_flow_diagram(components)
+        assert "Amazon EKS" in diagram
+        lines = [l.strip() for l in diagram.splitlines()]
+        assert "Kubernetes" not in lines  # bare "Kubernetes" must not win the hub slot
+
+
+def test_customer_entry_only_shown_with_real_evidence_of_a_customer_facing_layer():
+    # A compute hub with backing services but no frontend/CDN/load-balancer
+    # ever named (e.g. an internal service or data platform) must not
+    # imply a customer request path that was never described.
+    diagram = build_architecture_flow_diagram(["Kubernetes", "PostgreSQL", "Redis"])
+    assert diagram is not None
+    assert "Customer" not in diagram
+    assert diagram.splitlines()[0] == "Kubernetes"

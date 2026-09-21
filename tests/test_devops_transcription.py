@@ -67,9 +67,110 @@ def test_providers_not_corrupted_into_process_by_prefix_bias():
 
 def test_genuine_multiword_fuzzy_corrections_still_work():
     # Guards against the Levenshtein guard being too strict and blocking
-    # real corrections it wasn't meant to touch.
+    # real corrections it wasn't meant to touch. Now lands on the canonical
+    # key "rabbitmq" (not just the intermediate registered variant "rabbit
+    # mq") since get_canonical_key_map() correction now normalizes a
+    # matched variant to its canonical spelling — see
+    # test_known_variant_is_normalized_to_canonical_key_not_left_alone
+    # below for the bug this specifically fixes.
     from devops_transcription import apply_fuzzy_term_corrections
     text = "We rely on rabid mq heavily for async messaging."
     corrected, corrections = apply_fuzzy_term_corrections(text)
-    assert "rabbit mq" in corrected.lower()
-    assert corrections and corrections[0]["corrected"] == "rabbit mq"
+    assert "rabbitmq" in corrected.lower()
+    assert corrections and corrections[0]["corrected"] == "rabbitmq"
+
+
+def test_known_variant_is_normalized_to_canonical_key_not_left_alone():
+    # Regression test for a real bug: DEVOPS_VOCABULARY's variant lists are
+    # documented as "the ways Whisper is likely to mis-transcribe" the
+    # canonical term, but a listed variant used to be treated as "already a
+    # known term, nothing to correct" — apply_fuzzy_term_corrections left
+    # "pager duty" and "rabbit mq" completely untouched even though both are
+    # registered variants of "pagerduty"/"rabbitmq", not the canonical forms
+    # themselves.
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "pager duty is used for alerting and rabbit mq handles messaging."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert "pagerduty" in corrected.lower()
+    assert "pager duty" not in corrected.lower()
+    assert "rabbitmq" in corrected.lower()
+    assert "rabbit mq" not in corrected.lower()
+
+
+def test_already_canonical_terms_are_left_alone():
+    # The canonical spelling itself must never be "corrected" into anything
+    # else — only listed variants should be normalized.
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "PagerDuty is used for alerting and rabbitmq handles messaging."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert corrected == text
+    assert corrections == []
+
+
+def test_pub_slash_sub_corrected_to_product_name():
+    # Regression test: GCP Pub/Sub is routinely spelled out verbally ("pub
+    # slash sub") since "/" can't be spoken — a real generated KT left this
+    # uncorrected throughout an entire document (table rows, checklist
+    # items, danger zones all read "pub slash sub" verbatim).
+    text, _ = apply_devops_corrections("Review pub slash sub before making changes.")
+    assert "Pub/Sub" in text
+    assert "pub slash sub" not in text.lower()
+
+
+def test_graphana_typo_corrected_to_grafana():
+    # A live generated KT showed "Graphana dashboards" throughout, even
+    # though "Grafana" (correct spelling) appeared correctly elsewhere in
+    # the same document — the fuzzy multi-word corrector deliberately
+    # doesn't touch single words (see the "scanning"->"scaling"
+    # corruption this session reverted), so this needs an exact,
+    # single-token PHRASE_CORRECTIONS entry instead, same class of fix as
+    # "trevi" -> "Trivy".
+    text, _ = apply_devops_corrections("Review Graphana dashboards for the incident.")
+    assert "Grafana" in text
+    assert "Graphana" not in text
+
+
+def test_pager_duty_spacing_corrected_to_product_name():
+    text, _ = apply_devops_corrections("pager duty is used for alerting.")
+    assert "PagerDuty" in text
+
+
+def test_argo_cd_with_space_corrected_to_product_name():
+    # "Argo CD" (its own official stylization, two words) is at least as
+    # common in real speech as "ArgoCD" — must normalize the same way.
+    text, _ = apply_devops_corrections("Argo CD handles GitOps deployment.")
+    assert "ArgoCD" in text
+
+
+def test_brand_name_casing_batch_normalized_to_proper_product_names():
+    # A curated batch covering the highest-traffic devops_vocabulary.py
+    # entries whose spoken form commonly splits into separate words —
+    # these should reach real branded capitalization (via PHRASE_CORRECTIONS,
+    # which runs before the fuzzy safety net), not just a lowercase,
+    # word-glued canonical key.
+    cases = {
+        "We use mongo db for storage.": "MongoDB",
+        "Data lands in dynamo db.": "DynamoDB",
+        "Deployment uses code pipeline and code build.": ("CodePipeline", "CodeBuild"),
+        "Monitoring uses open telemetry and sonar qube.": ("OpenTelemetry", "SonarQube"),
+        "Alerts route through ops genie.": "OpsGenie",
+        "We use rabbit mq and active mq together.": ("RabbitMQ", "ActiveMQ"),
+        "Azure cosmos db is our primary store.": "Azure Cosmos DB",
+        "Rollback is handled by octopus deploy.": "Octopus Deploy",
+    }
+    for text, expected in cases.items():
+        corrected, _ = apply_devops_corrections(text)
+        expected_terms = (expected,) if isinstance(expected, str) else expected
+        for term in expected_terms:
+            assert term in corrected, f"expected {term!r} in {corrected!r} (from {text!r})"
+
+
+def test_brand_casing_corrections_do_not_misfire_on_ordinary_english_phrases():
+    # Terms deliberately excluded from the batch above because their
+    # "variant" spelling is also an ordinary English word/phrase (e.g.
+    # devops_vocabulary.py lists "customize" as a mishearing of "kustomize")
+    # — must never get swept into a devops-specific correction.
+    text = "Please customize the report before the team meeting."
+    corrected, _ = apply_devops_corrections(text)
+    assert "customize" in corrected.lower()
+    assert "kustomize" not in corrected.lower()

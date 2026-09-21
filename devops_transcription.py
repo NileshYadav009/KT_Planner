@@ -89,6 +89,51 @@ def get_known_terms() -> Tuple[List[str], Set[str]]:
     return _KNOWN_TERMS_CACHE
 
 
+_CANONICAL_KEY_MAP_CACHE: Optional[Dict[str, str]] = None
+_CANONICAL_KEY_MAP_CACHE_GLOSSARY_ID: Optional[int] = None
+
+
+def get_canonical_key_map() -> Dict[str, str]:
+    """Maps every lowercased DEVOPS_VOCABULARY variant string (including the
+    canonical key itself) to that entry's canonical key.
+
+    Exists because apply_fuzzy_term_corrections() used to treat ANY string
+    already present in get_known_terms()'s flattened set — canonical keys
+    AND every listed variant alike — as "already a known term, nothing to
+    correct". DEVOPS_VOCABULARY's variant lists are explicitly documented as
+    "the ways Whisper is likely to mis-transcribe" the canonical term (see
+    devops_vocabulary.py's module docstring), so a listed variant like
+    "pager duty" or "rabbit mq" is BY DEFINITION not the form that should
+    survive uncorrected — but the flattened-set check let it right through.
+    Confirmed live: apply_fuzzy_term_corrections("pager duty is used for
+    alerting and rabbit mq handles messaging.") returned the text completely
+    unchanged. This map lets the correction step distinguish "already
+    canonical, leave alone" from "a known garbled form, correct it" for
+    every one of the vocabulary's ~600 entries at once, instead of only the
+    handful hand-written into PHRASE_CORRECTIONS.
+    """
+    global _CANONICAL_KEY_MAP_CACHE, _CANONICAL_KEY_MAP_CACHE_GLOSSARY_ID
+
+    current_glossary = glossary.get_glossary()
+    if _CANONICAL_KEY_MAP_CACHE is not None and id(current_glossary) == _CANONICAL_KEY_MAP_CACHE_GLOSSARY_ID:
+        return _CANONICAL_KEY_MAP_CACHE
+
+    mapping: Dict[str, str] = {}
+    for canonical, aliases in DEVOPS_VOCABULARY.items():
+        canonical_lower = canonical.lower()
+        for alias in aliases:
+            mapping.setdefault(alias.lower(), canonical_lower)
+    # Canonical keys always map to themselves, set last and unconditionally
+    # so a key that also happens to appear in some OTHER entry's alias list
+    # can never be "corrected" away from its own correct spelling.
+    for canonical in DEVOPS_VOCABULARY:
+        mapping[canonical.lower()] = canonical.lower()
+
+    _CANONICAL_KEY_MAP_CACHE = mapping
+    _CANONICAL_KEY_MAP_CACHE_GLOSSARY_ID = id(current_glossary)
+    return _CANONICAL_KEY_MAP_CACHE
+
+
 def bucket_terms_by_word_count(terms: List[str]) -> Dict[int, Dict[str, List[str]]]:
     """Index terms by (word count, first letter of the first word) so n-gram
     fuzzy matching only scans same-length, same-first-letter candidates instead
@@ -171,6 +216,7 @@ PHRASE_CORRECTIONS = {
     r"desklation\s+path": "escalation path",
     r"trevi\b": "Trivy",
     r"argos\s+cd": "ArgoCD",
+    r"argo\s+cd": "ArgoCD",
     r"cache\s+clear": "cache layers",
     r"intra\s+changes": "infrastructure changes",
     r"infrastructure\s+as\s+cold": "Infrastructure as Code",
@@ -185,6 +231,19 @@ PHRASE_CORRECTIONS = {
     r"cloud\s+front": "CloudFront",
     r"postgres\s+sql": "PostgreSQL",
     r"fast\s+api": "FastAPI",
+    # GCP Pub/Sub is routinely spelled out verbally ("pub slash sub") since
+    # the "/" can't be spoken — never converted back to the product name
+    # anywhere downstream without this, so it persisted as "pub slash sub"
+    # verbatim throughout an entire generated KT (table rows, checklist
+    # items, danger zones) in a live GCP-transcript test.
+    r"pub\s+slash\s+sub": "Pub/Sub",
+    # Single-token typo, not a generic fuzzy-similarity match (that class
+    # of correction was deliberately reverted earlier — see
+    # apply_fuzzy_term_corrections' MIN_FUZZY_PHRASE_WORDS — after it
+    # corrupted unrelated words). This is exact and 1:1, same class of fix
+    # as "trevi" -> "Trivy" below.
+    r"graphana\b": "Grafana",
+    r"pager[\s-]?duty": "PagerDuty",
     r"front[\s-]?end": "frontend",
     r"hel[\s-]?checks": "health checks",
     r"redowning": "redeploying",
@@ -207,6 +266,50 @@ PHRASE_CORRECTIONS = {
     # Tense and grammar
     r"is\s+done": "goes down",
     r"what\s+breaks": "what breaks",
+
+    # ------------------------------------------------------------------
+    # Brand/product casing normalization — proper branded casing for the
+    # highest-value devops_vocabulary.py entries whose spoken form commonly
+    # splits into separate words ("mongo db", "code pipeline"). Runs before
+    # apply_fuzzy_term_corrections(), which now also normalizes ANY of the
+    # ~600 devops_vocabulary.py entries' variants to their canonical KEY
+    # (lowercase) as a safety net — this hand-curated set exists to get the
+    # highest-traffic terms to their real branded capitalization instead of
+    # stopping at a lowercase, word-glued key. Deliberately excludes any
+    # variant that's also an ordinary English word/phrase in its own right
+    # (e.g. devops_vocabulary.py's "customize" variant for "kustomize",
+    # or "batch"/"glue"/"teams"/"composer"/"bastion" for various AWS/Azure/
+    # GCP services) — those are too likely to misfire on unrelated sentences
+    # and were deliberately left out.
+    r"mongo[\s-]db": "MongoDB",
+    r"dynamo[\s-]db": "DynamoDB",
+    r"cockroach\s+db": "CockroachDB",
+    r"maria\s+db": "MariaDB",
+    r"influx\s+db": "InfluxDB",
+    r"timescale\s+db": "TimescaleDB",
+    r"document\s*db": "DocumentDB",
+    r"elastic[\s-]cache": "ElastiCache",
+    r"cloud[\s-]formation": "CloudFormation",
+    r"code\s+pipeline": "CodePipeline",
+    r"code\s+build": "CodeBuild",
+    r"code\s+deploy": "CodeDeploy",
+    r"event\s+bridge": "EventBridge",
+    r"open[\s-]telemetry": "OpenTelemetry",
+    r"sonar\s+(?:qube|cube)": "SonarQube",
+    r"ops[\s-]genie": "OpsGenie",
+    r"victor\s+ops": "VictorOps",
+    r"app\s+dynamics": "AppDynamics",
+    r"fluent\s+d\b": "Fluentd",
+    r"crowd\s+strike": "CrowdStrike",
+    r"build\s+kite": "Buildkite",
+    r"code\s+fresh": "Codefresh",
+    r"cross\s+plane": "Crossplane",
+    r"rabbit[\s-]m[\s-]?q": "RabbitMQ",
+    r"active[\s-]m[\s-]?q": "ActiveMQ",
+    r"zero[\s-]m[\s-]?q": "ZeroMQ",
+    r"amazon\s+m[\s-]?q": "Amazon MQ",
+    r"azure\s+cosmos\s+db|cosmos\s*db": "Azure Cosmos DB",
+    r"octopus\s+deploy": "Octopus Deploy",
 }
 
 # ============================================================================
@@ -424,6 +527,7 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
         return text, []
 
     known_terms, known_terms_set = get_known_terms()
+    canonical_map = get_canonical_key_map()
     terms_by_word_count = bucket_terms_by_word_count(known_terms)
 
     max_n = min(4, len(words))
@@ -431,7 +535,21 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
         for i in range(len(words) - n + 1):
             ngram_words = words[i:i+n]
             phrase = " ".join(ngram_words).lower()
-            if phrase in known_terms_set:
+            # Skip only when `phrase` is ALREADY the canonical spelling — not
+            # merely because it's somewhere in the flattened known-terms set.
+            # That flattened set also contains every listed VARIANT (the
+            # "ways Whisper is likely to mis-transcribe" the canonical term,
+            # per devops_vocabulary.py's own docstring) — treating a listed
+            # variant as "already fine, nothing to correct" was the actual
+            # live bug: apply_fuzzy_term_corrections("pager duty is used for
+            # alerting and rabbit mq handles messaging.") returned the text
+            # completely unchanged, because "pager duty" and "rabbit mq" are
+            # both registered variants, not canonical keys. Terms outside
+            # DEVOPS_VOCABULARY entirely (glossary-only or static-extra
+            # terms, absent from canonical_map) keep the original skip
+            # behavior — nothing to canonicalize them TO.
+            canonical_for_phrase = canonical_map.get(phrase)
+            if phrase in known_terms_set and (canonical_for_phrase is None or canonical_for_phrase == phrase):
                 continue
             # Skip n-grams where a word is already an exact known term on its own.
             # Without this, an already-correct word can get swept into a fuzzy
@@ -467,14 +585,26 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                 best_score = score
                 best_term = target
             if best_term and best_score >= threshold:
+                # Correct to the matched entry's CANONICAL key, not the raw
+                # candidate text — best_term can itself be a listed variant
+                # (e.g. matching "paegr duty" against the registered variant
+                # "pager duty" would otherwise just substitute one wrong-ish
+                # spacing for another instead of collapsing it to the
+                # canonical "pagerduty").
+                replacement = canonical_map.get(best_term, best_term)
+                if replacement == phrase:
+                    # Already the canonical spelling — no real correction to
+                    # make (this can happen when best_term resolves back to
+                    # the same phrase via canonicalization).
+                    continue
                 escaped_phrase = re.escape(" ".join(words[i:i+n]))
                 pattern = re.compile(rf"\b{escaped_phrase}\b", re.IGNORECASE)
-                corrected, count = pattern.subn(best_term, corrected, count=1)
+                corrected, count = pattern.subn(replacement, corrected, count=1)
                 if count > 0:
                     corrections.append({
                         "type": "fuzzy",
                         "original": phrase,
-                        "corrected": best_term,
+                        "corrected": replacement,
                         "score": float(best_score)
                     })
     return corrected, corrections

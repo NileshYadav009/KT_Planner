@@ -457,6 +457,36 @@ def test_enrich_architecture_knowledge_canonicalizes_bare_acronyms_to_branded_na
     assert "ecr" not in lowered
 
 
+def test_enrich_architecture_knowledge_recognizes_gcp_vocabulary():
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE",
+                      coverage_content=[
+                          "GKE is used for Kubernetes workloads.",
+                          "Pub/Sub is used for event ingestion and messaging.",
+                          "Dataflow is used for data processing.",
+                          "BigQuery is used for analytical workloads.",
+                          "Vertex AI supports machine learning.",
+                          "Airflow handles workflow orchestration.",
+                          "Container images are stored in Artifact Registry.",
+                          "Secret Manager handles secrets.",
+                      ]),
+        ],
+        "summary": {},
+    }
+    result = enrich_architecture_knowledge(ko)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    components = {c.lower() for c in arch["_architecture_components"]}
+    assert "google kubernetes engine" in components  # "gke" canonicalizes
+    assert "pub/sub" in components
+    assert "dataflow" in components
+    assert "bigquery" in components
+    assert "vertex ai" in components
+    assert "airflow" in components
+    assert "artifact registry" in components
+    assert "secret manager" in components
+
+
 def test_enrich_architecture_knowledge_noop_without_architecture_reference():
     ko = {"sections": [_section("system_overview", "SYSTEM OVERVIEW")], "summary": {}}
     result = enrich_architecture_knowledge(ko)
