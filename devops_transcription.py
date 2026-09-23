@@ -215,6 +215,11 @@ PHRASE_CORRECTIONS = {
     r"csed\s+tool": "CI/CD tool",
     r"desklation\s+path": "escalation path",
     r"trevi\b": "Trivy",
+    # "Trivi" (one-vowel swap from "Trivy") is at least as common a
+    # mishearing as "trevi" above — confirmed in a live AWS KT where the
+    # Security section's scanner name rendered as "Trivi for security
+    # scanning" throughout, never corrected.
+    r"trivi\b": "Trivy",
     r"argos\s+cd": "ArgoCD",
     r"argo\s+cd": "ArgoCD",
     r"cache\s+clear": "cache layers",
@@ -237,6 +242,11 @@ PHRASE_CORRECTIONS = {
     # verbatim throughout an entire generated KT (table rows, checklist
     # items, danger zones) in a live GCP-transcript test.
     r"pub\s+slash\s+sub": "Pub/Sub",
+    # "rural metadata" is Whisper mishearing "raw metadata" -- confirmed in
+    # a live GCP KT's Disaster Recovery section ("Rural metadata backed up
+    # daily"), a nonsensical phrase in a devops context that survived
+    # uncorrected to the final PDF.
+    r"\brural\s+metadata\b": "raw metadata",
     # Single-token typo, not a generic fuzzy-similarity match (that class
     # of correction was deliberately reverted earlier — see
     # apply_fuzzy_term_corrections' MIN_FUZZY_PHRASE_WORDS — after it
@@ -244,6 +254,15 @@ PHRASE_CORRECTIONS = {
     # as "trevi" -> "Trivy" below.
     r"graphana\b": "Grafana",
     r"pager[\s-]?duty": "PagerDuty",
+    # "certificate XBerry"/"certificate x berry" is Whisper mishearing
+    # "certificate expiry" — confirmed in two live Azure Banking KTs, where
+    # a Common Failures row rendered as the literal nonsense phrase
+    # "Certificate XBerry" with every other cell left blank (no likely
+    # cause/fix could be matched against a symptom name that isn't a real
+    # phrase), silently discarding what should have been a genuine known
+    # failure mode (cert expiry causing an outage).
+    r"certificate\s*x[\s-]?berry": "certificate expiry",
+    r"cert\s*x[\s-]?berry": "cert expiry",
     r"front[\s-]?end": "frontend",
     r"hel[\s-]?checks": "health checks",
     r"redowning": "redeploying",
@@ -329,6 +348,7 @@ WORD_CORRECTIONS = {
     "desklation": "escalation",
     "csed": "CI/CD",
     "trevi": "Trivy",
+    "trivi": "Trivy",
     "argos": "Argo",
     "katie": "KT",
     "pay-bin": "payment",

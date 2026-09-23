@@ -165,6 +165,35 @@ def test_brand_name_casing_batch_normalized_to_proper_product_names():
             assert term in corrected, f"expected {term!r} in {corrected!r} (from {text!r})"
 
 
+def test_trivi_typo_corrected_to_trivy():
+    # "Trivi" (one-vowel swap from "Trivy") slipped through uncorrected in a
+    # live AWS KT's Security section ("Trivi for security scanning"), even
+    # though the sibling mishearing "trevi" was already handled.
+    text, _ = apply_devops_corrections("Security scanning uses Trivi for container images.")
+    assert "Trivy" in text
+    assert "Trivi" not in text
+
+
+def test_certificate_xberry_corrected_to_certificate_expiry():
+    # "Certificate XBerry" is Whisper mishearing "certificate expiry" --
+    # confirmed in two live Azure Banking KTs, where a Common Failures row
+    # rendered as the literal nonsense phrase "Certificate XBerry" with
+    # every other cell blank (no likely cause/fix could match a symptom
+    # name that isn't a real phrase).
+    text, _ = apply_devops_corrections("Another common issue is Certificate XBerry.")
+    assert "certificate expiry" in text.lower()
+    assert "xberry" not in text.lower()
+
+
+def test_rural_metadata_corrected_to_raw_metadata():
+    # "Rural metadata" is Whisper mishearing "raw metadata" -- confirmed in
+    # a live GCP KT's Disaster Recovery section ("Rural metadata backed up
+    # daily"), a nonsensical phrase in a devops context.
+    text, _ = apply_devops_corrections("Rural metadata backed up daily.")
+    assert "raw metadata" in text.lower()
+    assert "rural" not in text.lower()
+
+
 def test_brand_casing_corrections_do_not_misfire_on_ordinary_english_phrases():
     # Terms deliberately excluded from the batch above because their
     # "variant" spelling is also an ordinary English word/phrase (e.g.

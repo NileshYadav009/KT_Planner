@@ -72,8 +72,24 @@ def _split_enumerated_items(text: str) -> List[str]:
     one-per-row ("review Pub/Sub, Dataflow, BigQuery, GKE, Airflow...").
     Without this split, that whole sentence lands in a single row/cell
     instead of becoming several distinct row items.
+
+    The caller passes one raw transcript "line", which despite the name can
+    actually span several sentences when upstream chunking didn't break on
+    sentence boundaries (e.g. "review X, Y, Z. Remember A, B, C. The danger
+    zones are D, E."). Without cutting at the first sentence boundary, the
+    comma-split below fuses the tail of one sentence onto the head of the
+    next into a single garbled item — confirmed on a real GCP transcript,
+    where this produced Day-1 checklist rows like "pager-duty. Remember the
+    main failure scenarios" and "schema changes. The danger zones are raw
+    event deletion" (no comma between the two halves, just ". " — a comma-
+    only split leaves them fused). Only the first sentence is treated as the
+    enumerated list; any later sentences are separate facts that belong to
+    other fields/sections, not this one.
     """
     s = text.strip().rstrip(".")
+    boundary = re.search(r"\.\s+(?=[A-Z])", s)
+    if boundary:
+        s = s[:boundary.start()]
     intro_matches = list(_ENUMERATION_INTRO_RE.finditer(s))
     if intro_matches:
         # Use the LAST enumeration-introducing verb, so a leading clause

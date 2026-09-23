@@ -211,6 +211,36 @@ excluding any variant that's also an ordinary English word/phrase (e.g.
 "customize" for kustomize) to avoid false positives. Full suite: **218
 passed, 0 failed, 9:22** — normal timing. See audit §9jj.
 
+**Update 2026-09-22 (full-fleet review of 8 generated KTs: sentence-fusion
+bug in list-splitting, missing "danger zone(s)" classification pattern, 3
+more mistranscriptions, fake-table-row renderer fix)**: user supplied 8
+generated KT PDFs at once spanning three fix generations and asked for a
+full quality rating + weakness pass plus a code read-through. Found and
+fixed 4 new real bugs: (1) `field_populator.py`'s `_split_enumerated_items()`
+fused two unrelated sentences together at a period boundary (no comma
+between them) into one garbled table row — reproduced exactly from a real
+GCP transcript ("pager-duty. Remember the main failure scenarios..."),
+fixed by cutting at the first sentence boundary before comma-splitting; (2)
+`section_rules.py`'s `danger_zones` classification never matched the
+literal phrase "danger zone(s)" (the section's own name!) or "sensitive
+area" — a real Azure transcript's "The main danger zones are X, Y, Z"
+sentence fell through to a different section, silently dropping 2 of 3
+named items; (3) three more mistranscriptions confirmed live and fixed the
+same way as §9ii's "trevi"->"Trivy" precedent: "Trivi"->"Trivy", "Certificate
+XBerry"->"certificate expiry" (seen in 2 separate Azure KTs), "Rural
+metadata"->"raw metadata"; (4) `open_responsibilities.py`'s raw-table
+fallback rendered an entire multi-sentence transition-plan paragraph as a
+single fake table row (one populated cell, rest blank) — now falls through
+to the narrative block when the fallback produces exactly one long
+(>20-word) row. Investigated and confirmed 3 other observations were
+stale pre-fix artifacts or PDF-extraction ambiguity, not live bugs (the
+GCP Customer-fabrication and AWS bare-acronym gaps are §9ii/§9hh's already-
+fixed issues on older cached PDFs; the "two-row" Historical Incident Record
+appearance on job 090F1472 is consistent with a page-break text-extraction
+artifact, re-confirmed `_historical_rows()` cannot produce a truly-blank
+cell). Full suite: **224 passed, 0 failed, 10:38** — normal timing. See
+audit §9kk.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered

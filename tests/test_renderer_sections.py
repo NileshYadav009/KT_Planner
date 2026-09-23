@@ -210,6 +210,32 @@ def test_open_responsibilities_falls_back_to_raw_table_without_structured_data()
     assert result["blocks"][0]["rows"][0]["Task / Responsibility"] == "Finish migrating the batch job to EKS"
 
 
+def test_open_responsibilities_renders_long_unstructured_blob_as_narrative_not_a_fake_table_row():
+    # Regression test for a real bug found on a live KT: when structured
+    # extraction isn't available, the raw type:"table" field fallback has
+    # no way to tell a genuine short task apart from an entire raw
+    # transition-plan paragraph -- it produced a single table row whose
+    # "Task / Responsibility" cell held a multi-sentence paragraph with
+    # every other column blank, which looks like structured data but isn't.
+    # A long single-row blob should fall through to the narrative block
+    # (sourced from coverage_content) instead.
+    long_blob = (
+        "Regarding open responsibilities and transition plan, only existing "
+        "and in-progress tasks are handed over. No new initiatives are "
+        "planned for the incoming owner during the first quarter, and any "
+        "additional scope should be raised with the platform engineering "
+        "manager before being accepted."
+    )
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {"open_tasks": {"value": long_blob}},
+        "coverage_content": [long_blob],
+    }
+    result = render_open_responsibilities(section)
+    assert not any(b["type"] == "DecisionTable" for b in result["blocks"])
+    assert any(long_blob in str(b) for b in result["blocks"])
+
+
 def test_open_responsibilities_shows_no_coverage_when_nothing_available():
     section = {"id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN", "fields": {}, "coverage_content": []}
     result = render_open_responsibilities(section)

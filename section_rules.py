@@ -32,6 +32,18 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bterraform\s+state\s+files?\s+manually\b",
             r"\bautoscaler\s+configuration\b",
             r"\brecovering\s+from\s+state\s+corruption\b",
+            # The section's own name spoken explicitly ("The main danger
+            # zones are X, Y, Z") is the single strongest possible signal,
+            # yet was missing from this list entirely — confirmed on a real
+            # Azure Banking transcript where that exact sentence fell
+            # through to a different section, silently dropping 2 of its 3
+            # named danger zones (Service Bus retention/dead-letter config,
+            # manual Kubernetes changes outside GitOps) from the rendered
+            # Danger Zones section even though they were said in the same
+            # breath as the one item that did get classified correctly.
+            r"\bdanger\s+zones?\b",
+            r"\bsensitive\s+area\b",
+            r"\brequir(?:es|ing)\s+caution\b",
         ],
         0.97,
     ),

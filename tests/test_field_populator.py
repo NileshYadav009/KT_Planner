@@ -476,3 +476,31 @@ def test_required_access_table_without_declared_rows_keeps_old_behavior():
     text = "For new team members, review Grafana dashboards, GitHub repositories, and pipelines."
     value = _extract_by_pattern(field, text)
     assert value == text
+
+
+def test_required_access_table_does_not_fuse_across_sentence_boundaries():
+    # Regression test for a real bug found in a live GCP transcript: the
+    # enumeration text handed to the splitter isn't always a single
+    # sentence — it can be three ("review X, Y, Z. Remember A, B, C. The
+    # danger zones are D, E.") glued together because upstream chunking
+    # didn't break on sentence boundaries. Without cutting at the first
+    # sentence boundary, the comma-only split fuses the tail of one
+    # sentence onto the head of the next (no comma between "pager-duty."
+    # and "Remember" -- just a period) into one garbled row like
+    # "pager-duty. Remember the main failure scenarios", which is exactly
+    # what a real generated KT's Day-1 checklist showed.
+    text = (
+        "For new team members, review pub slash sub, Dataflow, BigQuery, GKE, "
+        "Airflow, Vertex AI, Terraform, Argo CD, Secret Manager, and pager-duty. "
+        "Remember the main failure scenarios, pub slash sub backlog, unexpected "
+        "BigQuery query cost, Airflow DAG failures, and schema changes. The "
+        "danger zones are raw event deletion, BigQuery retention, and "
+        "partitioning, pub Slash sub retention, and manual GKE changes."
+    )
+    value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
+    lines = value.split("\n")
+    assert lines == [
+        "pub slash sub", "Dataflow", "BigQuery", "GKE", "Airflow",
+        "Vertex AI", "Terraform", "Argo CD", "Secret Manager", "pager-duty",
+    ]
+    assert not any("Remember" in line or "danger zones" in line for line in lines)

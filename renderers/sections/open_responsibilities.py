@@ -87,10 +87,24 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     if not blocks:
         if fields.get("open_tasks", {}).get("value"):
             rows = parse_table_rows(fields["open_tasks"]["value"], OPEN_TASKS_COLUMNS)
+            # A single row whose only populated cell is a long run of prose
+            # is not a task — it's a whole raw sentence that parse_table_rows
+            # (a last-resort, `\n`-split fallback with no structure-awareness
+            # of its own) had no way to split into real task rows. Rendering
+            # it as a table row makes it *look* like structured data ("Task /
+            # Responsibility: <giant paragraph>", every other column blank)
+            # when it's really unstructured narrative — confirmed on a real
+            # KT where this produced exactly that: one table row containing
+            # an entire multi-sentence transition-plan paragraph. Fall
+            # through to the narrative block below instead.
+            if len(rows) == 1 and len(str(rows[0].get(OPEN_TASKS_COLUMNS[0], "")).split()) > 20:
+                rows = []
             if rows:
                 blocks.append(build_decision_table("Open tasks", OPEN_TASKS_COLUMNS, rows))
         if fields.get("recurring_responsibilities", {}).get("value"):
             rows = parse_table_rows(fields["recurring_responsibilities"]["value"], RECURRING_RESPONSIBILITIES_COLUMNS)
+            if len(rows) == 1 and len(str(rows[0].get(RECURRING_RESPONSIBILITIES_COLUMNS[0], "")).split()) > 20:
+                rows = []
             if rows:
                 blocks.append(build_decision_table("Recurring responsibilities", RECURRING_RESPONSIBILITIES_COLUMNS, rows))
 
