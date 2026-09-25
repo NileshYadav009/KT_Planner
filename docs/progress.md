@@ -394,6 +394,45 @@ scale defect — it stays low because the transcript is short, and a
 headline metric shouldn't be adjusted until it flatters the output. Full
 suite: **280 passed, 0 failed**, up from 248. See audit §9pp.
 
+**Update 2026-09-25 (a per-DAY token quota misdiagnosed as a per-MINUTE
+one, three times, because the 429 body was never logged)**: user supplied
+a much larger transcript (~2,600 words, AWS/EKS/Aurora/Kafka trading
+platform) and asked to see the mapping end to end with a PDF. The run
+never finished — 23 consecutive rate-limit retries, zero structured
+extractions. **The real cause, found last: the account's binding limit is
+200,000 tokens per DAY and the earlier runs had spent it.** Provoking a
+429 and printing the body says so outright ("on tokens per day (TPD):
+Limit 200000, Used 199517") while the same response carries
+`x-ratelimit-remaining-tokens: 8000` — the per-minute bucket was full the
+whole time.
+
+The more useful finding is why that took four rounds. The retry warning
+logged `"rate-limited, retrying in 60s"` and **nothing about the error**,
+so the only signal available was the advertised per-minute header. Three
+plausible fixes were built and measured against that wrong signal before
+anyone read what the provider actually said — and `docs/LLM_PROVIDER.md`
+had *already documented* this exact gap ("doesn't distinguish a
+per-minute rate limit from a per-day quota exhaustion") without it being
+connected to the symptom. Lesson: a rate-limit log that omits the
+provider's own message is not diagnosable.
+
+Fixes: (1) **fail fast on a per-day quota** — recognize it from the
+provider's wording or from a `Retry-After` no retry could satisfy, and
+re-raise immediately so the existing fallback produces output at once
+instead of every call stalling 5 minutes first; (2) **log the exception
+text** in the retry warning; (3) the tokens-per-minute throttle is
+**kept but narrowed to opt-in, with the caveat that it neither caused nor
+fixes the above** — it closes a real latent gap (the throttle capped
+requests while providers meter tokens) and measurably reduced retry
+escalation, but it was built against a misread signal, so it no longer
+auto-activates from the learned header (it was silently throttling every
+Groq run to guard a ceiling that was never binding) and the Groq success
+path was reverted to plain `create()` instead of
+`with_raw_response.create()`. The capability stays, tested, for anyone
+actually on a TPM-bound tier; the behaviour change and the
+SDK-version-dependent accessor in every call's path do not.
+`tests/test_llm_provider.py` 11 → 32 tests. See audit §9qq.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered

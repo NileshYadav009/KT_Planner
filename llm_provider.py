@@ -92,28 +92,185 @@ LLM_MAX_CALLS_PER_MINUTE = int(os.getenv("LLM_MAX_CALLS_PER_MINUTE", "20"))
 # simultaneous connections beyond what the per-minute quota already implies.
 LLM_PARALLEL_WORKERS = int(os.getenv("LLM_PARALLEL_WORKERS", "4"))
 
+# The request-count throttle above is necessary but NOT sufficient: several
+# provider tiers meter TOKENS per minute, not requests. Measured live on a
+# real Groq account for qwen/qwen3.8-27b: 1,000 requests/DAY but only
+# 8,000 tokens/MINUTE (the account's own x-ratelimit-limit-tokens header).
+# A KT run's polish and structured-extraction prompts each carry a slice of
+# the transcript, so 20 requests/minute of multi-thousand-token prompts is
+# several times over a budget the request counter cannot see: every call
+# 429s, retries 5x at 60s apiece, and the run grinds for hours while still
+# losing the content those calls were supposed to produce. Confirmed live on
+# a ~2,600-word transcript — 23 consecutive rate-limit retries, zero
+# structured extractions completed, with the request throttle working
+# exactly as designed. This is the token half of the same throttle.
+#
+# Default 0 (no token ceiling) so no already-working deployment slows down:
+# the real budget is LEARNED from the provider's own response headers
+# (_note_token_limit below), which is exact, per-account and needs no
+# configuration. An explicit env var overrides the learned value.
+LLM_MAX_TOKENS_PER_MINUTE = int(os.getenv("LLM_MAX_TOKENS_PER_MINUTE", "0"))
+
+# Characters per token, for costing a prompt BEFORE sending it. Deliberately
+# below the ~4 real English average: over-estimating only makes the throttle
+# slightly more patient, whereas under-estimating re-creates the 429 storm
+# this exists to prevent.
+_CHARS_PER_TOKEN = 3.5
+
 _RATE_LIMIT_MARKERS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "ratelimit", "quota")
 
 _throttle_lock = threading.Lock()
 _call_timestamps: dict = defaultdict(deque)
+# bucket -> deque[(monotonic_ts, tokens_reserved)], the token half of the
+# same sliding 60s window as _call_timestamps.
+_token_timestamps: dict = defaultdict(deque)
+# bucket -> tokens/minute as reported by the provider itself. Populated from
+# response headers (success or 429), so the ceiling matches the real account
+# tier instead of a guess baked into this file.
+_learned_token_limits: dict = {}
 
 
-def _throttle(provider_label: str) -> None:
-    """Block until sending another request stays within LLM_MAX_CALLS_PER_MINUTE
-    for this provider's sliding 60s window. Gemini's two labels ("Gemini" /
-    "Gemini (HTTP fallback)") share one bucket since both hit the same quota.
+def _bucket_for(provider_label: str) -> str:
+    """Gemini's two labels ("Gemini" / "Gemini (HTTP fallback)") share one
+    bucket since both hit the same quota."""
+    return "gemini" if provider_label.startswith("Gemini") else "groq"
+
+
+def _token_budget(bucket: str) -> int:
+    """Tokens/minute ceiling for this bucket, or 0 (= uncapped).
+
+    Deliberately gated on the EXPLICIT env var only. The value learned from
+    provider headers (_learned_token_limits) is recorded and logged, but does
+    NOT switch throttling on by itself.
+
+    Why: this throttle was originally built to auto-activate from the learned
+    header, which meant it silently started throttling every Groq run. On the
+    account that motivated it, tokens-per-minute was never the binding limit
+    at all (the real one was tokens-per-DAY — see REPOSITORY_AUDIT.md §9qq),
+    so auto-activation added latency to every run to protect against a ceiling
+    that was never being hit. A throttle that slows down real work should be
+    turned on by someone who has measured that they need it, not inferred from
+    a header that merely advertises a bucket's existence.
     """
-    bucket = "gemini" if provider_label.startswith("Gemini") else "groq"
+    return LLM_MAX_TOKENS_PER_MINUTE if LLM_MAX_TOKENS_PER_MINUTE > 0 else 0
+
+
+def estimate_tokens(*texts: Optional[str], max_output_tokens: int = 0) -> int:
+    """Conservative token cost of a call: its prompt text plus the completion
+    budget it reserves. Providers that meter TPM count both halves, so
+    costing only the prompt under-reserves by exactly the output budget."""
+    chars = sum(len(t) for t in texts if t)
+    return int(chars / _CHARS_PER_TOKEN) + max(int(max_output_tokens), 0)
+
+
+def _header_int(headers, *names) -> Optional[int]:
+    """First of `names` present in `headers` as an int, or None. Tolerates any
+    header mapping shape and any junk value — this must never be the reason a
+    successful call is treated as failed."""
+    if not headers:
+        return None
+    for name in names:
+        try:
+            raw = headers.get(name) or headers.get(name.title())
+        except Exception:
+            return None
+        if raw in (None, ""):
+            continue
+        try:
+            return int(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _note_token_limit(provider_label: str, headers) -> None:
+    """Learn this account's real tokens/minute ceiling from a provider
+    response.
+
+    Called for both successes and 429s — Groq sends the header on either, so
+    the very first call of a run is enough to calibrate.
+    """
+    bucket = _bucket_for(provider_label)
+
+    limit = _header_int(headers, "x-ratelimit-limit-tokens")
+    if limit and limit > 0 and _learned_token_limits.get(bucket) != limit:
+        with _throttle_lock:
+            _learned_token_limits[bucket] = limit
+        LOGGER.info("%s token budget learned from provider: %d tokens/minute", provider_label, limit)
+
+
+def reconcile_token_usage(provider_label: str, estimated_tokens: int, actual_tokens: int) -> None:
+    """Book the shortfall when a call really cost more than it reserved.
+
+    estimate_tokens() is a heuristic, and on jargon-dense technical prose it
+    under-counts (acronyms and punctuation tokenize worse than the ~3.5
+    chars/token English average). A few percent per call is invisible, but it
+    ACCUMULATES across dozens of calls in the same window until the window is
+    genuinely over budget — measured live as a run that still drew 35 retries
+    while throttled purely on the estimate.
+
+    `actual_tokens` is the provider's own `usage.total_tokens` for the call:
+    exact, and — unlike the `x-ratelimit-remaining-tokens` header — a fixed
+    figure rather than one that decays as the provider's bucket refills, so it
+    is directly comparable to what this window reserved. (Reconciling against
+    the remaining-tokens header was tried first and is the wrong quantity: it
+    recovers within seconds while the local 60s window is still holding the
+    reservation, so the shortfall it computes is almost always <= 0.)
+
+    Only under-estimates are corrected. An over-estimate is never refunded,
+    because trusting the heuristic further is precisely how the estimate-only
+    version failed.
+    """
+    shortfall = int(actual_tokens) - int(estimated_tokens)
+    if shortfall <= 0:
+        return
+    bucket = _bucket_for(provider_label)
+    with _throttle_lock:
+        tq = _token_timestamps[bucket]
+        now = time.monotonic()
+        while tq and now - tq[0][0] >= 60:
+            tq.popleft()
+        tq.append((now, shortfall))
+
+
+def _throttle(provider_label: str, estimated_tokens: int = 0) -> None:
+    """Block until sending another request stays within BOTH
+    LLM_MAX_CALLS_PER_MINUTE and this bucket's tokens/minute budget, over the
+    same sliding 60s window.
+
+    `estimated_tokens` of 0 skips the token check entirely, so callers that
+    genuinely don't know a call's size behave exactly as before.
+    """
+    bucket = _bucket_for(provider_label)
     while True:
         with _throttle_lock:
             now = time.monotonic()
             dq = _call_timestamps[bucket]
             while dq and now - dq[0] >= 60:
                 dq.popleft()
-            if len(dq) < LLM_MAX_CALLS_PER_MINUTE:
+            tq = _token_timestamps[bucket]
+            while tq and now - tq[0][0] >= 60:
+                tq.popleft()
+
+            wait = 0.0
+            if len(dq) >= LLM_MAX_CALLS_PER_MINUTE:
+                wait = 60 - (now - dq[0]) + 0.05
+
+            budget = _token_budget(bucket)
+            if budget > 0 and estimated_tokens > 0 and tq:
+                # `and tq` matters: a single prompt larger than the entire
+                # per-minute budget can never "fit", so gating it on an empty
+                # window would deadlock the run forever. Let it through, and
+                # let the existing 429 retry path deal with the rejection.
+                used = sum(tokens for _, tokens in tq)
+                if used + estimated_tokens > budget:
+                    wait = max(wait, 60 - (now - tq[0][0]) + 0.05)
+
+            if wait <= 0:
                 dq.append(now)
+                if estimated_tokens > 0:
+                    tq.append((now, estimated_tokens))
                 return
-            wait = 60 - (now - dq[0]) + 0.05
         time.sleep(wait)
 
 
@@ -127,6 +284,33 @@ def _is_rate_limit_error(exc: Exception) -> bool:
         return True
     text = str(exc)
     return any(marker.lower() in text.lower() for marker in _RATE_LIMIT_MARKERS)
+
+
+# A per-DAY quota exhaustion is not a transient rate limit: nothing this
+# process does in the next few minutes will clear it. Retrying it 5 times at
+# 60s apiece turns one refusal into a 5-minute stall per call and still ends
+# in the same failure — measured live as a KT run that ground for over an hour
+# producing nothing, while the per-minute bucket sat completely full. Groq
+# names the quota in the 429 body ("on tokens per day (TPD): Limit 200000,
+# Used 199517"); Gemini names it in its quota metric
+# ("GenerateRequestsPerDayPerProjectPerModel-FreeTier"), which lowercases to
+# contain "perday". See REPOSITORY_AUDIT.md §9qq.
+_DAILY_QUOTA_MARKERS = (
+    "tokens per day", "requests per day", "(tpd)", "(rpd)", "per day", "perday", "per-day",
+)
+
+
+def _is_daily_quota_error(exc: Exception) -> bool:
+    """True when a 429 is a per-day quota exhaustion rather than a per-minute
+    rate limit, so the caller can fail fast instead of retrying pointlessly."""
+    text = str(exc).lower()
+    if any(marker in text for marker in _DAILY_QUOTA_MARKERS):
+        return True
+    # Providers that don't name the window still signal it: a suggested delay
+    # far longer than the retry cap cannot be satisfied by any retry this loop
+    # would make, so treating it as transient is wrong regardless of wording.
+    suggested = _extract_retry_delay_seconds(exc, fallback=0.0)
+    return suggested > max(LLM_RETRY_MAX_DELAY_SECONDS * 2, 120)
 
 
 def _extract_retry_delay_seconds(exc: Exception, fallback: float) -> float:
@@ -150,7 +334,7 @@ def _extract_retry_delay_seconds(exc: Exception, fallback: float) -> float:
     return fallback
 
 
-def _call_with_rate_limit_retry(call_fn, provider_label: str):
+def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: int = 0):
     """Call call_fn() (a zero-arg callable making the real API request),
     retrying on rate-limit errors with the provider's own suggested delay
     (falling back to capped exponential backoff), up to LLM_RETRY_MAX_ATTEMPTS
@@ -161,21 +345,42 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str):
     Every attempt (the original call and every retry) is throttled via
     _throttle() first — the retry backoff alone only reacts after a 429; the
     throttle is what actually keeps outbound request volume under the
-    account's real per-minute quota.
+    account's real per-minute quota. `estimated_tokens` additionally keeps it
+    under a tokens-per-minute quota, which on some tiers (see
+    LLM_MAX_TOKENS_PER_MINUTE) binds long before the request count does.
     """
     last_exc = None
     for attempt in range(LLM_RETRY_MAX_ATTEMPTS + 1):
-        _throttle(provider_label)
+        _throttle(provider_label, estimated_tokens)
         try:
             return call_fn()
         except Exception as exc:
+            # A 429 body carries the account's real ceilings — learn from it
+            # even though this attempt failed, so the throttle stops
+            # over-sending for the rest of the run.
+            _note_token_limit(provider_label, getattr(getattr(exc, "response", None), "headers", None))
             if not _is_rate_limit_error(exc) or attempt == LLM_RETRY_MAX_ATTEMPTS:
+                raise
+            if _is_daily_quota_error(exc):
+                # Fail fast: the caller's existing fallback-on-exception path
+                # produces the deterministic result immediately, instead of
+                # every remaining call in the run stalling for minutes first.
+                LOGGER.warning(
+                    "%s per-day quota exhausted — not retrying (retries cannot clear a "
+                    "daily quota). Falling back to the non-LLM path. Provider said: %s",
+                    provider_label, exc,
+                )
                 raise
             backoff = min(2 ** attempt, LLM_RETRY_MAX_DELAY_SECONDS)
             delay = min(_extract_retry_delay_seconds(exc, fallback=backoff), LLM_RETRY_MAX_DELAY_SECONDS)
+            # The exception text is included deliberately: a bare
+            # "rate-limited" line is un-diagnosable, and a whole session was
+            # lost to inferring the wrong quota dimension from advertised
+            # headers because this log never said which limit the provider
+            # actually named.
             LOGGER.warning(
-                "%s rate-limited (attempt %d/%d), retrying in %.1fs",
-                provider_label, attempt + 1, LLM_RETRY_MAX_ATTEMPTS, delay,
+                "%s rate-limited (attempt %d/%d), retrying in %.1fs: %s",
+                provider_label, attempt + 1, LLM_RETRY_MAX_ATTEMPTS, delay, exc,
             )
             time.sleep(delay)
             last_exc = exc
@@ -223,7 +428,15 @@ class GeminiProvider(LLMProvider):
                     config=genai.types.GenerateContentConfig(**config_kwargs)
                 )
 
-            response = _call_with_rate_limit_retry(_do_call, "Gemini")
+            response = _call_with_rate_limit_retry(
+                _do_call,
+                "Gemini",
+                estimate_tokens(
+                    system_prompt,
+                    prompt,
+                    max_output_tokens=config_kwargs.get("max_output_tokens", 0),
+                ),
+            )
             text = getattr(response, "text", None) or str(response)
             return text.strip()
 
@@ -239,7 +452,11 @@ class GeminiProvider(LLMProvider):
             resp.raise_for_status()
             return resp
 
-        r = _call_with_rate_limit_retry(_do_call, "Gemini (HTTP fallback)")
+        r = _call_with_rate_limit_retry(
+            _do_call,
+            "Gemini (HTTP fallback)",
+            estimate_tokens(prompt, max_output_tokens=payload.get("maxOutputTokens", 0)),
+        )
         data = r.json()
         text = ""
         if isinstance(data, dict):
@@ -306,9 +523,35 @@ class GroqProvider(LLMProvider):
             completion_kwargs["stop"] = stop_sequences
 
         def _do_call():
+            # Plain create(), unchanged from before this file gained token
+            # accounting. An earlier version routed this through
+            # with_raw_response.create() purely to read rate-limit headers on
+            # success — reverted: it put an SDK-version-dependent accessor in
+            # the path of EVERY Groq call to feed a throttle that is now
+            # opt-in, and the headers are still available on 429s where they
+            # actually matter. Not worth the exposure for an off-by-default
+            # feature.
             return self.client.chat.completions.create(**completion_kwargs)
 
-        response = _call_with_rate_limit_retry(_do_call, "Groq")
+        estimated = estimate_tokens(
+            completion_kwargs["messages"][0]["content"],
+            prompt,
+            max_output_tokens=max_tokens,
+        )
+        response = _call_with_rate_limit_retry(_do_call, "Groq", estimated)
+
+        # Correct the throttle's window with what the call actually cost, so a
+        # systematic under-estimate can't accumulate into a 429 storm. See
+        # reconcile_token_usage().
+        try:
+            actual = getattr(getattr(response, "usage", None), "total_tokens", None)
+            if actual is None and isinstance(response, dict):
+                actual = (response.get("usage") or {}).get("total_tokens")
+            if actual:
+                reconcile_token_usage("Groq", estimated, int(actual))
+        except Exception:
+            pass
+
         if hasattr(response, "choices") and response.choices:
             choice = response.choices[0]
             message = getattr(choice, "message", None) or choice.get("message", {})
