@@ -91,10 +91,22 @@ def _split_enumerated_items(text: str) -> List[str]:
     if boundary:
         s = s[:boundary.start()]
     intro_matches = list(_ENUMERATION_INTRO_RE.finditer(s))
-    if intro_matches:
-        # Use the LAST enumeration-introducing verb, so a leading clause
-        # like "For new team members, review X, Y, Z" keeps only "X, Y, Z".
-        s = s[intro_matches[-1].end():]
+    if not intro_matches:
+        # No genuine enumeration-introducing verb ("review"/"access"/
+        # "requires"/...) anywhere in the sentence is strong evidence this
+        # isn't actually a list of discrete items at all — confirmed on a
+        # real GCP transcript: "For Kubernetes issues, check GKE and
+        # ArgoCD." (a troubleshooting tip, not an enumeration) has 1 comma
+        # plus "and", which is enough to reach this function, but blindly
+        # splitting on that comma/and anyway produced three bogus "items"
+        # ("For Kubernetes issues", "check GKE", "ArgoCD") for a Day-1
+        # required-access table. Returning it unsplit lets the caller's
+        # `len(items) >= 3` acceptance check correctly reject the (absent)
+        # split and keep the original sentence intact instead.
+        return [s.strip(" .")] if s.strip(" .") else []
+    # Use the LAST enumeration-introducing verb, so a leading clause like
+    # "For new team members, review X, Y, Z" keeps only "X, Y, Z".
+    s = s[intro_matches[-1].end():]
     parts = re.split(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*", s)
     return [p.strip(" .") for p in parts if p.strip(" .")]
 
@@ -133,6 +145,14 @@ PATTERN_EXTRACTORS = {
         r"Cloud\s+Build|"
         r"Dataflow|Airflow|Vertex\s+AI|Cloud\s+Storage|"
         r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
+        # ".NET microservices" is an extremely common way to name the backend
+        # in an Azure KT, but the leading "." can't sit inside this regex's
+        # outer \b(...)\b, so the dotted form is matched via its "NET
+        # microservices" tail and canonicalized back to ".NET" by
+        # knowledge_builder._CANONICAL_TERM_ALIASES. Without this the whole
+        # backend tier was invisible to the component list, the Technology
+        # summary and the architecture diagram alike.
+        r"ASP\.NET|NET\s+microservices?|dotnet|"
         r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,
     ),
@@ -142,8 +162,110 @@ PATTERN_EXTRACTORS = {
     "email": re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"),
     "environments": re.compile(r"\b(prod(?:uction)?|staging|qa|dev(?:elopment)?|sandbox|uat|pre-?prod)\b", re.IGNORECASE),
     "region": re.compile(r"\b(us-east-[12]|us-west-[12]|eu-west-[123]|eu-central-1|ap-south-1|ap-southeast-[12]|ap-northeast-[123])\b"),
-    "orders_per_day": re.compile(r"(\d[\d,]+)\s*orders?\s*(?:per|a)\s*day", re.IGNORECASE),
+    # Allows a descriptor between the figure and "orders" -- "120,000
+    # customer orders per day" is at least as common as the bare form, and
+    # without this the volume fell through to the LLM/semantic path instead
+    # of being captured deterministically.
+    "orders_per_day": re.compile(
+        r"(\d[\d,]+)\s*(?:[A-Za-z]+\s+){0,2}orders?\s*(?:per|a)\s*day", re.IGNORECASE
+    ),
 }
+
+_RTO_RE = re.compile(
+    r"\b(?:rto|recovery\s+time\s+objective)\b"
+    # Tolerates a spoken-transcript-style acronym callout set off by a comma
+    # or parenthesis ("the recovery time objective, RTO, is 2 hours") -- a
+    # live real transcript produced exactly this phrasing and the earlier,
+    # stricter version of this regex (only an optional bare "(rto)") failed
+    # to match it at all, silently dropping an explicitly stated RTO.
+    r"(?:\s*[,(]\s*rto\s*[,)]\s*)?"
+    r"\s*(?:is|of|:)\s*"
+    r"(\d+\s*(?:minutes?|mins?|hours?|hrs?|days?))",
+    re.IGNORECASE,
+)
+_RPO_RE = re.compile(
+    r"\b(?:rpo|recovery\s+point\s+objective)\b"
+    r"(?:\s*[,(]\s*rpo\s*[,)]\s*)?"
+    r"\s*(?:is|of|:)\s*"
+    r"(\d+\s*(?:minutes?|mins?|hours?|hrs?|days?))",
+    re.IGNORECASE,
+)
+
+
+_CUSTOMER_REACH_RE = re.compile(
+    r"\b("
+    r"web\s+and\s+mobile(?:\s+(?:applications?|channels?|users?|clients?))?"
+    r"|mobile\s+and\s+web(?:\s+(?:applications?|channels?|users?|clients?))?"
+    r"|b2b\s+(?:partners?|customers?|clients?|users?)"
+    r"|b2c\s+(?:users?|customers?)"
+    r"|internal\s+(?:teams?|users?|staff)"
+    r"|external\s+customers?"
+    r"|customers?\s+globally"
+    r"|end\s+users?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def extract_customer_reach(text: str) -> Optional[str]:
+    """Who/what channels the system serves, e.g. "web and mobile applications".
+
+    A dedicated pattern rather than a semantic match because the reach is
+    routinely stated in the SAME sentence as the business volume ("processes
+    around 120,000 customer orders per day through web and mobile
+    applications"). Whichever field claims that line first excludes it from
+    the other, so on a live run the volume was captured and the reach was
+    lost outright — one sentence genuinely carries two independent facts.
+    Reading the section text directly sidesteps the line-claiming exclusion.
+    """
+    if not text:
+        return None
+    seen: List[str] = []
+    for match in _CUSTOMER_REACH_RE.finditer(text):
+        phrase = re.sub(r"\s+", " ", match.group(1)).strip().lower()
+        if phrase not in [s.lower() for s in seen]:
+            seen.append(phrase)
+    if not seen:
+        return None
+    # "b2b"/"b2c" are acronyms; everything else reads better sentence-cased.
+    def _present(p: str) -> str:
+        return re.sub(r"\b(b2b|b2c)\b", lambda m: m.group(1).upper(), p)
+    return ", ".join(_present(p) for p in seen)
+
+
+def extract_rto_rpo(text: str) -> Dict[str, str]:
+    """Deterministically capture an explicitly stated RTO/RPO duration (e.g.
+    "RTO is 2 hours and RPO is 15 minutes") independent of the LLM provider,
+    into dedicated `rto_metric`/`rpo_metric` fields.
+
+    disaster_recovery has no "fields" array in kt_schema_new.json — it's a
+    digest-only section, so before this function existed, RTO/RPO were only
+    ever captured incidentally, if at all, by the structured LLM prompt
+    (llm/prompts.py's disaster_recovery schema), which silently returns
+    nothing whenever get_llm_provider() is unavailable (llm_provider.py's
+    own catch-and-return-None behavior). A plainly-stated RTO/RPO sentence
+    should never depend on LLM availability to survive into the document.
+
+    Deliberately NOT named "rto_steps"/"rpo_steps" — those field ids are
+    already owned by the LLM prompt's own schema, which uses them for the
+    recovery PROCEDURE ("restore database from backups", "recreate
+    infrastructure"), not the duration metric. Writing this function's plain
+    numeric value into that same slot silently destroyed a real procedure
+    narrative the LLM had captured (confirmed live: "Restore database from
+    Azure SQL backups" / "Recreate infrastructure" / "Backups retained for
+    35 days" disappeared, replaced by a bare, unlabeled "2 hours"). Metric
+    and procedure are two different facts and must not share a field.
+    """
+    result: Dict[str, str] = {}
+    if not text:
+        return result
+    rto = _RTO_RE.search(text)
+    if rto:
+        result["rto_metric"] = rto.group(1).strip()
+    rpo = _RPO_RE.search(text)
+    if rpo:
+        result["rpo_metric"] = rpo.group(1).strip()
+    return result
 
 
 def _extract_escalation_chain(text: str) -> Optional[str]:
@@ -233,6 +355,11 @@ def _extract_by_pattern(
         match = PATTERN_EXTRACTORS["orders_per_day"].search(section_text)
         if match:
             return f"{match.group(1)} orders per day"
+
+    if field_id == "customer_reach":
+        reach = extract_customer_reach(section_text)
+        if reach:
+            return reach
 
     if field_id != "oncall_tool" and ("tool" in field_id or "technolog" in field_id or "stack" in field_id):
         tools = PATTERN_EXTRACTORS["tools"].findall(section_text)
@@ -453,12 +580,32 @@ def _extract_by_semantic(
     from sentence_transformers import util as st_util
 
     field_text = f"{field.get('label', '')} {field.get('description', '')}"
+
+    # A field whose own definition names concrete technologies ("Cache Layer
+    # / Redis / ElastiCache configuration") is only satisfied by a sentence
+    # that actually talks about one of them. Cosine similarity alone is not
+    # that evidence: on a live KT, "Flux synchronizes the new version into
+    # AKS. Rollback is performed by reverting the Git deployment
+    # configuration..." scored over the flat 0.35 threshold against the
+    # Cache Layer field and was published as the system's cache layer —
+    # every word of it about GitOps deployment instead. Restrict to
+    # anchor-bearing candidates when any exist; when none do, demand much
+    # stronger similarity rather than silently taking the best of a bad set.
+    anchors = {a.lower() for a in PATTERN_EXTRACTORS["tools"].findall(field_text)}
+    threshold = 0.35
+    if anchors:
+        anchored = [s for s in sentences if any(a in s.lower() for a in anchors)]
+        if anchored:
+            sentences = anchored
+        else:
+            threshold = 0.55
+
     field_emb = model.encode(field_text, convert_to_tensor=True, normalize_embeddings=True)
     sent_embs = model.encode(sentences, convert_to_tensor=True, normalize_embeddings=True)
     scores = st_util.cos_sim(field_emb, sent_embs)[0]
     best_idx = int(scores.argmax().item())
     best_score = float(scores[best_idx].item())
-    if best_score >= 0.35:
+    if best_score >= threshold:
         return sentences[best_idx]
     return None
 

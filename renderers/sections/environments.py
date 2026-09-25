@@ -1,7 +1,10 @@
 from typing import Any, Dict, List
 from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.narrative import build_block as build_narrative_block
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import (
+    no_coverage_block,
+    coverage_paragraphs as shared_coverage_paragraphs,
+)
 
 COLUMNS = ["Environment", "Known characteristics"]
 
@@ -19,10 +22,9 @@ def _field_value(fields: Dict[str, Any], field_id: str):
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
-    content = section.get("coverage_content") or []
-    if isinstance(content, str):
-        content = [content]
-    return [str(item).strip() for item in content if isinstance(item, str) and item.strip()]
+    # Shared implementation: splits polish-pass bullet blobs and drops
+    # repeats. See renderers/blocks/common.coverage_paragraphs().
+    return shared_coverage_paragraphs(section)
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,6 +47,19 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         known_differences = _field_value(fields, "known_differences")
         if isinstance(known_differences, str) and known_differences.strip():
             blocks.append(build_narrative_block("Known differences / limitations", [known_differences.strip()]))
+
+        # The table has one row per schema-declared environment
+        # (Production/Staging/Non-production), so a transcript naming any
+        # OTHER environment has nowhere to put it — "The platform has
+        # development, QA, staging, and production environments." was
+        # dropped outright on a live run, losing the existence of the dev
+        # and QA environments entirely. Anything captured for this section
+        # that isn't already shown in a row still surfaces here.
+        shown = {row["Known characteristics"] for row in rows}
+        leftover = [p for p in _coverage_paragraphs(section) if p not in shown]
+        if leftover:
+            blocks.append(build_narrative_block("Additional environment notes", leftover))
+
         blocks.append(build_narrative_block("Do not over-infer", [NOT_PROVIDED_NOTE]))
         return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
 

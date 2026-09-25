@@ -86,6 +86,61 @@ def test_supporting_infrastructure_only_still_renders_its_own_sections():
     assert "Jenkins" in diagram and "CI" in diagram
 
 
+def test_bare_compute_hub_with_no_chain_or_fanout_is_not_rendered_as_a_floating_node():
+    # Regression test for a real live KT: a transcript naming only
+    # Kubernetes, Terraform, and Jenkins (no frontend/CDN/LB, no fan-out
+    # services/databases) produced a diagram with a standalone "Kubernetes"
+    # line with zero arrows or context, immediately followed by a separate
+    # "Jenkins -> CI -> Kubernetes" CI/CD flow ending at the exact same
+    # node — the same fact rendered twice as if it were two disconnected
+    # pieces of information. A lone node with no relationships conveys
+    # nothing the flat Architecture Knowledge list doesn't already say, so
+    # the main-flow section should be omitted in that case; the CI/CD flow
+    # (and any other supporting section) still renders normally.
+    diagram = build_architecture_flow_diagram(["Kubernetes", "Terraform", "Jenkins"])
+    assert diagram is not None
+    lines = [l.strip() for l in diagram.splitlines() if l.strip()]
+    # "Kubernetes" only legitimately appears as the CI/CD flow's
+    # destination, never as an isolated leading line with no arrow.
+    assert lines[0] != "Kubernetes"
+    assert "Jenkins" in diagram and "CI" in diagram and "Kubernetes" in diagram
+    assert "Terraform ──► Infrastructure" in diagram
+
+
+def test_dependency_layers_are_visually_distinguished_from_the_hosted_workload():
+    # A compute hub with both a hosted service AND dependencies (database/
+    # cache/queue) used to render all four as identical "├──" tree children
+    # of the same hub — visually implying the database/cache/queue were
+    # hosted INSIDE the compute node, when really only the service (the
+    # application workload) is hosted there; the database/cache/queue are
+    # dependencies OF that workload, not of the cluster itself. A labeled
+    # sub-group must separate the two.
+    components = ["FastAPI", "Amazon EKS", "Amazon RDS", "Redis", "Amazon SQS"]
+    diagram = build_architecture_flow_diagram(components)
+    assert diagram is not None
+    assert "(workload dependencies)" in diagram
+
+    lines = diagram.splitlines()
+    hosted_idx = next(i for i, l in enumerate(lines) if "FastAPI" in l)
+    label_idx = next(i for i, l in enumerate(lines) if "(workload dependencies)" in l)
+    dependency_idx = next(i for i, l in enumerate(lines) if "Amazon RDS" in l)
+    # The label appears after the hosted workload and before the
+    # dependencies it's introducing.
+    assert hosted_idx < label_idx < dependency_idx
+
+
+def test_dependency_label_omitted_when_no_hosted_workload_is_named():
+    # No service/app-framework term named (only a database) — there's
+    # nothing to distinguish the dependency FROM, so no label should be
+    # added; this must render exactly as it did before the hosted/
+    # dependency split.
+    components = ["Application Load Balancer", "Amazon EKS", "Amazon RDS"]
+    diagram = build_architecture_flow_diagram(components)
+    assert diagram is not None
+    assert "(workload dependencies)" not in diagram
+    assert "├── Amazon RDS" in diagram or "└── Amazon RDS" in diagram
+
+
 def test_no_recognizable_layer_terms_returns_none():
     # Nothing here maps to any known layer at all. Must not fabricate an
     # empty or misleading diagram.

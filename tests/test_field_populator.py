@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from field_populator import (
     populate_fields, find_source_sentence_index, _build_llm_gap_fill_prompt, _extract_by_semantic,
-    _extract_by_pattern,
+    _extract_by_pattern, extract_rto_rpo, PATTERN_EXTRACTORS,
 )
 
 
@@ -504,3 +504,216 @@ def test_required_access_table_does_not_fuse_across_sentence_boundaries():
         "Vertex AI", "Terraform", "Argo CD", "Secret Manager", "pager-duty",
     ]
     assert not any("Remember" in line or "danger zones" in line for line in lines)
+
+
+def test_required_access_table_does_not_shred_a_non_enumerated_troubleshooting_sentence():
+    # Regression test for a real bug found via a live LLM-enabled pipeline
+    # run on a GCP transcript: "For Kubernetes issues, check GKE and
+    # ArgoCD." is a troubleshooting tip, not a list of access items -- it
+    # has no enumeration-introducing verb ("review"/"access"/"requires"/...)
+    # anywhere in it, but the caller's trigger heuristic (>=1 comma + "and"
+    # present) still handed it to the splitter, which used to split on the
+    # comma and "and" regardless of whether a real enumeration was ever
+    # found, producing three bogus "access items": "For Kubernetes issues",
+    # "check GKE", "ArgoCD". Must now stay as a single, unsplit item.
+    text = "For Kubernetes issues, check GKE and ArgoCD."
+    value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
+    lines = value.split("\n")
+    # Preserved verbatim (including the trailing period), same as the
+    # no-split precedent above -- the fix's job is only to stop it being
+    # shredded into bogus fragments, not to reformat it.
+    assert lines == [text]
+
+
+def test_extract_rto_rpo_captures_an_explicit_sentence_with_no_llm_involved():
+    # disaster_recovery has no "fields" array in kt_schema_new.json, so
+    # before this function existed, an explicit RTO/RPO duration depended
+    # entirely on the structured LLM prompt (llm/prompts.py) -- meaning a
+    # plainly-stated "RTO is 2 hours and RPO is 15 minutes" was silently
+    # lost whenever get_llm_provider() returned None. extract_rto_rpo() is
+    # a pure regex function called with no LLM provider anywhere in the
+    # picture. Writes to rto_metric/rpo_metric specifically -- NOT
+    # rto_steps/rpo_steps, which are a different fact (the LLM prompt's own
+    # recovery PROCEDURE narrative) that this function must never collide
+    # with or overwrite (regression found via live verification: it used
+    # to destroy a real "restore from backups" procedure).
+    text = "RTO is 2 hours and RPO is 15 minutes."
+    result = extract_rto_rpo(text)
+    assert result == {"rto_metric": "2 hours", "rpo_metric": "15 minutes"}
+
+
+def test_extract_rto_rpo_handles_spelled_out_recovery_objective_phrasing():
+    text = "Our recovery time objective is 4 hours and the recovery point objective is 30 minutes."
+    result = extract_rto_rpo(text)
+    assert result == {"rto_metric": "4 hours", "rpo_metric": "30 minutes"}
+
+
+def test_extract_rto_rpo_handles_comma_set_off_acronym_callout():
+    # Regression test for a real bug found via a live end-to-end pipeline
+    # run: a transcript phrasing the metric out loud and then naming its
+    # acronym in a comma-set-off aside ("the recovery time objective, RTO,
+    # is 2 hours") is common spoken-transcript style, but the original
+    # regex only tolerated a bare "(rto)" immediately before "is", so this
+    # phrasing matched nothing and silently dropped an explicitly stated
+    # RTO/RPO.
+    text = (
+        "The recovery time objective, RTO, is 2 hours and the recovery "
+        "point objective, RPO, is 15 minutes."
+    )
+    result = extract_rto_rpo(text)
+    assert result == {"rto_metric": "2 hours", "rpo_metric": "15 minutes"}
+
+
+def test_extract_rto_rpo_returns_only_whichever_one_is_present():
+    assert extract_rto_rpo("RTO is 2 hours.") == {"rto_metric": "2 hours"}
+    assert extract_rto_rpo("RPO is 15 minutes.") == {"rpo_metric": "15 minutes"}
+
+
+def test_extract_rto_rpo_returns_empty_when_neither_is_stated():
+    assert extract_rto_rpo("") == {}
+    assert extract_rto_rpo("We back up the database nightly.") == {}
+
+
+def test_extract_rto_rpo_never_collides_with_the_llm_procedure_fields():
+    # Regression test for a real bug found via live PDF comparison: an
+    # earlier version wrote the plain duration into "rto_steps"/"rpo_steps"
+    # -- the same field ids the LLM structured prompt (llm/prompts.py) uses
+    # for the recovery PROCEDURE narrative ("restore database from backups",
+    # "recreate infrastructure using infra-as-code") -- silently destroying
+    # that real procedure and replacing it with a bare, unlabeled number.
+    # Metric and procedure are different facts; this must never regress.
+    result = extract_rto_rpo("RTO is 2 hours and RPO is 15 minutes.")
+    assert "rto_steps" not in result
+    assert "rpo_steps" not in result
+    assert set(result) <= {"rto_metric", "rpo_metric"}
+
+
+def test_dotnet_microservices_recognized_as_a_component():
+    # ".NET microservices" is the standard way an Azure KT names its backend
+    # tier, but the leading "." can't sit inside the tools regex's outer
+    # \b(...)\b -- so the entire backend was invisible to the component
+    # list, Technology summary and architecture diagram alike. Matched via
+    # its "NET microservices" tail and canonicalized back to ".NET".
+    from knowledge.knowledge_builder import _canonicalize_component_term
+    found = PATTERN_EXTRACTORS["tools"].findall("The back end consists of .NET microservices.")
+    assert found, "no component matched for '.NET microservices'"
+    assert ".NET" in [_canonicalize_component_term(t) for t in found]
+
+
+class _Idx:
+    def __init__(self, value):
+        self._value = value
+
+    def item(self):
+        return self._value
+
+
+class _ScoreRow(list):
+    """Minimal stand-in for the 1-D tensor sentence_transformers returns."""
+
+    def argmax(self):
+        return _Idx(max(range(len(self)), key=lambda i: list.__getitem__(self, i)))
+
+    def __getitem__(self, index):
+        return _Idx(list.__getitem__(self, index))
+
+
+def test_semantic_match_requires_a_named_anchor_when_the_field_names_one(monkeypatch):
+    # Regression test for a real, published mapping error: System Overview's
+    # "Cache Layer" field (description "Redis / ElastiCache configuration
+    # and sizing") was filled with "Flux synchronizes the new version into
+    # AKS. Rollback is performed by reverting the Git deployment
+    # configuration..." -- a GitOps sentence with nothing to do with a
+    # cache, which cleared the flat 0.35 similarity threshold. A field whose
+    # own definition names a concrete technology must only be matched
+    # against a sentence that actually mentions it.
+    field = {
+        "id": "cache_layer",
+        "label": "Cache Layer",
+        "description": "Redis / ElastiCache configuration and sizing",
+        "type": "text",
+    }
+    sentences = [
+        "Flux synchronizes the new version into AKS. Rollback is performed by reverting the Git deployment configuration.",
+        "Azure Cache for Redis provides caching for the order platform.",
+    ]
+    captured = {}
+
+    class _Model:
+        def encode(self, value, convert_to_tensor=False, normalize_embeddings=False):
+            if isinstance(value, list):
+                captured["candidates"] = value
+            return value
+
+    class _FakeUtil:
+        @staticmethod
+        def cos_sim(a, b):
+            # Uniform score for every candidate: without the anchor filter
+            # argmax would pick the FIRST (wrong) sentence.
+            return [_ScoreRow([0.9] * len(b))]
+
+    import sys as _sys
+    import types as _types
+    stub = _types.ModuleType("sentence_transformers")
+    stub.util = _FakeUtil
+    monkeypatch.setitem(_sys.modules, "sentence_transformers", stub)
+
+    result = _extract_by_semantic(field, sentences, model=_Model())
+    assert captured["candidates"] == [sentences[1]], "non-anchor sentences must be filtered out"
+    assert result == sentences[1]
+
+
+def test_semantic_match_unaffected_when_field_names_no_technology(monkeypatch):
+    # Fields with no concrete technology in their definition (most fields)
+    # must keep the original behaviour -- the anchor rule only narrows a
+    # field that actually names something to look for.
+    field = {"id": "business_criticality", "label": "Business Criticality", "description": "How critical is it"}
+    sentences = ["This is one of the most business critical systems.", "Unrelated filler sentence."]
+    captured = {}
+
+    class _Model:
+        def encode(self, value, convert_to_tensor=False, normalize_embeddings=False):
+            if isinstance(value, list):
+                captured["candidates"] = value
+            return value
+
+    class _FakeUtil:
+        @staticmethod
+        def cos_sim(a, b):
+            return [_ScoreRow([0.9, 0.1])]
+
+    import sys as _sys
+    import types as _types
+    stub = _types.ModuleType("sentence_transformers")
+    stub.util = _FakeUtil
+    monkeypatch.setitem(_sys.modules, "sentence_transformers", stub)
+
+    result = _extract_by_semantic(field, sentences, model=_Model())
+    assert captured["candidates"] == sentences
+    assert result == sentences[0]
+
+
+def test_customer_reach_extracted_from_the_same_sentence_as_business_volume():
+    # One sentence genuinely carries two independent facts. Whichever field
+    # claimed the line first excluded it from the other, so on a live run
+    # the volume was captured and "web and mobile applications" was lost
+    # outright -- the Coverage matrix then reported Customer Reach as simply
+    # "missing" when the transcript plainly stated it.
+    from field_populator import extract_customer_reach
+    text = ("The platform processes around 120,000 customer orders per day "
+            "through web and mobile applications.")
+    assert extract_customer_reach(text) == "web and mobile applications"
+    assert _extract_by_pattern(
+        {"id": "customer_reach", "label": "Customer Reach", "type": "text"}, text
+    ) == "web and mobile applications"
+    # The volume extractor still works off the very same sentence.
+    assert _extract_by_pattern(
+        {"id": "orders_per_day", "label": "Business Volume", "type": "text"}, text
+    ) == "120,000 orders per day"
+
+
+def test_customer_reach_handles_audience_phrasing_and_stays_silent_otherwise():
+    from field_populator import extract_customer_reach
+    assert extract_customer_reach("Used by B2B partners and internal teams.") == "B2B partners, internal teams"
+    assert extract_customer_reach("Nothing about the audience here.") is None
+    assert extract_customer_reach("") is None

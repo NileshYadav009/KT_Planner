@@ -738,6 +738,80 @@ def test_append_coverage_matrix_section_collects_knowledge_gaps_separately():
     assert matrix["_knowledge_gaps"] == ["FIRST 30-DAY OWNERSHIP PLAN", "HANDOVER COMPLETION CHECK"]
 
 
+def test_append_coverage_matrix_section_builds_knowledge_coverage_summary_with_zero_lost():
+    # Knowledge coverage (how many transcript FACTS were captured) must be a
+    # genuinely separate number from the Domain/Coverage/Assessment matrix
+    # (template-field population) — spec's "must never be confused" rule.
+    # append_unmapped_findings_section stashes its substantive-unassigned
+    # split as knowledge_object["_dedup_stats"] before this function runs;
+    # this reads it and must never fabricate a nonzero "lost" count when the
+    # accounting is genuinely balanced.
+    ko = {"sections": [], "summary": {}, "_dedup_stats": {"substantive_unassigned": 5, "deduplicated": 2, "unmapped": 3}}
+    dynamic_schema = [
+        {"id": "system_overview", "title": "SYSTEM OVERVIEW"},
+        {"id": "architecture_reference", "title": "ARCHITECTURE REFERENCE"},
+    ]
+    coverage = {
+        "system_overview": {"status": "covered", "confidence": 0.9, "sentence_count": 5},
+        "architecture_reference": {"status": "weak", "confidence": 0.5, "sentence_count": 2},
+    }
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    summary = matrix["_knowledge_coverage_summary"]
+    assert summary["mapped"] == 7  # 5 + 2 sentence_count across the two real sections
+    assert summary["deduplicated"] == 2
+    assert summary["unmapped"] == 3
+    assert summary["facts_identified"] == 12  # 7 + 2 + 3
+    assert summary["lost"] == 0
+    # The transport key must be consumed, not left dangling on the object.
+    assert "_dedup_stats" not in result
+
+
+def test_append_coverage_matrix_section_knowledge_coverage_summary_defaults_to_zero_without_dedup_stats():
+    # append_unmapped_findings_section may have failed/been skipped upstream
+    # (pipeline.py wraps it in a try/except) — must degrade to zero counts,
+    # not crash.
+    ko = {"sections": [], "summary": {}}
+    dynamic_schema = [{"id": "system_overview", "title": "SYSTEM OVERVIEW"}]
+    coverage = {"system_overview": {"status": "covered", "confidence": 0.9, "sentence_count": 4}}
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    summary = matrix["_knowledge_coverage_summary"]
+    assert summary == {"facts_identified": 4, "mapped": 4, "deduplicated": 0, "unmapped": 0, "lost": 0}
+
+
+def test_knowledge_coverage_summary_stays_consistent_end_to_end_with_unmapped_findings():
+    # Integration test: chain the two real functions in their actual
+    # pipeline.py order (append_unmapped_findings_section, then
+    # append_coverage_matrix_section) rather than hand-constructing
+    # _dedup_stats, so a future refactor that breaks the handoff between
+    # them fails a test instead of silently drifting.
+    ko = {
+        "sections": [{
+            "id": "system_overview", "title": "SYSTEM OVERVIEW", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "coverage_content": ["The system is business critical and handles global traffic."],
+            "fields": {},
+        }],
+        "summary": {},
+    }
+    sentences = [
+        _sentence("The system is business critical and handles global traffic."),  # duplicate of mapped content
+        _sentence("CloudFront cache invalidation can take longer than expected during releases."),  # genuinely unmapped
+    ]
+    ko = append_unmapped_findings_section(ko, sentences)
+    dynamic_schema = [{"id": "system_overview", "title": "SYSTEM OVERVIEW"}]
+    coverage = {"system_overview": {"status": "covered", "confidence": 0.8, "sentence_count": 3}}
+    ko = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in ko["sections"] if s["id"] == "kt_coverage")
+    summary = matrix["_knowledge_coverage_summary"]
+    assert summary["deduplicated"] == 1
+    assert summary["unmapped"] == 1
+    assert summary["mapped"] == 3
+    assert summary["facts_identified"] == summary["mapped"] + summary["deduplicated"] + summary["unmapped"]
+    assert summary["lost"] == 0
+
+
 def test_append_quick_reference_section_skips_rows_with_no_source_data():
     ko = {
         "sections": [
@@ -910,3 +984,214 @@ def test_build_knowledge_object_carries_section_tier():
     ko = build_knowledge_object("job1", {}, dynamic_schema, {})
     tiers = {s["id"]: s["tier"] for s in ko["sections"]}
     assert tiers == {"system_overview": "core", "cost_optimization": "conditional"}
+
+
+def test_unmapped_findings_drops_a_reworded_near_duplicate():
+    # Real case: the polish pass turned "Tribal knowledge, service bus
+    # backlog can temporarily increase during large deployments. Check
+    # whether the deployment has completed..." into "...indicates that the
+    # service bus backlog ... Verify whether the deployment has
+    # completed...". Neither string contains the other, so the substring
+    # test missed it and the same fact was published twice -- once in its
+    # real section, again as an "unmapped finding".
+    ko = {
+        "sections": [{
+            "id": "known_bad_days", "title": "OPERATIONAL CALENDAR", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "fields": {},
+            "coverage_content": [
+                "Tribal knowledge indicates that the service bus backlog can temporarily "
+                "increase during large deployments. Verify whether the deployment has "
+                "completed before treating a short-lived backlog as an incident."
+            ],
+        }],
+        "summary": {},
+    }
+    sentences = [_sentence(
+        "Tribal knowledge, service bus backlog can temporarily increase during large "
+        "deployments. Check whether the Deployment has completed before treating a "
+        "short-lived backlog as an incident."
+    )]
+    result = append_unmapped_findings_section(ko, sentences)
+    assert not any(s["id"] == "unmapped_findings" for s in result["sections"])
+
+
+def test_unmapped_findings_keeps_distinct_facts_about_the_same_technology():
+    # The overlap rule must not collapse two genuinely different facts that
+    # merely share a technology name.
+    ko = {
+        "sections": [{
+            "id": "system_overview", "title": "SYSTEM OVERVIEW", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "fields": {},
+            "coverage_content": ["Azure Cache for Redis provides caching for the platform."],
+        }],
+        "summary": {},
+    }
+    sentences = [_sentence("A previous major incident was caused by Redis memory saturation.")]
+    result = append_unmapped_findings_section(ko, sentences)
+    unmapped = next(s for s in result["sections"] if s["id"] == "unmapped_findings")
+    assert any("memory saturation" in c for c in unmapped["coverage_content"])
+
+
+def test_architecture_details_excludes_procedural_sentences_from_other_sections():
+    # Nearly every sentence in a DevOps KT names some tool, so collecting
+    # them all turned Architecture Details into a near-copy of the whole
+    # transcript, restating the deployment/monitoring/DR sections verbatim.
+    # The COMPONENT list must still see components named anywhere.
+    ko = {
+        "sections": [{
+            "id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "status": "covered",
+            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
+            "relationships": [], "fields": {}, "coverage_content": [],
+        }],
+        "summary": {},
+    }
+    section_content = {
+        "architecture_reference": {"sentences": [
+            {"text": "Azure SQL is the primary database and Azure Service Bus handles async processing."},
+        ]},
+        "deployment_and_rollback": {"sentences": [
+            {"text": "Azure DevOps runs CI, builds the image, and pushes it to ACR."},
+        ]},
+        "monitoring_observability": {"sentences": [
+            {"text": "Monitoring uses Prometheus and Grafana."},
+        ]},
+    }
+    result = enrich_architecture_knowledge(ko, section_content)
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+
+    details = " ".join(arch.get("_architecture_sentences") or [])
+    assert "Azure SQL is the primary database" in details
+    assert "pushes it to ACR" not in details, "deployment procedure leaked into Architecture Details"
+    assert "Monitoring uses Prometheus" not in details, "monitoring procedure leaked into Architecture Details"
+
+    # ...but every component named anywhere is still inventoried.
+    components = [c.lower() for c in arch.get("_architecture_components") or []]
+    for expected in ("azure sql", "azure devops", "prometheus", "grafana"):
+        assert any(expected in c for c in components), f"component lost: {expected}"
+
+
+def test_tribal_knowledge_digest_reads_sentences_from_blocks_fallback():
+    # section_content[id]['sentences'] can be empty while ['blocks'] holds
+    # the real sentences -- the digest used to read only the former and
+    # silently lost genuinely tagged tribal knowledge on a live run.
+    ko = {"sections": [], "summary": {}}
+    section_content = {
+        "known_bad_days": {
+            "sentences": [],
+            "blocks": [{"sentences": [
+                {"text": "Tribal knowledge, service bus backlog can temporarily increase during large deployments."},
+            ]}],
+        }
+    }
+    result = append_tribal_knowledge_section(ko, section_content)
+    tribal = next(s for s in result["sections"] if s["id"] == "tribal_knowledge")
+    assert any("service bus backlog" in r["Knowledge"] for r in tribal["_tribal_rows"])
+
+
+def test_tribal_digest_finds_knowledge_that_exists_only_in_polished_content():
+    # A section's raw ['sentences'] and its coverage_content are populated
+    # by two independent mechanisms that can disagree, so a sentence
+    # explicitly framed as tribal knowledge can exist ONLY in the polished
+    # text. Confirmed live: "Tribal knowledge, service bus backlog can
+    # temporarily increase during large deployments." reached the document
+    # but never the digest that exists to collect exactly that.
+    ko = {
+        "sections": [_section("known_bad_days", "OPERATIONAL CALENDAR", coverage_content=[
+            "- The platform experiences peak activity during month-end periods and major "
+            "promotional campaigns; production deployments should be avoided during these times. "
+            "- Tribal knowledge indicates that the service bus backlog can temporarily increase "
+            "during large deployments. Verify whether the deployment has completed before "
+            "treating a short-lived backlog as an incident."
+        ])],
+        "summary": {},
+    }
+    result = append_tribal_knowledge_section(ko, {})
+    tribal = next(s for s in result["sections"] if s["id"] == "tribal_knowledge")
+    knowledge = [r["Knowledge"] for r in tribal["_tribal_rows"]]
+    assert any("service bus backlog" in k for k in knowledge)
+    # The ordinary calendar sentence in the same blob is not tribal knowledge
+    # and must not be swept in alongside it.
+    assert not any("month-end periods" in k for k in knowledge)
+
+
+def test_tribal_digest_does_not_list_a_polished_restatement_twice():
+    ko = {
+        "sections": [_section("known_bad_days", "OPERATIONAL CALENDAR", coverage_content=[
+            "Tribal knowledge indicates that the service bus backlog can temporarily increase "
+            "during large deployments. Verify whether the deployment has completed."
+        ])],
+        "summary": {},
+    }
+    section_content = {"known_bad_days": {"sentences": [
+        {"text": "Tribal knowledge, service bus backlog can temporarily increase during large "
+                 "deployments. Check whether the deployment has completed."},
+    ]}}
+    result = append_tribal_knowledge_section(ko, section_content)
+    tribal = next(s for s in result["sections"] if s["id"] == "tribal_knowledge")
+    assert len(tribal["_tribal_rows"]) == 1
+
+
+def test_transcript_sentence_lost_before_rendering_is_recovered_not_silently_dropped():
+    # The classifier can drop a sentence without ever reporting it as
+    # unassigned, and the polish pass can drop one while rewriting a
+    # section. In both cases the sentence is simply gone, and the
+    # knowledge-coverage summary cannot see it because that summary counts
+    # what the pipeline KNOWS about, not what the transcript said.
+    # Confirmed live: a stated danger zone vanished from the document while
+    # the summary still reported zero loss.
+    transcript = (
+        "Production runs on Azure Kubernetes Service. "
+        "Production Kubernetes configuration must not be changed manually."
+    )
+    ko = {
+        "sections": [_section("system_overview", "SYSTEM OVERVIEW", coverage_content=[
+            "Production runs on Azure Kubernetes Service."
+        ])],
+        "summary": {},
+    }
+    result = append_unmapped_findings_section(ko, [], transcript)
+    unmapped = next(s for s in result["sections"] if s["id"] == "unmapped_findings")
+    assert any("must not be changed manually" in c for c in unmapped["coverage_content"])
+    # It is recorded as real evidence, not an invented note.
+    assert any("must not be changed manually" in e["text"] for e in unmapped["evidence"])
+
+
+def test_retention_net_does_not_flag_content_the_document_already_covers():
+    # A sentence the polish pass legitimately condensed must not be
+    # reported as lost, or every run would end in a wall of false alarms.
+    transcript = "Azure SQL is the primary database and Azure Service Bus handles async processing."
+    ko = {
+        "sections": [_section("architecture_reference", "ARCHITECTURE", coverage_content=[
+            "Azure SQL is the primary database. Azure Service Bus handles asynchronous processing."
+        ])],
+        "summary": {},
+    }
+    result = append_unmapped_findings_section(ko, [], transcript)
+    assert not any(s["id"] == "unmapped_findings" for s in result["sections"])
+
+
+def test_technology_summary_folds_in_the_architecture_component_inventory():
+    # Without this the summary only saw tools named in system_overview's own
+    # sentences, so a real Azure KT rendered a "Technology summary" missing
+    # its compute, database, cache, messaging and ingress tiers even though
+    # all of them were listed in the component inventory right above it.
+    ko = {
+        "sections": [
+            _section("system_overview", "SYSTEM OVERVIEW"),
+            _section("architecture_reference", "ARCHITECTURE", **{
+                "_architecture_components": [
+                    "Angular", "Azure Kubernetes Service", "Azure SQL", "Redis",
+                    "Azure Service Bus", "Azure Front Door", ".NET",
+                ],
+            }),
+        ],
+        "summary": {},
+    }
+    result = enrich_technology_summary(ko)
+    overview = next(s for s in result["sections"] if s["id"] == "system_overview")
+    value = overview["fields"]["key_technologies"]["value"].lower()
+    for expected in ("azure kubernetes service", "azure sql", "redis",
+                     "azure service bus", "azure front door", ".net"):
+        assert expected in value, f"missing from technology summary: {expected}"

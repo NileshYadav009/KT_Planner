@@ -194,6 +194,56 @@ def test_rural_metadata_corrected_to_raw_metadata():
     assert "rural" not in text.lower()
 
 
+def test_drive_testing_corrected_to_dr_testing():
+    # "drive testing" is Whisper mishearing "DR testing" (disaster-recovery
+    # testing) -- disaster_recovery's own schema hints list "dr testing" as
+    # the expected phrase, so the mishearing fails to match anything.
+    text, _ = apply_devops_corrections("Drive testing is performed twice a year.")
+    assert "dr testing" in text.lower()
+    assert "drive testing" not in text.lower()
+
+
+def test_bicep_casing_corrected_to_branded_name():
+    text, _ = apply_devops_corrections("We manage infrastructure with bicep templates.")
+    assert "Bicep" in text
+    assert "bicep templates" not in text
+
+
+def test_crash_loop_back_off_corrected_to_crashloopbackoff():
+    text, _ = apply_devops_corrections("Pods sometimes enter a crash loop back off state.")
+    assert "CrashLoopBackOff" in text
+    assert "crash loop back off" not in text.lower()
+
+
+def test_azure_cash_for_redis_corrected_to_cache():
+    # "Cash" is Whisper mishearing "Cache" -- confirmed live in two Azure
+    # KTs, where the nonsense phrase reached the rendered document.
+    text, _ = apply_devops_corrections("Azure Cash for Redis provides caching.")
+    assert "Azure Cache for Redis" in text
+    assert "cash" not in text.lower()
+
+
+def test_doubled_azure_and_lowercase_front_door_corrected():
+    # "Azure azure front door" is a real transcript artifact. Both the
+    # doubled word and the brand casing must be fixed deterministically --
+    # this used to correct only in sections the LLM polish pass touched,
+    # leaving Additional Notes (raw text) showing the broken form.
+    text, _ = apply_devops_corrections(
+        "Traffic flows through Azure azure front door and Application Gateway to AKS."
+    )
+    assert "Azure Front Door" in text
+    assert "azure azure" not in text.lower()
+
+
+def test_azure_service_names_get_branded_casing():
+    text, _ = apply_devops_corrections(
+        "azure sql is the primary database and azure service bus handles messages, "
+        "secrets live in azure key vault and azure devops runs ci."
+    )
+    for expected in ("Azure SQL", "Azure Service Bus", "Azure Key Vault", "Azure DevOps"):
+        assert expected in text, expected
+
+
 def test_brand_casing_corrections_do_not_misfire_on_ordinary_english_phrases():
     # Terms deliberately excluded from the batch above because their
     # "variant" spelling is also an ordinary English word/phrase (e.g.

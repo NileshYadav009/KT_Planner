@@ -24,10 +24,24 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     if not rows:
         return {"section_id": section.get("id"), "section_title": title, "blocks": [no_coverage_block(title)]}
 
-    blocks = [
-        build_decision_table("Coverage matrix", COLUMNS, rows),
-        build_narrative_block("Completeness invariant", [COMPLETENESS_INVARIANT]),
-    ]
+    blocks = []
+
+    # Knowledge coverage (how many transcript FACTS were captured) is a
+    # distinct metric from the Coverage matrix below it (which measures
+    # TEMPLATE FIELD population) — rendered first and clearly labeled so
+    # the two are never mistaken for the same number.
+    summary = section.get("_knowledge_coverage_summary") or {}
+    if summary:
+        blocks.append(build_narrative_block("Knowledge coverage", [
+            f"{summary.get('facts_identified', 0)} fact-bearing sentence(s) identified in this KT session: "
+            f"{summary.get('mapped', 0)} mapped to a section, "
+            f"{summary.get('deduplicated', 0)} deduplicated (already captured elsewhere), "
+            f"{summary.get('unmapped', 0)} surfaced as unmapped findings, "
+            f"{summary.get('lost', 0)} lost."
+        ]))
+
+    blocks.append(build_decision_table("Coverage matrix", COLUMNS, rows))
+    blocks.append(build_narrative_block("Completeness invariant", [COMPLETENESS_INVARIANT]))
 
     # Kept visually/structurally separate from open_responsibilities' Open
     # Tasks table: a knowledge gap is "the KT session never covered this,"

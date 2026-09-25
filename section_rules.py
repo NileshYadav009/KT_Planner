@@ -44,6 +44,18 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bdanger\s+zones?\b",
             r"\bsensitive\s+area\b",
             r"\brequir(?:es|ing)\s+caution\b",
+            # Generic prohibition phrasings. Without these, a plainly-stated
+            # prohibition like "Production Kubernetes configuration must not
+            # be changed manually." matched no rule at all and depended
+            # entirely on embedding similarity to reach Danger Zones — on a
+            # live run it reached nothing and vanished from the document
+            # altogether. A silently dropped prohibition is the worst
+            # failure this document can have, so the phrasings that
+            # introduce one are matched deterministically.
+            r"\bmust\s+not\s+be\s+(?:changed|modified|edited|deleted|touched|altered)\b",
+            r"\bshould\s+not\s+be\s+(?:changed|modified|edited|deleted|touched|altered)\b",
+            r"\bdo\s+not\s+(?:ever\s+|manually\s+)?(?:modify|change|edit|delete|touch|alter|run)\b",
+            r"\bnever\s+(?:manually\s+)?(?:change|edit|delete|touch|alter|run)\b",
         ],
         0.97,
     ),

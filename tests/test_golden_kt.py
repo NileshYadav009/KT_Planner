@@ -105,6 +105,66 @@ def test_golden_kt_pipeline_end_to_end(golden_pipeline):
     assert "autoscaler" in danger_text
 
 
+def test_golden_kt_pipeline_populates_rto_rpo_deterministically_with_no_llm(golden_pipeline):
+    # Regression test for two real bugs found via live end-to-end
+    # verification (extract_rto_rpo() in field_populator.py is correct in
+    # isolation -- both bugs were in the pipeline.py wiring around it):
+    # 1) It originally read sentence text from
+    #    kt.section_content["disaster_recovery"]["sentences"], which can be
+    #    empty even for a section with real coverage (the same "sentences"
+    #    vs. "blocks" disagreement knowledge_builder._collect_evidence()
+    #    already works around) -- silently starving the extractor of any
+    #    text. Fixed by reading from coverage["disaster_recovery"]
+    #    ["sentences"] instead, which has its own fallback chain baked in
+    #    already.
+    # 2) source_chunk_index was then computed against THAT (coverage-based)
+    #    sentence list, but _collect_evidence() resolves it against a
+    #    DIFFERENT, kt.section_content-based list -- an index valid in one
+    #    can silently misresolve (or go out of range and fall back) in the
+    #    other. Fixed by searching the same list _collect_evidence() will
+    #    actually index into.
+    # This test guards both through the real pipeline.run_kt_pipeline()
+    # entry point, not just the pure regex function. (A third bug found
+    # right after this one shipped -- writing the metric into rto_steps/
+    # rpo_steps clobbered the LLM's own recovery-procedure narrative in
+    # those same fields -- is guarded separately below by asserting the
+    # metric lands in rto_metric/rpo_metric, a field id the LLM prompt
+    # never writes to.)
+    transcript = clean_transcript(
+        TRANSCRIPT
+        + "\nFor disaster recovery, RDS snapshots are restored and Kubernetes "
+        "workloads are recreated using infrastructure as code. The recovery "
+        "time objective, RTO, is 2 hours and the recovery point objective, "
+        "RPO, is 15 minutes.\n"
+    )
+    result = golden_pipeline.run_kt_pipeline("golden-test-rto-rpo", transcript)
+    assert result["status"] == "completed", result.get("error")
+
+    dr_section = next(
+        sec for sec in result["knowledge_object"]["sections"] if sec["id"] == "disaster_recovery"
+    )
+    fields = dr_section.get("fields") or {}
+    assert fields.get("rto_metric", {}).get("value") == "2 hours"
+    assert fields.get("rto_metric", {}).get("source") == "pattern"
+    assert fields.get("rpo_metric", {}).get("value") == "15 minutes"
+    assert fields.get("rpo_metric", {}).get("source") == "pattern"
+    # Evidence must always be present and never fabricated -- but whether it
+    # names the exact RTO sentence depends on kt.section_content actually
+    # containing that sentence for this section, which (confirmed via live
+    # verification) it does not always do for disaster_recovery specifically
+    # -- a separate, pre-existing "sentences" vs. "blocks" disagreement
+    # inside the classifier's own section_content construction (see
+    # knowledge_builder._collect_evidence()'s docstring), not something this
+    # fix's own pipeline.py wiring can resolve without a much larger change.
+    # find_source_sentence_index() correctly returns None rather than
+    # guessing in that case (see its own docstring), and knowledge_builder's
+    # generic "first sentence(s) of the section" fallback fires instead --
+    # imprecise but never wrong/fabricated. Guard only that real, non-empty
+    # evidence is attached, not its exact precision.
+    evidence = fields["rto_metric"].get("evidence") or []
+    assert evidence and all(e.get("text") for e in evidence)
+
+
 def _leaf_field_values(fields: dict):
     """Yield each leaf field's populated value string, recursing into nested
     group fields (field_populator.py stores a group's sub-fields at

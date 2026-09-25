@@ -247,6 +247,24 @@ PHRASE_CORRECTIONS = {
     # daily"), a nonsensical phrase in a devops context that survived
     # uncorrected to the final PDF.
     r"\brural\s+metadata\b": "raw metadata",
+    # "drive testing" is Whisper mishearing "DR testing" (disaster-recovery
+    # testing) — the disaster_recovery schema's own sub_topics/hints list
+    # "dr testing" as the expected phrase, but a transcript saying it aloud
+    # routinely comes back as the unrelated-sounding but phonetically close
+    # "drive testing", which then fails to match the section's own hint
+    # vocabulary and reads as nonsense in the rendered KT.
+    r"\bdrive\s+testing\b": "DR testing",
+    # Bicep (Azure's IaC language) transcribes fine as a word but never with
+    # its branded capitalization — same casing-only fix as "graphana"/
+    # "PagerDuty" above, needed because kt_schema_new.json's iac layer and
+    # architecture_diagram.py's layer classification both match on the
+    # lowercase term but the rendered document should show the brand name.
+    r"\bbicep\b": "Bicep",
+    # "crash loop back off" / "crash loop backoff" (spoken, with spaces) is
+    # the Kubernetes pod-restart state CrashLoopBackOff — left as loose
+    # words it reads as a nonsensical common-failures symptom name instead
+    # of the specific, well-known Kubernetes term.
+    r"crash\s*loop\s*back\s*off": "CrashLoopBackOff",
     # Single-token typo, not a generic fuzzy-similarity match (that class
     # of correction was deliberately reverted earlier — see
     # apply_fuzzy_term_corrections' MIN_FUZZY_PHRASE_WORDS — after it
@@ -329,6 +347,35 @@ PHRASE_CORRECTIONS = {
     r"amazon\s+m[\s-]?q": "Amazon MQ",
     r"azure\s+cosmos\s+db|cosmos\s*db": "Azure Cosmos DB",
     r"octopus\s+deploy": "Octopus Deploy",
+
+    # ------------------------------------------------------------------
+    # Azure service-name normalization. Deliberately deterministic rather
+    # than left to the LLM polish pass: comparing two live-generated PDFs
+    # of the same transcript showed these correcting only in sections the
+    # (rate-limited) polish pass happened to touch, while Additional Notes
+    # -- which renders raw unassigned-sentence text directly -- kept the
+    # uncorrected form. Correctness must not depend on LLM quota.
+    #
+    # Ordering matters: the doubled-word and mishearing rules run BEFORE
+    # the brand-casing rules below, so "Azure azure front door" becomes
+    # "Azure front door" and then "Azure Front Door".
+    r"\bazure\s+azure\b": "Azure",
+    # "Cash" is Whisper mishearing "Cache" -- confirmed live in two Azure
+    # KTs ("Azure Cash for Redis provides caching"), where the nonsense
+    # phrase survived all the way into the rendered document.
+    r"\bazure\s+cash\s+for\s+redis\b": "Azure Cache for Redis",
+    r"\bcash\s+for\s+redis\b": "Cache for Redis",
+    r"\bazure\s+cache\s+for\s+redis\b": "Azure Cache for Redis",
+    r"\bazure\s+front\s+door\b": "Azure Front Door",
+    r"\bazure\s+kubernetes\s+service\b": "Azure Kubernetes Service",
+    r"\bazure\s+service\s+bus\b": "Azure Service Bus",
+    r"\bazure\s+key\s+vault\b": "Azure Key Vault",
+    r"\bazure\s+container\s+registry\b": "Azure Container Registry",
+    r"\bazure\s+dev\s*ops\b": "Azure DevOps",
+    r"\bazure\s+monitor\b": "Azure Monitor",
+    r"\bazure\s+sql\b": "Azure SQL",
+    r"\bapplication\s+insights\b": "Application Insights",
+    r"\bapplication\s+gateway\b": "Application Gateway",
 }
 
 # ============================================================================

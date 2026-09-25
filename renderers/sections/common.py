@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from renderers.blocks.warning import build_block as build_warning_block
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import no_coverage_block, split_bullet_blob
 
 # render_monitoring/render_failures/render_generic were removed from here —
 # they were dead code (RENDERER_REGISTRY in renderers/sections/__init__.py
@@ -19,7 +19,9 @@ def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
 
 def render_danger_zones(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Danger Zones")
-    warnings = _coverage_paragraphs(section)
+    # One prohibition per warning card — the polish pass routinely returns
+    # the whole section as a single "- item. - item." blob.
+    warnings = split_bullet_blob(_coverage_paragraphs(section))
     if not warnings:
         return {"section_id": section.get("id"), "section_title": title, "blocks": [no_coverage_block(title)]}
     return {"section_id": section.get("id"), "section_title": title, "blocks": [build_warning_block(title, warnings)]}

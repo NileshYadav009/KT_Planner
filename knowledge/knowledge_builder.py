@@ -8,6 +8,7 @@ from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
 from architecture_diagram import build_architecture_flow_diagram
+from renderers.blocks.common import split_bullet_blob
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
 UNMAPPED_FINDINGS_TITLE = "Additional Notes (Unmapped Findings)"
@@ -21,23 +22,34 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
+def _section_sentences(section_content: Any) -> List[Dict[str, Any]]:
+    """Every sentence dict for one section_content entry.
+
+    The two independent mechanisms that populate section_content[id]
+    ['sentences'] vs. ['blocks'] can disagree, leaving 'sentences' empty for
+    a section that has real coverage — so anything reading sentences for a
+    section must consult both or it silently sees nothing. Shared by
+    _collect_evidence() (where an index computed elsewhere must refer to the
+    same list) and append_tribal_knowledge_section() (which lost real tagged
+    sentences to exactly this gap on a live run).
+    """
+    if not isinstance(section_content, dict):
+        return []
+    sentences = section_content.get("sentences") or []
+    if sentences:
+        return sentences
+    return [
+        s for block in (section_content.get("blocks") or [])
+        for s in (block.get("sentences") or [])
+    ]
+
+
 def _collect_evidence(
     section_id: str,
     section_content: Dict[str, Any],
     populated_field: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    sentence_entries = section_content.get("sentences", []) if isinstance(section_content, dict) else []
-    if not sentence_entries and isinstance(section_content, dict):
-        # Same fallback field_populator.py's populate_fields() uses when
-        # computing source_chunk_index — the two independent mechanisms that
-        # populate section_content[id]['sentences'] vs. ['blocks'] can
-        # disagree, leaving 'sentences' empty for a section that has real
-        # coverage. Must use the identical list here so an index computed
-        # there still refers to the right entry here.
-        sentence_entries = [
-            s for block in (section_content.get("blocks") or [])
-            for s in (block.get("sentences") or [])
-        ]
+    sentence_entries = _section_sentences(section_content)
 
     if populated_field and populated_field.get("source_chunk_index") is not None:
         index = populated_field["source_chunk_index"]
@@ -275,6 +287,49 @@ def _mapped_text_chunks(knowledge_object: Dict[str, Any]) -> List[str]:
     return [_dedup_normalize(c) for c in chunks if str(c).strip()]
 
 
+# Content words below this length carry no identifying signal for the
+# overlap comparison below (articles, prepositions, auxiliaries).
+_DEDUP_STOPWORDS = frozenset(
+    "a an and are as at be been but by can for from had has have if in into is it its "
+    "of on or that the their then there these this to was were when which while will "
+    "with you your".split()
+)
+# Share of a candidate's content words that must already appear in one
+# mapped chunk before it counts as the same fact. High enough that two
+# genuinely different sentences about the same technology stay distinct
+# ("Redis provides caching" vs "Redis memory saturation caused an
+# incident" overlap on only ~1 content word out of 4-5).
+_DEDUP_OVERLAP_RATIO = 0.8
+_DEDUP_MIN_CONTENT_WORDS = 5
+
+
+def _content_words(text: str) -> List[str]:
+    return [w for w in _dedup_normalize(text).split() if w not in _DEDUP_STOPWORDS]
+
+
+def _is_near_duplicate(candidate: str, chunk: str) -> bool:
+    """True when nearly all of `candidate`'s content words already appear in
+    `chunk` — catching the same fact after a rewording that defeats a plain
+    substring test.
+
+    Real case this exists for: the polish pass turned "Tribal knowledge,
+    service bus backlog can temporarily increase during large deployments.
+    Check whether the deployment has completed..." into "Tribal knowledge
+    indicates that the service bus backlog can temporarily increase during
+    large deployments. Verify whether the deployment has completed...".
+    Neither string contains the other, so the same fact was published twice
+    — once in its real section and again as an "unmapped finding".
+    """
+    cand_words = _content_words(candidate)
+    if len(cand_words) < _DEDUP_MIN_CONTENT_WORDS:
+        return False
+    chunk_words = set(_content_words(chunk))
+    if not chunk_words:
+        return False
+    shared = sum(1 for w in cand_words if w in chunk_words)
+    return (shared / len(cand_words)) >= _DEDUP_OVERLAP_RATIO
+
+
 def _is_duplicate_of_mapped_content(sentence_text: str, mapped_chunks: List[str]) -> bool:
     """True if `sentence_text` is essentially the same fact as something
     already mapped into a real section — checked both directions since
@@ -296,12 +351,71 @@ def _is_duplicate_of_mapped_content(sentence_text: str, mapped_chunks: List[str]
         # unrelated long unassigned sentence that happens to contain it.
         if len(chunk.split()) >= 4 and chunk in normalized:
             return True
+        if _is_near_duplicate(sentence_text, chunk):
+            return True
     return False
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+# Share of a transcript sentence's content words that must appear somewhere
+# in the mapped document for it to count as retained. Lower than the
+# deduplication ratio on purpose: this answers the much weaker question
+# "did this survive anywhere at all?", so it must not cry loss over a
+# sentence the polish pass legitimately condensed.
+_RETENTION_RATIO = 0.75
+
+
+def _unretained_transcript_sentences(
+    transcript: str,
+    mapped_chunks: List[str],
+    already_listed: List[str],
+) -> List[str]:
+    """Transcript sentences whose content reached no part of the document.
+
+    The classifier can drop a sentence without ever reporting it as
+    unassigned, and the polish pass can drop one while rewriting a section —
+    in both cases the sentence is simply gone, and the knowledge-coverage
+    summary cannot see it, because that summary is computed from what the
+    pipeline *knows* about (mapped + deduplicated + unassigned) rather than
+    from the transcript itself. Confirmed live on a real KT: "Production
+    Kubernetes configuration must not be changed manually." — a danger zone —
+    vanished from the document while the summary still reported zero loss.
+
+    This compares the actual transcript against the actual document, so a
+    silently dropped fact becomes visible instead of disappearing.
+    """
+    if not transcript:
+        return []
+    mapped_words = set()
+    for chunk in mapped_chunks:
+        mapped_words.update(chunk.split())
+    for text in already_listed:
+        mapped_words.update(_dedup_normalize(text).split())
+
+    missing: List[str] = []
+    seen: set = set()
+    for raw in _SENTENCE_SPLIT_RE.split(transcript):
+        sentence = raw.strip()
+        if len(sentence.split()) < _MIN_UNMAPPED_SENTENCE_WORDS:
+            continue
+        words = [w for w in _dedup_normalize(sentence).split() if w not in _DEDUP_STOPWORDS]
+        if len(words) < _DEDUP_MIN_CONTENT_WORDS:
+            continue
+        retained = sum(1 for w in words if w in mapped_words) / len(words)
+        if retained >= _RETENTION_RATIO:
+            continue
+        key = _dedup_normalize(sentence)
+        if key in seen:
+            continue
+        seen.add(key)
+        missing.append(sentence)
+    return missing
 
 
 def append_unmapped_findings_section(
     knowledge_object: Dict[str, Any],
     unassigned_sentences: Optional[List[Any]],
+    transcript: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Surface sentences that never confidently classified into any real
     schema section (context_mapper.py's StructuredKT.unassigned_sentences)
@@ -324,16 +438,39 @@ def append_unmapped_findings_section(
     """
     sentences = unassigned_sentences or []
     mapped_chunks = _mapped_text_chunks(knowledge_object)
-    surviving = [
+    # Split into two named passes (rather than one combined filter) so the
+    # counts at each stage can be reported separately — sub-word-count
+    # fragments are filler, never "facts" to begin with (§2's "substantive
+    # fact" carve-out), so they're excluded before either count is taken.
+    substantive = [
         s for s in sentences
         if isinstance(getattr(s, "text", None), str)
         and len(s.text.split()) >= _MIN_UNMAPPED_SENTENCE_WORDS
-        and not _is_duplicate_of_mapped_content(s.text, mapped_chunks)
     ]
-    if not surviving:
-        return knowledge_object
-
+    surviving = [
+        s for s in substantive
+        if not _is_duplicate_of_mapped_content(s.text, mapped_chunks)
+    ]
     coverage_content = [s.text.strip() for s in surviving]
+
+    # Safety net: anything in the transcript that reached no part of the
+    # document, whether or not the classifier ever reported it as
+    # unassigned. See _unretained_transcript_sentences().
+    recovered = _unretained_transcript_sentences(transcript or "", mapped_chunks, coverage_content)
+    coverage_content.extend(recovered)
+
+    # Stashed on the knowledge_object (not just this section's dict) so
+    # append_coverage_matrix_section can build its knowledge-coverage
+    # summary from these exact counts even when nothing survives to
+    # render below — popped once consumed, see that function.
+    knowledge_object["_dedup_stats"] = {
+        "substantive_unassigned": len(substantive) + len(recovered),
+        "deduplicated": len(substantive) - len(surviving),
+        "unmapped": len(coverage_content),
+        "recovered": len(recovered),
+    }
+    if not coverage_content:
+        return knowledge_object
     evidence = [
         {
             "sentence_index": idx,
@@ -345,6 +482,20 @@ def append_unmapped_findings_section(
         }
         for idx, s in enumerate(surviving)
     ]
+    # Recovered sentences come from the transcript text itself, so they have
+    # no sentence object to read timings/speaker from — the text is still
+    # real, verbatim evidence and must be recorded as such.
+    evidence.extend(
+        {
+            "sentence_index": len(surviving) + idx,
+            "text": _normalize_text(text),
+            "start": None,
+            "end": None,
+            "speaker": None,
+            "audio_confidence": None,
+        }
+        for idx, text in enumerate(recovered)
+    )
 
     section_dict = {
         "id": UNMAPPED_FINDINGS_SECTION_ID,
@@ -357,7 +508,7 @@ def append_unmapped_findings_section(
         ),
         "status": "covered",
         "confidence": 0.5,
-        "sentence_count": len(surviving),
+        "sentence_count": len(coverage_content),
         "risk": 0.0,
         "coverage_content": coverage_content,
         "facts": [],
@@ -483,6 +634,15 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
             # losing this data whenever the LLM path doesn't fire.
             found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(_raw_text(monitoring_section)))
 
+    # The architecture component inventory (built just before this, see
+    # pipeline.py's ordering note) is the most complete list of what the
+    # system actually runs on — folding it in is what makes this a genuine
+    # one-stop technology summary instead of a list of whichever tools
+    # happened to be named in system_overview's own sentences.
+    arch_section = _find_section(knowledge_object, "architecture_reference")
+    if arch_section:
+        found.extend(str(c).strip() for c in (arch_section.get("_architecture_components") or []) if str(c).strip())
+
     security_section = _find_section(knowledge_object, "security_controls")
     if security_section:
         scan_config = (security_section.get("fields", {}).get("security_scan_config") or {}).get("value")
@@ -530,11 +690,26 @@ _CANONICAL_TERM_ALIASES = {
     "blob storage": "Azure Blob Storage",
     "gke": "Google Kubernetes Engine",
     "argo cd": "ArgoCD",
+    # See the ".NET microservices" note in field_populator.PATTERN_EXTRACTORS
+    # — matched without its leading dot, restored to the real product name
+    # here so the document never shows a bare "NET microservices".
+    "net microservices": ".NET",
+    "net microservice": ".NET",
+    "dotnet": ".NET",
+    "asp.net": "ASP.NET",
 }
 
 
 def _canonicalize_component_term(term: str) -> str:
     return _CANONICAL_TERM_ALIASES.get(term.strip().lower(), term)
+
+
+# Sections whose sentences genuinely describe the architecture itself
+# (what the system is built from and how requests flow through it), as
+# opposed to sections that merely mention tools while describing a
+# procedure. Only these contribute Architecture Details lines — see
+# _scan_text() inside enrich_architecture_knowledge().
+_ARCHITECTURE_SENTENCE_SECTIONS = frozenset({"architecture_reference", "system_overview"})
 
 
 def enrich_architecture_knowledge(
@@ -577,19 +752,37 @@ def enrich_architecture_knowledge(
     found: List[str] = []
     descriptive_sentences: List[str] = []
 
-    def _scan_text(text: str) -> None:
+    def _scan_text(text: str, *, describes_architecture: bool = True) -> None:
+        """Collect components from `text`; additionally keep the sentence
+        itself as an Architecture Details line only when it came from a
+        section that actually describes the architecture.
+
+        The component list deliberately scans EVERYTHING (a component named
+        anywhere is still a real component). The sentence list must not:
+        in a DevOps KT nearly every sentence names some tool, so collecting
+        all of them turned Architecture Details into a near-copy of the
+        whole transcript — on a live run it restated the deployment,
+        monitoring, DR, rollback and danger-zone sections verbatim, each of
+        which already renders that same text in its own section. "Do not
+        treat every technology mention as an architecture relationship."
+        """
         text = (text or "").strip()
         if not text:
             return
         matches = tools_pattern.findall(text)
         if matches:
             found.extend(matches)
-            descriptive_sentences.append(text)
+            if describes_architecture:
+                descriptive_sentences.append(text)
 
     if section_content:
-        for sc in section_content.values():
-            for s in (sc or {}).get("sentences", []) or []:
-                _scan_text((s or {}).get("text", "") if isinstance(s, dict) else "")
+        for sc_id, sc in section_content.items():
+            architectural = sc_id in _ARCHITECTURE_SENTENCE_SECTIONS
+            for s in _section_sentences(sc):
+                _scan_text(
+                    (s or {}).get("text", "") if isinstance(s, dict) else "",
+                    describes_architecture=architectural,
+                )
 
     # Always ALSO scan coverage_content — never gated on "found nothing at
     # all yet". context_mapper.py populates a section's raw ['sentences']
@@ -611,8 +804,9 @@ def enrich_architecture_knowledge(
         content = section.get("coverage_content") or []
         if isinstance(content, str):
             content = [content]
+        architectural = section.get("id") in _ARCHITECTURE_SENTENCE_SECTIONS
         for item in content:
-            _scan_text(str(item))
+            _scan_text(str(item), describes_architecture=architectural)
 
     if not found:
         return knowledge_object
@@ -692,19 +886,48 @@ def append_tribal_knowledge_section(
     seen_texts = set()
     rows: List[Dict[str, str]] = []
 
+    def _consider(text: str, label: str, value_text: str, always_eligible: bool) -> None:
+        text = (text or "").strip()
+        if not text or not (always_eligible or is_tribal_knowledge(text)):
+            return
+        normalized = _normalize_text(text)
+        if normalized in seen_texts:
+            return
+        # A polished restatement of a sentence already captured from the raw
+        # text is the same knowledge, not a second entry.
+        if any(_is_near_duplicate(text, _dedup_normalize(r["Knowledge"])) for r in rows):
+            return
+        seen_texts.add(normalized)
+        rows.append({"Knowledge": text, "Value": value_text, "Classification": label})
+
     for section_id, entry in section_content.items():
-        sentences = (entry or {}).get("sentences") or []
         label, value_text = _TRIBAL_SOURCE_LABELS.get(section_id, _TRIBAL_DEFAULT_LABEL)
         always_eligible = section_id in _TRIBAL_ALWAYS_ELIGIBLE_SECTIONS
-        for sentence in sentences:
+        for sentence in _section_sentences(entry):
             text = (sentence or {}).get("text", "") if isinstance(sentence, dict) else ""
-            if not text or not (always_eligible or is_tribal_knowledge(text)):
-                continue
-            normalized = _normalize_text(text)
-            if normalized in seen_texts:
-                continue
-            seen_texts.add(normalized)
-            rows.append({"Knowledge": text.strip(), "Value": value_text, "Classification": label})
+            _consider(text, label, value_text, always_eligible)
+
+    # Also scan each section's (possibly LLM-polished) coverage_content. A
+    # section's raw ['sentences'] and its coverage_content are populated by
+    # two independent mechanisms that can disagree, so a sentence explicitly
+    # framed as tribal knowledge can exist ONLY in the polished text —
+    # confirmed live, where "Tribal knowledge, service bus backlog can
+    # temporarily increase during large deployments." reached the document
+    # but never the Tribal Knowledge digest that exists to collect it.
+    # Bullet blobs are split first so one card holds one piece of knowledge.
+    for section in knowledge_object.get("sections") or []:
+        section_id = section.get("id")
+        if section_id == TRIBAL_KNOWLEDGE_SECTION_ID:
+            continue
+        label, value_text = _TRIBAL_SOURCE_LABELS.get(section_id, _TRIBAL_DEFAULT_LABEL)
+        content = section.get("coverage_content") or []
+        if isinstance(content, str):
+            content = [content]
+        for item in split_bullet_blob([str(c) for c in content if str(c).strip()]):
+            # Not `always_eligible` here: a whole section's polished prose
+            # must earn its place in the digest by actually reading as
+            # tribal knowledge, or every danger zone would be duplicated.
+            _consider(item, label, value_text, always_eligible=False)
 
     if not rows:
         return knowledge_object
@@ -767,12 +990,14 @@ def append_coverage_matrix_section(
     """
     rows: List[Dict[str, str]] = []
     gaps: List[str] = []
+    mapped_sentence_total = 0
     for section in dynamic_schema:
         section_id = section.get("id")
         title = section.get("title") or section_id
         cov = coverage.get(section_id) or {}
         status = cov.get("status", "missing")
         sentence_count = int(cov.get("sentence_count", 0) or 0)
+        mapped_sentence_total += sentence_count
 
         # Bucket directly from the pipeline's own status — it's already
         # required-vs-optional- and density-aware (semantic_coverage_score()
@@ -860,6 +1085,30 @@ def append_coverage_matrix_section(
     if not rows:
         return knowledge_object
 
+    # Knowledge coverage (how many transcript facts were captured) is a
+    # genuinely separate metric from the Domain/Coverage/Assessment matrix
+    # above (template-field population) — §12's "must never be confused".
+    # `mapped` is the number of sentences the classifier actually placed
+    # into a real section; `deduplicated`/`unmapped` come from the same
+    # substantive-unassigned-sentence split append_unmapped_findings_section
+    # already computed (see its docstring) — read from the stats it stashed
+    # on knowledge_object rather than recomputed here, so the two can never
+    # drift apart. `lost` is an explicit self-check, not an aspiration: it's
+    # only ever nonzero if facts_identified was computed independently of
+    # mapped+deduplicated+unmapped and the two disagree, which would mean a
+    # real accounting bug rather than something to paper over.
+    dedup_stats = knowledge_object.pop("_dedup_stats", {}) or {}
+    deduplicated = int(dedup_stats.get("deduplicated", 0) or 0)
+    unmapped = int(dedup_stats.get("unmapped", 0) or 0)
+    facts_identified = mapped_sentence_total + deduplicated + unmapped
+    knowledge_coverage_summary = {
+        "facts_identified": facts_identified,
+        "mapped": mapped_sentence_total,
+        "deduplicated": deduplicated,
+        "unmapped": unmapped,
+        "lost": facts_identified - (mapped_sentence_total + deduplicated + unmapped),
+    }
+
     section_dict = {
         "id": KT_COVERAGE_SECTION_ID,
         "title": KT_COVERAGE_TITLE,
@@ -882,6 +1131,7 @@ def append_coverage_matrix_section(
         # (a knowledge gap isn't an open task) per the golden-reference
         # standard's own distinction.
         "_knowledge_gaps": gaps,
+        "_knowledge_coverage_summary": knowledge_coverage_summary,
     }
     sections = knowledge_object.setdefault("sections", [])
     sections.append(section_dict)

@@ -487,6 +487,53 @@ def wrap_structured_as_fields(structured: dict, raw_sentence_texts: Optional[Lis
     return fields
 
 
+_POLISH_STOPWORDS = frozenset(
+    "a an an and are as at be been but by for from had has have if in into is it its of on "
+    "or that the their then there these this to was were when which while with you your "
+    # Modals/negations carry no identifying signal for a presence check, and
+    # a legitimate rewrite routinely swaps them ("must not be changed" ->
+    # "never change"), which would otherwise look like a dropped fragment.
+    "must not do does should would will can never no also".split()
+)
+# Words are compared on a short prefix so ordinary inflection ("changed" vs
+# "change", "integrations" vs "integration") doesn't read as a loss.
+_POLISH_STEM_LEN = 5
+# Share of a fragment's content words that must still be present in the
+# polished text for that fragment to count as retained. Below 1.0 because a
+# legitimate polish does rephrase ("bicep" -> "Bicep", dropping filler), but
+# high enough that an omitted sentence is caught.
+_POLISH_RETENTION_RATIO = 0.7
+# Fragments shorter than this carry too few content words for the ratio to
+# mean anything, so they are not checked.
+_POLISH_MIN_CONTENT_WORDS = 4
+
+
+def _fragments_missing_from(fragments: List[str], polished_text: str) -> List[str]:
+    """Fragments whose content is not adequately represented in `polished_text`.
+
+    Word-level, not substring: the polish pass is expected to rewrite
+    wording, so the test is whether a fragment's distinctive content words
+    survived, not whether the sentence is reproduced verbatim.
+    """
+    def _stems(text: str) -> List[str]:
+        return [
+            w[:_POLISH_STEM_LEN]
+            for w in re.sub(r"[^a-z0-9\s]+", " ", (text or "").lower()).split()
+            if w not in _POLISH_STOPWORDS
+        ]
+
+    polished_stems = set(_stems(polished_text))
+    missing = []
+    for fragment in fragments or []:
+        stems = _stems(str(fragment))
+        if len(stems) < _POLISH_MIN_CONTENT_WORDS:
+            continue
+        retained = sum(1 for s in stems if s in polished_stems) / len(stems)
+        if retained < _POLISH_RETENTION_RATIO:
+            missing.append(fragment)
+    return missing
+
+
 def polish_coverage_sections(
     sections: Dict[str, dict],
     *,
@@ -550,7 +597,25 @@ def polish_coverage_sections(
                 ),
             )
             cleaned_text = response.strip() if isinstance(response, str) else ""
-            return [cleaned_text] if cleaned_text else _local_cleanup_list(section["fragments"])
+            if not cleaned_text:
+                return _local_cleanup_list(section["fragments"])
+            dropped = _fragments_missing_from(section["fragments"], cleaned_text)
+            if dropped:
+                # The polish pass rewrites a section wholesale, and its
+                # output then REPLACES the raw fragments as that section's
+                # content — so anything the model silently omits is gone
+                # from the document entirely. Observed live: a Danger Zones
+                # polish returned only one of two prohibitions, and
+                # "Production Kubernetes configuration must not be changed
+                # manually." vanished from the KT with nothing reporting a
+                # loss. Prose quality is never worth losing a stated fact,
+                # so a lossy rewrite is discarded in favour of the raw text.
+                logger.warning(
+                    "Polish for %s dropped %d fragment(s); keeping raw text instead",
+                    sid, len(dropped),
+                )
+                return _local_cleanup_list(section["fragments"])
+            return [cleaned_text]
         except Exception as e:
             logger.warning("Polish failed for %s: %s", sid, e)
             return _local_cleanup_list(section["fragments"])

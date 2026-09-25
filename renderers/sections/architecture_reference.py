@@ -2,7 +2,10 @@ from typing import Dict, Any, List
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.code import build_block as build_code_block
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import (
+    no_coverage_block,
+    coverage_paragraphs as shared_coverage_paragraphs,
+)
 
 # (field_id, display label) for the 3 template-defined administrative facts
 # this section's schema actually has. These are metadata about the
@@ -15,10 +18,9 @@ _METADATA_FIELD_SPECS = [
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
-    content = section.get("coverage_content") or []
-    if isinstance(content, str):
-        content = [content]
-    return [str(item).strip() for item in content if isinstance(item, str) and item.strip()]
+    # Shared implementation: splits polish-pass bullet blobs and drops
+    # repeats. See renderers/blocks/common.coverage_paragraphs().
+    return shared_coverage_paragraphs(section)
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:

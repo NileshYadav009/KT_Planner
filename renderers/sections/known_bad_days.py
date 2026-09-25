@@ -1,14 +1,16 @@
 from typing import Dict, Any, List
 from renderers.blocks.warning import build_block as build_warning_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import no_coverage_block, split_bullet_blob
 
 
 def _coverage_warnings(section: Dict[str, Any]) -> List[str]:
     content = section.get("coverage_content") or []
     if isinstance(content, str):
         content = [content]
-    return [str(item).strip() for item in content if isinstance(item, str) and item.strip()]
+    items = [str(item).strip() for item in content if isinstance(item, str) and item.strip()]
+    # One period/window per warning card — see split_bullet_blob's docstring.
+    return split_bullet_blob(items)
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:

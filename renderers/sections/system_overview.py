@@ -1,7 +1,10 @@
 from typing import Any, Dict, List
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import (
+    no_coverage_block,
+    coverage_paragraphs as shared_coverage_paragraphs,
+)
 
 # Generic tool -> technology-category mapping, keyed by lowercased tool name
 # as matched by field_populator.py's PATTERN_EXTRACTORS["tools"] regex. Not
@@ -11,6 +14,7 @@ _TECH_CATEGORY_MAP = {
     "react": "Frontend", "angular": "Frontend", "vue": "Frontend", "vue.js": "Frontend",
     "fastapi": "Backend", "fast api": "Backend", "django": "Backend", "flask": "Backend",
     "node": "Backend", "node.js": "Backend", "express": "Backend",
+    ".net": "Backend", "asp.net": "Backend", "dotnet": "Backend",
     "postgresql": "Database", "mysql": "Database", "mongodb": "Database",
     "amazon rds": "Database",
     "redis": "Cache",
@@ -30,7 +34,58 @@ _TECH_CATEGORY_MAP = {
     "kafka": "Messaging", "rabbitmq": "Messaging",
     "pagerduty": "Alerting", "opsgenie": "Alerting",
     "nexus": "Artifact management", "artifactory": "Artifact management",
+    # AWS equivalents of the same roles (the acronym forms are what
+    # knowledge_builder.py's _CANONICAL_TERM_ALIASES collapses to).
+    "amazon sqs": "Messaging", "sqs": "Messaging",
+    "amazon ecr": "Container registry", "ecr": "Container registry",
+    "rds": "Database",
+    # Azure. Without these the entire Azure stack was silently dropped from
+    # the Technology summary -- _categorize_technologies() skips any tool
+    # with no category, so a real Azure KT listing 18 identified components
+    # rendered only 3 rows (Frontend/Observability/Alerting). Confirmed on
+    # a live generated PDF.
+    "azure kubernetes service": "Compute", "aks": "Compute",
+    "azure sql": "Database",
+    "azure cache for redis": "Cache",
+    "azure service bus": "Messaging", "service bus": "Messaging",
+    "azure front door": "Edge / ingress", "application gateway": "Edge / ingress",
+    "azure container registry": "Container registry", "acr": "Container registry",
+    "azure devops": "GitOps / deployment", "flux": "GitOps / deployment",
+    "bicep": "Infrastructure",
+    "azure key vault": "Secrets", "key vault": "Secrets",
+    "azure monitor": "Observability", "application insights": "Observability",
+    "azure blob storage": "Storage", "blob storage": "Storage",
+    # GCP equivalents of the same roles.
+    "google kubernetes engine": "Compute", "gke": "Compute",
+    "bigquery": "Database", "cloud sql": "Database", "firestore": "Database",
+    "bigtable": "Database", "cloud spanner": "Database",
+    "memorystore": "Cache",
+    "pub/sub": "Messaging",
+    "artifact registry": "Container registry", "container registry": "Container registry",
+    "secret manager": "Secrets",
+    "cloud monitoring": "Observability", "cloud logging": "Observability",
+    "stackdriver": "Observability",
+    "cloud build": "GitOps / deployment",
+    "dataflow": "Data processing", "airflow": "Workflow orchestration",
+    "vertex ai": "Machine learning",
+    "cloud storage": "Storage",
 }
+
+
+def _drop_generic_duplicates(values: List[str]) -> List[str]:
+    """Remove a generic term when the branded product it names is also
+    listed in the same category, e.g. "Azure Kubernetes Service; Kubernetes"
+    -> "Azure Kubernetes Service". A transcript naturally says the full
+    product name once and the generic word afterwards, and both then match
+    the tools regex, so the summary listed the same tier twice.
+    """
+    kept: List[str] = []
+    for value in values:
+        lowered = value.lower()
+        if any(lowered != other.lower() and lowered in other.lower() for other in values):
+            continue
+        kept.append(value)
+    return kept or values
 
 
 def _categorize_technologies(key_technologies_value: str) -> List[Dict[str, str]]:
@@ -41,14 +96,16 @@ def _categorize_technologies(key_technologies_value: str) -> List[Dict[str, str]
         if not category:
             continue
         by_category.setdefault(category, []).append(tool)
-    return [{"label": category, "value": "; ".join(values)} for category, values in by_category.items()]
+    return [
+        {"label": category, "value": "; ".join(_drop_generic_duplicates(values))}
+        for category, values in by_category.items()
+    ]
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
-    coverage_content = section.get("coverage_content") or []
-    if isinstance(coverage_content, str):
-        coverage_content = [coverage_content]
-    return [str(item).strip() for item in coverage_content if isinstance(item, str) and item.strip()]
+    # Shared implementation: splits polish-pass bullet blobs and drops
+    # repeats. See renderers/blocks/common.coverage_paragraphs().
+    return shared_coverage_paragraphs(section)
 
 
 def _field_value(fields: Dict[str, Any], *path: str):

@@ -159,6 +159,37 @@ def test_kt_coverage_omits_gaps_block_when_nothing_missing():
     assert not any(b["type"] == "ChecklistBlock" for b in result["blocks"])
 
 
+def test_kt_coverage_renders_knowledge_coverage_summary_before_the_matrix():
+    # Knowledge coverage (facts identified/mapped/deduplicated/unmapped/lost)
+    # is a distinct metric from the Coverage matrix (template-field
+    # population) -- must render as its own clearly-labeled block, first,
+    # never merged into or confused with the matrix table.
+    section = {
+        "id": "kt_coverage", "title": "KT Coverage & Knowledge Gaps",
+        "_coverage_rows": [{"Domain": "SYSTEM OVERVIEW", "Coverage": "Strong", "Assessment": "5 sentences."}],
+        "_knowledge_gaps": [],
+        "_knowledge_coverage_summary": {
+            "facts_identified": 12, "mapped": 7, "deduplicated": 2, "unmapped": 3, "lost": 0,
+        },
+    }
+    result = render_kt_coverage(section)
+    assert result["blocks"][0]["type"] == "NarrativeBlock"
+    assert result["blocks"][0]["title"] == "Knowledge coverage"
+    text = " ".join(result["blocks"][0]["paragraphs"])
+    assert "12" in text and "7 mapped" in text and "2 deduplicated" in text and "3" in text and "0 lost" in text
+    assert result["blocks"][1]["type"] == "DecisionTable"
+
+
+def test_kt_coverage_omits_knowledge_coverage_summary_block_when_absent():
+    section = {
+        "id": "kt_coverage", "title": "KT Coverage & Knowledge Gaps",
+        "_coverage_rows": [{"Domain": "SYSTEM OVERVIEW", "Coverage": "Strong", "Assessment": "5 sentences."}],
+        "_knowledge_gaps": [],
+    }
+    result = render_kt_coverage(section)
+    assert not any(b.get("title") == "Knowledge coverage" for b in result["blocks"])
+
+
 def test_open_responsibilities_prefers_structured_rows_over_raw_table_fallback():
     # llm/prompts.py's open_responsibilities structured prompt is instructed
     # to only emit rows for genuine tasks/recurring duties and drop general
@@ -194,6 +225,36 @@ def test_open_responsibilities_prefers_structured_rows_over_raw_table_fallback()
     # anywhere in the structured-preferred output.
     rendered_text = str(result)
     assert "production activity" not in rendered_text
+
+
+def test_open_responsibilities_filters_generic_guidance_out_of_llm_structured_tasks():
+    # Regression test for a real bug found via a live Groq-backed pipeline
+    # run: the structured extraction prompt explicitly tells the model not
+    # to include general safety/escalation guidance as a task, but a
+    # smaller/faster model doesn't always follow that instruction --
+    # confirmed live: qwen3-8b put a genuine "Open Tasks" transition-plan
+    # sentence AND "If you are unsure about an ongoing production activity,
+    # contact platform engineering before proceeding." into the SAME
+    # "open_tasks" list for one real transcript. The renderer must apply
+    # its own guidance-phrase filter to the model's output too, not just
+    # the no-LLM fallback path.
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {},
+        "coverage_content": [],
+        "_structured": {
+            "open_tasks": [
+                {"task": "Regarding open responsibilities and transition plan, only "
+                         "existing and in-progress tasks are handed over. No new initiatives."},
+                {"task": "If you are unsure about an ongoing production activity, "
+                         "contact platform engineering before proceeding."},
+            ],
+        },
+    }
+    result = render_open_responsibilities(section)
+    assert not any(b["type"] == "DecisionTable" for b in result["blocks"])
+    rendered_text = str(result)
+    assert "unsure" not in rendered_text.lower()
 
 
 def test_open_responsibilities_falls_back_to_raw_table_without_structured_data():
@@ -234,6 +295,50 @@ def test_open_responsibilities_renders_long_unstructured_blob_as_narrative_not_a
     result = render_open_responsibilities(section)
     assert not any(b["type"] == "DecisionTable" for b in result["blocks"])
     assert any(long_blob in str(b) for b in result["blocks"])
+
+
+def test_open_responsibilities_renders_short_multisentence_blob_as_narrative():
+    # The real-world blob that exposed this bug is actually short (17
+    # words, under the word-count-only guard's old >20 threshold) because
+    # it's two short sentences, not one long one -- confirmed verbatim from
+    # a live KT's Open Tasks table.
+    real_blob = (
+        "Regarding open responsibilities and transition plan, only existing "
+        "and in-progress tasks are handed over. No new initiatives."
+    )
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {"open_tasks": {"value": real_blob}},
+        "coverage_content": [real_blob],
+    }
+    result = render_open_responsibilities(section)
+    assert not any(b["type"] == "DecisionTable" for b in result["blocks"])
+    assert any(real_blob in str(b) for b in result["blocks"])
+
+
+def test_open_responsibilities_renders_generic_guidance_sentence_as_narrative_not_a_fake_task():
+    # Regression test for a bug that recurred across nearly every reviewed
+    # KT: a short, single-sentence, generic safety/escalation reminder
+    # ("If you are unsure about an ongoing production activity, contact
+    # platform engineering before proceeding.") isn't caught by a
+    # word-count or sentence-count check (it's genuinely one ~13-word
+    # sentence) but is explicitly NOT a task -- llm/prompts.py's own
+    # open_responsibilities prompt says so by name ("Do NOT include general
+    # safety warnings, escalation/contact instructions"). When structured
+    # extraction doesn't run, the raw fallback must apply the same
+    # judgment via phrasing, not just length.
+    guidance = (
+        "If you are unsure about an ongoing production activity, "
+        "Contact platform engineering before proceeding."
+    )
+    section = {
+        "id": "open_responsibilities", "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+        "fields": {"open_tasks": {"value": guidance}},
+        "coverage_content": [guidance],
+    }
+    result = render_open_responsibilities(section)
+    assert not any(b["type"] == "DecisionTable" for b in result["blocks"])
+    assert any(guidance in str(b) for b in result["blocks"])
 
 
 def test_open_responsibilities_shows_no_coverage_when_nothing_available():
@@ -487,6 +592,37 @@ def test_disaster_recovery_omits_testing_frequency_line_when_not_captured():
     assert not any(b["type"] == "NarrativeBlock" for b in result["blocks"])
 
 
+def test_disaster_recovery_renders_rto_rpo_metric_as_labeled_lines_alongside_procedure():
+    # Regression test for a real bug found comparing two live-generated KT
+    # PDFs of the same transcript: rto_metric/rpo_metric (field_populator.
+    # extract_rto_rpo, a plain duration) used to be written into rto_steps/
+    # rpo_steps -- the SAME field ids the LLM's own structured extraction
+    # uses for the recovery PROCEDURE narrative -- clobbering it and leaving
+    # a bare, unlabeled "2 hours" with no indication of what it measured.
+    # Both facts must now coexist: the metric as its own clearly labeled
+    # line, the procedure still in the Recovery actions checklist untouched.
+    section = {
+        "id": "disaster_recovery", "title": "DISASTER RECOVERY",
+        "fields": {
+            "rto_steps": {"value": "Restore database from Azure SQL backups\nRecreate infrastructure using Bicep"},
+            "rto_metric": {"value": "2 hours"},
+            "rpo_metric": {"value": "15 minutes"},
+        },
+        "coverage_content": [],
+    }
+    result = render_disaster_recovery(section)
+    narrative = next(b for b in result["blocks"] if b["type"] == "NarrativeBlock")
+    assert "RTO (Recovery Time Objective): 2 hours" in narrative["paragraphs"]
+    assert "RPO (Recovery Point Objective): 15 minutes" in narrative["paragraphs"]
+
+    checklist = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")
+    assert "Restore database from Azure SQL backups" in checklist["items"]
+    assert "Recreate infrastructure using Bicep" in checklist["items"]
+    # The metric must never leak into the procedure checklist as a bare item.
+    assert "2 hours" not in checklist["items"]
+    assert "15 minutes" not in checklist["items"]
+
+
 def test_ownership_escalation_separates_guidance_from_oncall_tool_name():
     # Regression test for a real bug found on a live PDF: a general
     # "contact X when unsure" instruction ended up rendered as if it were
@@ -513,3 +649,168 @@ def test_ownership_escalation_separates_guidance_from_oncall_tool_name():
 
     guidance_block = next(b for b in result["blocks"] if b["title"] == "Operational escalation guidance")
     assert "If you are unsure about a change" in guidance_block["paragraphs"][0]
+
+
+def test_danger_zones_splits_a_single_bullet_blob_into_separate_warnings():
+    # The LLM polish pass routinely returns a whole section as one
+    # "- item. - item." string. That rendered as a single warning card
+    # containing both prohibitions plus literal dashes on live output.
+    from renderers.sections.common import render_danger_zones
+    section = {
+        "id": "danger_zones", "title": "DANGER ZONES",
+        "coverage_content": [
+            "- Production Kubernetes configuration must not be changed manually. "
+            "- Do not manually modify Bicep-managed infrastructure without "
+            "coordinating with platform engineering."
+        ],
+    }
+    result = render_danger_zones(section)
+    warnings = result["blocks"][0]["warnings"]
+    assert len(warnings) == 2
+    assert warnings[0].startswith("Production Kubernetes configuration")
+    assert warnings[1].startswith("Do not manually modify Bicep-managed")
+    assert not any(w.startswith("-") for w in warnings)
+
+
+def test_bullet_split_preserves_hyphenated_words():
+    from renderers.blocks.common import split_bullet_blob
+    assert split_bullet_blob(["Use the read-only Bicep-managed non-production cluster."]) == [
+        "Use the read-only Bicep-managed non-production cluster."
+    ]
+
+
+def test_decision_table_prunes_columns_no_row_has_data_for():
+    # A column every row leaves empty renders as nothing but the explicit
+    # "Not covered during KT" placeholder repeated down the page -- on live
+    # output four of five Day-1 columns were exactly that, squeezing the one
+    # column with real content down to an unreadable width.
+    from renderers.blocks.table import build_block
+    block = build_block(
+        "Required access & tools",
+        ["Item", "Required", "Location/Link", "Safe on Day-1", "Notes"],
+        [{"Item": "Grafana dashboards"}, {"Item": "AKS namespaces"}],
+    )
+    assert "Item" in block["columns"]
+    assert "Location/Link" not in block["columns"]
+    assert block["rows"][0]["Item"] == "Grafana dashboards"
+
+
+def test_decision_table_keeps_partially_filled_columns():
+    # A column with SOME data must survive, so a genuine per-row
+    # "not covered" signal still shows where it is informative.
+    from renderers.blocks.table import build_block
+    block = build_block(
+        "Failures",
+        ["Issue/Symptom", "Likely Cause", "How to Fix"],
+        [
+            {"Issue/Symptom": "Expired TLS certificate", "Likely Cause": "renewal missed", "How to Fix": ""},
+            {"Issue/Symptom": "Service Bus backlog", "Likely Cause": "", "How to Fix": ""},
+        ],
+    )
+    assert block["columns"] == ["Issue/Symptom", "Likely Cause"]
+
+
+def test_common_failures_renders_first_checks_as_its_own_column():
+    # A transcript very often states what to CHECK without stating a fix
+    # ("Azure SQL connection exhaustion during high traffic. Check active
+    # connections and connection pool metrics."). With no column for it the
+    # diagnostic step was dropped entirely -- the schema-gap class of bug.
+    section = {
+        "id": "common_failures", "title": "COMMON FAILURES",
+        "_structured": {"failures": [{
+            "symptom": "Azure SQL connection exhaustion",
+            "cause": None,
+            "first_checks": "Active connections; connection pool metrics",
+            "fix": None,
+        }]},
+    }
+    result = render_common_failures(section)
+    table = next(b for b in result["blocks"] if b["type"] == "DecisionTable")
+    assert "First Checks" in table["columns"]
+    assert table["rows"][0]["First Checks"] == "Active connections; connection pool metrics"
+
+
+def test_common_failures_accepts_first_checks_as_a_list():
+    section = {
+        "id": "common_failures", "title": "COMMON FAILURES",
+        "_structured": {"failures": [{
+            "symptom": "Service Bus message backlog",
+            "first_checks": ["Consumer pod health", "Processing metrics"],
+        }]},
+    }
+    result = render_common_failures(section)
+    table = next(b for b in result["blocks"] if b["type"] == "DecisionTable")
+    assert table["rows"][0]["First Checks"] == "Consumer pod health; Processing metrics"
+
+
+def test_system_overview_categorizes_azure_and_gcp_technologies():
+    # _categorize_technologies silently drops any tool with no category, so
+    # with an AWS-only map a real Azure KT that identified 18 components
+    # rendered a Technology summary of just three rows.
+    section = {
+        "id": "system_overview", "title": "SYSTEM OVERVIEW",
+        "fields": {"key_technologies": {"value": (
+            "Angular, Azure Kubernetes Service, Azure SQL, Azure Service Bus, "
+            "Azure Front Door, Bicep, Azure Key Vault, Azure Monitor, .NET"
+        )}},
+        "coverage_content": [],
+    }
+    result = render_system_overview(section)
+    grid = next(b for b in result["blocks"] if b.get("title") == "Technology summary")
+    labels = {row["label"] for row in grid["rows"]}
+    for expected in ("Frontend", "Compute", "Database", "Messaging", "Edge / ingress",
+                     "Infrastructure", "Secrets", "Observability", "Backend"):
+        assert expected in labels, f"missing category {expected}: {labels}"
+
+
+def test_environments_surfaces_content_not_covered_by_a_table_row():
+    # The table has one row per schema-declared environment, so a transcript
+    # naming any OTHER environment had nowhere to go -- "The platform has
+    # development, QA, staging, and production environments." was dropped
+    # outright on a live run, losing the dev and QA environments entirely.
+    section = {
+        "id": "environments", "title": "ENVIRONMENTS",
+        "fields": {"staging_notes": {"value": "Staging has mocked payment integrations."}},
+        "coverage_content": [
+            "Staging has mocked payment integrations.",
+            "The platform has development, QA, staging, and production environments.",
+        ],
+    }
+    result = render_environments(section)
+    extra = next(b for b in result["blocks"] if b.get("title") == "Additional environment notes")
+    assert extra["paragraphs"] == [
+        "The platform has development, QA, staging, and production environments."
+    ]
+    # The sentence already shown as a table row is not repeated.
+    assert not any("mocked payment" in p for p in extra["paragraphs"])
+
+
+def test_environments_omits_extra_notes_block_when_rows_cover_everything():
+    section = {
+        "id": "environments", "title": "ENVIRONMENTS",
+        "fields": {"staging_notes": {"value": "Staging has mocked payment integrations."}},
+        "coverage_content": ["Staging has mocked payment integrations."],
+    }
+    result = render_environments(section)
+    assert not any(b.get("title") == "Additional environment notes" for b in result["blocks"])
+
+
+def test_technology_summary_drops_a_generic_term_when_the_branded_one_is_present():
+    # A transcript says the full product name once and the generic word
+    # afterwards ("Azure Kubernetes Service ... Kubernetes workloads"), and
+    # both match the tools regex -- the summary then listed the same tier
+    # twice as "Azure Kubernetes Service; Kubernetes".
+    section = {
+        "id": "system_overview", "title": "SYSTEM OVERVIEW",
+        "fields": {"key_technologies": {"value": (
+            "Azure Kubernetes Service, Kubernetes, Azure Service Bus, Service Bus, Redis"
+        )}},
+        "coverage_content": [],
+    }
+    result = render_system_overview(section)
+    grid = next(b for b in result["blocks"] if b.get("title") == "Technology summary")
+    by_label = {row["label"]: row["value"] for row in grid["rows"]}
+    assert by_label["Compute"] == "Azure Kubernetes Service"
+    assert by_label["Messaging"] == "Azure Service Bus"
+    # A term with no branded superset is untouched.
+    assert by_label["Cache"] == "Redis"

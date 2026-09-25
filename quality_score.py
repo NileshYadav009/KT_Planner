@@ -29,6 +29,16 @@ _VALIDATION_PENALTY_CAP = 0.30
 
 _DIMENSION_WEIGHTS = {"coverage": 0.5, "confidence": 0.25, "risk": 0.25}
 
+# context_mapper.semantic_coverage_score() treats >= 0.65 as a fully
+# "covered" section, so that is the top of this signal's practical working
+# range — not 1.0. Averaging the raw value straight onto a 0-100 scale
+# therefore understated every document by roughly a third, the same
+# miscalibration already removed from the coverage-matrix bucketing (which
+# now buckets from `status` instead). Normalizing against the pipeline's own
+# threshold keeps this dimension meaningful without double-counting `status`,
+# which the coverage dimension already measures.
+_CONFIDENCE_FULL_CREDIT = 0.65
+
 _GRADE_BANDS = [
     (90, "A"),
     (80, "B"),
@@ -71,7 +81,8 @@ def compute_quality_score(
         coverage_terms.append(weights.get(status, 0.0))
 
         if status in ("covered", "weak"):
-            confidence_values.append(float(info.get("confidence", 0.0) or 0.0))
+            raw_confidence = float(info.get("confidence", 0.0) or 0.0)
+            confidence_values.append(min(raw_confidence / _CONFIDENCE_FULL_CREDIT, 1.0))
         risk_values.append(float(info.get("risk", 0.0) or 0.0))
 
     coverage_score = sum(coverage_terms) / len(coverage_terms) if coverage_terms else 0.0

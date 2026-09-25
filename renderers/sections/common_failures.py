@@ -6,7 +6,9 @@ from renderers.blocks.common import no_coverage_block
 # Matches kt_schema_new.json's declared columns for the common_failures table
 # section. The legacy pipe-parsed fallback below only ever produces 3 of these
 # (Symptom/Cause/Fix) since that format never carried frequency/ticket data.
-STRUCTURED_COLUMNS = ["Issue/Symptom", "Likely Cause", "How to Fix", "Frequency", "KEDB / Ticket Link"]
+STRUCTURED_COLUMNS = [
+    "Issue/Symptom", "Likely Cause", "First Checks", "How to Fix", "Frequency", "KEDB / Ticket Link",
+]
 
 HISTORICAL_COLUMNS = ["Incident", "Cause", "When", "Impact", "Resolution", "Preventive action"]
 NOT_COVERED = "Not covered in KT"
@@ -23,9 +25,17 @@ def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
         symptom = str(item.get("symptom") or "").strip()
         if not symptom:
             continue
+        first_checks = item.get("first_checks")
+        if isinstance(first_checks, list):
+            first_checks = "; ".join(str(c).strip() for c in first_checks if str(c).strip())
         rows.append({
             "Issue/Symptom": symptom,
             "Likely Cause": str(item.get("cause") or "").strip(),
+            # Diagnostic steps are a distinct fact from a remediation — a
+            # transcript very often states what to check without stating a
+            # fix, and that used to be dropped entirely for want of a column
+            # to put it in (the schema-gap class of bug).
+            "First Checks": str(first_checks or "").strip(),
             "How to Fix": str(item.get("fix") or "").strip(),
             "Frequency": str(item.get("frequency") or "").strip(),
             "KEDB / Ticket Link": str(item.get("ticket") or "").strip(),

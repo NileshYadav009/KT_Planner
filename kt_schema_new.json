@@ -81,8 +81,10 @@
         "fastapi services",
         "postgresql databases",
         "redis cache",
-        "staging mirrors production",
-        "payment integrations mocked"
+        "web and mobile",
+        "mobile applications",
+        "b2b partners",
+        "internal teams"
       ],
       "fields": [
         {
@@ -204,6 +206,12 @@
         "mirrors production",
         "mocked",
         "payment integrations are mocked",
+        "mocked payment integrations",
+        "staging has mocked",
+        "multiple availability zones",
+        "smaller configurations",
+        "environment differences",
+        "environment limitations",
         "non-production environment",
         "spot instances used in non-production",
         "qa environment",
@@ -240,7 +248,13 @@
         "metrics",
         "service health",
         "first response",
-        "incidents are visible"
+        "incidents are visible",
+        "application insights",
+        "azure monitor",
+        "cloud monitoring",
+        "check for exceptions",
+        "infrastructure issues",
+        "then check"
       ]
     },
     {

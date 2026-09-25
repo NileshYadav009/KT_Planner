@@ -2,14 +2,16 @@ from typing import Dict, Any, List
 from renderers.blocks.checklist import build_block as build_checklist_block
 from renderers.blocks.warning import build_block as build_warning_block
 from renderers.blocks.narrative import build_block as build_narrative_block
-from renderers.blocks.common import no_coverage_block
+from renderers.blocks.common import (
+    no_coverage_block,
+    coverage_paragraphs as shared_coverage_paragraphs,
+)
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
-    coverage_content = section.get("coverage_content") or []
-    if isinstance(coverage_content, str):
-        coverage_content = [coverage_content]
-    return [str(item).strip() for item in coverage_content if isinstance(item, str) and item.strip()]
+    # Shared implementation: splits polish-pass bullet blobs and drops
+    # repeats. See renderers/blocks/common.coverage_paragraphs().
+    return shared_coverage_paragraphs(section)
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,6 +32,15 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         paragraphs.append(f"Recovery contact: {fields['recovery_contact']['value']}")
     if fields.get("dr_testing_frequency", {}).get("value"):
         paragraphs.append(f"DR testing frequency: {fields['dr_testing_frequency']['value']}")
+    # rto_metric/rpo_metric (field_populator.extract_rto_rpo) are a plain
+    # duration, deliberately kept out of rto_steps/rpo_steps above (which
+    # hold the LLM's own recovery PROCEDURE narrative, a different fact) --
+    # rendered as their own clearly labeled lines so "2 hours" never appears
+    # bare with nothing saying what it measures.
+    if fields.get("rto_metric", {}).get("value"):
+        paragraphs.append(f"RTO (Recovery Time Objective): {fields['rto_metric']['value']}")
+    if fields.get("rpo_metric", {}).get("value"):
+        paragraphs.append(f"RPO (Recovery Point Objective): {fields['rpo_metric']['value']}")
 
     blocks = []
     if checklist_items:

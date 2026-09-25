@@ -32,7 +32,10 @@ _LAYER_TERMS: Dict[str, List[str]] = {
         "google kubernetes engine", "gke",
         "kubernetes", "docker", "rancher",
     ],
-    "service": ["fastapi", "fast api", "django", "flask", "node.js", "node", "express"],
+    "service": [
+        "fastapi", "fast api", "django", "flask", "node.js", "node", "express",
+        ".net", "asp.net", "dotnet", ".net microservices",
+    ],
     "database": [
         "postgresql", "mysql", "mongodb", "amazon rds", "azure sql",
         "bigquery", "cloud sql", "firestore", "bigtable", "cloud spanner",
@@ -79,7 +82,14 @@ _CHAIN_LAYERS = ["frontend", "cdn", "load_balancer", "compute"]
 # with no frontend/CDN/load-balancer ever mentioned).
 _ENTRY_LAYERS = ["frontend", "cdn", "load_balancer"]
 # Layers that fan out FROM the compute hub, rather than continuing the chain.
-_FANOUT_LAYERS = ["service", "database", "cache", "queue"]
+# Split so the diagram can distinguish "hosted BY compute" (the app
+# workloads themselves) from "DEPENDED ON by the workloads" (a database,
+# cache, or queue) — rendering both as identical tree children previously
+# implied every one of them was hosted inside the compute node/cluster,
+# which is only true for "service".
+_HOSTED_LAYERS = ["service"]
+_DEPENDENCY_LAYERS = ["database", "cache", "queue"]
+_FANOUT_LAYERS = _HOSTED_LAYERS + _DEPENDENCY_LAYERS
 
 _ROOT_LABEL = "Customer"
 
@@ -137,7 +147,9 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
     of a customer-facing request path.
     """
     chain = [by_layer[layer][0] for layer in _CHAIN_LAYERS if layer in by_layer]
-    fanout = [by_layer[layer][0] for layer in _FANOUT_LAYERS if layer in by_layer]
+    hosted = [by_layer[layer][0] for layer in _HOSTED_LAYERS if layer in by_layer]
+    dependencies = [by_layer[layer][0] for layer in _DEPENDENCY_LAYERS if layer in by_layer]
+    fanout = hosted + dependencies
 
     if not chain and not fanout:
         return None
@@ -145,12 +157,28 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
     has_hub = "compute" in by_layer
     if not has_hub and fanout:
         chain = chain + fanout
+        hosted = []
+        dependencies = []
         fanout = []
 
     has_customer_entry = any(layer in by_layer for layer in _ENTRY_LAYERS)
 
-    lines: List[str] = []
     nodes = ([_ROOT_LABEL] if has_customer_entry else []) + chain
+    if len(nodes) <= 1 and not fanout:
+        # A single bare node with no arrows and no branches isn't a "flow"
+        # — it conveys nothing the flat Architecture Knowledge component
+        # list doesn't already say, and it's actively confusing when the
+        # same node also appears as the destination of the CI/CD flow
+        # rendered right below it (a real transcript with only "Kubernetes,
+        # Terraform, Jenkins" named produced exactly this: a standalone
+        # "Kubernetes" line with no context, immediately followed by
+        # "Jenkins -> CI -> Kubernetes", making the same fact look like two
+        # separate, disconnected pieces of information). Skip this section
+        # entirely in that case — the CI/CD/IaC/etc. sections built
+        # separately still render normally.
+        return None
+
+    lines: List[str] = []
     for i, node in enumerate(nodes):
         lines.append(node)
         if i < len(nodes) - 1:
@@ -163,11 +191,29 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
             lines.append("   │")
 
     if fanout:
-        for j, child in enumerate(fanout):
-            connector = "└──" if j == len(fanout) - 1 else "├──"
-            lines.append(f"   {connector} {child}")
-            if j < len(fanout) - 1:
-                lines.append("   │")
+        # Only label the dependency group when BOTH a hosted workload and a
+        # dependency are present — that's the only case where "children of
+        # the compute hub" would otherwise look like one undifferentiated
+        # group and falsely imply the database/cache/queue are hosted
+        # inside compute rather than depended on by the workload it hosts.
+        groups = []
+        if hosted:
+            groups.append((None, hosted))
+        if dependencies:
+            label = "(workload dependencies)" if hosted else None
+            groups.append((label, dependencies))
+
+        total = len(fanout)
+        seen = 0
+        for label, members in groups:
+            if label:
+                lines.append(f"   │  {label}")
+            for child in members:
+                seen += 1
+                connector = "└──" if seen == total else "├──"
+                lines.append(f"   {connector} {child}")
+                if seen < total:
+                    lines.append("   │")
 
     return "\n".join(lines) if lines else None
 

@@ -25,7 +25,7 @@ from faster_whisper import WhisperModel
 from ai import map_analysis_to_fields, polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript
-from field_populator import populate_fields
+from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
 from knowledge import (
     build_knowledge_object,
     append_unmapped_findings_section,
@@ -310,6 +310,50 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             if fields_from_structured:
                 populated_fields.setdefault(section_id, {}).update(fields_from_structured)
 
+        # Deterministic RTO/RPO capture, independent of LLM availability (see
+        # extract_rto_rpo's docstring). Writes to its OWN rto_metric/
+        # rpo_metric field ids, not rto_steps/rpo_steps -- those already
+        # belong to the LLM prompt's recovery-PROCEDURE narrative ("restore
+        # from backups", "recreate infrastructure"), a different fact from
+        # the duration metric. Confirmed live that writing the metric into
+        # that same slot silently destroyed a real procedure the LLM had
+        # captured. Runs after the structured-LLM merge above but never
+        # collides with it, since the field ids don't overlap.
+        # `coverage["disaster_recovery"]["sentences"]` (built above, lines
+        # ~124-155) is the authoritative source, already carrying its own
+        # blocks/sentences/section_content fallback chain -- kt.section_content
+        # directly is a DIFFERENT, less reliable structure (see
+        # knowledge_builder._collect_evidence()'s own docstring on the same
+        # disagreement); confirmed live that section_content left this text
+        # unreachable even via its own ['blocks'] fallback, silently starving
+        # this extractor of any text.
+        dr_sentences = coverage.get("disaster_recovery", {}).get("sentences", [])
+        dr_sentence_texts = [s.get("text", "") for s in dr_sentences if isinstance(s, dict)]
+        dr_text = " ".join(dr_sentence_texts)
+        rto_rpo = extract_rto_rpo(dr_text)
+        if rto_rpo:
+            # knowledge_builder._collect_evidence() resolves source_chunk_index
+            # against kt.section_content, NOT this coverage-based list -- the
+            # two can disagree in both content AND length (confirmed live: an
+            # index valid here landed out of range there and silently fell
+            # back to evidence for a different sentence). Search the SAME
+            # sentence list _collect_evidence() will actually index into, so
+            # a set index is guaranteed to resolve to the right sentence.
+            dr_section_content = kt.section_content.get("disaster_recovery", {}) or {}
+            dr_evidence_sentences = dr_section_content.get("sentences") or [
+                s for block in (dr_section_content.get("blocks") or [])
+                for s in (block.get("sentences") or [])
+            ]
+            dr_evidence_texts = [s.get("text", "") for s in dr_evidence_sentences if isinstance(s, dict)]
+
+            dr_fields = populated_fields.setdefault("disaster_recovery", {})
+            for field_id, value in rto_rpo.items():
+                entry = {"value": value, "confidence": 0.90, "source": "pattern"}
+                idx = find_source_sentence_index(value, dr_evidence_texts)
+                if idx is not None:
+                    entry["source_chunk_index"] = idx
+                dr_fields[field_id] = entry
+
         try:
             knowledge_object = build_knowledge_object(
                 job_id=job_id,
@@ -335,28 +379,39 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # Overview's Technology Summary so it's a genuine one-stop
         # inventory, not just whatever happened to be mentioned in the same
         # sentences as the rest of the overview narrative.
-        try:
-            knowledge_object = enrich_technology_summary(knowledge_object)
-        except Exception as exc:
-            logger.warning("Technology summary enrichment failed: %s", exc)
-
         # Architecture Reference's own field schema is 3 admin facts (doc
         # link, last-updated, verified-by) — real architecture knowledge
         # (the actual components/services the system runs on) lives in
         # whichever section's sentences happened to mention it. Surface it
         # as its own digest so the section isn't judged solely by whether
         # those 3 admin fields were discussed.
+        #
+        # Runs BEFORE the technology summary so that summary can reuse the
+        # component inventory this builds: without that ordering the summary
+        # only saw whatever tools appeared in system_overview's own
+        # sentences, and a real Azure KT rendered a "Technology summary"
+        # missing its compute, database, cache, messaging and ingress tiers
+        # even though all of them were in the component list right above it.
         try:
             knowledge_object = enrich_architecture_knowledge(knowledge_object, kt.section_content)
         except Exception as exc:
             logger.warning("Architecture knowledge enrichment failed: %s", exc)
 
+        try:
+            knowledge_object = enrich_technology_summary(knowledge_object)
+        except Exception as exc:
+            logger.warning("Technology summary enrichment failed: %s", exc)
+
         # Surface sentences the classifier never confidently placed in any
         # real section instead of letting them vanish silently (see
         # knowledge_builder.append_unmapped_findings_section docstring).
         try:
+            # `transcript` is passed so the safety net can compare the real
+            # transcript against the real document and surface anything that
+            # reached neither a section nor the classifier's own unassigned
+            # list — see _unretained_transcript_sentences().
             knowledge_object = append_unmapped_findings_section(
-                knowledge_object, kt.unassigned_sentences
+                knowledge_object, kt.unassigned_sentences, transcript
             )
         except Exception as exc:
             logger.warning("Unmapped findings appendix failed: %s", exc)

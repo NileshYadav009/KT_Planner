@@ -241,6 +241,159 @@ artifact, re-confirmed `_historical_rows()` cannot produce a truly-blank
 cell). Full suite: **224 passed, 0 failed, 10:38** — normal timing. See
 audit §9kk.
 
+**Update 2026-09-24 (live re-verification of §9kk: 3/4 confirmed, 1
+heuristic too narrow, a diagram cosmetic bug, and the real root cause)**:
+user supplied 4 freshly-generated KT PDFs — the first live re-check of
+§9kk's fixes against regenerated output. 3/4 confirmed working (certificate
+expiry, danger-zone patterns, raw metadata). Found §9kk's open_responsibilities
+word-count-only guard (`>20 words`) was too narrow: the real recurring
+offender across nearly every KT reviewed this session is a short (~13-word)
+single-sentence generic safety reminder ("If you are unsure about an
+ongoing production activity, contact platform engineering before
+proceeding.") that slides under a word-count check entirely. Replaced with
+`_looks_like_narrative_not_a_task()`: catches hedge-phrase openers ("if you
+are unsure...") and multi-sentence content, not just raw length. Also fixed
+a diagram cosmetic bug: a lone compute-hub node with no chain/fan-out
+rendered as a floating, context-free line duplicating what the CI/CD flow
+already showed below it — `_build_main_flow()` now omits that section
+entirely when there's nothing relational to show. **Root cause identified
+for most of this session's findings**: `get_llm_provider()` silently
+returns `None` (just a log warning) whenever no provider is configured,
+which no-ops all structured LLM extraction in `pipeline.py`; separately,
+`field_populator.py` architecturally excludes `type:"table"` fields
+(day1's `required_access`, open_responsibilities' `open_tasks`) from LLM
+gap-fill entirely, always. Every demo PDF reviewed this session shows the
+fully-degraded-pattern-only signature — strong evidence no LLM provider
+was active during generation, meaning fallback heuristics (meant as a rare
+last resort) have been the *primary* path throughout. Recommended: verify
+an LLM provider is configured where these KTs are generated, and/or extend
+structured extraction to the highest-value table fields. One item flagged
+but not root-caused (looks like nondeterministic semantic classification,
+needs live pipeline state to diagnose): a monitoring sentence appearing
+misclassified into day1's checklist on one run. Full suite: **228 passed,
+0 failed, 8:34** — normal timing. See audit §9ll.
+
+**Update 2026-09-24, later same day (first live LLM-enabled run — Groq/
+qwen3-8b — confirms §9ll's root-cause theory, finds 2 new bugs)**: user
+supplied real Groq credentials and asked for 4 architecture transcripts to
+be run through the live pipeline with the LLM actually active, to check
+the diagram stays technically sound and doesn't make illogical
+connections. API key never written to any file or echoed anywhere. All 4
+diagrams (AWS, Azure, GCP, Cloud Native) came out technically correct with
+zero illogical/hallucinated connections — confirmed this is structural,
+not luck: `build_architecture_flow_diagram()` is entirely deterministic/
+regex-driven and is never touched by the LLM at all, so its correctness
+can't depend on probabilistic model output. Also live-confirmed the prior
+round's diagram floating-node fix works (Cloud Native's diagram no longer
+shows a standalone context-free "Kubernetes" line). Found 2 new bugs in
+the parts of the pipeline the LLM *does* touch or sit beside: (1) the
+pattern-path enumeration splitter was splitting ANY comma+"and" sentence
+even with zero real-enumeration evidence, shredding a GCP troubleshooting
+tip ("For Kubernetes issues, check GKE and ArgoCD.") into 3 bogus access
+items — fixed by requiring a genuine intro-verb match before splitting at
+all; (2) the LLM itself (qwen3-8b) didn't reliably follow its own prompt's
+explicit "do NOT include safety warnings" instruction, mixing a real task
+and a generic guidance sentence into the same open_tasks list for one
+transcript (but got it right for the other two in the same run) — fixed
+with a defense-in-depth guidance-phrase filter now applied to the LLM's
+own structured output, not just the no-LLM fallback. Confirms LLM
+assistance genuinely helps where it runs (Common Failures got real
+cause/fix pairs for the first time this session, previously always
+blank) but is not a silver bullet for negative instructions specifically —
+code-level filters stay necessary even with a capable LLM active. Full
+suite: **230 passed, 0 failed, 7:56** — normal timing (one self-caught
+test-assertion error fixed along the way, not a code defect). See audit
+§9mm.
+
+**Update 2026-09-24, later still (fact-checked a ~25-section "typed
+knowledge-object rewrite" spec; fixed 4 real gaps, deferred the rest, fixed
+3 more bugs the live verification itself surfaced)**: user supplied
+another large architectural spec (same class as §9dd's 31-section one) —
+fact-checked its claims against real code with 3 parallel Explore agents
+before touching anything, rather than attempting a blind rewrite. Most of
+it was already true (Additional Notes dedup, coverage-matrix bucketing,
+inferred-value markers, several terminology corrections). Found and fixed
+4 genuinely real, scoped gaps: (1) the architecture diagram rendered a
+compute hub's dependencies (database/cache/queue) as visually identical
+children to its hosted workload, implying false containment — split into
+a labeled "(workload dependencies)" group; (2) RTO/RPO had no
+deterministic fallback and were silently lost whenever the LLM structured
+path didn't fire — added a standalone regex extractor, preferred over the
+LLM's own value when both are present; (3) three more mistranscriptions
+("drive testing", "bicep", "crash loop back off") confirmed absent and
+added; (4) a new numeric knowledge-coverage summary (facts identified /
+mapped / deduplicated / unmapped / lost) now renders above the existing
+template-coverage matrix, kept explicitly distinct per the spec's own
+"must never be confused" rule. Deferred the genuinely multi-session items
+(typed fact taxonomy, one-sentence-to-many decomposition — still the same
+gap §9dd already flagged as the single largest one, general relationship-
+graph model, semantic dedup, the 20-case golden-test suite) with reasoning
+recorded rather than guessed at. Live end-to-end verification (LLM fully
+disabled) then surfaced 3 more real bugs in the RTO/RPO fix itself before
+it was called done — a too-strict regex that missed a real spoken-
+transcript acronym callout phrasing, a wrong sentence-list source in
+pipeline.py, and an evidence-citation index computed against the wrong
+list — all fixed and covered by a new test that exercises the real
+`pipeline.run_kt_pipeline()` entry point, not just the isolated function.
+Full suite: **246 passed, 0 failed, 7:31**, up from 230. See audit §9nn.
+
+**Update 2026-09-24, later still (user compared before/after PDFs of the
+same real KT; found and fixed a real regression in §9nn's own RTO/RPO
+fix)**: user generated two full KT PDFs of the same transcript (one before
+§9nn, one after) and asked for a comparison. Reading both against the real
+transcript found that §9nn's RTO/RPO extractor was writing a bare duration
+into `rto_steps`/`rpo_steps` — the same field ids the LLM's structured
+extraction uses for the recovery PROCEDURE ("restore database from
+backups", "recreate infrastructure") — silently destroying that real
+procedure (and the transcript's "backups retained for 35 days" fact) and
+replacing it with two unlabeled numbers. Fixed by giving the metric its
+own `rto_metric`/`rpo_metric` fields, rendered as clearly labeled lines
+alongside the (now untouched) procedure checklist. Also identified,
+not yet fixed: Common Failures' first-check remediation steps are still
+LLM-only with no deterministic fallback (same class of gap as RTO/RPO,
+just not fixed for this field yet); "Staging has mocked payment
+integrations" still misclassifies to Additional Notes instead of
+Environments; two mishearings ("Azure azure front door", "Azure Cash for
+Redis") self-correct only where the LLM polish pass touches the text, not
+in Additional Notes, which reads raw unassigned-sentence text directly —
+worth a deterministic fix given this environment's Gemini key is confirmed
+rate-limited; ".NET microservices" isn't recognized as an architecture
+"service" layer term, so the hosted-vs-dependency diagram label from §9nn
+never fires for this transcript. Full suite: **248 passed, 0 failed,
+10:49**, up from 246. See audit §9oo.
+
+**Update 2026-09-25 (measured end-to-end run with a live LLM: mapping
+errors driven to zero, three real data-loss paths closed)**: user supplied
+Groq credentials and required that no transcript data be lost and nothing
+map to the wrong section. Built a fact-accounting harness first rather
+than eyeballing another PDF — it runs the real pipeline with the LLM
+active and audits 45 enumerated transcript facts against the rendered
+document, classifying each as mapped / misplaced / lost. Baseline 39/45
+mapped with 3 mapping errors, 3 lost facts, 3 uncorrected mishearings and
+4 duplicate entries; final **45/45 mapped, 0 mapping errors, 0
+mishearings, 0 data loss**. Three data-loss paths found that the
+pipeline's own accounting could never see (it reported `lost: 0`
+throughout, because it counts what the pipeline knows about rather than
+what the transcript said): the LLM polish pass silently dropping facts
+while rewriting a section (a stated danger zone vanished); the classifier
+dropping a sentence without reporting it unassigned; and a prohibition
+reaching Danger Zones only by embedding luck. Fixed respectively with a
+lossless-polish guard, a transcript-vs-document retention net that makes
+silent loss structurally impossible, and deterministic prohibition rules.
+Also fixed three real mapping errors (a GitOps sentence published as the
+system's "Cache Layer", "Staging has mocked payment integrations" landing
+in Additional Notes due to competing schema hints, and tribal knowledge
+never reaching its own digest), recovered data that had nowhere to go
+(failure first-checks, customer reach, non-schema environments), and made
+several enterprise output-quality fixes (the entire Azure stack was
+missing from the Technology Summary, `.NET` was invisible everywhere,
+tables were walls of "Not covered during KT", Danger Zones rendered as
+one blob, Architecture Details was a near-copy of the transcript).
+Deliberately did NOT tune the quality grade upward beyond fixing a real
+scale defect — it stays low because the transcript is short, and a
+headline metric shouldn't be adjusted until it flatters the output. Full
+suite: **280 passed, 0 failed**, up from 248. See audit §9pp.
+
 **Update 2026-09-19 (fact-checked a detailed external re-review; fixed 2
 real bugs, correctly rejected 1 false claim, precisely scoped and deferred
 1 real architectural gap)**: user pasted their own structured, numbered
