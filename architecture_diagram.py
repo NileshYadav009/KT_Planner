@@ -191,30 +191,38 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
             lines.append("   │")
 
     if fanout:
-        # Only label the dependency group when BOTH a hosted workload and a
-        # dependency are present — that's the only case where "children of
-        # the compute hub" would otherwise look like one undifferentiated
-        # group and falsely imply the database/cache/queue are hosted
-        # inside compute rather than depended on by the workload it hosts.
-        groups = []
-        if hosted:
-            groups.append((None, hosted))
-        if dependencies:
-            label = "(workload dependencies)" if hosted else None
-            groups.append((label, dependencies))
-
-        total = len(fanout)
-        seen = 0
-        for label, members in groups:
-            if label:
-                lines.append(f"   │  {label}")
-            for child in members:
-                seen += 1
-                connector = "└──" if seen == total else "├──"
+        if hosted and dependencies:
+            # Two DIFFERENT relationships, drawn differently.
+            #
+            # Compute HOSTS the workload; the workload DEPENDS ON the managed
+            # data services. Rendering both as identical tree children of the
+            # compute hub says "these are all inside the cluster", which for
+            # Azure SQL / Azure Cache for Redis / Service Bus (or RDS /
+            # ElastiCache / SQS) is simply false -- they are managed services
+            # outside it. A text label alone did not fix this: a reviewer
+            # reading the generated PDF still read the dependency rows as
+            # living inside the cluster, because the CONNECTORS said
+            # containment even while the label said otherwise.
+            #
+            # So dependencies now hang off the workload that actually uses
+            # them, with "-->" edges that read as "calls out to" rather than
+            # the "|--" that reads as "contains".
+            workload = hosted[0]
+            lines.append(f"   └── {workload}")
+            lines.append("         │")
+            for idx, dependency in enumerate(dependencies):
+                last = idx == len(dependencies) - 1
+                connector = "└──►" if last else "├──►"
+                lines.append(f"         {connector} {dependency}")
+        else:
+            # Only one kind of child is present, so there is no relationship
+            # to disambiguate -- a plain tree is correct and least cluttered.
+            total = len(fanout)
+            for idx, child in enumerate(fanout, start=1):
+                connector = "└──" if idx == total else "├──"
                 lines.append(f"   {connector} {child}")
-                if seen < total:
+                if idx < total:
                     lines.append("   │")
-
     return "\n".join(lines) if lines else None
 
 

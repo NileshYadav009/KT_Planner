@@ -6,8 +6,17 @@ from renderers.blocks.common import no_coverage_block
 # Matches kt_schema_new.json's declared columns for the common_failures table
 # section. The legacy pipe-parsed fallback below only ever produces 3 of these
 # (Symptom/Cause/Fix) since that format never carried frequency/ticket data.
+# "When it happens" carries the TRIGGERING CONDITION ("during high traffic",
+# "after a deployment", "during market-open bursts"). Speakers state it in the
+# same breath as the failure itself, and without a column for it the condition
+# was simply dropped: "Azure SQL connection exhaustion during high traffic"
+# rendered as "Azure SQL connection exhaustion" alone, losing the single most
+# useful thing for recognising the failure before it escalates. Keeping
+# issue -> condition -> cause -> first checks -> fix intact is the point of
+# this table.
 STRUCTURED_COLUMNS = [
-    "Issue/Symptom", "Likely Cause", "First Checks", "How to Fix", "Frequency", "KEDB / Ticket Link",
+    "Issue/Symptom", "When it happens", "Likely Cause", "First Checks",
+    "How to Fix", "Frequency", "KEDB / Ticket Link",
 ]
 
 HISTORICAL_COLUMNS = ["Incident", "Cause", "When", "Impact", "Resolution", "Preventive action"]
@@ -30,6 +39,7 @@ def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
             first_checks = "; ".join(str(c).strip() for c in first_checks if str(c).strip())
         rows.append({
             "Issue/Symptom": symptom,
+            "When it happens": str(item.get("condition") or "").strip(),
             "Likely Cause": str(item.get("cause") or "").strip(),
             # Diagnostic steps are a distinct fact from a remediation — a
             # transcript very often states what to check without stating a

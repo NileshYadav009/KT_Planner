@@ -1195,3 +1195,106 @@ def test_technology_summary_folds_in_the_architecture_component_inventory():
     for expected in ("azure kubernetes service", "azure sql", "redis",
                      "azure service bus", "azure front door", ".net"):
         assert expected in value, f"missing from technology summary: {expected}"
+
+
+# ---------------------------------------------------------------------------
+# Fixes from the reviewed Azure Order Processing PDF (REPOSITORY_AUDIT.md §9rr)
+# ---------------------------------------------------------------------------
+
+def test_architecture_details_do_not_repeat_the_same_sentence():
+    # The list mixes RAW sentences with the polish pass's BULLET BLOBS, which
+    # restate the same facts. Exact-match dedup kept both, so a real PDF
+    # printed "The frontend uses Angular." twice and showed
+    # "...Azure Kubernetes Service, AKS." beside "...Service (AKS)."
+    from knowledge.knowledge_builder import enrich_architecture_knowledge
+
+    knowledge_object = {
+        "sections": [
+            {"id": "architecture_reference", "coverage_content": []},
+            {
+                "id": "system_overview",
+                "coverage_content": [
+                    "The frontend uses Angular.",
+                    "- The frontend uses Angular. - Infrastructure is provisioned with Bicep.",
+                    "Production runs on Azure Kubernetes Service, AKS.",
+                    "Production runs on Azure Kubernetes Service (AKS).",
+                    "Infrastructure is provisioned with Bicep.",
+                ],
+            },
+        ]
+    }
+    arch = enrich_architecture_knowledge(knowledge_object, {})["sections"][0]
+    sentences = arch.get("_architecture_sentences") or []
+
+    assert sum("frontend uses Angular" in s for s in sentences) == 1
+    assert sum("provisioned with Bicep" in s for s in sentences) == 1
+    assert sum("Azure Kubernetes Service" in s for s in sentences) == 1
+
+
+def test_dynamic_fields_are_not_reported_as_knowledge_gaps():
+    # A dynamic field exists BECAUSE the transcript named the technology, so
+    # counting its absence as a gap is circular. A real PDF reported
+    # "missing: Cache Layer" on a KT whose Technology Summary said
+    # "Cache | Redis" on the same page.
+    from knowledge.knowledge_builder import _leaf_field_specs
+
+    specs = _leaf_field_specs([
+        {"id": "business_criticality", "label": "Business Criticality", "type": "single_select"},
+        {"id": "orders_per_day", "label": "Business Volume", "type": "text"},
+        {"id": "cache_layer", "label": "Cache Layer", "type": "text", "dynamic": True},
+    ])
+    ids = [fid for fid, _ in specs]
+
+    assert "cache_layer" not in ids
+    # Template fields still count -- their absence is genuine news.
+    assert "business_criticality" in ids
+    assert "orders_per_day" in ids
+
+
+def test_session_pleasantries_are_not_surfaced_as_unmapped_findings():
+    from knowledge.knowledge_builder import _is_session_pleasantry
+
+    assert _is_session_pleasantry("Hi everyone, today I will be handing over the Azure Order Processing Platform.")
+    assert _is_session_pleasantry("That concludes the Atlas trading platform handover.")
+    assert _is_session_pleasantry("Good morning, this is the handover for the Helios payments platform.")
+
+
+def test_pleasantry_filter_never_drops_a_real_fact():
+    # The filter removes noise; it must never cost a fact. Two false
+    # positives were found by probing it against phrasings it was not
+    # written for -- a length heuristic dropped a greeting that also stated
+    # the business volume, and a bare "That concludes..." threw away a real
+    # canary-rollback fact. Substance (a figure or a named technology) is
+    # the test, and a closing verb now needs a SESSION noun. See §9rr.
+    from knowledge.knowledge_builder import _is_session_pleasantry
+
+    keep = [
+        "Hi everyone, the platform processes 120,000 orders per day and runs on AKS.",
+        "That concludes the rollback if the canary thresholds are breached.",
+        "That concludes the deployment once Flux has synchronized.",
+        "Thanks to the platform engineering team who own the AKS infrastructure.",
+        "Production Kubernetes configuration must not be changed manually.",
+        "Good morning traffic peaks at 30 million events.",
+        "This is the end of the retention window for backups.",
+    ]
+    for sentence in keep:
+        assert not _is_session_pleasantry(sentence), sentence
+
+
+def test_closing_remarks_need_a_session_noun_not_just_the_verb():
+    from knowledge.knowledge_builder import _is_session_pleasantry
+
+    assert _is_session_pleasantry("That concludes the handover.")
+    assert _is_session_pleasantry("This wraps up the knowledge transfer session.")
+    # Same verb, applied to a procedure rather than the session.
+    assert not _is_session_pleasantry("That concludes the rollback procedure.")
+
+
+def test_pleasantry_filter_is_content_driven_not_transcript_specific():
+    # Works on wording from unrelated KTs (AWS / GCP / Azure), because it
+    # keys on greeting phrases plus substance, never on any one stack.
+    from knowledge.knowledge_builder import _is_session_pleasantry
+
+    assert _is_session_pleasantry("Good morning, this is the handover session for today.")
+    assert not _is_session_pleasantry("Hello, Memorystore caches session tokens.")
+    assert not _is_session_pleasantry("Hi team, Amazon MSK carries settlement events.")

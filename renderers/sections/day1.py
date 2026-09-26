@@ -34,7 +34,30 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     if paragraphs:
         blocks.append(build_narrative_block(title, paragraphs))
     if access_rows:
-        blocks.append(build_decision_table("Required access & tools", REQUIRED_ACCESS_COLUMNS, access_rows))
+        # Natural speech ("review Grafana dashboards, Azure DevOps
+        # repositories, AKS namespaces and deployment configurations") gives
+        # the ITEMS and nothing else, so parse_table_rows() fills only the
+        # first column. Rendered as a table, every remaining column then
+        # shows "Not covered during KT" -- and since the table keeps a
+        # minimum of two columns, a real generated PDF showed
+        # "Grafana dashboards | Not covered during KT", which flatly
+        # contradicts itself: the item is listed precisely BECAUSE the
+        # transcript named it as required. A list of items is a checklist,
+        # not a table; render it as one rather than manufacturing columns
+        # the transcript never spoke to.
+        item_column = REQUIRED_ACCESS_COLUMNS[0]
+        only_items = all(
+            not str(row.get(column) or "").strip()
+            for row in access_rows
+            for column in REQUIRED_ACCESS_COLUMNS[1:]
+        )
+        if only_items:
+            items = [str(row.get(item_column) or "").strip() for row in access_rows]
+            items = [item for item in items if item]
+            if items:
+                blocks.append(build_checklist_block("Required access & tools", items))
+        else:
+            blocks.append(build_decision_table("Required access & tools", REQUIRED_ACCESS_COLUMNS, access_rows))
     if checklist:
         blocks.append(build_checklist_block("First-day actions", checklist))
     if not blocks:

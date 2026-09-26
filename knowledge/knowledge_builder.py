@@ -17,6 +17,86 @@ UNMAPPED_FINDINGS_TITLE = "Additional Notes (Unmapped Findings)"
 # Generic length threshold — not keyed to any transcript's content.
 _MIN_UNMAPPED_SENTENCE_WORDS = 4
 
+# Session pleasantries carry no operational knowledge, but they are long
+# enough to clear the word-count filter and distinct enough to survive
+# deduplication, so they land in "Additional Notes (Unmapped Findings)" and
+# get presented to the reader as a finding. A real generated PDF's entire
+# Additional Notes section read: "Hi everyone, today I will be handing over
+# the Azure Order Processing Platform." -- which tells an incoming engineer
+# nothing and makes a genuine loss-reporting mechanism look like noise.
+#
+# Matched as whole phrases anchored at the start of a sentence so that real
+# content is never dropped: "Thanks to the platform team for the runbook" is
+# a fact about who owns what and must survive, whereas "Thanks everyone,
+# that concludes the session" must not.
+_PLEASANTRY_PATTERNS = (
+    r"^(hi|hello|hey|good\s+(morning|afternoon|evening))\b",
+    r"^(thanks|thank\s+you)\s+(everyone|all|folks|team)\b",
+    r"^(welcome|glad)\s+(to|you|everyone)\b",
+    r"^(let'?s|let\s+us)\s+(get\s+started|begin|start)\b",
+)
+_PLEASANTRY_RE = re.compile("|".join(_PLEASANTRY_PATTERNS), re.IGNORECASE)
+
+# Closing remarks need a SECOND condition, not just the verb. "That
+# concludes..." is only a pleasantry when what it concludes is the session:
+# "That concludes the rollback if the canary thresholds are breached." is a
+# real operational fact that the verb alone threw away. Found by probing the
+# filter against phrasings it had not been written for, not by a test that
+# merely re-stated the patterns.
+_CLOSING_VERB_RE = re.compile(
+    r"^(that|this)\s+(concludes|wraps\s+up|is\s+the\s+end\s+of)\b", re.IGNORECASE
+)
+_SESSION_NOUN_RE = re.compile(
+    r"\b(handover|hand\s*over|session|kt|knowledge\s+transfer|walkthrough|"
+    r"walk\s*through|meeting|call|presentation|briefing|demo)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_closing_remark(text: str) -> bool:
+    """A closing verb applied to the session itself, not to a procedure."""
+    return bool(_CLOSING_VERB_RE.search(text) and _SESSION_NOUN_RE.search(text))
+
+# A pleasantry that also states real facts must be KEPT -- the filter exists
+# to remove noise, and it is not worth losing a fact to tidy up a greeting.
+#
+# Length is the wrong test for that, and measuring it that way was a real
+# bug: "Hi everyone, the platform processes 120,000 orders per day and runs
+# on AKS." was short enough to be dropped, and "That concludes the rollback
+# if the canary thresholds are breached." -- a genuine operational fact --
+# matched the closing-remark pattern outright. Both were caught by probing
+# the filter against phrasings it had not been written for.
+#
+# So the test is SUBSTANCE, not length: a sentence is only filler when it
+# carries no number and names no technology. That reuses field_populator's
+# curated tool vocabulary rather than a second list that would drift from it.
+_PLEASANTRY_DIGIT_RE = re.compile(r"\d")
+
+
+def _has_content_signal(text: str) -> bool:
+    """True when a sentence carries substance a KT reader would want kept:
+    any figure, or any named technology."""
+    if _PLEASANTRY_DIGIT_RE.search(text or ""):
+        return True
+    try:
+        # Imported lazily so this module never participates in an import
+        # cycle with field_populator.
+        from field_populator import PATTERN_EXTRACTORS
+    except Exception:
+        return False
+    tools = PATTERN_EXTRACTORS.get("tools")
+    return bool(tools and tools.search(text or ""))
+
+
+def _is_session_pleasantry(text: str) -> bool:
+    """True for opening/closing remarks that carry no operational knowledge."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if not (_PLEASANTRY_RE.search(stripped) or _is_closing_remark(stripped)):
+        return False
+    return not _has_content_signal(stripped)
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -398,6 +478,11 @@ def _unretained_transcript_sentences(
         sentence = raw.strip()
         if len(sentence.split()) < _MIN_UNMAPPED_SENTENCE_WORDS:
             continue
+        if _is_session_pleasantry(sentence):
+            # Same carve-out as the classifier-reported pass above: an
+            # opening or closing remark is not a lost fact, and surfacing it
+            # here would re-add exactly what that filter just removed.
+            continue
         words = [w for w in _dedup_normalize(sentence).split() if w not in _DEDUP_STOPWORDS]
         if len(words) < _DEDUP_MIN_CONTENT_WORDS:
             continue
@@ -446,6 +531,7 @@ def append_unmapped_findings_section(
         s for s in sentences
         if isinstance(getattr(s, "text", None), str)
         and len(s.text.split()) >= _MIN_UNMAPPED_SENTENCE_WORDS
+        and not _is_session_pleasantry(s.text)
     ]
     surviving = [
         s for s in substantive
@@ -831,13 +917,36 @@ def enrich_architecture_knowledge(
             if existing[:1].islower() and canon[:1].isupper():
                 deduped[seen[key]] = canon
 
+    # Architecture Details renders these verbatim, so duplication here is
+    # duplication in the PDF. Exact lowercase matching was not enough: the
+    # list mixes RAW sentences with the polish pass's BULLET BLOBS, which
+    # restate the same facts inside one string. A real generated document
+    # showed "The frontend uses Angular." and "Infrastructure is provisioned
+    # with Bicep." twice each, plus "...Azure Kubernetes Service, AKS." next
+    # to "...Azure Kubernetes Service (AKS)." -- different by punctuation
+    # alone, so exact matching kept both.
+    #
+    # Split blobs into their constituent sentences first (so a blob's items
+    # are comparable to raw sentences at all), then compare on content words
+    # via the same near-duplicate rule used for Additional Notes.
+    expanded: List[str] = []
+    for text in descriptive_sentences:
+        parts = split_bullet_blob([text]) or [text]
+        for part in parts:
+            part = part.strip()
+            if part:
+                expanded.append(part)
+
     seen_sentences = set()
     deduped_sentences: List[str] = []
-    for text in descriptive_sentences:
-        key = text.lower()
-        if key not in seen_sentences:
-            seen_sentences.add(key)
-            deduped_sentences.append(text)
+    for text in expanded:
+        key = _dedup_normalize(text)
+        if key in seen_sentences:
+            continue
+        if any(_is_near_duplicate(text, kept) for kept in deduped_sentences):
+            continue
+        seen_sentences.add(key)
+        deduped_sentences.append(text)
 
     arch_section["_architecture_components"] = deduped
     if deduped_sentences:
@@ -973,6 +1082,20 @@ def _leaf_field_specs(fields_schema: Optional[List[Dict[str, Any]]]) -> List[tup
     for f in fields_schema or []:
         ftype = f.get("type", "text")
         if ftype in ("list", "group"):
+            continue
+        if f.get("dynamic"):
+            # Dynamically-added fields (schema_generator.py's
+            # TECH_STACK_FIELD_ADDITIONS) exist BECAUSE the transcript
+            # mentioned the technology -- "Cache Layer" is created only
+            # because Redis was named. Counting such a field as a gap is
+            # circular: the transcript conjures the field and is then
+            # marked down for not elaborating on it. A real generated PDF
+            # reported "missing: Cache Layer" on a KT whose own Technology
+            # Summary, on the same page, read "Cache | Redis".
+            #
+            # Template fields are different and stay in scope: they
+            # represent what a KT *should* cover regardless of what was
+            # said, so their absence is genuine news.
             continue
         specs.append((f.get("id"), f.get("label", f.get("id"))))
     return specs

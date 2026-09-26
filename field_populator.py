@@ -125,7 +125,9 @@ PATTERN_EXTRACTORS = {
         # fuller name at its first mention — see the term-canonicalization
         # step in knowledge_builder.py that collapses these to one display
         # name regardless of which form each individual mention used.
-        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|Amazon\s+SQS|CloudFront|S3|SQS|RDS|ECR|"
+        r"Amazon\s+EKS|Amazon\s+RDS|Amazon\s+ECR|Amazon\s+SQS|Amazon\s+MSK|"
+        r"Amazon\s+OpenSearch|OpenSearch|Amazon\s+Aurora|Aurora\s+PostgreSQL|Aurora|"
+        r"Route\s*53|AWS\s+WAF|AWS\s+KMS|CloudFront|S3|SQS|RDS|ECR|EKS|MSK|WAF|KMS|"
         # Azure equivalents of the same architectural roles above.
         r"Azure\s+Kubernetes\s+Service|AKS|Azure\s+SQL|"
         r"Azure\s+Service\s+Bus|Service\s+Bus|"
@@ -145,6 +147,7 @@ PATTERN_EXTRACTORS = {
         r"Cloud\s+Build|"
         r"Dataflow|Airflow|Vertex\s+AI|Cloud\s+Storage|"
         r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
+        r"Spring\s+Boot|Spring|"
         # ".NET microservices" is an extremely common way to name the backend
         # in an Azure KT, but the leading "." can't sit inside this regex's
         # outer \b(...)\b, so the dotted form is matched via its "NET
@@ -231,6 +234,71 @@ def extract_customer_reach(text: str) -> Optional[str]:
     def _present(p: str) -> str:
         return re.sub(r"\b(b2b|b2c)\b", lambda m: m.group(1).upper(), p)
     return ", ".join(_present(p) for p in seen)
+
+
+# What happens when the system is unavailable. Speakers state this as a
+# consequence clause ("An outage prevents orders and delays warehouse
+# processing", "If the platform is unavailable, customers may be unable to
+# submit orders"), and never using the schema's own words ("what breaks",
+# "impact if down"), so semantic matching against the field label is weak and
+# the fact was being reported as missing on documents that plainly stated it.
+_OUTAGE_TRIGGER_RE = re.compile(
+    r"(?:^|[.;]\s*)(?:"
+    r"(?:an?\s+|any\s+)?(?:outage|downtime|failure)\b[^.;]*?|"
+    # The subject is often the product's NAME, not a generic noun — a real
+    # KT says "If Helios is down, customers cannot complete checkout".
+    # Restricting this to platform/system/service silently skipped every
+    # transcript that names its own system, which is most of them.
+    # (?![\w-]) rather than \b: a word boundary fires at the hyphen in
+    # "down-scaled", so "If the deployment is down-scaled the pods restart"
+    # was read as an outage-impact statement.
+    r"if\s+(?:the\s+)?[A-Za-z][\w.\-]*(?:\s+[a-z]+)?\s+(?:is|becomes|goes)\s+"
+    r"(?:down|unavailable|offline)(?![\w-])[^.;]*?|"
+    r"when\s+(?:the\s+)?[A-Za-z][\w.\-]*(?:\s+[a-z]+)?\s+(?:is\s+)?"
+    r"(?:down|unavailable|offline)(?![\w-])[^.;]*?"
+    r")(?=[.;]|$)",
+    re.IGNORECASE,
+)
+
+# Who the outage lands on, when the sentence says so.
+_OUTAGE_AUDIENCE_RE = re.compile(
+    r"\b(customers?|users?|clients?|operations\s+team|ops\s+team|warehouse|"
+    r"downstream\s+(?:systems?|teams?)|internal\s+teams?|partners?)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_outage_impact(text: str) -> Optional[str]:
+    """The stated consequence of the system being unavailable.
+
+    Deterministic on purpose: this is a REQUIRED field whose absence is
+    reported to the reader as a knowledge gap, so it must not depend on an
+    LLM being reachable. Confirmed live that a KT stating "An outage prevents
+    orders and delays warehouse processing." still rendered
+    "missing: Business Criticality" and left impact_if_down unfilled.
+    """
+    if not text:
+        return None
+    for match in _OUTAGE_TRIGGER_RE.finditer(text):
+        phrase = re.sub(r"\s+", " ", match.group(0)).strip(" .;")
+        # Guard against matching a bare mention ("outage" in a list of
+        # monitoring alert types) rather than a stated consequence.
+        if len(phrase.split()) >= 4:
+            return phrase[:1].upper() + phrase[1:]
+    return None
+
+
+def extract_outage_audience(text: str) -> Optional[str]:
+    """Who a stated outage affects, when the same clause names them."""
+    impact = extract_outage_impact(text)
+    if not impact:
+        return None
+    seen: List[str] = []
+    for match in _OUTAGE_AUDIENCE_RE.finditer(impact):
+        who = re.sub(r"\s+", " ", match.group(1)).strip().lower()
+        if who not in seen:
+            seen.append(who)
+    return ", ".join(w[:1].upper() + w[1:] for w in seen) if seen else None
 
 
 def extract_rto_rpo(text: str) -> Dict[str, str]:
@@ -348,7 +416,22 @@ def _extract_by_pattern(
             if opt in text_lower:
                 matched.append(opt.title())
         if field_type == "single_select":
-            return matched[0] if matched else None
+            if matched:
+                return matched[0]
+            # A speaker almost never says "business criticality is High" —
+            # they say what an outage costs. A stated customer- or
+            # operations-facing outage impact IS evidence of criticality, so
+            # reporting this required field as a knowledge gap on a document
+            # that describes the impact is wrong (confirmed live: a KT
+            # stating "An outage prevents orders and delays warehouse
+            # processing." rendered "missing: Business Criticality").
+            #
+            # The LEVEL itself is never stated, so it is derived, and the
+            # value says so inline rather than presenting a guess as fact —
+            # a reader can see exactly what it came from and correct it.
+            if field_id == "business_criticality" and extract_outage_impact(section_text):
+                return "High (derived from the stated outage impact)"
+            return None
         return matched if matched else None
 
     if "orders" in field_id or "transactions" in field_id:
@@ -360,6 +443,17 @@ def _extract_by_pattern(
         reach = extract_customer_reach(section_text)
         if reach:
             return reach
+
+    # impact_if_down is a GROUP, so these arrive as the group's leaf ids.
+    if field_id == "what_breaks":
+        impact = extract_outage_impact(section_text)
+        if impact:
+            return impact
+
+    if field_id == "who_affected":
+        audience = extract_outage_audience(section_text)
+        if audience:
+            return audience
 
     if field_id != "oncall_tool" and ("tool" in field_id or "technolog" in field_id or "stack" in field_id):
         tools = PATTERN_EXTRACTORS["tools"].findall(section_text)

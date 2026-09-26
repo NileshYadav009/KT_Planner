@@ -39,6 +39,20 @@ _TECH_CATEGORY_MAP = {
     "amazon sqs": "Messaging", "sqs": "Messaging",
     "amazon ecr": "Container registry", "ecr": "Container registry",
     "rds": "Database",
+    # The rest of a mainstream AWS stack. Without these the tools regex can
+    # recognise the term while _categorize_technologies() still drops it (it
+    # skips anything with no category), so a real AWS KT naming Aurora, MSK,
+    # OpenSearch and Route 53 rendered a Technology Summary missing its
+    # database, messaging, logging and DNS tiers entirely -- the same defect
+    # already fixed once for Azure, re-found on the AWS side.
+    "eks": "Compute",
+    "aurora": "Database", "aurora postgresql": "Database", "amazon aurora": "Database",
+    "amazon msk": "Messaging", "msk": "Messaging",
+    "opensearch": "Observability", "amazon opensearch": "Observability",
+    "route 53": "Edge / ingress", "route53": "Edge / ingress",
+    "aws waf": "Security", "waf": "Security",
+    "aws kms": "Security", "kms": "Security",
+    "spring boot": "Backend", "spring": "Backend",
     # Azure. Without these the entire Azure stack was silently dropped from
     # the Technology summary -- _categorize_technologies() skips any tool
     # with no category, so a real Azure KT listing 18 identified components

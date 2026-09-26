@@ -814,3 +814,95 @@ def test_technology_summary_drops_a_generic_term_when_the_branded_one_is_present
     assert by_label["Messaging"] == "Azure Service Bus"
     # A term with no branded superset is untouched.
     assert by_label["Cache"] == "Redis"
+
+
+def test_day1_access_items_render_as_a_checklist_not_a_contradictory_table():
+    # Natural speech gives the ITEMS only, so every other column filled with
+    # "Not covered during KT" -- and the table keeps a minimum of two
+    # columns, so a real PDF printed "Grafana dashboards | Not covered
+    # during KT", which contradicts itself: the item is listed precisely
+    # BECAUSE the transcript named it as required. See §9rr.
+    from renderers.sections.day1 import render
+
+    out = render({
+        "id": "day1_survival_checklist",
+        "title": "DAY-1 SURVIVAL CHECKLIST",
+        "fields": {
+            "required_access": {
+                "value": "Grafana dashboards\nAzure DevOps repositories\nAKS namespaces"
+            }
+        },
+    })
+
+    access = next(b for b in out["blocks"] if b.get("title") == "Required access & tools")
+    assert access["type"] == "ChecklistBlock"
+    assert access["items"] == [
+        "Grafana dashboards",
+        "Azure DevOps repositories",
+        "AKS namespaces",
+    ]
+    rendered = " ".join(access["items"])
+    assert "Not covered" not in rendered
+
+
+def test_day1_still_renders_a_table_when_columns_have_real_data():
+    # The checklist path must not swallow genuinely tabular evidence.
+    from renderers.sections.day1 import render
+
+    out = render({
+        "id": "day1_survival_checklist",
+        "title": "DAY-1 SURVIVAL CHECKLIST",
+        "fields": {
+            "required_access": {"value": "Grafana | Yes | https://grafana.internal"}
+        },
+    })
+
+    access = next(b for b in out["blocks"] if b.get("title") == "Required access & tools")
+    assert access["type"] != "ChecklistBlock"
+
+
+def test_technology_summary_categorises_a_full_aws_stack():
+    # A recognised tool with no category is silently dropped by
+    # _categorize_technologies(), so vocabulary and category map must move
+    # together. This is the AWS half of a defect already fixed for Azure.
+    from renderers.sections.system_overview import _categorize_technologies
+
+    rows = _categorize_technologies(
+        "React, Amazon EKS, Spring Boot, Aurora PostgreSQL, Redis, Amazon MSK, "
+        "OpenSearch, Route 53, AWS WAF, AWS KMS, Amazon ECR, Terraform"
+    )
+    by_label = {r["label"]: r["value"] for r in rows}
+
+    assert "Aurora PostgreSQL" in by_label["Database"]
+    assert "Amazon MSK" in by_label["Messaging"]
+    assert "OpenSearch" in by_label["Observability"]
+    assert "Route 53" in by_label["Edge / ingress"]
+    assert "Spring Boot" in by_label["Backend"]
+    assert "AWS KMS" in by_label["Security"]
+
+
+def test_failure_table_keeps_the_triggering_condition():
+    # issue -> condition -> cause -> first checks -> fix must stay intact.
+    # "Azure SQL connection exhaustion during high traffic" previously
+    # rendered without "during high traffic" -- there was no column for it,
+    # so the condition was dropped. See §9ss.
+    from renderers.sections.common_failures import render, STRUCTURED_COLUMNS
+
+    assert "When it happens" in STRUCTURED_COLUMNS
+
+    out = render({
+        "id": "common_failures",
+        "title": "COMMON FAILURES & FIXES",
+        "_structured": {"failures": [{
+            "symptom": "Azure SQL connection exhaustion",
+            "condition": "During high traffic",
+            "first_checks": ["Active Connections", "Connection Pool metrics"],
+            "cause": None,
+            "fix": None,
+        }]},
+    })
+    row = next(b for b in out["blocks"] if b.get("rows"))["rows"][0]
+
+    assert row["Issue/Symptom"] == "Azure SQL connection exhaustion"
+    assert row["When it happens"] == "During high traffic"
+    assert "Active Connections" in row["First Checks"]

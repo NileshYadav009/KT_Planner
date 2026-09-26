@@ -1118,6 +1118,49 @@ left as silent gaps:
     deliberately not built on a fragile keyword-blocklist approximation
     that would likely misfire on legitimate short facts elsewhere.
 
+**Update 2026-09-26 (fact-checked a second agent's review of a generated
+PDF: 5 findings real and fixed, 2 wrong)**: user ran another agent over the
+Azure Order Processing transcript + its PDF and asked whether that agent's
+mapping critique was on point. Checked each claim against code instead of
+accepting or dismissing the review wholesale. Real and fixed: (1) the
+architecture diagram drew managed services as tree children of the compute
+hub, implying Azure SQL/Redis/Service Bus run *inside* AKS — the
+`(workload dependencies)` label added in an earlier round was not enough,
+because the connectors said containment; dependencies now hang off the
+workload with arrow edges; (2) "Cache Layer" reported as a knowledge gap
+although it is a *dynamically added* field created because the transcript
+said Redis — circular, now excluded from gap counting; (3) Architecture
+Details printed the same sentence twice (raw sentences mixed with polish
+bullet blobs, exact-match dedup); (4) the Day-1 table printed
+"Grafana dashboards | Not covered during KT" for an item listed *because*
+the transcript required it — now a checklist; (5) a greeting was the whole
+Additional Notes section. Wrong: "Business Criticality should read
+Complete" conflates it with `impact_if_down` (though `impact_if_down`
+genuinely failing to populate is a real defect, recorded); and the proposed
+knowledge-object rebuild is the same deferred rewrite as before. Also
+confirmed but deliberately NOT fixed: Tribal Knowledge is ~75%
+duplication, but fixing it properly needs the deferred multi-fact sentence
+split first, so it stays open rather than half-done. See audit §9rr.
+
+**Same day, generality check**: user asked whether those five fixes apply
+to any KT or only repaired that one document. Proved it by exercising each
+against AWS/GCP/Azure stacks and other transcripts' phrasings rather than
+asserting it — and the probe found two real defects in that same round's
+work. (1) The pleasantry filter had two false positives, one destructive: a
+length heuristic dropped "Hi everyone, the platform processes 120,000
+orders per day and runs on AKS", and a bare "That concludes..." pattern
+threw away "That concludes the rollback if the canary thresholds are
+breached", a genuine operational fact. Replaced length with a substance
+test (a figure, or a technology in the curated vocabulary) and required a
+closing verb to be paired with a session noun. The original tests passed
+because they restated the patterns instead of probing them. (2) Eleven
+mainstream AWS technologies were missing from the tools vocabulary — MSK,
+bare EKS, Aurora, OpenSearch, Route 53, WAF, KMS, Spring Boot — the AWS
+half of a defect already fixed for Azure, and the direct reason the AWS
+trading-platform KT rendered a thin architecture section. Vocabulary and
+`_TECH_CATEGORY_MAP` fixed together; an AWS KT now renders a full 14-tier
+Technology Summary.
+
 If picking Phase 9 back up: decide the auth approach deliberately (a
 lightweight shared-API-key-per-role model vs. real user accounts) rather
 than defaulting to whichever is faster to build — see

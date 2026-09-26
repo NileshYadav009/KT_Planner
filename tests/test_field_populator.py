@@ -717,3 +717,91 @@ def test_customer_reach_handles_audience_phrasing_and_stays_silent_otherwise():
     assert extract_customer_reach("Used by B2B partners and internal teams.") == "B2B partners, internal teams"
     assert extract_customer_reach("Nothing about the audience here.") is None
     assert extract_customer_reach("") is None
+
+
+def test_tools_vocabulary_covers_a_mainstream_aws_stack():
+    # Found while proving the §9rr fixes were generic rather than tuned to
+    # one Azure transcript: 11 mainstream AWS technologies were absent from
+    # the curated vocabulary, so an AWS KT naming Aurora, MSK, OpenSearch,
+    # Route 53, WAF, KMS and Spring Boot lost them from Architecture
+    # Knowledge and the Technology Summary entirely.
+    from field_populator import PATTERN_EXTRACTORS
+
+    tools = PATTERN_EXTRACTORS["tools"]
+    for term in [
+        "Amazon MSK", "MSK", "EKS", "Aurora", "Aurora PostgreSQL",
+        "OpenSearch", "Route 53", "AWS WAF", "WAF", "AWS KMS", "KMS",
+    ]:
+        assert tools.findall(term), f"{term} not recognised as a technology"
+
+    # Azure/GCP/core terms must keep matching.
+    for term in ["Azure Kubernetes Service", "AKS", "Redis", "Terraform", "Amazon RDS"]:
+        assert tools.findall(term), term
+
+
+def test_backend_frameworks_include_spring_boot():
+    from field_populator import PATTERN_EXTRACTORS
+
+    assert PATTERN_EXTRACTORS["tools"].findall("Spring Boot")
+
+
+def test_outage_impact_populates_a_required_field_without_an_llm():
+    # "An outage prevents orders and delays warehouse processing." is
+    # explicitly stated, yet impact_if_down stayed unfilled and the coverage
+    # matrix reported "missing: Business Criticality". A required field whose
+    # absence is shown to the reader as a knowledge gap must not depend on an
+    # LLM being reachable. See REPOSITORY_AUDIT.md §9ss.
+    from field_populator import extract_outage_impact, extract_outage_audience
+
+    stated = [
+        "An outage prevents orders and delays warehouse processing.",
+        "If Helios is down, customers cannot complete checkout and settlement is delayed.",
+        "If the platform is unavailable, customers may be unable to submit or modify orders.",
+        "When Atlas is unavailable the operations team must intervene manually.",
+    ]
+    for sentence in stated:
+        assert extract_outage_impact(sentence), sentence
+
+    assert "Warehouse" in (extract_outage_audience(stated[0]) or "")
+    assert "Customers" in (extract_outage_audience(stated[1]) or "")
+
+
+def test_outage_impact_does_not_fire_on_unrelated_text():
+    from field_populator import extract_outage_impact
+
+    for sentence in [
+        "Monitoring alerts on outage, latency and error rate.",   # bare mention
+        "If the deployment is down-scaled the pods restart.",      # "down-scaled"
+        "Check whether the consumer is downstream of the topic.",  # "downstream"
+        "The platform runs on Azure Kubernetes Service.",
+    ]:
+        assert not extract_outage_impact(sentence), sentence
+
+
+def test_business_criticality_is_derived_and_says_so():
+    # The LEVEL is never stated aloud, so it is derived from the stated
+    # impact -- and the value declares that inline rather than presenting a
+    # guess as fact.
+    import json
+    from kt_schema_loader import SCHEMA
+    from field_populator import populate_fields
+
+    sentences = [
+        "The platform processes around 120,000 customer orders per day.",
+        "An outage prevents orders and delays warehouse processing.",
+    ]
+    out = populate_fields(
+        dynamic_schema=SCHEMA,
+        coverage={"system_overview": {
+            "title": "SYSTEM OVERVIEW", "status": "partial", "confidence": 0.7,
+            "content": sentences, "sentences": [{"text": t} for t in sentences],
+        }},
+        llm_provider=None, embedding_model=None,
+        section_content={"system_overview": {"sentences": [{"text": t} for t in sentences]}},
+    )
+    overview = out["system_overview"]
+
+    assert overview["business_criticality"]["value"].startswith("High")
+    assert "derived" in overview["business_criticality"]["value"].lower()
+    assert overview["impact_if_down"]["what_breaks"]["value"]
+    assert overview["impact_if_down"]["who_affected"]["value"]

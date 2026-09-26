@@ -32,11 +32,13 @@ def test_full_diagram_covers_main_flow_and_every_supporting_section():
     chain_order = [l for l in lines if l in ("Customer", "React", "CloudFront", "Application Load Balancer", "Amazon EKS")]
     assert chain_order[:5] == ["Customer", "React", "CloudFront", "Application Load Balancer", "Amazon EKS"]
 
-    # Fan-out from the EKS hub: service + database + cache + queue
-    assert "├── FastAPI" in diagram
-    assert "├── Amazon RDS" in diagram
-    assert "├── Redis" in diagram
-    assert "└── Amazon SQS" in diagram
+    # Fan-out from the EKS hub: the hosted workload is the hub's tree child,
+    # and the data services hang off THAT workload with arrow edges (they are
+    # managed services it calls, not things running inside the cluster).
+    assert "└── FastAPI" in diagram
+    assert "├──► Amazon RDS" in diagram
+    assert "├──► Redis" in diagram
+    assert "└──► Amazon SQS" in diagram
 
     # PostgreSQL is a synonym for the same "database" layer as Amazon RDS —
     # first-seen (Amazon RDS, which appears earlier in the input list) wins,
@@ -109,24 +111,33 @@ def test_bare_compute_hub_with_no_chain_or_fanout_is_not_rendered_as_a_floating_
 
 def test_dependency_layers_are_visually_distinguished_from_the_hosted_workload():
     # A compute hub with both a hosted service AND dependencies (database/
-    # cache/queue) used to render all four as identical "├──" tree children
-    # of the same hub — visually implying the database/cache/queue were
-    # hosted INSIDE the compute node, when really only the service (the
-    # application workload) is hosted there; the database/cache/queue are
-    # dependencies OF that workload, not of the cluster itself. A labeled
-    # sub-group must separate the two.
+    # cache/queue) used to render all four as identical "|--" tree children
+    # of the same hub, visually implying the database/cache/queue ran INSIDE
+    # the compute node. Only the service is hosted there; the rest are
+    # managed services the workload depends on.
+    #
+    # A "(workload dependencies)" text label was tried first and was not
+    # enough -- a reviewer reading the generated PDF still read them as
+    # contained, because the CONNECTORS said containment. The distinction is
+    # now structural: dependencies hang off the workload, with arrow edges.
     components = ["FastAPI", "Amazon EKS", "Amazon RDS", "Redis", "Amazon SQS"]
     diagram = build_architecture_flow_diagram(components)
     assert diagram is not None
-    assert "(workload dependencies)" in diagram
 
     lines = diagram.splitlines()
+    hub_idx = next(i for i, l in enumerate(lines) if "Amazon EKS" in l)
     hosted_idx = next(i for i, l in enumerate(lines) if "FastAPI" in l)
-    label_idx = next(i for i, l in enumerate(lines) if "(workload dependencies)" in l)
     dependency_idx = next(i for i, l in enumerate(lines) if "Amazon RDS" in l)
-    # The label appears after the hosted workload and before the
-    # dependencies it's introducing.
-    assert hosted_idx < label_idx < dependency_idx
+
+    assert hub_idx < hosted_idx < dependency_idx
+
+    # The hosted workload keeps a containment connector; the dependencies
+    # get arrows, and sit deeper than the workload.
+    assert "└── FastAPI" in lines[hosted_idx]
+    assert "►" in lines[dependency_idx]
+    hosted_indent = len(lines[hosted_idx]) - len(lines[hosted_idx].lstrip())
+    dep_indent = len(lines[dependency_idx]) - len(lines[dependency_idx].lstrip())
+    assert dep_indent > hosted_indent
 
 
 def test_dependency_label_omitted_when_no_hosted_workload_is_named():
@@ -259,3 +270,48 @@ def test_customer_entry_only_shown_with_real_evidence_of_a_customer_facing_layer
     assert diagram is not None
     assert "Customer" not in diagram
     assert diagram.splitlines()[0] == "Kubernetes"
+
+
+# ---------------------------------------------------------------------------
+# Hosted workloads vs. managed dependencies.
+#
+# A reviewer reading a real generated PDF read "Azure SQL / Redis / Service
+# Bus" as running INSIDE the AKS cluster, because they were drawn as tree
+# children of the compute hub with the same connectors as the hosted
+# workload. A "(workload dependencies)" text label did not fix it -- the
+# connectors said containment. See REPOSITORY_AUDIT.md §9rr.
+# ---------------------------------------------------------------------------
+
+def test_dependencies_hang_off_the_workload_not_the_compute_hub():
+    diagram = build_architecture_flow_diagram(
+        ["Angular", "Azure Kubernetes Service", ".NET", "Azure SQL", "Redis", "Azure Service Bus"]
+    )
+    lines = diagram.splitlines()
+
+    compute_idx = next(i for i, l in enumerate(lines) if "Azure Kubernetes Service" in l)
+    workload_idx = next(i for i, l in enumerate(lines) if ".NET" in l)
+    sql_idx = next(i for i, l in enumerate(lines) if "Azure SQL" in l)
+
+    # The workload is the compute hub's child; the data services come after it.
+    assert compute_idx < workload_idx < sql_idx
+
+    # Dependencies use an ARROW edge ("calls out to"), not the plain tree
+    # connector that reads as containment.
+    for dependency in ("Azure SQL", "Redis", "Azure Service Bus"):
+        line = next(l for l in lines if dependency in l)
+        assert "►" in line, f"{dependency} should use an arrow edge: {line!r}"
+
+    # ...and they are indented deeper than the workload, so they read as
+    # hanging off it rather than as its siblings.
+    workload_indent = len(lines[workload_idx]) - len(lines[workload_idx].lstrip())
+    dep_indent = len(lines[sql_idx]) - len(lines[sql_idx].lstrip())
+    assert dep_indent > workload_indent
+
+
+def test_dependencies_alone_still_render_as_a_plain_tree():
+    # No hosted workload means there is no relationship to disambiguate, so
+    # the extra indentation and arrows would be noise.
+    diagram = build_architecture_flow_diagram(
+        ["Azure Kubernetes Service", "Azure SQL", "Redis"]
+    )
+    assert "►" not in diagram
