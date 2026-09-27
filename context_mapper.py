@@ -484,6 +484,119 @@ class HumanFeedback:
     confidence_adjustment: float = 1.0
 
 
+# ---------------------------------------------------------------------------
+# Controlled multi-section assignment (Principle #3), OFF by default.
+#
+# A sentence has always been placed in exactly one section. That was a
+# deliberate decision, not an oversight: the classifier produces a ranked
+# top-k for EVERY sentence, so adding secondary candidates unconditionally
+# would copy most of the transcript into several sections at once.
+#
+# The downstream machinery for multi-placement already exists and is unused —
+# ContextMappingPipeline's assembly loop iterates multi_section_assignments,
+# de-duplicates per section by normalized text, and records a cross-reference
+# when a sentence is already present. What was missing is a reason to add a
+# second section at all, so this supplies one: an extra section must clear an
+# absolute confidence bar (it is a real match in its own right, not merely
+# next-best) AND sit close to the primary (the sentence genuinely straddles
+# both, rather than having one clear home). A section whose own deterministic
+# rule fired is evidence by itself.
+#
+# Every extra placement records WHY, so a reviewer can audit it. The flag
+# stays off until the measurement says it earns its place.
+ENABLE_MULTI_SECTION_MAPPING = os.getenv(
+    "ENABLE_MULTI_SECTION_MAPPING", "false"
+).strip().lower() in ("1", "true", "yes", "on")
+
+# Absolute floor: an extra section must be a genuine match on its own.
+#
+# 0.30 is ContextClassifier's own `similarity_threshold` — the bar for "this
+# is a real match" — NOT the relaxed 0.6x version (0.18) used merely to decide
+# which candidates are worth carrying around. An extra section has to be a
+# real match, not a retained candidate.
+#
+# Two earlier values, both measured and both wrong, are worth recording:
+#
+#   0.45, picked by intuition: silently unreachable. Blended cross-encoder
+#   confidences top out near 0.26 on real transcripts (a strong 0.65
+#   embedding match blends DOWN against a ~-9.7 cross-encoder score), so the
+#   gate never fired once across two full transcripts -- dead code that still
+#   passed its unit tests, because those tests fed it invented numbers.
+#
+#   0.18, the candidate-retention bar: fires on noise. A census of 140 real
+#   sentences found secondaries clustering at 0.13-0.18 with ratios of
+#   0.98-1.00 against their primary -- e.g. 0.143 vs 0.144. At that spread
+#   the classifier is not saying "this belongs in both sections", it is
+#   saying it cannot tell them apart, and promoting those would copy the
+#   LEAST confident sentences into two sections each. The unit test for
+#   "both scores low, so reject" caught this regression immediately.
+#
+# Which is the real conclusion of the experiment: no threshold works,
+# because the whole score range is compressed into 0.13-0.26. See
+# REPOSITORY_AUDIT.md §9tt -- this stays off until cross-encoder score
+# calibration is fixed.
+MULTI_SECTION_MIN_CONFIDENCE = float(os.getenv("MULTI_SECTION_MIN_CONFIDENCE", "0.30"))
+# Relative bar: how close to the primary an extra section must sit. At 0.85 a
+# runner-up scoring far below the winner is rejected even if it clears the
+# absolute floor -- that is the "one clear home" case.
+MULTI_SECTION_RELATIVE_RATIO = float(os.getenv("MULTI_SECTION_RELATIVE_RATIO", "0.85"))
+# Hard cap per sentence. Straddling two sections is common; straddling four is
+# a symptom of a vague sentence, not of rich knowledge.
+MULTI_SECTION_MAX_EXTRA = int(os.getenv("MULTI_SECTION_MAX_EXTRA", "1"))
+
+
+def justify_extra_sections(
+    primary: Optional["Classification"],
+    secondary: Optional[List["Classification"]],
+) -> List[Dict[str, Any]]:
+    """Which additional sections a sentence genuinely belongs to, and why.
+
+    Returns one record per justified extra section:
+    {section_id, confidence, primary_confidence, reason}. Empty when the
+    sentence has a single clear home -- which is the common case and must
+    stay so. Pure function of data the classifier already produced: no new
+    LLM call, no new model.
+    """
+    if not primary or not secondary:
+        return []
+
+    justified: List[Dict[str, Any]] = []
+    for candidate in secondary:
+        if not candidate or candidate.section_id == primary.section_id:
+            continue
+        if any(record["section_id"] == candidate.section_id for record in justified):
+            continue
+
+        rule_backed = str(getattr(candidate, "reason", "") or "").startswith("Rule match:")
+        clears_floor = candidate.confidence >= MULTI_SECTION_MIN_CONFIDENCE
+        close_to_primary = (
+            primary.confidence > 0
+            and (candidate.confidence / primary.confidence) >= MULTI_SECTION_RELATIVE_RATIO
+        )
+
+        if rule_backed:
+            why = f"section rule fired on this sentence ({candidate.reason})"
+        elif clears_floor and close_to_primary:
+            why = (
+                f"semantic match {candidate.confidence:.2f} vs primary "
+                f"{primary.confidence:.2f} (>= {MULTI_SECTION_RELATIVE_RATIO:.2f} of primary "
+                f"and >= {MULTI_SECTION_MIN_CONFIDENCE:.2f} absolute)"
+            )
+        else:
+            continue
+
+        justified.append({
+            "section_id": candidate.section_id,
+            "confidence": round(float(candidate.confidence), 4),
+            "primary_confidence": round(float(primary.confidence), 4),
+            "reason": why,
+        })
+        if len(justified) >= MULTI_SECTION_MAX_EXTRA:
+            break
+
+    return justified
+
+
 @dataclass
 class ClassifiedSentence:
     """Sentence with class assignments and explainability."""
@@ -491,20 +604,35 @@ class ClassifiedSentence:
     primary_classification: Optional[Classification]
     secondary_classifications: List[Classification]
     multi_section_assignments: Optional[List[str]] = None  # All sections this sentence maps to
+    multi_section_evidence: Optional[List[Dict[str, Any]]] = None  # Why each extra section was added
     is_unassigned: bool = False
     explainability_log: Optional[ExplainabilityLog] = None
     human_feedback: Optional[HumanFeedback] = None
     active_topic_context: Optional[Dict[str, Any]] = None  # Topic memory context (active_section, topic_confidence, topic_duration)
     
     def __post_init__(self):
-        # Build multi-section assignment from primary ONLY
-        # Do NOT add secondary classifications to prevent duplicate sentences across sections
+        # The primary section is ALWAYS first and is never displaced -- an
+        # extra placement is additive, so turning the flag on can never move
+        # a fact away from where it lands today.
         if self.multi_section_assignments is None:
             self.multi_section_assignments = []
+            if self.multi_section_evidence is None:
+                self.multi_section_evidence = []
             if self.primary_classification:
                 self.multi_section_assignments.append(self.primary_classification.section_id)
-            # Skip secondary classifications to avoid duplication across sections
-            # (keeping this comment for clarity on design decision)
+
+                # Off by default. With the flag off the behaviour is exactly
+                # what it has always been: primary only, secondaries skipped
+                # to prevent the same sentence appearing in several sections.
+                if ENABLE_MULTI_SECTION_MAPPING:
+                    for record in justify_extra_sections(
+                        self.primary_classification, self.secondary_classifications
+                    ):
+                        if record["section_id"] not in self.multi_section_assignments:
+                            self.multi_section_assignments.append(record["section_id"])
+                            self.multi_section_evidence.append(record)
+        if self.multi_section_evidence is None:
+            self.multi_section_evidence = []
         # Explicit evidence extracted from sentence (e.g., 'connection pool', 'timeout')
         if getattr(self, 'explicit_evidence', None) is None:
             self.explicit_evidence = []
@@ -937,7 +1065,23 @@ class ContextClassifier:
                     c.confidence = 0.4 * c.confidence + 0.6 * normalized_cross
                     c.reason = f"Embedding={c.similarity_score:.3f}, CrossEncoder={cross_score:.3f}, Blended={c.confidence:.3f}"
                 top_candidates.sort(key=lambda x: x.confidence, reverse=True)
-                classifications = top_candidates + classifications[5:]
+                # Keep ONLY the reranked candidates. The tail was never
+                # reranked, so it still carries raw embedding scores while
+                # these carry blended ones — and blending against a
+                # strongly-negative cross-encoder score pushes a genuine
+                # match DOWN (0.65 embedding -> 0.26 blended), so an
+                # un-reranked tail entry routinely shows a higher number
+                # than the real winner. Measured live: secondary candidates
+                # scoring 2.18x the primary, which is meaningless — they are
+                # not on the same scale.
+                #
+                # Concatenating the two made `secondary_classifications` a
+                # mix of both scales, and because `filtered` accepts anything
+                # above threshold*0.6, a raw tail entry could even overtake a
+                # blended primary that dipped just below it. Candidates the
+                # cross-encoder never judged have no comparable score, and
+                # embeddings already ranked them below these five.
+                classifications = top_candidates
                 logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
             except Exception as e:
                 logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
@@ -1750,6 +1894,18 @@ def assemble_kt(
                     continue
                 seen_texts_per_section.setdefault(sec_id, set()).add(norm_key)
 
+                is_primary_section = bool(
+                    cs.primary_classification
+                    and sec_id == cs.primary_classification.section_id
+                )
+                placement_reason = next(
+                    (
+                        record.get("reason")
+                        for record in (cs.multi_section_evidence or [])
+                        if record.get("section_id") == sec_id
+                    ),
+                    None,
+                )
                 section_content[sec_id]["sentences"].append({
                     "text": cs.sentence.text,
                     "start": cs.sentence.start,
@@ -1757,6 +1913,12 @@ def assemble_kt(
                     "speaker": cs.sentence.speaker,
                     "audio_confidence": cs.sentence.audio_confidence,
                     "assigned_sections": list(cs.multi_section_assignments or []),
+                    # Traceability: for a sentence placed in more than one
+                    # section, every non-primary placement carries the reason
+                    # it was justified, so an extra placement can be audited
+                    # (or blamed) without re-running the classifier.
+                    "is_primary_section": is_primary_section,
+                    "placement_reason": placement_reason,
                     "preserve_verbatim": bool(is_protected_sentence(cs.sentence.text))
                 })
                 section_content[sec_id]["enhanced_texts"].append(enhanced_text)

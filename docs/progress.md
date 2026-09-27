@@ -1161,6 +1161,61 @@ trading-platform KT rendered a thin architecture section. Vocabulary and
 `_TECH_CATEGORY_MAP` fixed together; an AWS KT now renders a full 14-tier
 Technology Summary.
 
+**Update 2026-09-26 (fourth restatement of the "knowledge-first"
+architecture, checked principle-by-principle: 2 live bugs fixed, 4
+principles confirmed as one deferred rewrite)**: user supplied a
+10-principle adaptive knowledge-first mapping spec. Instead of answering in
+principle a fourth time, each point was given a concrete state against real
+code. Two were live bugs and are fixed: (1) principle 2's own example —
+"outage impact -> Business Criticality" — was broken; a KT stating "An
+outage prevents orders and delays warehouse processing." left
+`impact_if_down` unfilled and reported "missing: Business Criticality",
+because outage impact had no deterministic extractor and so depended on the
+LLM path. A required field whose absence is shown as a knowledge gap must
+not depend on a provider being reachable. Criticality now renders as "High
+(derived from the stated outage impact)" — resolving the tension with
+principle 10 by labelling the derivation rather than presenting a guess as
+fact. (2) Principle 6's chain was dropping the triggering condition: the
+failures prompt's own example discarded "during high traffic". Added a
+`condition` field and a "When it happens" column so issue -> condition ->
+cause -> first checks -> remediation survives. Principles 1/3/4/7 are one
+change, not four — a fact-level model replacing section-shaped
+classification across context_mapper, field_populator, knowledge_builder,
+every renderer and the schema loader. Recommended entry point if taken on:
+#3 alone (re-enable multi-section assignment behind a flag and measure
+duplication), which also unblocks the Tribal Knowledge duplication left
+open in §9rr. Suite: **317 passed, 0 failed**. See audit §9ss.
+
+**Update 2026-09-26 (Principle #3 implemented, measured, result NEGATIVE —
+leave the flag off)**: user scoped controlled multi-section assignment
+behind `ENABLE_MULTI_SECTION_MAPPING`, off by default, no new LLM call,
+measure before going further. Done, and the honest answer is to keep it
+off — not because the idea is wrong, but because the classifier cannot
+support it. Census over 140 real sentences: 46% have no secondary
+candidate at all, and the closest pairs score 0.143 vs 0.144 (ratio 1.00,
+confidence 0.14). That is not "this fact belongs in both sections", it is
+the classifier unable to tell them apart — promoting it would duplicate
+the LEAST confident sentences. Exactly one genuine straddle appeared in
+the top eight.
+
+Two things found on the way. (1) A pre-existing bug: `_rerank_candidates`
+blended cross-encoder scores into the top 5 but concatenated the
+un-reranked tail back on, mixing two scales in one list — secondaries
+showing 2.18x the primary's confidence, and a measured case where a raw
+tail entry sat 0.01 away from overtaking the true primary. Fixed. (2) My
+own threshold was mis-calibrated twice: 0.45 was unreachable (dead code
+that still passed all 13 unit tests, because they fed it invented
+numbers), and 0.18 fired on noise (caught by an existing test — the test
+was right, so the code was reverted rather than the test relaxed).
+Settled at 0.30, the classifier's real similarity threshold.
+
+The actual finding is about the classifier: an embedding match of 0.65
+blends DOWN to 0.14-0.26 against cross-encoder scores near -9.7. That
+compression is why no threshold works, and it degrades primary
+classification too. **Cross-encoder score calibration is the prerequisite
+for Principle #3** and should come before Principles 1, 4 and 7. See
+audit §9tt.
+
 If picking Phase 9 back up: decide the auth approach deliberately (a
 lightweight shared-API-key-per-role model vs. real user accounts) rather
 than defaulting to whichever is faster to build — see

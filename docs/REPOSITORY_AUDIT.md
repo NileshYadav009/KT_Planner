@@ -3373,6 +3373,56 @@ Worth stating plainly: the vocabulary is a **curated list**, so it is generic ac
 
 **A self-inflicted bug worth recording**: the pleasantry regexes were first written via a heredoc where ``\b`` reached Python as a non-raw escape and was written to the file as a literal **backspace character (0x08)** — invisible in an editor, and it silently broke all five word boundaries so every pleasantry test failed. Caught only because the tests asserted behaviour rather than checking the patterns looked right. When patching a file programmatically, verify the bytes, not the rendering.
 
+### 9ss. Fourth restatement of the "knowledge-first" architecture, checked principle-by-principle against real code: 2 live bugs found and fixed, 4 principles confirmed as one deferred rewrite
+
+User supplied a 10-principle "ADAPTIVE KNOWLEDGE-FIRST KT MAPPING" spec — the fourth variant this session of the same proposed architecture (§9dd, §9nn and the ~25-section spec preceded it). Rather than answer in principle a fourth time, each of the ten was checked against the actual implementation and given a concrete state.
+
+**Already true, or fixed in earlier rounds**: #5's MAPPED/DEDUPLICATED/UNMAPPED accounting exists; #8's "never imply managed services are hosted inside Kubernetes" was fixed structurally in §9rr; #9's cross-section duplication was fixed for Architecture Details in §9rr; #10's "never invent" is honored via the `*(inferred)*` marker and the "do not over-infer" blocks.
+
+**Two live bugs the spec correctly identified, both fixed here:**
+
+1. **Principle 2's own example was broken.** "A fact can satisfy a field even when the exact field name is never spoken (e.g. outage impact → Business Criticality)" — and a KT stating *"An outage prevents orders and delays warehouse processing."* left `impact_if_down` entirely unfilled and reported **"missing: Business Criticality"**. Cause: `orders_per_day` and `customer_reach` have deterministic pattern extractors; outage impact had none, so it depended on the LLM/embedding path. A **required** field whose absence is presented to the reader as a knowledge gap must not depend on a provider being reachable. Added `extract_outage_impact()` / `extract_outage_audience()`, wired to the `impact_if_down` group's `what_breaks` / `who_affected` leaves.
+
+   On the tension between principle 2 and principle 10 ("never invent"): the criticality LEVEL is genuinely never spoken, so the impact is extracted verbatim while criticality renders as **"High (derived from the stated outage impact)"** — no longer a false gap, and not a guess presented as fact.
+
+   Two negative cases needed guarding, both found by probing rather than by assertion: `\b` fired at the hyphen in "down-scaled" ("If the deployment is down-scaled the pods restart") and inside "downstream", so both read as outage statements. Now `(?![\w-])`. The subject also had to widen beyond platform/system/service — a real KT says *"If **Helios** is down"*, naming its own product.
+
+2. **Principle 6's chain was losing the triggering condition.** The `common_failures` prompt's own worked example demonstrated the loss: *"Azure SQL connection exhaustion during high traffic"* → `{"symptom": "Azure SQL connection exhaustion"}`, with `during high traffic` discarded. There was no field for a condition and no column to render it — the same schema-gap class as the `first_checks` bug fixed in §9pp. Added `condition` to the structured extraction and a **"When it happens"** column, so issue → condition → cause → first checks → remediation survives end to end. Knowing *when* a failure strikes is often the most actionable part of the entry.
+
+**Confirmed as one deferred rewrite, not four principles**: #1 (atomic knowledge objects), #3 (a fact preserved across all relevant sections), #4 (coverage computed from knowledge objects rather than template fields) and #7 (canonical knowledge fully separated from presentation) are a single change — a fact-level model replacing section-shaped classification — touching `context_mapper.py`, `field_populator.py`, `knowledge/knowledge_builder.py`, every renderer and the schema loader simultaneously.
+
+Recommended entry point if it is taken on: **#3 alone**, first. `multi_section_assignments` plumbing already exists but is deliberately populated with only the primary section ("Do NOT add secondary classifications to prevent duplicate sentences across sections" — `context_mapper.py:499-507`). Understanding why that was disabled, re-enabling it behind a flag, and measuring the resulting duplication is a bounded, measurable pass — and it is also the blocker for #9's remaining Tribal Knowledge duplication (§9rr), which cannot be fixed without it because the section's one genuinely tribal fact is currently absorbed into another section's paragraph.
+
+**Verified**: full `pytest tests/` — **317 passed, 0 failed** (up from 313), including outage-impact extraction across four phrasings, three negative cases, derived-criticality labelling, and the failure table's condition column.
+
+### 9tt. Principle #3 implemented, measured, and the result is NEGATIVE: the classifier's score range cannot support multi-section assignment
+
+User scoped Principle #3 precisely — controlled multi-section assignment behind `ENABLE_MULTI_SECTION_MAPPING`, off by default, no new LLM call, measure before going further. Implemented and measured. **Recommendation: leave it off.** Not because the idea is wrong, but because the measurement says the classifier cannot currently support it.
+
+**What was already there.** The consumption machinery existed and was unreachable: `ContextMappingPipeline`'s assembly loop already iterated `multi_section_assignments`, de-duplicated per section by normalized text, and recorded a cross-reference for a sentence already present. Only the *population* was disabled. `justify_extra_sections()` supplies the missing part — a pure function of what the classifier already produced (no new call, no new model): an extra section qualifies if its own deterministic rule fired, or if it clears an absolute floor AND sits close to the primary. Capped at one extra; the primary is always first and never displaced, so enabling the flag can only be additive. Each extra placement carries `placement_reason` and `is_primary_section` onto the sentence for audit.
+
+**A pre-existing bug found underneath it — two score scales in one list.** `_rerank_candidates` blends cross-encoder scores into `classifications[:5]`, then did `classifications = top_candidates + classifications[5:]`. The tail is never reranked and never re-sorted, so it kept **raw embedding** scores while the head carried **blended** ones. Measured live: secondary candidates showing **2.18x the primary's confidence** — not a better match, a different scale. Worse, `filtered` accepts anything above `threshold * 0.6 = 0.18`, and a real sentence produced a blended primary of **0.181**: a raw tail entry at 0.39 was one hundredth of a point from overtaking the true winner and becoming the primary classification. Fixed by keeping only the reranked candidates — the tail has no comparable score and embeddings had already ranked it below those five. This is independent of the flag and affects primary classification.
+
+**The measurement.** Harness verified deterministic first (flag OFF twice → byte-identical `100 placements / 28 fields / 29374 chars`), so a null result means something. Census over Atlas's 140 sentences:
+
+| | |
+|---|---|
+| no secondary candidate at all | 64 (46%) |
+| >= 1 distinct secondary | 76 |
+| extra placements in the real pipeline | **0** |
+
+**Why it must stay off.** Real secondary confidences cluster at **0.13-0.18**, with ratios of **0.98-1.00** against their primary — e.g. `handover_completion 0.143` vs `day1_survival_checklist 0.144`. A ratio of 1.00 at a confidence of 0.14 is not the classifier saying "this fact belongs in both sections"; it is the classifier saying **it cannot tell them apart**. Promoting those would copy the *least*-confident sentences into two sections each, inverting the feature's purpose. Two of the three closest pairs are also simply wrong — "The first is to review and document the external market-data certificate renewal" is an Open Responsibility, and "For high-risk services we use a canary rollout" is Deployment & Rollback. Exactly **one** genuine straddle appeared in the top eight (`ownership_escalation 0.170` / `security_controls 0.168`). One real case in 140 sentences does not justify shipping this on.
+
+**Threshold calibration, twice wrong, and how each was caught.** Recorded because the failure mode is instructive:
+
+- **0.45, picked by intuition**: silently unreachable. Blended confidences top out near 0.26, so the gate never fired once across two transcripts — **dead code that still passed all 13 of its unit tests**, because those tests fed it hand-made confidence values instead of values the classifier actually produces. The first measurement's "zero difference" was initially misread as the gate being appropriately conservative; it was not.
+- **0.18, the candidate-retention bar**: fires on noise, per the census above. Caught immediately by the existing unit test asserting "both scores low, so reject" — a case where the test was right and the code change was wrong, so the code was reverted rather than the test relaxed.
+- **0.30** (the classifier's real `similarity_threshold`) is the defensible floor: an extra section must be a real match, not a retained candidate. On the current score distribution the gate is then effectively unsatisfiable, which is the honest state.
+
+**The real conclusion is a finding about the classifier, not the feature.** A strong embedding match of **0.65 blends down to 0.14-0.26** against cross-encoder scores around **-9.7**. That compression is why no threshold works, and it is not confined to this feature — the mis-assignments above show it degrading *primary* classification too. **Cross-encoder score calibration is the prerequisite for Principle #3**, and it likely improves mapping accuracy on its own. That is the recommended next piece of work, ahead of Principles 1, 4 and 7.
+
+**Verified**: `tests/test_multi_section_mapping.py` — 15 tests covering flag-off equivalence, legitimate promotion, rule-backed evidence, the user's four scenarios (two as negative cases), the cap, de-duplication, traceability, and two regression guards pinning the calibration lessons above.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.
