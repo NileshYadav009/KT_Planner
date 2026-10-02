@@ -1223,3 +1223,15 @@ than defaulting to whichever is faster to build — see
 
 Nothing from this entire session is committed yet. Run `git status` before
 doing anything else.
+
+## End-to-end mapping audit (audit §9uu)
+
+Traced every sentence of a real KT from transcript to PDF. Baseline: 30 of 101
+sentences missing from the PDF while the coverage page claimed zero loss.
+Fixed 13 generic root causes across cleaning, segmentation, assembly, field
+population, routing, rendering, polish truncation and coverage accounting, plus
+UI hardening and a paste-transcript mode. Every fact-bearing sentence of the
+test KT now appears in a section, verified after rendering. See audit §9uu for
+the list and the remaining risks; regressions are pinned in
+`tests/test_audit_regressions.py`.
+

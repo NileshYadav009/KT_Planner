@@ -74,3 +74,28 @@ def no_coverage_block(title: str) -> Dict[str, Any]:
     intentional, visible gap in a real KT deliverable.
     """
     return _build_narrative_block(title, [NOT_COVERED_MESSAGE])
+
+
+def tool_names_in(value) -> List[str]:
+    """Technology names mentioned in a field value, de-duplicated in order.
+
+    Technology grids label a row with a tool category, so the cell must hold
+    tool names. Dynamic fields such as "Security Scan Configuration" or
+    "Cache Layer" are often filled with a whole matched sentence; placed
+    verbatim in the grid, a sentence about scanning policy or a tribal-
+    knowledge note posed as the name of a tool. The sentence itself still
+    renders in its section (see pdf_rendering.append_residual_content).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        from field_populator import PATTERN_EXTRACTORS
+    except Exception:
+        return []
+    seen, out = set(), []
+    for name in PATTERN_EXTRACTORS["tools"].findall(value):
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out

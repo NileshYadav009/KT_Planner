@@ -25,7 +25,9 @@ from typing import Dict, List, Optional
 # acronym-to-branded-name canonicalization) to a coarse architectural layer.
 _LAYER_TERMS: Dict[str, List[str]] = {
     "frontend": ["react", "angular", "vue", "vue.js"],
+    "dns": ["route 53", "route53", "azure dns", "cloud dns"],
     "cdn": ["cloudfront", "azure front door"],
+    "waf": ["aws waf", "waf", "azure waf", "cloud armor"],
     "load_balancer": ["application load balancer", "alb", "load balancer", "application gateway"],
     "compute": [
         "amazon eks", "azure kubernetes service", "aks",
@@ -34,23 +36,27 @@ _LAYER_TERMS: Dict[str, List[str]] = {
     ],
     "service": [
         "fastapi", "fast api", "django", "flask", "node.js", "node", "express",
-        ".net", "asp.net", "dotnet", ".net microservices",
+        ".net", "asp.net", "dotnet", ".net microservices", "spring boot", "spring",
     ],
     "database": [
         "postgresql", "mysql", "mongodb", "amazon rds", "azure sql",
+        "aurora", "aurora postgresql", "amazon aurora", "dynamodb", "azure cosmos db",
         "bigquery", "cloud sql", "firestore", "bigtable", "cloud spanner",
     ],
     "cache": ["redis", "memorystore"],
-    "queue": ["kafka", "rabbitmq", "sqs", "amazon sqs", "azure service bus", "service bus", "pub/sub"],
+    "queue": [
+        "kafka", "amazon msk", "msk", "rabbitmq", "sqs", "amazon sqs",
+        "azure service bus", "service bus", "pub/sub",
+    ],
     "registry": ["amazon ecr", "azure container registry", "acr", "artifact registry", "container registry"],
     "cicd": ["github actions", "gitlab ci", "jenkins", "azure devops", "cloud build"],
     "gitops": ["argocd", "argo cd", "flux"],
     "iac": ["terraform", "bicep", "ansible"],
-    "secrets": ["vault", "azure key vault", "key vault", "consul", "secret manager"],
+    "secrets": ["vault", "azure key vault", "key vault", "consul", "secret manager", "aws kms", "kms"],
     "monitoring": [
         "prometheus", "grafana", "cloudwatch", "datadog", "splunk", "elk",
         "elasticsearch", "logstash", "kibana", "azure monitor", "application insights",
-        "cloud monitoring", "cloud logging", "stackdriver",
+        "cloud monitoring", "cloud logging", "stackdriver", "opensearch", "amazon opensearch",
     ],
     "alerting": ["pagerduty", "opsgenie"],
     # Data/ML-pipeline roles that don't fit the web-request-flow chain
@@ -74,13 +80,13 @@ _COMPUTE_SPECIFICITY = [
 ]
 
 # The main top-down request-flow chain, in order.
-_CHAIN_LAYERS = ["frontend", "cdn", "load_balancer", "compute"]
+_CHAIN_LAYERS = ["frontend", "dns", "cdn", "waf", "load_balancer", "compute"]
 # Layers that represent real evidence of an inbound, customer-facing entry
 # point — as opposed to "compute", which is just a hub and, on its own,
 # doesn't establish that a customer request path exists at all (e.g. a
 # backend-only data-pipeline platform can run entirely on a compute hub
 # with no frontend/CDN/load-balancer ever mentioned).
-_ENTRY_LAYERS = ["frontend", "cdn", "load_balancer"]
+_ENTRY_LAYERS = ["frontend", "dns", "cdn", "waf", "load_balancer"]
 # Layers that fan out FROM the compute hub, rather than continuing the chain.
 # Split so the diagram can distinguish "hosted BY compute" (the app
 # workloads themselves) from "DEPENDED ON by the workloads" (a database,
@@ -92,6 +98,49 @@ _DEPENDENCY_LAYERS = ["database", "cache", "queue"]
 _FANOUT_LAYERS = _HOSTED_LAYERS + _DEPENDENCY_LAYERS
 
 _ROOT_LABEL = "Customer"
+
+# A managed service and the engine it provides ("Kafka is provided through
+# Amazon MSK") are one dependency, not two. Drawn as "Kafka (Amazon MSK)".
+_MANAGED_OFFERING_OF = {
+    "amazon msk": "kafka",
+    "msk": "kafka",
+    "aurora postgresql": "postgresql",
+    "amazon aurora": "postgresql",
+    "azure cache for redis": "redis",
+    "memorystore": "redis",
+}
+
+
+# A bare database engine named alongside a managed database service is that
+# service's engine ("Amazon RDS with PostgreSQL"), not a second database.
+_DB_ENGINES = {"postgresql", "mysql", "postgres"}
+_MANAGED_DATABASES = {"amazon rds", "azure sql", "cloud sql", "aurora", "amazon aurora", "aurora postgresql"}
+
+
+def _merge_managed_offerings(components: List[str]) -> List[str]:
+    if any(c.lower() in _MANAGED_DATABASES for c in components):
+        components = [c for c in components if c.lower() not in _DB_ENGINES]
+    lowered = {c.lower(): c for c in components}
+    merged: List[str] = []
+    consumed = set()
+    for comp in components:
+        low = comp.lower()
+        if low in consumed:
+            continue
+        engine = _MANAGED_OFFERING_OF.get(low)
+        if engine and engine in lowered:
+            # Rendered at the engine's position, below.
+            continue
+        offering = next(
+            (lowered[o] for o, e in _MANAGED_OFFERING_OF.items() if e == low and o in lowered),
+            None,
+        )
+        if offering:
+            merged.append(f"{comp} ({offering})")
+            consumed.add(offering.lower())
+        else:
+            merged.append(comp)
+    return merged
 
 
 def _classify(component: str) -> Optional[str]:
@@ -148,7 +197,12 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
     """
     chain = [by_layer[layer][0] for layer in _CHAIN_LAYERS if layer in by_layer]
     hosted = [by_layer[layer][0] for layer in _HOSTED_LAYERS if layer in by_layer]
-    dependencies = [by_layer[layer][0] for layer in _DEPENDENCY_LAYERS if layer in by_layer]
+    # EVERY named dependency, not just the first per layer: a transcript
+    # naming Kafka and SQS (or two databases) used to draw one of them and
+    # silently drop the other from the picture.
+    dependencies = _merge_managed_offerings(
+        [c for layer in _DEPENDENCY_LAYERS for c in by_layer.get(layer, [])]
+    )
     fanout = hosted + dependencies
 
     if not chain and not fanout:
@@ -292,7 +346,7 @@ def build_architecture_flow_diagram(components: List[str]) -> Optional[str]:
         _build_registry_note(by_layer),
         _build_cicd_flow(by_layer),
         _build_labeled_arrow(by_layer, "iac", "Infrastructure"),
-        _build_labeled_arrow(by_layer, "secrets", "Secrets"),
+        _build_converging_arrow(by_layer, "secrets", "Secrets & keys"),
         _build_converging_arrow(by_layer, "monitoring", "Observability"),
         _build_labeled_arrow(by_layer, "alerting", "Alerting"),
         _build_labeled_arrow(by_layer, "orchestration", "Workflow Orchestration"),

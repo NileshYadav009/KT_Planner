@@ -86,6 +86,13 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
     if isinstance(failures, str):
         failures = [failures]
 
+    # Only genuinely structured "symptom | cause | fix" lines become table
+    # rows. A plain sentence used to become a "Symptom" row with blank Cause
+    # and Fix cells, which presented narrative ("There was a previous
+    # incident where ...", "The corrective action was to ...") as if it were
+    # a structured failure record with an unknown cause and no fix -- the
+    # fix was often stated in the very next sentence. Plain sentences render
+    # as narrative instead (see render()).
     rows = []
     for item in failures:
         text = str(item).strip()
@@ -96,8 +103,6 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
             rows.append({"Symptom": parts[0], "Cause": parts[1], "Fix": parts[2]})
         elif len(parts) == 2:
             rows.append({"Symptom": parts[0], "Cause": parts[1], "Fix": ""})
-        else:
-            rows.append({"Symptom": text, "Cause": "", "Fix": ""})
     return rows
 
 
@@ -117,13 +122,15 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
 
     if rows:
         blocks.append(build_decision_table("Failure symptoms and remediation", ["Symptom", "Cause", "Fix"], rows))
-    else:
-        content = section.get("coverage_content") or []
-        if isinstance(content, str):
-            content = [content]
-        paragraphs = [str(item).strip() for item in content if str(item).strip()]
-        if paragraphs:
-            blocks.append(build_narrative_block(title, paragraphs))
+    content = section.get("coverage_content") or []
+    if isinstance(content, str):
+        content = [content]
+    paragraphs = [
+        str(item).strip() for item in content
+        if str(item).strip() and "|" not in str(item)
+    ]
+    if paragraphs:
+        blocks.append(build_narrative_block("Failure notes from the KT session" if rows else title, paragraphs))
 
     if not blocks:
         blocks.append(no_coverage_block(title))

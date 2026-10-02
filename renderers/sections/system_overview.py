@@ -4,6 +4,7 @@ from renderers.blocks.technology_grid import build_block as build_technology_gri
 from renderers.blocks.common import (
     no_coverage_block,
     coverage_paragraphs as shared_coverage_paragraphs,
+    tool_names_in,
 )
 
 # Generic tool -> technology-category mapping, keyed by lowercased tool name
@@ -161,10 +162,16 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # for content that implies a cache layer / event-streaming platform —
     # not always present, only added when the transcript's tech mix triggers
     # the relevant pattern.
+    #
+    # Only tool NAMES belong in this grid. These fields are frequently filled
+    # with a whole matched sentence (a live KT's "Cache Layer" row held a
+    # tribal-knowledge paragraph about cache hit ratios after deployments),
+    # and a category the grid already lists needs no second row.
+    shown_tools = {v.strip().lower() for row in tech_rows for v in row["value"].split(";")}
     for label, field_id in (("Cache Layer", "cache_layer"), ("Event Streaming", "event_streaming")):
-        value = _field_value(fields, field_id)
-        if isinstance(value, str) and value.strip():
-            tech_rows.append({"label": label, "value": value.strip()})
+        names = [n for n in tool_names_in(_field_value(fields, field_id)) if n.lower() not in shown_tools]
+        if names:
+            tech_rows.append({"label": label, "value": "; ".join(names)})
 
     blocks = []
     if knowledge_rows:

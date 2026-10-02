@@ -48,6 +48,17 @@ def _is_generic_guidance(text: str) -> bool:
     return bool(_GUIDANCE_PHRASE_RE.match(text.strip()))
 
 
+_ENUMERATION_HEAD_ONLY_RE = re.compile(
+    r"^\s*there\s+(?:are|is)\s+(?:currently\s+|still\s+)?(?:several|a\s+few|a\s+number\s+of|some|many|"
+    r"two|three|four|five|six|\d+)\s+[\w\s-]{0,40}?(?:tasks?|responsibilit(?:y|ies)|items?|actions?)\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_enumeration_head(text: str) -> bool:
+    return bool(_ENUMERATION_HEAD_ONLY_RE.match(text or ""))
+
+
 def _looks_like_narrative_not_a_task(text: str) -> bool:
     """True when a raw-fallback row's only populated cell reads as
     unstructured prose/guidance rather than a discrete task or recurring-
@@ -160,6 +171,9 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
                 str(rows[0].get(OPEN_TASKS_COLUMNS[0], ""))
             ):
                 rows = []
+            # "There are currently several open responsibilities." introduces
+            # the list; it is not itself a task.
+            rows = [r for r in rows if not _is_enumeration_head(str(r.get(OPEN_TASKS_COLUMNS[0], "")))]
             if rows:
                 blocks.append(build_decision_table("Open tasks", OPEN_TASKS_COLUMNS, rows))
         if fields.get("recurring_responsibilities", {}).get("value"):

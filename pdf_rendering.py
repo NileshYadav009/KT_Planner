@@ -251,6 +251,152 @@ def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
     return False
 
 
+# Digest sections restate content that already rendered in its real section
+# (or, for unmapped findings, render their own content verbatim) — they have
+# no residual of their own to recover.
+_RESIDUAL_EXEMPT_SECTIONS = frozenset({"unmapped_findings", "tribal_knowledge", "kt_coverage", "quick_reference"})
+RESIDUAL_BLOCK_TITLE = "Additional details from the KT session"
+_RESIDUAL_STOPWORDS = frozenset(
+    "a an and are as at be been but by can for from had has have if in into is it its of on or "
+    "that the their then there these this to was were when which while will with "
+    # Relation verbs: a table row states "owner | what they own" without the
+    # verb, so these must not decide whether the fact is shown.
+    "own owns owned use uses used using provide provides handle handles manage manages "
+    "run runs include includes".split()
+)
+_RESIDUAL_OVERLAP = 0.8
+_MD_LABEL_RE = re.compile(r"\*\*[^*\n]{1,60}:\*\*|\n+")
+
+
+def _norm_for_match(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())).strip()
+
+
+def _block_strings(value) -> list:
+    """Every human-visible string in a rendered block (paragraphs, list items,
+    table cells, grid values, code), recursively. Titles and the block type
+    are structural, not content."""
+    out = []
+    if isinstance(value, str):
+        if value.strip():
+            out.append(value)
+    elif isinstance(value, dict):
+        cells = []
+        for key, inner in value.items():
+            if key in ("type", "title", "columns", "language"):
+                continue
+            inner_strings = _block_strings(inner)
+            out.extend(inner_strings)
+            if isinstance(inner, str):
+                cells.append(inner)
+        # A table/grid row splits one statement across cells ("Market
+        # connectivity team" | "External market-data connectivity..."), so
+        # the row as a whole must also be comparable as a single string.
+        if len(cells) > 1:
+            out.append(" ".join(cells))
+    elif isinstance(value, (list, tuple)):
+        for inner in value:
+            out.extend(_block_strings(inner))
+    return out
+
+
+def _is_represented(text: str, rendered_norms: list) -> bool:
+    norm = _norm_for_match(text)
+    if not norm:
+        return True
+    if any(norm in r for r in rendered_norms):
+        return True
+    words = [w for w in norm.split() if w not in _RESIDUAL_STOPWORDS]
+    if not words:
+        return True
+    # Short sentences need every content word: at 80%, "The staging deployment
+    # exercise has been completed successfully." (5 words) counted as shown
+    # because a longer criteria sentence happened to contain 4 of them.
+    required = _RESIDUAL_OVERLAP if len(words) >= 8 else 1.0
+    for r in rendered_norms:
+        r_words = set(r.split())
+        if sum(1 for w in words if w in r_words) / len(words) >= required:
+            return True
+    return False
+
+
+def is_text_represented(text: str, rendered_norms: list) -> bool:
+    """`text` is represented when it, or every one of its sentences, appears
+    in the rendered strings. A merged two-sentence chunk is often rendered as
+    two separate rows, and neither row alone contains the whole chunk."""
+    if _is_represented(text, rendered_norms):
+        return True
+    parts = [p for p in re.split(r"(?<=[.!?])\s+", str(text or "")) if p.strip()]
+    return len(parts) > 1 and all(_is_represented(p, rendered_norms) for p in parts)
+
+
+def append_residual_content(section: dict, rendered: dict) -> dict:
+    """Guarantee every sentence classified into a section reaches that
+    section's rendered output.
+
+    Section renderers build their blocks from a handful of named fields and
+    historically only fell back to the section's sentences when NO field
+    filled. So as soon as one field filled, every other sentence vanished:
+    on a real KT, Security rendered 1 of 5 classified sentences (Vault/KMS,
+    ECR, CI scanning and SonarQube/Trivy were gone), Ownership rendered 1 of
+    13, and Handover Completion rendered none of its own sentences. The
+    knowledge-coverage summary still reported zero loss because it measured
+    the knowledge object, not the document.
+
+    This compares the section's content against what its renderer actually
+    produced and appends whatever is not represented as a narrative block —
+    verbatim, never paraphrased, and never duplicated when a renderer already
+    shows the same text (substring or near-duplicate match).
+    """
+    if not rendered or section.get("id") in _RESIDUAL_EXEMPT_SECTIONS:
+        return rendered
+    content = section.get("coverage_content") or []
+    if isinstance(content, str):
+        content = [content]
+    try:
+        from renderers.blocks.common import split_bullet_blob
+        items = split_bullet_blob([c for c in content if isinstance(c, str)])
+    except Exception:
+        items = [c for c in content if isinstance(c, str)]
+    blocks = rendered.setdefault("blocks", [])
+    rendered_norms = [_norm_for_match(s) for s in _block_strings(blocks) if s.strip() != NOT_COVERED_MESSAGE]
+    residual = []
+    for item in items:
+        # Polish output can carry markdown section labels ("**Access to
+        # request:**") that are formatting, not facts; on their own they
+        # rendered as stray paragraphs.
+        item = _MD_LABEL_RE.sub(" ", str(item)).strip()
+        if len(item.split()) < 3:
+            continue
+        if not item or item == NOT_COVERED_MESSAGE:
+            continue
+        if _is_represented(item, rendered_norms):
+            continue
+        # A merged chunk ("The platform team owns X. The database team owns
+        # Y.") can be fully rendered sentence by sentence (two ownership rows)
+        # while no single rendered string holds the whole chunk. Keep only the
+        # sentences that are genuinely missing.
+        parts = [p for p in re.split(r"(?<=[.!?])\s+", item) if p.strip()]
+        if len(parts) > 1:
+            missing = [p for p in parts if not _is_represented(p, rendered_norms)]
+            if not missing:
+                continue
+            item = item if len(missing) == len(parts) else " ".join(missing)
+        residual.append(item)
+        rendered_norms.append(_norm_for_match(item))
+    if not residual:
+        return rendered
+    # A placeholder claiming the section was not covered must not sit next
+    # to content proving it was.
+    rendered["blocks"] = [
+        b for b in blocks
+        if not (b.get("type") == "NarrativeBlock"
+                and [p for p in b.get("paragraphs", []) if str(p).strip()] == [NOT_COVERED_MESSAGE])
+    ]
+    rendered["blocks"].append({"type": "NarrativeBlock", "title": RESIDUAL_BLOCK_TITLE, "paragraphs": residual})
+    return rendered
+
+
 def build_rendered_sections(knowledge_object: dict) -> list:
     rendered_sections = []
     for section in knowledge_object.get("sections", []):
@@ -259,6 +405,7 @@ def build_rendered_sections(knowledge_object: dict) -> list:
         rendered = None
         if renderer:
             rendered = renderer(section)
+            rendered = append_residual_content(section, rendered)
 
         if rendered and _has_meaningful_rendered_blocks(rendered):
             rendered_sections.append(rendered)

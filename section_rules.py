@@ -41,7 +41,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # manual Kubernetes changes outside GitOps) from the rendered
             # Danger Zones section even though they were said in the same
             # breath as the one item that did get classified correctly.
-            r"\bdanger\s+zones?\b",
+            # ...but only when the sentence NAMES danger zones. A sentence
+            # that merely refers to them ("the handover is complete once the
+            # engineer has reviewed the danger zones") is not one, and the
+            # bare phrase at 0.97 pulled such handover criteria in here.
+            r"\bdanger\s+zones?\s+(?:are|is|include[sd]?|would\s+be)\b",
+            r"\b(?:main|key|biggest|major|other|another|first|second)\s+danger\s+zones?\b",
             r"\bsensitive\s+area\b",
             r"\brequir(?:es|ing)\s+caution\b",
             # Generic prohibition phrasings. Without these, a plainly-stated
@@ -55,6 +60,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bmust\s+not\s+be\s+(?:changed|modified|edited|deleted|touched|altered)\b",
             r"\bshould\s+not\s+be\s+(?:changed|modified|edited|deleted|touched|altered)\b",
             r"\bdo\s+not\s+(?:ever\s+|manually\s+)?(?:modify|change|edit|delete|touch|alter|run)\b",
+            # "Do not assume a healthy health check means the path is healthy"
+            # is a trap warning of the same kind.
+            r"\bdo\s+not\s+assume\b",
             r"\bnever\s+(?:manually\s+)?(?:change|edit|delete|touch|alter|run)\b",
         ],
         0.97,
@@ -64,11 +72,23 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         [
             r"\bdevelopers?\s+own\b",
             r"\bplatform\s+engineering(?:\s+team)?\s+owns?\b",
-            r"\bescalation\s+path\b",
+            # Any "<the X team> owns ..." statement, not only the two team
+            # names a past transcript happened to use.
+            r"\b(?:team|group|squad|engineers?)\s+(?:is\s+responsible\s+for|owns?)\b",
+            r"\bescalation\s+(?:path|chain|point|goes|matrix)\b",
+            r"\bescalated?\s+to\b",
             r"\bdesklation\s+path\b",
-            r"\bon-?call\s+engineer\b",
-            r"\bhead\s+of\s+engineering\b",
-            r"\bplatform\s+engineering\s+manager\b",
+            # A role NAMED in a sentence is not evidence the sentence is about
+            # ownership: "the on-call engineer still needs to understand which
+            # services have automated rollback" is deployment knowledge, and
+            # "deployments are frozen unless the platform engineering manager
+            # approves" is a calendar rule. Bare role mentions forced both
+            # into Ownership at 0.97, above every other signal. A role only
+            # routes here together with ownership/escalation language.
+            r"\b(?:on-?call\s+engineer|head\s+of\s+engineering|platform\s+engineering\s+manager|engineering\s+director)\b"
+            r".{0,80}\b(?:escalat\w*|owns?|responsible|contact|page[sd]?|involve)\b",
+            r"\b(?:escalat\w*|owns?|responsible|contact|page[sd]?)\b.{0,80}"
+            r"\b(?:on-?call\s+engineer|head\s+of\s+engineering|platform\s+engineering\s+manager|engineering\s+director)\b",
         ],
         0.97,
     ),
@@ -94,6 +114,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bdeployments?\s+must\s+be\s+avoided\b",
             r"\bavoid\s+deployments?\s+during\b",
             r"\bhigh[\s-]?traffic\s+periods?\b",
+            # Change freezes are calendar rules regardless of who can grant
+            # an exception to them.
+            r"\bdeployments?\s+(?:are|is)\s+(?:also\s+)?frozen\b",
+            r"\b(?:deployment|change)\s+freezes?\b",
         ],
         0.96,
     ),
@@ -112,6 +136,25 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bgitops\b",
         ],
         0.94,
+    ),
+    (
+        # A stated deployment window is the Deployment section's own field,
+        # even when the same statement goes on to list freeze periods (which
+        # the known_bad_days freeze rule would otherwise claim at 0.96).
+        "deployment_and_rollback",
+        [
+            r"\b(?:normal\s+)?(?:production\s+)?deployment\s+window\s+is\b",
+            r"\bcanary\s+(?:rollouts?|releases?|deployments?)\b",
+            r"\bprogressive\s+(?:rollout|delivery)\b",
+            r"\bautomated\s+rollback\b",
+            # Rollback procedure language: restoring a previous good release
+            # or halting a rollout. These were scored into Handover Completion
+            # (whose checklist mentions "understands rollback").
+            r"\b(?:previous|last)\s+(?:known[\s-]good\s+)?(?:\w+\s+)?(?:release|version|revision)\s+can\s+be\s+(?:restored|redeployed|rolled\s+back)\b",
+            r"\brollout\s+can\s+be\s+(?:stopped|paused|aborted|halted)\b",
+            r"\breverted\s+in\s+git\b",
+        ],
+        0.965,
     ),
     (
         "disaster_recovery",
@@ -186,6 +229,14 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         "day1_survival_checklist",
         [
             r"\bfor\s+new\s+team\s+members\b",
+            # Singular/article forms and explicit first-day framing. Only the
+            # exact plural "for new team members" used to match, so "For a new
+            # team member, the first day should include access to Grafana,
+            # PagerDuty, GitHub, ArgoCD..." fell to the ArgoCD deployment rule
+            # and Day-1 was reported as not covered.
+            r"\bfor\s+(?:a|any|every|each)\s+new\s+(?:team\s+member|engineer|joiner|hire)\b",
+            r"\b(?:the\s+)?first\s+day\s+(?:should|must|will|needs?\s+to)\b",
+            r"\bon\s+(?:their|your|the)\s+first\s+day\b",
             r"\bstart\s+by\s+reviewing\b",
             r"\bfirst\s+safe\s+actions?\b",
             r"\brequired\s+access\b",
@@ -193,7 +244,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bfor\s+new\s+team\s+members\b.*\bgrafana\s+dashboards?\b",
             r"\bkubernetes\s+namespaces?\b.*\bdeployment\s+pipelines?\b",
         ],
-        0.92,
+        # Above the 0.94 tool-mention rules (ArgoCD, GitHub Actions): a
+        # first-day checklist names those tools as things to get access to.
+        0.95,
     ),
     (
         "first_30_day_ownership",
@@ -214,8 +267,28 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bsign[\s-]?off\b",
             r"\bKT\s+(?:is\s+)?(?:done|complete|finished)\b",
             r"\bthis\s+(?:concludes|completes)\b",
+            # Readiness evidence: what the incoming owner has actually done
+            # or confirmed. Outranks a passing tool mention ("...access to
+            # Grafana, ArgoCD... has been granted") that would otherwise pull
+            # the statement into Deployment via the ArgoCD rule.
+            r"\bincoming\s+(?:owner|engineer)\s+has\s+(?:also\s+)?(?:successfully\s+)?"
+            r"(?:confirmed|completed|reviewed|accepted|demonstrated|walked|verified)\b",
+            r"\b(?:incoming\s+and\s+outgoing|outgoing\s+and\s+incoming)\s+owners?\b",
+            r"\bexercise\s+has\s+(?:also\s+)?been\s+completed\b",
+            r"\bhandover\s+checklist\b",
         ],
-        0.94,
+        0.95,
+    ),
+    (
+        # The completion criteria themselves. They name the escalation path
+        # and danger zones as things to have reviewed, so without a higher
+        # priority the 0.97 ownership/danger rules claimed them.
+        "handover_completion",
+        [
+            r"\bhandover\s+is\s+(?:only\s+)?considered\s+complete\b",
+            r"\bconsidered\s+complete\s+only\s+when\b",
+        ],
+        0.975,
     ),
     (
         "architecture_reference",
@@ -247,6 +320,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bhanding\s+over\s+the\b",
             r"\b50[,\s]?000\s+orders\b",
             r"\bbusiness[\s-]?critical\b",
+            # Stated criticality and outage impact, in general form rather
+            # than the one transcript's wording above.
+            r"\bmost\s+(?:business[\s-]+)?critical\s+(?:platforms?|systems?|services?|applications?)\b",
+            r"\bmission[\s-]critical\b",
+            r"\bif\s+the\s+(?:platform|system|service|application)\s+(?:is|goes|was|were|becomes)\s+"
+            r"(?:unavailable|down|offline)\b",
             r"\breact\s+front[\s-]?end\b",
             r"\bfast\s*api\b",
             r"\bplatform\s+consists\s+of\b",
@@ -295,18 +374,27 @@ def match_section_rules(text: str) -> Optional[SectionRuleMatch]:
     if not text or not text.strip():
         return None
 
+    # Ranked by (confidence, number of this section's patterns that fired,
+    # earliest match position). Ties used to go to whichever rule happened
+    # to be listed first, so "During the first thirty days, the engineer
+    # should ... perform a supervised rollback" went to Deployment (a later
+    # passing mention) instead of the 30-day plan the sentence opens with.
     best: Optional[SectionRuleMatch] = None
+    best_key = None
     for section_id, patterns, base_confidence in _COMPILED_RULES:
-        for pattern in patterns:
-            if pattern.search(text):
-                match = SectionRuleMatch(
-                    section_id=section_id,
-                    confidence=base_confidence,
-                    reason=f"rule:{section_id}",
-                    matched_pattern=pattern.pattern,
-                )
-                if best is None or match.confidence > best.confidence:
-                    best = match
+        hits = [(m.start(), pattern) for pattern in patterns for m in [pattern.search(text)] if m]
+        if not hits:
+            continue
+        first_pos, first_pattern = min(hits, key=lambda h: h[0])
+        key = (base_confidence, len(hits), -first_pos)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = SectionRuleMatch(
+                section_id=section_id,
+                confidence=base_confidence,
+                reason=f"rule:{section_id}",
+                matched_pattern=first_pattern.pattern,
+            )
     return best
 
 
@@ -407,24 +495,159 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
 
         # Secondary pass: pull specialized content out of overview.
         if current_section == "system_overview":
-            reassignment = find_overview_reassignment(text)
-            if reassignment:
-                meta = schema_metadata.get(reassignment.section_id, {})
-                cs.primary_classification = Classification(
-                    section_id=reassignment.section_id,
-                    section_title=meta.get("title", reassignment.section_id),
-                    confidence=reassignment.confidence,
-                    similarity_score=reassignment.confidence,
-                    reason=f"Overview reassignment: {reassignment.matched_pattern}",
+            _reassign_out_of_overview(cs, idx, text, schema_metadata, Classification, ExplainabilityLog, datetime)
+
+    apply_continuation_rules(classified_sentences, schema_metadata)
+
+
+def _reassign_out_of_overview(cs, idx, text, schema_metadata, Classification, ExplainabilityLog, datetime):
+    """Pull specialized content out of system_overview (see find_overview_reassignment)."""
+    reassignment = find_overview_reassignment(text)
+    if not reassignment:
+        return
+    meta = schema_metadata.get(reassignment.section_id, {})
+    cs.primary_classification = Classification(
+        section_id=reassignment.section_id,
+        section_title=meta.get("title", reassignment.section_id),
+        confidence=reassignment.confidence,
+        similarity_score=reassignment.confidence,
+        reason=f"Overview reassignment: {reassignment.matched_pattern}",
+    )
+    cs.is_unassigned = False
+    cs.explainability_log = ExplainabilityLog(
+        action="overview_reassign",
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        sentence_id=idx,
+        section_id=reassignment.section_id,
+        reasoning=f"Reassigned from system_overview via {reassignment.matched_pattern}",
+        confidence=reassignment.confidence,
+    )
+
+
+# ============================================================================
+# Discourse continuation
+# ============================================================================
+#
+# Some sentences are grammatically dependent on an earlier one and carry no
+# topic signal of their own, so scoring them in isolation places them almost
+# at random. Observed on a real KT:
+#   "There are currently several open responsibilities." -> Open Responsibilities
+#   "The first is to review the certificate renewal configuration..." -> Handover
+#   "The second is to document the Kafka lag procedure..."           -> Operational Calendar
+#   "The third is to review the canary rollback configuration..."    -> Deployment
+# and, in a failure narrative, "The usual remediation is to..." / "The
+# corrective action was to..." landed in Disaster Recovery instead of with
+# the failure they resolve. These rules make such a sentence inherit the
+# section of the sentence it continues. They are linguistic, not tied to any
+# transcript's subject matter.
+
+_ORDINAL_ITEM_RE = re.compile(
+    r"^\s*(?:and\s+)?(?:the\s+)?(?:first|second|third|fourth|fifth|sixth|seventh|next|final|last)"
+    r"(?:\s+one)?\s+(?:is|was|would\s+be|will\s+be)\b",
+    re.IGNORECASE,
+)
+_ENUMERATION_HEAD_RE = re.compile(
+    r"\bthere\s+(?:are|were|is)\s+(?:currently\s+|still\s+)?"
+    r"(?:several|a\s+few|a\s+number\s+of|some|many|two|three|four|five|six|\d+)\b",
+    re.IGNORECASE,
+)
+_DEPENDENT_CONTINUATION_RE = re.compile(
+    r"^\s*(?:the\s+(?:\w+\s+)?(?:reason|root\s+cause|cause|symptom|fix|remediation|"
+    r"corrective\s+action|workaround|mitigation)\b|(?:this|that)\s+(?:was|is)\s+because\b)",
+    re.IGNORECASE,
+)
+# How far back an ordinal item may look for its enumeration head.
+_ENUMERATION_WINDOW = 6
+# An item keeps its own placement only when it independently matches a rule
+# for one of these sections (an explicit "never modify ..." prohibition).
+_CONTINUATION_YIELDS_TO_SECTIONS = frozenset({"danger_zones"})
+# Openers that mark a clause cut from a longer sentence.
+_FRAGMENT_START_RE = re.compile(r"^(?:and|or|but|then|so|while|which|whereas|nor|plus)\b", re.IGNORECASE)
+
+
+def _inherit_section(cs, source, idx, reason, Classification, ExplainabilityLog, datetime) -> None:
+    src = source.primary_classification
+    cs.primary_classification = Classification(
+        section_id=src.section_id,
+        section_title=src.section_title,
+        confidence=src.confidence,
+        similarity_score=src.confidence,
+        reason=reason,
+    )
+    cs.is_unassigned = source.is_unassigned
+    cs.explainability_log = ExplainabilityLog(
+        action="continuation",
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        sentence_id=idx,
+        section_id=src.section_id,
+        reasoning=reason,
+        confidence=src.confidence,
+    )
+
+
+def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Dict]) -> None:
+    """Place grammatically dependent sentences with the sentence they
+    continue. Mutates classified_sentences in place; see module comment."""
+    from context_mapper import Classification, ExplainabilityLog
+    from datetime import datetime
+
+    for idx, cs in enumerate(classified_sentences):
+        raw = (cs.sentence.raw_text or cs.sentence.text or "").strip()
+        text = (cs.sentence.text or "").strip()
+        if not text:
+            continue
+        own_rule = match_section_rules(text)
+        # Only an explicit safety prohibition outranks the sentence's
+        # grammatical dependence on its antecedent. A passing keyword (e.g.
+        # "automated rollback" in "The third is to review which services
+        # have automated rollback") must not pull an enumerated task away
+        # from the list it belongs to.
+        if own_rule and own_rule.section_id in _CONTINUATION_YIELDS_TO_SECTIONS:
+            continue
+
+        if _ORDINAL_ITEM_RE.search(text):
+            # Anchor to the enumeration HEAD ("There are several open
+            # responsibilities."), not merely the previous item: chaining
+            # item-to-item let one misplaced item drag every later item with
+            # it. Falls back to the nearest earlier item when no head is in
+            # range.
+            anchor = None
+            for back in range(idx - 1, max(-1, idx - 1 - _ENUMERATION_WINDOW), -1):
+                prev = classified_sentences[back]
+                prev_text = (prev.sentence.text or "").strip()
+                if not prev.primary_classification:
+                    continue
+                if _ENUMERATION_HEAD_RE.search(prev_text):
+                    anchor = prev
+                    break
+                if anchor is None and _ORDINAL_ITEM_RE.search(prev_text):
+                    anchor = prev
+            if anchor is not None and anchor.primary_classification.section_id != getattr(
+                cs.primary_classification, "section_id", None
+            ):
+                _inherit_section(
+                    cs, anchor, idx,
+                    f"Continuation: enumerated item of \"{(anchor.sentence.text or '')[:60]}\"",
+                    Classification, ExplainabilityLog, datetime,
                 )
-                cs.is_unassigned = False
-                cs.explainability_log = ExplainabilityLog(
-                    action="overview_reassign",
-                    timestamp=datetime.utcnow().isoformat() + "Z",
-                    sentence_id=idx,
-                    section_id=reassignment.section_id,
-                    reasoning=f"Reassigned from system_overview via {reassignment.matched_pattern}",
-                    confidence=reassignment.confidence,
+            continue
+
+        # A fragment produced by splitting one long spoken sentence at a
+        # comma ("then review the major Terraform modules...", "or bypass the
+        # production approval process.") starts lowercase or with a
+        # coordinating conjunction and has no subject of its own; it belongs
+        # wherever the sentence it was cut from went.
+        is_fragment = bool(_FRAGMENT_START_RE.match(raw)) or (raw[:1].islower())
+        if (is_fragment or _DEPENDENT_CONTINUATION_RE.search(text)) and idx > 0:
+            prev = classified_sentences[idx - 1]
+            if prev.primary_classification and (
+                prev.primary_classification.section_id != getattr(cs.primary_classification, "section_id", None)
+            ):
+                _inherit_section(
+                    cs, prev, idx,
+                    "Continuation: fragment of the preceding sentence" if is_fragment
+                    else "Continuation: explains the preceding sentence",
+                    Classification, ExplainabilityLog, datetime,
                 )
 
 

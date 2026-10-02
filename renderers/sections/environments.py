@@ -8,10 +8,38 @@ from renderers.blocks.common import (
 
 COLUMNS = ["Environment", "Known characteristics"]
 
-NOT_PROVIDED_NOTE = (
-    "Exact environment names, URLs, AWS accounts, regions, access procedures "
-    "and namespaces were not covered — do not infer them."
-)
+import re
+
+# (label, evidence pattern) for the environment details a reader might be
+# tempted to infer. The note used to claim ALL of these were "not covered"
+# unconditionally -- including on a KT that listed every environment by name.
+# Now it names only the details the section's own content never mentions.
+_DETAIL_EVIDENCE = [
+    ("exact environment names", re.compile(r"\b(?:dev(?:elopment)?|qa|test|integration|uat|staging|pre-?prod(?:uction)?|production|sandbox)\b", re.I)),
+    ("URLs", re.compile(r"https?://|\bwww\.|\.(?:com|net|io|internal)\b", re.I)),
+    ("cloud accounts", re.compile(r"\baccount(?:s|\s+ids?)?\b|\bsubscription\b|\bproject\s+id\b", re.I)),
+    ("regions", re.compile(r"\bregions?\b|\b(?:us|eu|ap|sa|ca|me|af)-[a-z]+-\d\b", re.I)),
+    ("access procedures", re.compile(r"\baccess\b", re.I)),
+    ("namespaces", re.compile(r"\bnamespaces?\b", re.I)),
+]
+
+
+def _not_provided_note(text: str):
+    missing = []
+    for label, pattern in _DETAIL_EVIDENCE:
+        found = {m.group(0).lower() for m in pattern.finditer(text or "")}
+        # One passing mention of "production" is not a list of environment
+        # names; two or more distinct names are.
+        needed = 2 if label == "exact environment names" else 1
+        if len(found) < needed:
+            missing.append(label)
+    if not missing:
+        return None
+    if len(missing) == 1:
+        listed = missing[0]
+    else:
+        listed = ", ".join(missing[:-1]) + " and " + missing[-1]
+    return f"{listed[:1].upper() + listed[1:]} were not covered — do not infer them."
 
 
 def _field_value(fields: Dict[str, Any], field_id: str):
@@ -60,13 +88,17 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         if leftover:
             blocks.append(build_narrative_block("Additional environment notes", leftover))
 
-        blocks.append(build_narrative_block("Do not over-infer", [NOT_PROVIDED_NOTE]))
+        note = _not_provided_note(" ".join(_coverage_paragraphs(section)))
+        if note:
+            blocks.append(build_narrative_block("Do not over-infer", [note]))
         return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
 
     fallback = _coverage_paragraphs(section)
     if fallback:
         blocks.append(build_narrative_block(title, fallback))
-        blocks.append(build_narrative_block("Do not over-infer", [NOT_PROVIDED_NOTE]))
+        note = _not_provided_note(" ".join(fallback))
+        if note:
+            blocks.append(build_narrative_block("Do not over-infer", [note]))
     else:
         blocks.append(no_coverage_block(title))
 

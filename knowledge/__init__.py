@@ -7,6 +7,8 @@ from .knowledge_builder import (
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
+    reconcile_linked_fields,
+    verify_document_coverage,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "append_tribal_knowledge_section",
     "append_coverage_matrix_section",
     "append_quick_reference_section",
+    "reconcile_linked_fields",
+    "verify_document_coverage",
 ]

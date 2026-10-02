@@ -316,6 +316,35 @@
     }
     input[type=file]{display:none}
 
+    /* ── INPUT MODE (recording | transcript) ──────────────────── */
+    .mode-switch{
+      display:inline-flex;padding:3px;gap:2px;margin-bottom:14px;
+      background:var(--bg2);border:1px solid var(--border-lt);border-radius:9px;
+    }
+    .mode-switch button{
+      font:inherit;font-size:12.5px;font-weight:600;color:var(--text2);
+      background:transparent;border:none;border-radius:7px;padding:6px 12px;cursor:pointer;
+      display:inline-flex;align-items:center;gap:6px;
+    }
+    .mode-switch button svg{width:14px;height:14px}
+    .mode-switch button[aria-selected="true"]{background:var(--surface);color:var(--blue);box-shadow:var(--shadow-sm)}
+    .mode-switch button:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+    .transcript-input{
+      width:100%;min-height:190px;resize:vertical;
+      font:inherit;font-size:13px;line-height:1.6;color:var(--text);
+      background:var(--surface-2);border:1.5px solid var(--border);border-radius:var(--radius-lg);
+      padding:12px 14px;
+    }
+    .transcript-input:focus{outline:none;border-color:var(--blue);background:var(--surface)}
+    .transcript-meta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text3);margin-top:6px}
+    .coverage-proof{
+      display:flex;align-items:flex-start;gap:9px;margin-top:10px;
+      padding:11px 13px;border-radius:var(--radius);font-size:13px;line-height:1.5;
+      background:var(--green-dim);color:var(--green);
+    }
+    .coverage-proof svg{width:16px;height:16px;flex-shrink:0;margin-top:1px}
+    .coverage-proof.recovered{background:var(--amber-dim);color:var(--amber)}
+
     /* ── BUTTONS ──────────────────────────────────────────────── */
     .btn{
       display:inline-flex;align-items:center;justify-content:center;gap:7px;
@@ -999,7 +1028,7 @@
     <div class="page-heading">
       <div>
         <h1>KT Session</h1>
-        <p>Upload a recording to generate a structured knowledge transfer document.</p>
+        <p>Upload a recording or paste a transcript to generate a structured knowledge transfer document.</p>
       </div>
     </div>
 
@@ -1011,13 +1040,31 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
           <div>
-            <div class="card-title">Upload Recording</div>
-            <div class="card-sub">Accepts audio and video · Whisper transcription · AI classification</div>
+            <div class="card-title">New KT Session</div>
+            <div class="card-sub">Upload a recording for Whisper transcription, or paste an existing transcript</div>
           </div>
         </div>
       </div>
       <div class="card-body">
 
+        <div class="mode-switch" role="tablist" aria-label="Input type">
+          <button type="button" role="tab" id="modeRecording" aria-selected="true" aria-controls="recordingPane">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            Recording
+          </button>
+          <button type="button" role="tab" id="modeTranscript" aria-selected="false" aria-controls="transcriptPane">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            Paste transcript
+          </button>
+        </div>
+
+        <div id="transcriptPane" role="tabpanel" aria-labelledby="modeTranscript" hidden>
+          <textarea id="transcriptInput" class="transcript-input" spellcheck="false"
+            placeholder="Paste the KT transcript here, e.g. an exported meeting transcript. It goes through the same cleanup and classification as a recording."></textarea>
+          <div class="transcript-meta"><span>Plain text, one or more paragraphs</span><span id="transcriptCount">0 words</span></div>
+        </div>
+
+        <div id="recordingPane" role="tabpanel" aria-labelledby="modeRecording">
         <label for="file" style="margin:0">
           <div class="upload-zone" id="uploadZone">
             <div class="uz-icon">
@@ -1029,11 +1076,12 @@
           </div>
         </label>
         <input id="file" type="file" accept="audio/*,video/*"/>
+        </div>
 
         <div style="display:flex;justify-content:flex-end;margin-top:12px">
           <button id="upload" class="btn btn-primary">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-            Upload &amp; Process
+            <span id="uploadLabel">Upload &amp; Process</span>
           </button>
         </div>
 
@@ -1053,7 +1101,7 @@
             <div class="mt-value" id="summaryCoverage">—</div>
           </div>
           <div class="metric-tile t-green">
-            <div class="mt-label">Confidence</div>
+            <div class="mt-label">Quality</div>
             <div class="mt-value" id="summaryConfidence">—</div>
           </div>
           <div class="metric-tile t-amber">
@@ -1375,6 +1423,38 @@ const fileNameDisplay  = document.getElementById('fileNameDisplay');
 let currentJobId = null;
 let pollInterval = null;
 let SCHEMA = null;
+let inputMode = 'recording';
+
+/* ── Input mode: recording | pasted transcript ─────────────── */
+const modeRecordingBtn  = document.getElementById('modeRecording');
+const modeTranscriptBtn = document.getElementById('modeTranscript');
+const recordingPane     = document.getElementById('recordingPane');
+const transcriptPane    = document.getElementById('transcriptPane');
+const transcriptInput   = document.getElementById('transcriptInput');
+const transcriptCount   = document.getElementById('transcriptCount');
+const uploadLabel       = document.getElementById('uploadLabel');
+function setInputMode(mode){
+  inputMode = mode;
+  const isTranscript = mode === 'transcript';
+  modeRecordingBtn.setAttribute('aria-selected', String(!isTranscript));
+  modeTranscriptBtn.setAttribute('aria-selected', String(isTranscript));
+  recordingPane.hidden = isTranscript;
+  transcriptPane.hidden = !isTranscript;
+  uploadLabel.textContent = isTranscript ? 'Process transcript' : 'Upload & Process';
+  if(isTranscript) transcriptInput.focus();
+}
+modeRecordingBtn.addEventListener('click', ()=>setInputMode('recording'));
+modeTranscriptBtn.addEventListener('click', ()=>setInputMode('transcript'));
+transcriptInput.addEventListener('input', ()=>{
+  const words = (transcriptInput.value.trim().match(/\S+/g) || []).length;
+  transcriptCount.textContent = words.toLocaleString() + (words === 1 ? ' word' : ' words');
+});
+
+/* Section id -> human title, from the loaded schema (falls back to the id). */
+function sectionTitle(id){
+  const sec = (SCHEMA || []).find(s => s.id === id);
+  return (sec && sec.title) || id;
+}
 
 /* ── Progress ──────────────────────────────────────────────── */
 function setProgress(p){ bar.style.width=p+'%'; progressText.textContent=p+'%'; }
@@ -1444,7 +1524,12 @@ function renderSummary(data){
   summaryCoverage.textContent=`${covered+weak}/${total}`;
   summaryWeak.textContent=weak;
   summaryMissing.textContent=data.missing_required?.length??missing;
-  summaryConfidence.textContent=data.overall_coverage_percent?Math.round(data.overall_coverage_percent)+'%':'—';
+  // The job result never carried overall_coverage_percent, so this tile
+  // always read "—". Show the document quality score the pipeline computes.
+  const q = data.quality_score || {};
+  summaryConfidence.textContent = (typeof q.overall_score === 'number')
+    ? `${q.grade || ''} ${Math.round(q.overall_score)}`.trim()
+    : '—';
   sessionJob.textContent=data.job_id?(data.job_id.slice(0,14)+'…'):'—';
   sessionCoverage.textContent=pct+'%';
   sessionMissing.textContent=data.missing_required?.length??missing;
@@ -1462,15 +1547,31 @@ function renderSummary(data){
   });
   aiSummaryEl.appendChild(grid);
 
+  const titleOf = id => (cov[id] && cov[id].title) || sectionTitle(id);
   if(missingList.length){
     const a=document.createElement('div'); a.className='alert-row danger';
-    a.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span><strong>Missing critical sections:</strong> ${escapeHtml(missingList.join(', '))}</span>`;
+    a.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span><strong>Missing critical sections:</strong> ${escapeHtml(missingList.map(titleOf).join(', '))}</span>`;
     aiSummaryEl.appendChild(a);
   }
   if(weakList.length){
     const a=document.createElement('div'); a.className='alert-row warn';
-    a.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span><strong>Weak coverage:</strong> ${escapeHtml(weakList.join(', '))}</span>`;
+    a.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span><strong>Weak coverage:</strong> ${escapeHtml(weakList.map(titleOf).join(', '))}</span>`;
     aiSummaryEl.appendChild(a);
+  }
+
+  // Verified against the rendered document (knowledge_builder.
+  // verify_document_coverage): how many transcript facts made it in, and
+  // whether any had to be recovered into Additional Notes.
+  const kc = (data.knowledge_object || {})._knowledge_coverage_summary;
+  if(kc && kc.verified_against_document){
+    const recovered = kc.recovered || 0;
+    const p=document.createElement('div');
+    p.className = 'coverage-proof' + (recovered ? ' recovered' : '');
+    const text = `${kc.mapped} of ${kc.facts_identified} transcript facts appear in a section`
+      + (kc.unmapped ? `, ${kc.unmapped} in Additional Notes` : '')
+      + (recovered ? `. ${recovered} were missing and have been added to Additional Notes — review their placement.` : '. Nothing was dropped.');
+    p.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12 11 15 16 9"/></svg><span>${escapeHtml(text)}</span>`;
+    aiSummaryEl.appendChild(p);
   }
 }
 
@@ -1484,7 +1585,7 @@ function renderCoverage(cov){
     item.setAttribute('data-section', id);
     const hdr=document.createElement('div'); hdr.className='cov-header';
     hdr.innerHTML=`
-      <span class="cov-title">${info.title||id}</span>
+      <span class="cov-title">${escapeHtml(info.title||id)}</span>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
         <span class="badge ${status}">${status}</span>
         <svg class="cov-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -1495,7 +1596,10 @@ function renderCoverage(cov){
       contentArray.forEach(c=>{
         const div=document.createElement('div');
         div.className='cov-text kt-rendered';
-        div.innerHTML = marked.parse(c || '');
+        // Escaped BEFORE markdown: transcript text is untrusted input (the
+        // /kt-from-transcript endpoint accepts arbitrary text) and marked
+        // passes raw HTML such as <img onerror=...> straight through.
+        div.innerHTML = marked.parse(escapeHtml(String(c || '')));
         body.appendChild(div);
       });
     } else {
@@ -1561,27 +1665,28 @@ function renderKnowledgeDocument(knowledge){
 
 function renderBlockHtml(block){
   if(!block || !block.type) return '<p>Invalid block.</p>';
+  const title = fallback => `<div class="doc-block-title">${escapeHtml(String(block.title||fallback))}</div>`;
   switch(block.type){
     case 'NarrativeBlock':
-      return `<div class="doc-block-title">${block.title||'Narrative'}</div>${(block.paragraphs||[]).map(p=>`<p>${marked.parseInline(String(p||''))}</p>`).join('')}`;
+      return `${title('Narrative')}${(block.paragraphs||[]).map(p=>`<p>${marked.parseInline(escapeHtml(String(p||'')))}</p>`).join('')}`;
     case 'ChecklistBlock':
-      return `<div class="doc-block-title">${block.title||'Checklist'}</div><ul>${(block.items||[]).map(item=>`<li>${renderInlineText(item)}</li>`).join('')}</ul>`;
+      return `${title('Checklist')}<ul>${(block.items||[]).map(item=>`<li>${renderInlineText(item)}</li>`).join('')}</ul>`;
     case 'WarningBlock':
-      return `<div class="doc-block-title">${block.title||'Warning'}</div><div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${renderInlineText(w)}</p>`).join('')}</div>`;
+      return `${title('Warning')}<div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${renderInlineText(w)}</p>`).join('')}</div>`;
     case 'TechnologyGrid':
-      return `<div class="doc-block-title">${block.title||'Technology'}</div><div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${renderInlineText(row.label)}</span><strong>${renderInlineText(row.value)}</strong></div>`).join('')}</div>`;
+      return `${title('Technology')}<div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${renderInlineText(row.label)}</span><strong>${renderInlineText(row.value)}</strong></div>`).join('')}</div>`;
     case 'DeploymentTimeline':
-      return `<div class="doc-block-title">${block.title||'Timeline'}</div><ol>${(block.entries||[]).map(entry=>`<li><strong>${renderInlineText(entry.label)}:</strong> ${renderInlineText(entry.description)}</li>`).join('')}</ol>`;
+      return `${title('Timeline')}<ol>${(block.entries||[]).map(entry=>`<li><strong>${renderInlineText(entry.label)}:</strong> ${renderInlineText(entry.description)}</li>`).join('')}</ol>`;
     case 'OwnershipTable':
-      return `<div class="doc-block-title">${block.title||'Ownership'}</div><table class="doc-table"><tbody>${(block.rows||[]).map(row=>`<tr><td>${renderInlineText(row.role||'')}</td><td>${renderInlineText(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
+      return `${title('Ownership')}<table class="doc-table"><thead><tr><th>Responsibility</th><th>Owner</th></tr></thead><tbody>${(block.rows||[]).map(row=>`<tr><td>${renderInlineText(row.role||'')}</td><td>${renderInlineText(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
     case 'DecisionTable':
-      return `<div class="doc-block-title">${block.title||'Decision Table'}</div><table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>renderTableCell(row[col])).join('')}</tr>`).join('')}</tbody></table>`;
+      return `${title('Decision Table')}<table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>renderTableCell(row[col])).join('')}</tr>`).join('')}</tbody></table>`;
     case 'TroubleshootingBlock':
-      return `<div class="doc-block-title">${block.title||'Troubleshooting'}</div><ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
+      return `${title('Troubleshooting')}<ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
-      return `<div class="doc-block-title">${block.title||'Code'}</div><pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
+      return `${title('Code')}<pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
     default:
-      return `<div class="doc-block-title">${block.title||block.type}</div><p>${renderInlineText(block.description||'')}</p>`;
+      return `${title(block.type)}<p>${renderInlineText(block.description||'')}</p>`;
   }
 }
 
@@ -1615,7 +1720,10 @@ function populateCoverBlock(data){
   const covered = secs.filter(id => cov[id].status === 'covered').length;
   const total = secs.length;
 
-  document.getElementById('coverSystemName').textContent = data.system_name || 'AWS E-Commerce Platform';
+  // Never a hardcoded example name: every KT without a system_name used to
+  // print "AWS E-Commerce Platform" on its cover.
+  const ko = data.knowledge_object || {};
+  document.getElementById('coverSystemName').textContent = data.system_name || ko.system_name || '—';
   document.getElementById('coverDate').textContent = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
   document.getElementById('coverAuthor').textContent = data.author || 'KT Session';
   document.getElementById('coverCoverage').textContent = `${covered}/${total} sections covered`;
@@ -1631,13 +1739,25 @@ toggleTranscript.addEventListener('click',()=>{
 /* ── Poll job ───────────────────────────────────────────────── */
 function pollJobStatus(jobId){
   if(pollInterval) clearInterval(pollInterval);
+  // One dropped request (a server busy loading models, a network blip) used
+  // to abandon the job in the UI while it kept running on the server.
+  // Only give up after several consecutive failures.
+  let failures = 0;
+  const MAX_FAILURES = 5;
+  const fail = msg => {
+    failures += 1;
+    if(failures >= MAX_FAILURES){ showToast(msg); clearInterval(pollInterval); }
+  };
   pollInterval=setInterval(async()=>{
     try{
       const resp=await fetch(`/status/${jobId}`);
-      if(!resp.ok){ showToast('Status check failed'); clearInterval(pollInterval); return; }
+      if(resp.status===404){ showToast('Job not found — the server may have restarted'); clearInterval(pollInterval); progressWrap.style.display='none'; return; }
+      if(!resp.ok){ fail('Status check failed'); return; }
+      failures = 0;
       const data=await resp.json();
       if(data.status==='processing'){
-        setProgress(Math.min(50,data.progress||0));
+        // Server progress runs 0-100; keep the bar short of 100 until done.
+        setProgress(Math.max(10, Math.min(95, data.progress||0)));
       } else if(data.status==='completed'){
         setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
         renderSummary(data);
@@ -1671,19 +1791,32 @@ function pollJobStatus(jobId){
         showToast('Processing failed: '+(data.error||'Unknown error'));
         setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
       }
-    }catch(err){ showToast('Poll error: '+err); clearInterval(pollInterval); }
+    }catch(err){ fail('Poll error: '+err); }
   },2000);
 }
 
 /* ── Upload ─────────────────────────────────────────────────── */
 uploadBtn.addEventListener('click',async()=>{
-  const f=fileInput.files[0];
-  if(!f){ showToast('Choose a file first'); return; }
+  let request;
+  if(inputMode === 'transcript'){
+    const text = transcriptInput.value.trim();
+    if(!text){ showToast('Paste a transcript first'); transcriptInput.focus(); return; }
+    request = fetch('/kt-from-transcript',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transcript:text}),
+    });
+  } else {
+    const f=fileInput.files[0];
+    if(!f){ showToast('Choose a file first'); return; }
+    const fd=new FormData(); fd.append('file',f);
+    request = fetch('/upload',{method:'POST',body:fd});
+  }
   progressWrap.style.display='block'; setProgress(5);
-  const fd=new FormData(); fd.append('file',f);
+  uploadBtn.disabled = true;
   try{
-    const resp=await fetch('/upload',{method:'POST',body:fd});
-    if(!resp.ok){ const t=await resp.text(); showToast('Upload failed: '+resp.status+' '+t); setProgress(0); progressWrap.style.display='none'; return; }
+    const resp=await request;
+    if(!resp.ok){ const t=await resp.text(); showToast('Submission failed: '+resp.status+' '+t); setProgress(0); progressWrap.style.display='none'; uploadBtn.disabled=false; return; }
     setProgress(20);
     const data=await resp.json();
     currentJobId=data.job_id;
@@ -1695,6 +1828,11 @@ uploadBtn.addEventListener('click',async()=>{
       pollJobStatus(currentJobId);
     }
   }catch(err){ showToast('Error: '+err); setProgress(0); progressWrap.style.display='none'; }
+  finally{
+    // Re-enabled once the job is accepted; polling reports the rest. This
+    // stops a double click from queueing the same KT twice.
+    uploadBtn.disabled = false;
+  }
 });
 
 /* ── Edit modal ─────────────────────────────────────────────── */

@@ -746,10 +746,12 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
     seen = set()
     deduped = []
     for tool in found:
+        tool = _canonicalize_component_term(tool)
         key = tool.lower()
         if key not in seen:
             seen.add(key)
             deduped.append(tool)
+    deduped = _drop_subsumed_components(deduped)
 
     overview_section.setdefault("fields", {}).setdefault(
         "key_technologies", {"id": "key_technologies", "label": "Key Technologies", "type": "text", "confidence": 0.6, "source": "cross_section", "evidence": []}
@@ -783,7 +785,48 @@ _CANONICAL_TERM_ALIASES = {
     "net microservice": ".NET",
     "dotnet": ".NET",
     "asp.net": "ASP.NET",
+    # AWS acronyms that name exactly one product. (WAF/KMS/OpenSearch are
+    # left alone: the bare word is not AWS-specific, and the vendor-
+    # qualified form is collapsed by _drop_subsumed_components instead.)
+    "alb": "Application Load Balancer",
+    "eks": "Amazon EKS",
+    "msk": "Amazon MSK",
+    "route53": "Route 53",
+    "route 53": "Route 53",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
 }
+
+# A bare name is dropped when the same list also holds it with a vendor
+# prefix or an engine qualifier ("Aurora" + "Aurora PostgreSQL", "WAF" +
+# "AWS WAF"), or when it is the generic noun for a more specific entry
+# ("Load Balancer" + "Application Load Balancer"). Listing both presented
+# one component as two. Deliberately narrow: "Vault" is NOT subsumed by
+# "Azure Key Vault" (different products).
+_VENDOR_PREFIXES = ("amazon", "aws", "azure", "google", "gcp", "hashicorp")
+_ENGINE_SUFFIXES = ("postgresql", "mysql", "postgres")
+_GENERIC_COMPONENT_NOUNS = {"load balancer"}
+
+
+def _drop_subsumed_components(components: List[str]) -> List[str]:
+    lowered = [c.lower() for c in components]
+    kept: List[str] = []
+    for comp, low in zip(components, lowered):
+        subsumed = False
+        for other in lowered:
+            if other == low:
+                continue
+            if any(other == f"{p} {low}" for p in _VENDOR_PREFIXES):
+                subsumed = True
+            elif any(other == f"{low} {s}" for s in _ENGINE_SUFFIXES):
+                subsumed = True
+            elif low in _GENERIC_COMPONENT_NOUNS and other.endswith(" " + low):
+                subsumed = True
+            if subsumed:
+                break
+        if not subsumed:
+            kept.append(comp)
+    return kept
 
 
 def _canonicalize_component_term(term: str) -> str:
@@ -916,6 +959,7 @@ def enrich_architecture_knowledge(
             existing = deduped[seen[key]]
             if existing[:1].islower() and canon[:1].isupper():
                 deduped[seen[key]] = canon
+    deduped = _drop_subsumed_components(deduped)
 
     # Architecture Details renders these verbatim, so duplication here is
     # duplication in the PDF. Exact lowercase matching was not enough: the
@@ -1163,6 +1207,15 @@ def append_coverage_matrix_section(
                     else:
                         missing_labels.append(label)
 
+                # Keep the bucket consistent with the field count it is shown
+                # next to: "Partial" beside "5 of 5 fields captured" and
+                # "Strong" beside "1 of 7" both contradicted themselves.
+                if section.get("fields_role") != "metadata":
+                    if leaf_specs and filled_count == len(leaf_specs):
+                        bucket = "Strong"
+                    elif bucket == "Strong" and filled_count * 2 < len(leaf_specs):
+                        bucket = "Partial"
+
                 # A section whose leaf fields are purely administrative
                 # metadata (e.g. architecture_reference's doc link / last
                 # updated / verified-by) can have real knowledge captured
@@ -1342,8 +1395,14 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     if value:
         rows.append({"Situation": "Terraform state", "Immediate reference": value})
 
-    open_resp = _find_section(knowledge_object, "open_responsibilities")
-    value = _first_matching_paragraph(open_resp, "contact platform engineering", "unaware", "unsure")
+    # "If you are unsure ... contact X" guidance can be classified into any
+    # of several sections (open responsibilities, ownership, danger zones);
+    # look in all of them rather than only the one a past transcript used.
+    value = None
+    for sid in ("open_responsibilities", "ownership_escalation", "danger_zones", "day1_survival_checklist"):
+        value = _first_matching_paragraph(_find_section(knowledge_object, sid), "unaware", "unsure", "not sure", "in doubt")
+        if value:
+            break
     if value:
         rows.append({"Situation": "Production activity unclear", "Immediate reference": value})
 
@@ -1353,9 +1412,21 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
         rows.append({"Situation": "System unavailable", "Immediate reference": value})
 
     ownership = _find_section(knowledge_object, "ownership_escalation")
-    value = _field_value(ownership, "escalation_chain")
+    value = _field_value(ownership, "escalation_chain") or _first_matching_paragraph(
+        ownership, "escalation point", "escalation path", "escalation chain", "escalation goes", "escalate to"
+    )
     if value:
         rows.append({"Situation": "Escalation", "Immediate reference": value})
+
+    value = _field_value(deployment, "deployment_window")
+    if value:
+        rows.append({"Situation": "Planning a production change", "Immediate reference": value})
+
+    dr = _find_section(knowledge_object, "disaster_recovery")
+    rto, rpo = _field_value(dr, "rto_metric"), _field_value(dr, "rpo_metric")
+    if rto or rpo:
+        parts = [f"RTO {rto}" if rto else "", f"RPO {rpo}" if rpo else ""]
+        rows.append({"Situation": "Disaster recovery", "Immediate reference": "Recovery objectives: " + ", ".join(p for p in parts if p)})
 
     if not rows:
         return knowledge_object
@@ -1382,4 +1453,144 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     summary = knowledge_object.setdefault("summary", {})
     summary["section_count"] = summary.get("section_count", len(sections) - 1) + 1
     summary["covered_sections"] = summary.get("covered_sections", 0) + 1
+    return knowledge_object
+
+
+# Sections that restate content from real sections (or are the coverage
+# report itself). A sentence that appears ONLY in one of these has not
+# reached a real section.
+_DIGEST_SECTION_IDS = frozenset({TRIBAL_KNOWLEDGE_SECTION_ID, KT_COVERAGE_SECTION_ID, QUICK_REFERENCE_SECTION_ID})
+RECOVERED_NOTE_TITLE = "Recovered by the final completeness check"
+_PARAPHRASE_RETENTION_RATIO = 0.6
+
+
+def verify_document_coverage(
+    knowledge_object: Dict[str, Any],
+    transcript_sentences: List[str],
+    sentence_sections: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Check every fact-bearing transcript sentence against the RENDERED
+    document and replace the knowledge-coverage summary with those counts.
+
+    The summary built by append_coverage_matrix_section() is computed from
+    the knowledge object before rendering, and its `lost` value was
+    facts_identified - (mapped + deduplicated + unmapped) with
+    facts_identified defined as that same sum -- zero by construction. On a
+    real KT it reported "0 lost" while 30 of 101 sentences appeared nowhere
+    in the PDF. This measures the document itself. A sentence found in no
+    section is not reported and left missing: it is added to Additional
+    Notes, and the summary says how many were recovered that way.
+    """
+    from pdf_rendering import _block_strings, _norm_for_match
+    from pdf_rendering import is_text_represented as _is_represented
+    from renderers import get_renderer
+
+    rendered = knowledge_object.get("rendered_sections") or []
+    real_norms: List[str] = []
+    unmapped_norms: List[str] = []
+    section_words: Dict[str, set] = {}
+    for sec in rendered:
+        sid = sec.get("section_id")
+        if sid in _DIGEST_SECTION_IDS:
+            continue
+        norms = [_norm_for_match(s) for s in _block_strings(sec.get("blocks") or [])]
+        (unmapped_norms if sid == UNMAPPED_FINDINGS_SECTION_ID else real_norms).extend(norms)
+        section_words[sid] = {w for n in norms for w in n.split()}
+
+    def _paraphrased_in_own_section(text: str) -> bool:
+        # With an LLM, a section's facts are often restated (week-by-week
+        # rows, checklist items) rather than quoted. Such a sentence is not
+        # missing: most of its content words appear in the section it was
+        # classified into. Scoped to that one section, so a sentence cannot
+        # pass merely because its words are scattered across the document.
+        sid = (sentence_sections or {}).get(_dedup_normalize(text))
+        words = [w for w in _content_words(text)]
+        if not sid or sid not in section_words or len(words) < _DEDUP_MIN_CONTENT_WORDS:
+            return False
+        own = section_words[sid]
+        return sum(1 for w in words if w in own) / len(words) >= _PARAPHRASE_RETENTION_RATIO
+
+    facts: List[str] = []
+    seen = set()
+    for text in transcript_sentences or []:
+        text = (text or "").strip()
+        if len(text.split()) < _MIN_UNMAPPED_SENTENCE_WORDS or _is_session_pleasantry(text):
+            continue
+        key = _dedup_normalize(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(text)
+
+    mapped = unmapped = 0
+    lost: List[str] = []
+    for text in facts:
+        if _is_represented(text, real_norms) or _paraphrased_in_own_section(text):
+            mapped += 1
+        elif _is_represented(text, unmapped_norms):
+            unmapped += 1
+        else:
+            lost.append(text)
+
+    if lost:
+        unmapped_sec = next((s for s in rendered if s.get("section_id") == UNMAPPED_FINDINGS_SECTION_ID), None)
+        block = {"type": "NarrativeBlock", "title": RECOVERED_NOTE_TITLE, "paragraphs": list(lost)}
+        if unmapped_sec is None:
+            unmapped_sec = {"section_id": UNMAPPED_FINDINGS_SECTION_ID, "section_title": UNMAPPED_FINDINGS_TITLE, "blocks": []}
+            insert_at = next(
+                (i for i, s in enumerate(rendered) if s.get("section_id") in _DIGEST_SECTION_IDS),
+                len(rendered),
+            )
+            rendered.insert(insert_at, unmapped_sec)
+        unmapped_sec.setdefault("blocks", []).append(block)
+
+    summary = {
+        "facts_identified": len(facts),
+        "mapped": mapped,
+        "unmapped": unmapped,
+        "recovered": len(lost),
+        "lost": 0,
+        "verified_against_document": True,
+    }
+    coverage_section = _find_section(knowledge_object, KT_COVERAGE_SECTION_ID)
+    if coverage_section is not None:
+        coverage_section["_knowledge_coverage_summary"] = summary
+        renderer = get_renderer(KT_COVERAGE_SECTION_ID)
+        for i, sec in enumerate(rendered):
+            if sec.get("section_id") == KT_COVERAGE_SECTION_ID:
+                rendered[i] = renderer(coverage_section)
+                break
+    knowledge_object["rendered_sections"] = rendered
+    knowledge_object["_knowledge_coverage_summary"] = summary
+    return knowledge_object
+
+
+# The template asks for the same fact in two places. When the transcript
+# answers it once, the other copy must not say "Not discussed" beside it.
+# (section_id, field_id) pairs; values are copied only into an unfilled side.
+_LINKED_FIELDS = [
+    (("architecture_reference", "verified_by_incoming_owner"), ("handover_completion", "architecture_verified")),
+]
+
+
+def reconcile_linked_fields(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+    def _entry(section_id: str, field_id: str):
+        section = _find_section(knowledge_object, section_id)
+        if not section:
+            return None
+        return (section.get("fields") or {}).get(field_id)
+
+    def _filled(entry) -> bool:
+        return bool(entry) and entry.get("value") not in (None, "", [], {}) and entry.get("source", "unfilled") != "unfilled"
+
+    for left, right in _LINKED_FIELDS:
+        a, b = _entry(*left), _entry(*right)
+        for src, dst, dst_key in ((a, b, right), (b, a, left)):
+            if _filled(src) and dst is not None and not _filled(dst):
+                dst.update({
+                    "value": src.get("value"),
+                    "confidence": src.get("confidence", 0.0),
+                    "source": "cross_section",
+                    "evidence": list(src.get("evidence") or []),
+                })
     return knowledge_object

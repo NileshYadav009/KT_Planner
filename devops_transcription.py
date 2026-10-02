@@ -203,13 +203,15 @@ PHRASE_CORRECTIONS = {
     r"qbritis": "kubernetes",
     r"cubernetes": "kubernetes",
     r"cubernetis": "kubernetes",
-    r"terra[\s-]?form?\s+state": "terraform state",
+    r"\bterra[\s-]?form?\s+state": "Terraform state",
     r"flash\s+sales": "flash sales",
     r"flash\s+sale[\s-]?event": "flash sale event",
     r"soby\s+cautious": "so be cautious",
     r"season\s+sales": "flash sales",
     r"teleform": "terraform",
-    r"ter[\s-]?form": "terraform",
+    # Word-bounded: unanchored, "ter form" also matched inside ordinary
+    # words ("after formal sign-off" -> "afterraformal sign-off").
+    r"\bter[\s-]?form\b": "terraform",
     r"csed\s+pipeline": "CI/CD pipeline",
     r"csed\s+pipelines?": "CI/CD pipelines",
     r"csed\s+tool": "CI/CD tool",
@@ -284,25 +286,31 @@ PHRASE_CORRECTIONS = {
     r"front[\s-]?end": "frontend",
     r"hel[\s-]?checks": "health checks",
     r"redowning": "redeploying",
-    r"redone": "red zone",
     r"ash-skin": "as-is",
     r"understandable\s+back": "understand back",
     r"asclicion": "escalation",
     r"katie": "KT",
     r"katie\s+planner": "KT Planner",
-    r"continue": "",  # Remove standalone "continue"
-    r"right[\.,]?\s*$": "",  # Remove trailing "Right."
-    r"okay[\.,]?\s*$": "",  # Remove trailing "Okay."
-    
-    # Number and acronym fixes
-    r"k[\s-]?8[\s-]?s": "kubernetes",
-    r"a[\s-]?w[\s-]?s": "aws",
-    r"\bs[\s-]?r[\s-]?e\b": "sre",
-    r"g[\s-]?c[\s-]?p": "gcp",
-    
-    # Tense and grammar
-    r"is\s+done": "goes down",
-    r"what\s+breaks": "what breaks",
+    # Standalone spoken "Continue." / "Right." / "Okay." utterances only.
+    # These used to be unanchored, which deleted the word from real content:
+    # "a successful canary allows the deployment to continue." became
+    # "allows the deployment to ." and any sentence ending "...the right."
+    # lost its last word.
+    r"(?:^|(?<=[.!?] ))continue[.!](?=\s|$)": "",
+    r"(?:^|(?<=[.!?] ))right[.,]?\s*$": "",
+    r"(?:^|(?<=[.!?] ))okay[.,]?\s*$": "",
+
+    # Number and acronym fixes. Word-bounded and emitted in their real
+    # uppercase form: unanchored, lowercase replacements rewrote every
+    # correctly transcribed "AWS"/"GCP"/"SRE" to lowercase in the document.
+    r"\bk[\s-]?8[\s-]?s\b": "Kubernetes",
+    r"\ba[\s-]?w[\s-]?s\b": "AWS",
+    r"\bs[\s-]?r[\s-]?e\b": "SRE",
+    r"\bg[\s-]?c[\s-]?p\b": "GCP",
+
+    # (Removed: r"is\s+done" -> "goes down" and r"redone" -> "red zone".
+    # Both rewrote ordinary English and inverted meaning: "The migration is
+    # done" became "The migration goes down".)
 
     # ------------------------------------------------------------------
     # Brand/product casing normalization — proper branded casing for the
@@ -389,7 +397,6 @@ WORD_CORRECTIONS = {
     "teleform": "terraform",
     "devons": "dev environments",
     "redowning": "redeploying",
-    "redone": "red zone",
     "seekers": "secrets",
     "asclicion": "escalation",
     "desklation": "escalation",
@@ -401,7 +408,6 @@ WORD_CORRECTIONS = {
     "pay-bin": "payment",
     "paybin": "payment",
     "soby": "so be",
-    "understandable": "understand",
     "asclicion": "escalation",
     "hel": "health",
     "grounding": "grounding",
@@ -422,15 +428,64 @@ FILLER_WORDS = [
     "like",
 ]
 
-FILLER_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in FILLER_WORDS) + r")\b[\.,]?", re.IGNORECASE)
+_FILLER_ALTERNATION = "|".join(re.escape(w) for w in FILLER_WORDS)
+# Most of these words are fillers only in a discourse position. Anywhere else
+# they carry meaning, and deleting them everywhere changed facts:
+# "right-sizing" -> "-sizing", "production-like" -> "production-",
+# "so that they understand" -> "that they understand", "works well" -> "works",
+# "tools like Terraform" -> "tools Terraform". So a word is only removed when
+# it opens a sentence or is set off by commas, never inside a hyphenated word.
+_NOT_IN_WORD = r"(?<![\w-])"
+_NOT_JOINED = r"(?![\w-])"
+# Sentence-initial discourse markers, possibly stacked ("Okay, so, basically ...").
+# "Right"/"like" open real sentences too ("Right after a deployment, ...",
+# "Like the previous incident, ..."), so at sentence start they only count
+# as filler when a comma sets them off; the rest are fillers there either way.
+_LEADING_FILLER_RE = re.compile(
+    r"(?:^|(?<=[.!?]\s))(?:(?:(?:okay|so|well|um+|uh+|basically|actually|you know)"
+    + _NOT_JOINED + r"[,.]?|(?:right|like)" + _NOT_JOINED + r"[,.])\s+)+",
+    re.IGNORECASE,
+)
+# Comma-delimited asides mid-sentence: "the pods, you know, restart".
+_ASIDE_FILLER_RE = re.compile(
+    r",\s*(?:" + _FILLER_ALTERNATION + r")" + _NOT_JOINED + r"\s*,\s*",
+    re.IGNORECASE,
+)
+_TAG_QUESTION_RE = re.compile(r",\s*(?:right|okay|you know)" + _NOT_JOINED + r"\s*\?", re.IGNORECASE)
+# Trailing tag question/remark: "..., right?" / "..., okay." -> "...".
+_TRAILING_TAG_RE = re.compile(
+    r",\s*(?:right|okay|you know)" + _NOT_JOINED + r"\s*(?=[.?!]|$)",
+    re.IGNORECASE,
+)
+# Hesitation sounds and pure hedges carry no content in any position.
+_ANYWHERE_FILLER_RE = re.compile(
+    _NOT_IN_WORD + r"(?:um+|uh+|basically|actually)" + _NOT_JOINED + r",?\s*",
+    re.IGNORECASE,
+)
 REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)(?:\s+\1\b)+", re.IGNORECASE)
 REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,12}\w+)\s+\1\b", re.IGNORECASE)
 
 
 def remove_fillers(text: str) -> str:
+    """Remove spoken filler without deleting meaningful uses of the same words.
+
+    "So", "like", "well" and "right" are content words far more often than
+    fillers in a technical walkthrough, so they are only dropped in discourse
+    positions (sentence-initial or comma-delimited). See _LEADING_FILLER_RE.
+    """
     if not text:
         return text
-    cleaned = re.sub(FILLER_PATTERN, "", text)
+    cleaned = _ANYWHERE_FILLER_RE.sub("", text)
+    # "We use Kafka, right?" is a statement with a tag, not a question.
+    cleaned = _TAG_QUESTION_RE.sub(".", cleaned)
+    cleaned = _TRAILING_TAG_RE.sub("", cleaned)
+    previous = None
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = _ASIDE_FILLER_RE.sub(" ", cleaned)
+    cleaned = _LEADING_FILLER_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    cleaned = re.sub(r",\s*([.!?])", r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -574,6 +629,28 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
     return corrected, corrections_applied
 
 
+_INFLECTION_SUFFIXES = ("s", "es", "ed", "d", "ing", "led", "ped", "ted", "red")
+
+
+def _is_inflected_form(words: List[str], target_words: List[str]) -> bool:
+    """True when every word equals its target word or is the target plus a
+    regular inflection suffix (plural, past tense, gerund), with at least one
+    word actually inflected. Such an n-gram is a correct spelling of a known
+    term, not a transcription error."""
+    if len(words) != len(target_words):
+        return False
+    inflected = False
+    for word, target in zip(words, target_words):
+        w, t = word.lower(), target.lower()
+        if w == t:
+            continue
+        if w.startswith(t) and w[len(t):] in _INFLECTION_SUFFIXES:
+            inflected = True
+            continue
+        return False
+    return inflected
+
+
 def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[str, List[Dict]]:
     """Use fuzzy matching against known DevOps terms to correct transcription noise."""
     if not text or not HAS_TEXTDISTANCE:
@@ -663,6 +740,19 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                     # Already the canonical spelling — no real correction to
                     # make (this can happen when best_term resolves back to
                     # the same phrase via canonicalization).
+                    continue
+                if _is_inflected_form(ngram_words, best_term.split()):
+                    # "load balancers", "canary deployments", "rolled back"
+                    # are correctly spelled inflections of a known term, not
+                    # mishearings. Replacing them with the canonical key
+                    # silently rewrote plurals to singulars and verbs to
+                    # nouns ("can be rolled back" -> "can be rollback").
+                    continue
+                if phrase == best_term and any(ch.isupper() for ch in " ".join(ngram_words)):
+                    # An exact listed variant that already carries branded
+                    # casing ("Route 53") is a correct spelling; the lowercase
+                    # canonical key ("route53") would only strip that casing.
+                    # Lowercase garbles ("pager duty") are still corrected.
                     continue
                 escaped_phrase = re.escape(" ".join(words[i:i+n]))
                 pattern = re.compile(rf"\b{escaped_phrase}\b", re.IGNORECASE)

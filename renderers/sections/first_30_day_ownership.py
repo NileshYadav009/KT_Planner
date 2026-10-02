@@ -37,8 +37,9 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
         parts = [part.strip() for part in text.split("|") if part.strip()]
         if len(parts) >= 2:
             rows.append({"role": parts[0], "team": parts[1]})
-        else:
-            rows.append({"role": text, "team": ""})
+        # A plain sentence is not a (period, plan) row: rendered as one, it
+        # showed the whole 30-day plan in the first column with an empty
+        # second column. Plain sentences fall through to the narrative block.
     return rows
 
 

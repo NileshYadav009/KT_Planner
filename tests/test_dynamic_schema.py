@@ -103,11 +103,10 @@ def test_dynamic_field_falls_back_to_other_sections_content():
     # stayed permanently "unfilled" because field_populator only ever
     # searched system_overview's own sentences, never architecture_reference's.
     # embedding_model=None throughout: _extract_by_semantic's no-model path
-    # just returns the first candidate sentence unconditionally (it can't
-    # score relevance without a model), so system_overview's OWN sentence
-    # list is left empty here -- otherwise that trivial "return first"
-    # behavior would satisfy cache_layer before the fallback path (the thing
-    # actually under test) ever runs. Real runs have a real model and a
+    # falls back to lexical topic/anchor overlap, so system_overview's OWN
+    # sentence list is left empty here -- otherwise an in-section match could
+    # satisfy cache_layer before the fallback path (the thing actually under
+    # test) ever runs. Real runs have a real model and a
     # genuine similarity threshold; this test only needs to prove the
     # fallback mechanism itself fires and finds the right cross-section value.
     base_schema = load_base_schema()

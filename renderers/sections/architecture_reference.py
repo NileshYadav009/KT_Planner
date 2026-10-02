@@ -69,7 +69,10 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     metadata_rows = []
     for field_id, label in _METADATA_FIELD_SPECS:
         value = fields.get(field_id, {}).get("value")
-        display_value = str(value) if value not in (None, "", []) else "Not discussed"
+        if isinstance(value, bool):
+            display_value = "Confirmed" if value else "Not confirmed"
+        else:
+            display_value = str(value) if value not in (None, "", []) else "Not discussed"
         metadata_rows.append({"label": label, "value": display_value})
     blocks.append(build_technology_grid("Architecture Metadata", metadata_rows))
 

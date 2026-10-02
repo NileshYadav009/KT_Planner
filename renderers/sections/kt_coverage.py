@@ -31,7 +31,22 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # TEMPLATE FIELD population) — rendered first and clearly labeled so
     # the two are never mistaken for the same number.
     summary = section.get("_knowledge_coverage_summary") or {}
-    if summary:
+    if summary.get("verified_against_document"):
+        # Counts measured against the rendered document itself (see
+        # knowledge_builder.verify_document_coverage), not the pre-render
+        # knowledge object.
+        text = (
+            f"{summary.get('facts_identified', 0)} fact-bearing sentence(s) from the transcript were "
+            f"checked against this document: {summary.get('mapped', 0)} appear in a section and "
+            f"{summary.get('unmapped', 0)} are listed under Additional Notes."
+        )
+        if summary.get("recovered"):
+            text += (
+                f" {summary['recovered']} did not appear anywhere and were added to Additional Notes "
+                f"by the final completeness check."
+            )
+        blocks.append(build_narrative_block("Knowledge coverage", [text]))
+    elif summary:
         blocks.append(build_narrative_block("Knowledge coverage", [
             f"{summary.get('facts_identified', 0)} fact-bearing sentence(s) identified in this KT session: "
             f"{summary.get('mapped', 0)} mapped to a section, "

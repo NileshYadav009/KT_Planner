@@ -5,6 +5,7 @@ Populate KT fields from coverage content using pattern, semantic, and LLM passes
 """
 
 import logging
+import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -15,6 +16,204 @@ logger = logging.getLogger(__name__)
 
 def _normalize_line(line: str) -> str:
     return re.sub(r"\s+", " ", line.strip()).lower()
+
+
+# ---------------------------------------------------------------------------
+# Field topic helpers
+# ---------------------------------------------------------------------------
+# Many schema fields have an empty label and description (e.g. every
+# known_bad_days field, most handover/sign-off fields). Their similarity
+# query used to be the empty string, so the "best" sentence was arbitrary:
+# a live KT filled Sign-off's "Incoming owner" with "The outgoing owner has
+# therefore not marked the handover as fully closed." The field id is always
+# present and always descriptive, so it is part of every query.
+
+_QUERY_STOPWORDS = frozenset(
+    "a an and are as at be by can could do does for from how if in is it its of "
+    "on one or the this to what when where which who why will with line non "
+    "type status".split()
+)
+# Words too generic to identify WHICH fact a boolean/select field is about.
+# They still count when a field has nothing more specific (see _topic_stems).
+_GENERIC_TOPIC_WORDS = frozenset(
+    "know knows known understand understands clear safely safe verified confirmed "
+    "replacement incoming outgoing owner new business most".split()
+)
+_STEM_SUFFIXES = ("ations", "ation", "ments", "ment", "ities", "ity", "ings", "ing",
+                  "ally", "ly", "ies", "ied", "es", "ed", "s")
+
+
+def _humanize_field_id(field_id: str) -> str:
+    return re.sub(r"[_\-]+", " ", str(field_id or "")).strip()
+
+
+def _field_query_text(field: Dict[str, Any]) -> str:
+    """Label + description + humanized id, de-duplicated — never empty."""
+    parts = [field.get("label") or "", field.get("description") or "", _humanize_field_id(field.get("id", ""))]
+    seen, out = set(), []
+    for part in parts:
+        key = part.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(part.strip())
+    return ". ".join(out)
+
+
+def _stem(word: str) -> str:
+    word = word.lower()
+    for suffix in _STEM_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
+def _topic_stems(field: Dict[str, Any]) -> Set[str]:
+    """Stems naming what a field is ABOUT, from its label and id (not its
+    description, which often holds unrelated example values). Specific words
+    are preferred; generic ones are used only when nothing else is left."""
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]+", f"{field.get('label') or ''} {_humanize_field_id(field.get('id', ''))}")
+    content = [w.lower() for w in words if w.lower() not in _QUERY_STOPWORDS]
+    specific = {_stem(w) for w in content if w not in _GENERIC_TOPIC_WORDS and len(w) >= 3}
+    if specific:
+        return specific
+    return {_stem(w) for w in content if len(w) >= 3}
+
+
+def _word_matches_stem(word: str, stem: str) -> bool:
+    """"caching" matches "cache" and "deployments" matches "deploy": compare
+    in both directions, the second only for stems long enough to be specific."""
+    if word.startswith(stem):
+        return True
+    word_stem = _stem(word)
+    return len(word_stem) >= 4 and stem.startswith(word_stem)
+
+
+def _mentions_topic(sentence: str, stems: Set[str]) -> bool:
+    if not stems:
+        return False
+    words = re.findall(r"[a-z][a-z0-9]+", sentence.lower())
+    return any(_word_matches_stem(w, stem) for w in words for stem in stems)
+
+
+# A sentence that states something is NOT done / still outstanding must never
+# be read as confirmation, even though it contains "complete" or "review".
+_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no\s+longer|isn't|hasn't|haven't|wasn't|weren't|aren't|doesn't|"
+    r"don't|didn't|cannot|can't|yet\s+to|still\s+needs?|still\s+has\s+to|pending|"
+    r"outstanding|incomplete|unresolved)\b",
+    re.IGNORECASE,
+)
+_OUTSTANDING_RE = re.compile(
+    r"\b(?:not\s+yet|still\s+needs?|still\s+has\s+to|yet\s+to|pending|outstanding|incomplete|unresolved)\b",
+    re.IGNORECASE,
+)
+_REQUIREMENT_RE = re.compile(
+    r"\b(?:only\s+when|only\s+if|must|should|needs?\s+to|required\s+to|is\s+required|"
+    r"considered\s+complete|before\s+(?:taking|marking|signing))\b",
+    re.IGNORECASE,
+)
+_CONFIRMATION_RE = re.compile(
+    r"\b(?:yes|confirmed|verified|validated|completed?|done|reviewed|accepted|approved|"
+    r"granted|demonstrated|walked\s+through|signed\s+off|understands?)\b",
+    re.IGNORECASE,
+)
+
+
+def _split_sentences(text: str) -> List[str]:
+    parts: List[str] = []
+    for line in (text or "").splitlines():
+        parts.extend(p.strip() for p in re.split(r"(?<=[.!?])\s+", line) if p.strip())
+    return parts
+
+
+def _extract_boolean(field: Dict[str, Any], section_text: str) -> Optional[bool]:
+    """True only when a sentence about THIS field's topic confirms it; False
+    when a sentence about its topic says it is not (yet) done; None when the
+    transcript is silent.
+
+    The previous check looked for "done"/"complete"/"verified" anywhere in the
+    whole section, so one unrelated sentence marked every readiness check in
+    Handover Completion "Confirmed" -- on a KT whose transcript said formal
+    sign-off had NOT been submitted. Outstanding evidence wins over positive
+    evidence: a document must not claim readiness the transcript disputes.
+    """
+    stems = _topic_stems(field)
+    saw_positive = saw_negative = False
+    for sentence in _split_sentences(section_text):
+        if not _mentions_topic(sentence, stems):
+            continue
+        if _OUTSTANDING_RE.search(sentence):
+            # "...still needs to complete the canary rollback review": work
+            # that is explicitly not done yet, even though it reads like a
+            # requirement.
+            saw_negative = True
+            continue
+        if _REQUIREMENT_RE.search(sentence):
+            # "The handover is considered complete only when the engineer has
+            # reviewed the danger zones" states a requirement, not that it
+            # happened -- it marked two readiness checks "Confirmed".
+            continue
+        if _NEGATION_RE.search(sentence):
+            saw_negative = True
+        elif _CONFIRMATION_RE.search(sentence):
+            saw_positive = True
+    if saw_negative:
+        return False
+    if saw_positive:
+        return True
+    return None
+
+
+def _match_select_options(field: Dict[str, Any], section_text: str) -> List[str]:
+    """Options stated in a sentence that is about this field's topic and is
+    not negated. Plain substring matching across the whole section used to
+    fire on any occurrence of the option word: "complete the canary review"
+    set KT status to "Complete", and "internal services are written in Go"
+    set the audience to "Internal"."""
+    stems = _topic_stems(field)
+    if not stems:
+        # A field whose label and id name no topic (e.g. an unlabeled
+        # "kt_status") has no way to tell which sentence answers it; any
+        # option word anywhere in the section is not evidence.
+        return []
+    options = [str(o) for o in field.get("options", []) if str(o).strip()]
+    matched: List[str] = []
+    for sentence in _split_sentences(section_text):
+        if not _mentions_topic(sentence, stems):
+            continue
+        if _NEGATION_RE.search(sentence):
+            continue
+        for option in options:
+            if option in matched:
+                continue
+            # Whole word, or its adverb ("internal" -> "internally"), but not
+            # other inflections: "completed successfully" is not KT status
+            # "Complete".
+            if re.search(r"(?<![\w-])" + re.escape(option.lower()) + r"(?:ly)?(?![\w-])", sentence.lower()):
+                matched.append(option)
+    return matched
+
+
+# Where documentation lives when no literal link is spoken. A URL field left
+# "Not discussed" beside "The architecture documentation is maintained in the
+# internal engineering wiki." contradicts the transcript.
+_DOC_LOCATION_RE = re.compile(
+    r"\b(?:wiki|confluence|sharepoint|notion|runbook|readme|git\s*hub|git\s*lab|"
+    r"repository|repo|google\s+drive|portal|knowledge\s+base)\b",
+    re.IGNORECASE,
+)
+_DOC_SUBJECT_RE = re.compile(r"\b(?:document\w*|docs?|diagram|runbook|wiki|link)\b", re.IGNORECASE)
+
+
+def _extract_document_location(field: Dict[str, Any], section_text: str) -> Optional[str]:
+    stems = _topic_stems(field)
+    for sentence in _split_sentences(section_text):
+        if not (_DOC_LOCATION_RE.search(sentence) and _DOC_SUBJECT_RE.search(sentence)):
+            continue
+        if stems and not _mentions_topic(sentence, stems):
+            continue
+        return sentence
+    return None
 
 
 # Structural/stop words that don't make a valid system name on their own —
@@ -107,6 +306,9 @@ def _split_enumerated_items(text: str) -> List[str]:
     # Use the LAST enumeration-introducing verb, so a leading clause like
     # "For new team members, review X, Y, Z" keeps only "X, Y, Z".
     s = s[intro_matches[-1].end():]
+    # "include access TO Grafana, PagerDuty, ..." -- the preposition belongs
+    # to the verb, not to the first item ("to Grafana").
+    s = re.sub(r"^\s*(?:to|for|of|on)\s+", "", s, flags=re.IGNORECASE)
     parts = re.split(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*", s)
     return [p.strip(" .") for p in parts if p.strip(" .")]
 
@@ -115,7 +317,7 @@ PATTERN_EXTRACTORS = {
     "url": re.compile(r"https?://[^\s\)\"']+", re.IGNORECASE),
     "tools": re.compile(
         r"\b(Prometheus|Grafana|CloudWatch|PagerDuty|OpsGenie|Jenkins|"
-        r"GitLab\s*CI|GitHub\s*Actions|Argo\s*CD|Flux|Helm|Terraform|Bicep|Ansible|"
+        r"GitLab\s*CI|GitHub\s*Actions|Argo\s*CD|(?-i:Flux)|Helm|Terraform|Bicep|Ansible|"
         r"Kubernetes|Docker|Rancher|Vault|Consul|Nexus|Artifactory|"
         r"SonarQube|Trivy|Veracode|Datadog|Splunk|ELK|Elasticsearch|"
         r"Logstash|Kibana|Redis|Kafka|RabbitMQ|PostgreSQL|MySQL|MongoDB|"
@@ -145,9 +347,16 @@ PATTERN_EXTRACTORS = {
         r"Secret\s+Manager|"
         r"Cloud\s+Monitoring|Cloud\s+Logging|Stackdriver|"
         r"Cloud\s+Build|"
-        r"Dataflow|Airflow|Vertex\s+AI|Cloud\s+Storage|"
-        r"React|Angular|Vue(?:\.js)?|Fast\s*API|Django|Flask|Node(?:\.js)?|"
-        r"Spring\s+Boot|Spring|"
+        # Product names that are also ordinary English words only count
+        # when capitalized ((?-i:...) turns the global IGNORECASE off for
+        # them): "EKS node capacity" was listed as a Node.js backend in the
+        # Technology Summary and drew a "node" box in the architecture
+        # diagram, and "react to the alert", "a spring release", "in flux"
+        # and "check the airflow" would do the same.
+        r"(?-i:Dataflow)|(?-i:Airflow)|Vertex\s+AI|Cloud\s+Storage|"
+        r"(?-i:React)|Angular|(?-i:Vue)(?:\.js)?|Fast\s*API|Django|Flask|"
+        r"node\.?js|(?-i:Node)|"
+        r"Spring\s+Boot|(?-i:Spring)|"
         # ".NET microservices" is an extremely common way to name the backend
         # in an Azure KT, but the leading "." can't sit inside this regex's
         # outer \b(...)\b, so the dotted form is matched via its "NET
@@ -156,7 +365,7 @@ PATTERN_EXTRACTORS = {
         # backend tier was invisible to the component list, the Technology
         # summary and the architecture diagram alike.
         r"ASP\.NET|NET\s+microservices?|dotnet|"
-        r"Express|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
+        r"(?-i:Express)|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
         re.IGNORECASE,
     ),
     "duration": re.compile(r"\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|seconds?|secs?)\b", re.IGNORECASE),
@@ -174,6 +383,27 @@ PATTERN_EXTRACTORS = {
     ),
 }
 
+# Minimum cosine similarity (BAAI/bge-large-en-v1.5, normalized embeddings)
+# between a field's query text and a sentence before that sentence may fill
+# the field. bge's baseline similarity between unrelated English sentences is
+# high, so a low bar turns "best available" into a wrong fact forced into a
+# template field. Calibration is recorded in docs/REPOSITORY_AUDIT.md.
+SEMANTIC_FIELD_THRESHOLD = float(os.getenv("SEMANTIC_FIELD_THRESHOLD", "0.35"))
+# Stricter bar for a field that names a technology when no candidate names it.
+SEMANTIC_FIELD_UNANCHORED_THRESHOLD = float(os.getenv("SEMANTIC_FIELD_UNANCHORED_THRESHOLD", "0.55"))
+# Bar for open-question fields ("What does this system do?"), which cannot
+# be checked for topic words. See _extract_by_semantic_scored.
+SEMANTIC_OPEN_QUESTION_THRESHOLD = float(os.getenv("SEMANTIC_OPEN_QUESTION_THRESHOLD", "0.56"))
+
+# Speech transcripts state durations in words as often as digits ("an RTO of
+# two hours and an RPO of fifteen minutes"); digits-only matching lost both.
+_NUMBER_WORD = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+    r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
+    r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?)"
+)
+_DURATION_AMOUNT = r"(?:\d+(?:\.\d+)?|" + _NUMBER_WORD + r"|an?|half\s+an?)"
+
 _RTO_RE = re.compile(
     r"\b(?:rto|recovery\s+time\s+objective)\b"
     # Tolerates a spoken-transcript-style acronym callout set off by a comma
@@ -183,18 +413,23 @@ _RTO_RE = re.compile(
     # to match it at all, silently dropping an explicitly stated RTO.
     r"(?:\s*[,(]\s*rto\s*[,)]\s*)?"
     r"\s*(?:is|of|:)\s*"
-    r"(\d+\s*(?:minutes?|mins?|hours?|hrs?|days?))",
+    r"(" + _DURATION_AMOUNT + r"\s*(?:minutes?|mins?|hours?|hrs?|days?))",
     re.IGNORECASE,
 )
 _RPO_RE = re.compile(
     r"\b(?:rpo|recovery\s+point\s+objective)\b"
     r"(?:\s*[,(]\s*rpo\s*[,)]\s*)?"
     r"\s*(?:is|of|:)\s*"
-    r"(\d+\s*(?:minutes?|mins?|hours?|hrs?|days?))",
+    r"(" + _DURATION_AMOUNT + r"\s*(?:minutes?|mins?|hours?|hrs?|days?))",
     re.IGNORECASE,
 )
 
 
+_REGION = (
+    r"(?:North\s+America|South\s+America|Latin\s+America|Europe|EMEA|APAC|"
+    r"Asia[\s-]Pacific|Asia|Africa|the\s+Middle\s+East|Australia|the\s+US|the\s+UK|"
+    r"(?:multiple|several|\d+)\s+(?:countries|regions|markets))"
+)
 _CUSTOMER_REACH_RE = re.compile(
     r"\b("
     r"web\s+and\s+mobile(?:\s+(?:applications?|channels?|users?|clients?))?"
@@ -205,6 +440,10 @@ _CUSTOMER_REACH_RE = re.compile(
     r"|external\s+customers?"
     r"|customers?\s+globally"
     r"|end\s+users?"
+    r"|(?:institutional|retail|enterprise|consumer|corporate|individual|small[\s-]business)"
+    r"(?:\s+and\s+(?:institutional|retail|enterprise|consumer|corporate|individual|small[\s-]business))?"
+    r"\s+(?:customers?|clients?|users?|investors?)"
+    r"|across\s+" + _REGION + r"(?:,?\s+(?:and\s+)?" + _REGION + r")*"
     r")\b",
     re.IGNORECASE,
 )
@@ -225,8 +464,10 @@ def extract_customer_reach(text: str) -> Optional[str]:
         return None
     seen: List[str] = []
     for match in _CUSTOMER_REACH_RE.finditer(text):
-        phrase = re.sub(r"\s+", " ", match.group(1)).strip().lower()
-        if phrase not in [s.lower() for s in seen]:
+        # Original casing kept: lowercasing everything turned "across North
+        # America, Europe, and Asia-Pacific" into "north america, europe".
+        phrase = re.sub(r"\s+", " ", match.group(1)).strip()
+        if phrase.lower() not in [s.lower() for s in seen]:
             seen.append(phrase)
     if not seen:
         return None
@@ -234,6 +475,44 @@ def extract_customer_reach(text: str) -> Optional[str]:
     def _present(p: str) -> str:
         return re.sub(r"\b(b2b|b2c)\b", lambda m: m.group(1).upper(), p)
     return ", ".join(_present(p) for p in seen)
+
+
+_EXPLICIT_HIGH_CRITICALITY_RE = re.compile(
+    r"\b(?:most\s+(?:business[\s-]+)?critical\s+(?:platforms?|systems?|services?|applications?)|"
+    r"(?:business|mission)[\s-]critical|tier[\s-]?(?:0|1|one|zero)\b|"
+    r"criticality\s+(?:is|of)\s+high)",
+    re.IGNORECASE,
+)
+
+_VOLUME_QUANTITY_RE = re.compile(
+    r"(?:\d[\d,.]*|" + _NUMBER_WORD + r"|hundreds|thousands|millions|billions)"
+    r"(?:\s+(?:hundred|thousand|million|billion))?",
+    re.IGNORECASE,
+)
+_VOLUME_UNIT_RE = re.compile(
+    r"\b(?:orders?|order\s+events|events|requests|transactions|messages|payments|trades|"
+    r"calls|jobs|records|api\s+calls)\b",
+    re.IGNORECASE,
+)
+_VOLUME_PERIOD_RE = re.compile(
+    r"\b(?:per\s+(?:day|second|minute|hour|month)|a\s+(?:day|second|minute|month)|daily|"
+    r"each\s+day|business\s+day|single\s+day|at\s+peak)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_business_volume(text: str) -> Optional[str]:
+    """The sentence stating the system's throughput, verbatim, when it names
+    a quantity, a unit of work and a time window -- "On a normal business
+    day the platform processes between eight and twelve million order
+    events". The digits-only "<n> orders per day" pattern missed every
+    volume stated in words or in units other than orders."""
+    for sentence in _split_sentences(text):
+        if not (_VOLUME_UNIT_RE.search(sentence) and _VOLUME_PERIOD_RE.search(sentence)):
+            continue
+        if re.search(r"(?:\d|\b(?:hundred|thousand|million|billion|" + _NUMBER_WORD + r")\b)", sentence, re.IGNORECASE):
+            return sentence.strip()
+    return None
 
 
 # What happens when the system is unavailable. Speakers state this as a
@@ -399,22 +678,21 @@ def _extract_by_pattern(
 
     if field_type == "url":
         match = PATTERN_EXTRACTORS["url"].search(section_text)
-        return match.group(0) if match else None
-
-    if field_type == "boolean":
-        text_lower = section_text.lower()
-        positives = ["yes", "confirmed", "verified", "done", "complete", "✓"]
-        if any(p in text_lower for p in positives):
-            return True
+        if match:
+            return match.group(0)
+        # No literal link, but the transcript may still say WHERE the
+        # documentation lives. Only for documentation-type link fields: a
+        # repo/pipeline link field must not be filled by any sentence that
+        # merely names a repository.
+        if any(s.startswith(("doc", "architect", "diagram", "runbook")) for s in _topic_stems(field)):
+            return _extract_document_location(field, section_text)
         return None
 
+    if field_type == "boolean":
+        return _extract_boolean(field, section_text)
+
     if field_type in ("single_select", "multi_select"):
-        options = [o.lower() for o in field.get("options", [])]
-        matched = []
-        text_lower = section_text.lower()
-        for opt in options:
-            if opt in text_lower:
-                matched.append(opt.title())
+        matched = _match_select_options(field, section_text)
         if field_type == "single_select":
             if matched:
                 return matched[0]
@@ -429,6 +707,10 @@ def _extract_by_pattern(
             # The LEVEL itself is never stated, so it is derived, and the
             # value says so inline rather than presenting a guess as fact —
             # a reader can see exactly what it came from and correct it.
+            if field_id == "business_criticality" and _EXPLICIT_HIGH_CRITICALITY_RE.search(section_text):
+                # "one of the most critical platforms", "mission-critical",
+                # "business-critical" state the level outright.
+                return "High"
             if field_id == "business_criticality" and extract_outage_impact(section_text):
                 return "High (derived from the stated outage impact)"
             return None
@@ -438,6 +720,9 @@ def _extract_by_pattern(
         match = PATTERN_EXTRACTORS["orders_per_day"].search(section_text)
         if match:
             return f"{match.group(1)} orders per day"
+        volume = extract_business_volume(section_text)
+        if volume:
+            return volume
 
     if field_id == "customer_reach":
         reach = extract_customer_reach(section_text)
@@ -552,8 +837,11 @@ def _extract_by_pattern(
             return ", ".join(dict.fromkeys(events))
 
     if "rollback" in field_id and ("time" in field_id or "duration" in field_id):
+        # Spelled-out durations too ("the target for a normal application
+        # rollback is fifteen minutes"), and "is" as well as within/in/under.
         match = re.search(
-            r"(?:rollback|roll back|roll-back).*?(?:within|in|under)\s+(\d+\s*minutes?)",
+            r"(?:rollback|roll back|roll-back)[^.]*?\b(?:within|in|under|is|of)\s+("
+            + _DURATION_AMOUNT + r"\s*(?:minutes?|mins?|hours?|hrs?))",
             section_text,
             re.IGNORECASE,
         )
@@ -601,9 +889,27 @@ def _extract_by_pattern(
                 expanded.append(line)
             return "\n".join(expanded[:20])
 
+        # The FIRST catch-all table in a section is the section's own list
+        # (steps, tasks) and takes the remaining lines. A later one only
+        # takes lines about its own topic: "Rollback scenarios" otherwise
+        # received whatever was left over ("and explain the difference
+        # between application ownership and platform ownership.").
+        if _CATCH_ALL_CLAIMED in (exclude_line_keys or set()):
+            stems = {st for st in _topic_stems(field) if len(st) >= 4}
+            lines = [line for line in lines if _mentions_topic(line, stems)]
+            if not lines:
+                return None
+        if exclude_line_keys is not None:
+            exclude_line_keys.add(_CATCH_ALL_CLAIMED)
         return "\n".join(lines[:10])
 
     return None
+
+
+# Marker placed in a section's shared used-line set once a catch-all table
+# has claimed lines (never equal to a real normalized line).
+_CATCH_ALL_CLAIMED = "\x00catch-all-table-claimed"
+
 
 
 def _field_identity_word(label: str) -> str:
@@ -624,7 +930,25 @@ def _extract_by_semantic(
     exclude_line_keys: Optional[Set[str]] = None,
     own_identity_word: Optional[str] = None,
     other_identity_words: Optional[List[str]] = None,
-) -> Optional[str]:
+    return_score: bool = False,
+):
+    """Best-matching sentence for `field`, or None. With return_score=True,
+    returns (sentence_or_None, similarity_or_None) so the caller can record
+    how strong the match was (see the `similarity` key on populated entries)."""
+    result = _extract_by_semantic_scored(
+        field, sentences, model, exclude_line_keys, own_identity_word, other_identity_words
+    )
+    return result if return_score else result[0]
+
+
+def _extract_by_semantic_scored(
+    field: Dict[str, Any],
+    sentences: List[str],
+    model=None,
+    exclude_line_keys: Optional[Set[str]] = None,
+    own_identity_word: Optional[str] = None,
+    other_identity_words: Optional[List[str]] = None,
+):
     if exclude_line_keys:
         sentences = [s for s in sentences if _normalize_line(s) not in exclude_line_keys]
 
@@ -641,13 +965,13 @@ def _extract_by_semantic(
             s_lower = s.lower()
             own_pos = None
             if own_identity_word:
-                m = re.search(rf"\b{re.escape(own_identity_word)}\b", s_lower)
+                m = re.search(rf"(?<![\w-]){re.escape(own_identity_word)}(?![\w-])", s_lower)
                 own_pos = m.start() if m else None
             other_pos = None
             for w in other_identity_words:
                 if not w:
                     continue
-                m = re.search(rf"\b{re.escape(w)}\b", s_lower)
+                m = re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", s_lower)
                 if m and (other_pos is None or m.start() < other_pos):
                     other_pos = m.start()
             if other_pos is None:
@@ -668,12 +992,28 @@ def _extract_by_semantic(
         # and had nothing to disqualify it).
         sentences = [s for s in sentences if not _primary_entity_is_other(s)]
 
-    if not sentences or model is None:
-        return sentences[0] if sentences else None
+    if not sentences:
+        return None, None
+    if model is None:
+        # No embedding model: fall back to lexical evidence rather than
+        # returning the first candidate blindly (which filled a field with
+        # whatever sentence happened to come first in the section). The
+        # sentence sharing the most of the field's own topic words wins;
+        # none sharing any means the field stays unfilled.
+        stems = _topic_stems(field)
+        anchors = {a.lower() for a in PATTERN_EXTRACTORS["tools"].findall(_field_query_text(field))}
+        best, best_hits = None, 0
+        for sentence in sentences:
+            words = re.findall(r"[a-z][a-z0-9]+", sentence.lower())
+            hits = sum(1 for stem in stems if any(_word_matches_stem(w, stem) for w in words))
+            hits += sum(1 for a in anchors if a in sentence.lower())
+            if hits > best_hits:
+                best, best_hits = sentence, hits
+        return best, None
 
     from sentence_transformers import util as st_util
 
-    field_text = f"{field.get('label', '')} {field.get('description', '')}"
+    field_text = _field_query_text(field)
 
     # A field whose own definition names concrete technologies ("Cache Layer
     # / Redis / ElastiCache configuration") is only satisfied by a sentence
@@ -686,22 +1026,104 @@ def _extract_by_semantic(
     # anchor-bearing candidates when any exist; when none do, demand much
     # stronger similarity rather than silently taking the best of a bad set.
     anchors = {a.lower() for a in PATTERN_EXTRACTORS["tools"].findall(field_text)}
-    threshold = 0.35
+    threshold = SEMANTIC_FIELD_THRESHOLD
+    all_candidates = list(sentences)
     if anchors:
         anchored = [s for s in sentences if any(a in s.lower() for a in anchors)]
         if anchored:
             sentences = anchored
         else:
-            threshold = 0.55
+            threshold = max(threshold, SEMANTIC_FIELD_UNANCHORED_THRESHOLD)
+    if _is_descriptive_question(field) and not _names_specific_object(field):
+        # Open questions ("What does this system do?") carry no distinctive
+        # words to check, and below this similarity every fill measured on
+        # five real KTs was wrong ("The frontend uses Angular.", "Bicep is
+        # used for infrastructure provisioning."). Left unfilled, the
+        # sentences still render as the section's context.
+        threshold = max(threshold, SEMANTIC_OPEN_QUESTION_THRESHOLD)
+    if not anchors and not other_identity_words:
+        # Topic evidence (see _has_topic_evidence). Not applied when a named
+        # technology anchor already constrains the candidates, or to per-
+        # entity sibling fields, which the identity filter above handles.
+        sentences = [s for s in sentences if _has_topic_evidence(field, s, all_candidates)]
+        if not sentences:
+            if _SEMANTIC_TRACE is not None:
+                _SEMANTIC_TRACE(field, [], [], None)
+            return None, None
 
     field_emb = model.encode(field_text, convert_to_tensor=True, normalize_embeddings=True)
     sent_embs = model.encode(sentences, convert_to_tensor=True, normalize_embeddings=True)
     scores = st_util.cos_sim(field_emb, sent_embs)[0]
     best_idx = int(scores.argmax().item())
     best_score = float(scores[best_idx].item())
+    if _SEMANTIC_TRACE is not None:
+        _SEMANTIC_TRACE(field, sentences, [float(x) for x in scores], best_idx)
     if best_score >= threshold:
-        return sentences[best_idx]
-    return None
+        return sentences[best_idx], best_score
+    return None, best_score
+
+
+def _is_name_field(field: Dict[str, Any]) -> bool:
+    field_id = str(field.get("id") or "").lower()
+    label_words = re.findall(r"[a-z]+", str(field.get("label") or "").lower())
+    return field_id.endswith(("_name", "_owner")) or field_id == "name" or "name" in label_words
+
+
+# Optional measurement hook: called as (field, candidates, scores, best_idx)
+# for every embedding-scored field. None in normal operation. Exists so the
+# threshold/evidence rules above can be re-calibrated against real
+# transcripts without duplicating this function's candidate filtering.
+_SEMANTIC_TRACE: Optional[Callable] = None
+
+
+def _is_descriptive_question(field: Dict[str, Any]) -> bool:
+    """Labels phrased as an open question ("What does this system do?",
+    "Why does the business depend on it?") describe free-form content that
+    rarely repeats the label's words; topic-word evidence is not required
+    for them. A question that names a specific object ("Who approves
+    rollback?") still has distinctive words and is treated like any other
+    field -- see _has_topic_evidence."""
+    return str(field.get("label") or "").strip().endswith("?")
+
+
+def _has_topic_evidence(field: Dict[str, Any], sentence: str, section_sentences: List[str]) -> bool:
+    """Does `sentence` actually talk about what `field` names?
+
+    Embedding similarity alone cannot tell (calibrated on five real KTs,
+    docs/REPOSITORY_AUDIT.md): wrong fills scored as high as 0.72 -- "Deployment
+    starts after code is merged" for Deployment Window, "The outgoing owner
+    has therefore not marked the handover as fully closed" for Outgoing
+    owner -- while correct ones scored as low as 0.47. What the wrong fills
+    lack is the field's DISTINCTIVE words: every sentence in the Deployment
+    section says "deploy", but only the real answer says "window".
+
+    Distinctive = the field's topic stems that appear in fewer than half of
+    the section's sentences; the candidate must mention every one of them.
+    When all of a field's stems are common in the section, one is enough.
+    """
+    if _is_descriptive_question(field) and not _names_specific_object(field):
+        return True
+    stems = {s for s in _topic_stems(field) if len(s) >= 4}
+    if not stems:
+        return False
+    pool = section_sentences or [sentence]
+    distinctive = {
+        s for s in stems
+        if sum(1 for t in pool if _mentions_topic(t, {s})) / len(pool) < 0.5
+    }
+    if distinctive:
+        return all(_mentions_topic(sentence, {s}) for s in distinctive)
+    return any(_mentions_topic(sentence, {s}) for s in stems)
+
+
+# Question words that ask for an open description rather than a named thing.
+_OPEN_QUESTION_RE = re.compile(r"^\s*(?:what|why|how|when)\b", re.IGNORECASE)
+
+
+def _names_specific_object(field: Dict[str, Any]) -> bool:
+    """"Who approves rollback?" asks for a specific fact about rollback, unlike
+    "What does this system do?"; only what/why/how/when questions are open."""
+    return not _OPEN_QUESTION_RE.match(str(field.get("label") or ""))
 
 
 def _build_llm_gap_fill_prompt(
@@ -886,26 +1308,29 @@ def populate_fields(
                 sentences = [section_text]
 
         result[section_id] = {}
-        _populate_fields_recursive(
-            fields=fields,
-            section_id=section_id,
-            section_title=section_title,
-            section_text=section_text,
-            sentences=sentences,
-            raw_sentence_texts=raw_sentence_texts,
-            output=result[section_id],
-            llm_provider=llm_provider,
-            embedding_model=embedding_model,
-            # Shared across every field (including nested group fields) in
-            # this section, so a second type:"table" field can't fall back
-            # onto the exact same generic lines[:10] slice the first one
-            # already claimed — see _populate_fields_recursive's _emit table
-            # handling below.
-            used_line_keys=set(),
-            dynamic_field_fallback_sentences=all_sentence_texts,
-        )
-
-    return result
+        shared_used_lines: Set[str] = set()
+        shared_captured: List[str] = []
+        # Two phases: every non-table field first, then tables (see
+        # _populate_fields_recursive's `phase`). The used-line set and the
+        # captured-values list are shared across both, so a table cannot
+        # re-claim a line a specific field already took, and a second table
+        # cannot fall back onto the same generic slice the first one claimed.
+        for phase in ("fields", "tables"):
+            _populate_fields_recursive(
+                fields=fields,
+                section_id=section_id,
+                section_title=section_title,
+                section_text=section_text,
+                sentences=sentences,
+                raw_sentence_texts=raw_sentence_texts,
+                output=result[section_id],
+                llm_provider=llm_provider,
+                embedding_model=embedding_model,
+                used_line_keys=shared_used_lines,
+                already_captured=shared_captured,
+                dynamic_field_fallback_sentences=all_sentence_texts,
+                phase=phase,
+            )
 
     return result
 
@@ -950,7 +1375,13 @@ def _populate_fields_recursive(
     used_line_keys: Optional[Set[str]] = None,
     already_captured: Optional[List[str]] = None,
     dynamic_field_fallback_sentences: Optional[List[str]] = None,
+    phase: Optional[str] = None,
 ):
+    """`phase` "fields" populates every non-table field (recursing into
+    groups), "tables" only the table fields; None does both in one pass.
+    populate_fields() runs the two phases in that order so a specific field
+    claims its sentence before any catch-all table takes "every remaining
+    line" -- including tables nested inside groups."""
     raw_sentence_texts = raw_sentence_texts or []
     used_line_keys = used_line_keys if used_line_keys is not None else set()
     dynamic_field_fallback_sentences = dynamic_field_fallback_sentences or []
@@ -966,10 +1397,27 @@ def _populate_fields_recursive(
     # that isn't shaped like a per-entity trio (environments' Production/
     # Staging/Non-production being the motivating case). See
     # _extract_by_semantic's other_identity_words for how it's used.
+    # Only fields that are the SAME attribute of different entities count
+    # ("Production characteristics" / "Staging characteristics"): their
+    # labels share everything after the first word. Previously any section
+    # whose labels merely started with different words qualified --
+    # Deployment's "Deployment Window" / "Pre-deployment Checks" / "Post-
+    # deployment Validation" were treated as three entities, which also
+    # exempted them from the topic-evidence check.
+    def _label_remainder(label: str) -> str:
+        words = re.findall(r"[A-Za-z][A-Za-z\-]*", label or "")
+        return " ".join(words[1:]).lower()
+
+    text_fields = [f for f in fields if f.get("type", "text") == "text"]
+    remainder_counts: Dict[str, int] = {}
+    for f in text_fields:
+        rem = _label_remainder(f.get("label", ""))
+        if rem:
+            remainder_counts[rem] = remainder_counts.get(rem, 0) + 1
     identity_words = {
         f.get("id"): _field_identity_word(f.get("label", ""))
-        for f in fields
-        if f.get("type", "text") == "text"
+        for f in text_fields
+        if remainder_counts.get(_label_remainder(f.get("label", "")), 0) > 1
     }
     use_identity_filter = len({w for w in identity_words.values() if w}) > 1
 
@@ -983,10 +1431,20 @@ def _populate_fields_recursive(
     for field in fields:
         field_id = field.get("id")
         field_type = field.get("type", "text")
+        # Specific fields claim their sentence before a catch-all table takes
+        # "every remaining line". In schema order, Deployment's steps table
+        # ran first, swallowed the sentence stating the deployment window,
+        # and the Deployment Window field was filled with the next-best
+        # sentence -- a Day-1 access checklist.
+        if field_type != "group" and (
+            (phase == "fields" and field_type == "table")
+            or (phase == "tables" and field_type != "table")
+        ):
+            continue
         field_label = field.get("label", field_id)
 
         if field_type == "group":
-            output[field_id] = {}
+            output.setdefault(field_id, {})
             _populate_fields_recursive(
                 fields=field.get("fields", []),
                 section_id=section_id,
@@ -1000,6 +1458,7 @@ def _populate_fields_recursive(
                 used_line_keys=used_line_keys,
                 already_captured=already_captured,
                 dynamic_field_fallback_sentences=dynamic_field_fallback_sentences,
+                phase=phase,
             )
             continue
 
@@ -1017,21 +1476,41 @@ def _populate_fields_recursive(
                 already_captured.append(f"{field_label}: {value}")
                 continue
 
-        if field_type == "text" and sentences:
+        # Dynamic fields exist because the transcript named a technology
+        # somewhere; a deterministic match for it anywhere in the transcript
+        # beats an in-section semantic guess. Ordering it after the semantic
+        # pass filled "On-call tool" with an escalation-chain sentence while
+        # "PagerDuty" was stated plainly one section over.
+        if field.get("dynamic") and field_type == "text" and dynamic_field_fallback_sentences:
+            value = _extract_by_pattern(field, "\n".join(dynamic_field_fallback_sentences))
+            if value is not None:
+                output[field_id] = {"value": value, "confidence": 0.90, "source": "pattern"}
+                already_captured.append(f"{field_label}: {value}")
+                continue
+
+        # A NAME (system name, outgoing/incoming owner) is a short identifier,
+        # never "the sentence most similar to the word 'owner'": on a real KT
+        # that filled Incoming owner with the opening greeting and Outgoing
+        # owner with "The outgoing owner has therefore not marked the handover
+        # as fully closed." Names come from patterns or the LLM only.
+        if field_type == "text" and sentences and not _is_name_field(field):
             own_word = identity_words.get(field_id) if use_identity_filter else None
             other_words = (
                 [w for fid, w in identity_words.items() if fid != field_id and w]
                 if use_identity_filter else None
             )
-            value = _extract_by_semantic(
+            value, similarity = _extract_by_semantic(
                 field, sentences, embedding_model,
                 exclude_line_keys=used_line_keys,
                 own_identity_word=own_word,
                 other_identity_words=other_words,
+                return_score=True,
             )
             if value is not None:
                 used_line_keys.add(_normalize_line(value))
                 output[field_id] = _emit(value, 0.65, "semantic")
+                if similarity is not None:
+                    output[field_id]["similarity"] = round(similarity, 4)
                 already_captured.append(f"{field_label}: {value}")
                 continue
 
@@ -1080,14 +1559,11 @@ def _populate_fields_recursive(
         # section entirely. Retry pattern + semantic extraction against every
         # section's sentences combined, not just this one.
         if field.get("dynamic") and field_type == "text" and dynamic_field_fallback_sentences:
-            fallback_text = "\n".join(dynamic_field_fallback_sentences)
-            value = _extract_by_pattern(field, fallback_text)
-            source = "pattern"
-            confidence = 0.90
-            if value is None:
-                value = _extract_by_semantic(field, dynamic_field_fallback_sentences, embedding_model)
-                source = "semantic"
-                confidence = 0.65
+            # (The cross-section PATTERN pass already ran above, before the
+            # in-section semantic pass.)
+            value = _extract_by_semantic(field, dynamic_field_fallback_sentences, embedding_model)
+            source = "semantic"
+            confidence = 0.65
             if value is not None:
                 # Deliberately no source_chunk_index here: that index is
                 # meant to point into THIS section's own sentence list (see

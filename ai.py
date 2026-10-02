@@ -134,7 +134,9 @@ def _local_cleanup(text: str) -> str:
     if text and text[0].islower():
         text = text[0].upper() + text[1:]
     if text and text[-1] not in '.!?':
-        text += '.'
+        # A clause cut from a longer sentence ends in a comma; appending a
+        # period produced "...platform,." in the document.
+        text = text.rstrip(' ,;:') + '.'
     return text.strip()
 
 
@@ -406,8 +408,17 @@ def _build_polish_inputs(
         'section_id': section_id,
         'title': section_title,
         'fragments': clipped,
+        # Fragments beyond the per-call cap. The polished result REPLACES the
+        # section's content, so these must be carried through (locally
+        # cleaned) rather than dropped: they used to vanish from every
+        # section with more than max_fragments_per_call sentences.
+        'overflow': cleaned[max_fragments_per_call:],
         'original_count': len(cleaned)
     }
+
+
+# How many of a section's sentences the structured-extraction prompt sees.
+STRUCTURED_MAX_FRAGMENTS = int(os.getenv("STRUCTURED_MAX_FRAGMENTS", "20"))
 
 
 def _extract_structured_section(
@@ -427,7 +438,9 @@ def _extract_structured_section(
     if provider is None:
         return None
     
-    joined_fragments = "\n".join(f"- {fragment}" for fragment in cleaned[:8])
+    # Was cleaned[:8]: the failures table, ownership fields etc. never saw
+    # anything said after a section's eighth sentence.
+    joined_fragments = "\n".join(f"- {fragment}" for fragment in cleaned[:STRUCTURED_MAX_FRAGMENTS])
     prompt_template = SECTION_STRUCTURED_PROMPTS[section_id]
     prompt = prompt_template.format(
         title=section_title,
@@ -559,10 +572,13 @@ def polish_coverage_sections(
     def _local_cleanup_list(inputs: List[str]) -> List[str]:
         return [_local_cleanup(text) for text in inputs]
 
+    def _all_fragments(section: dict) -> List[str]:
+        return list(section['fragments']) + list(section.get('overflow') or [])
+
     provider = get_llm_provider()
     if provider is None:
         return {
-            sid: _local_cleanup_list(section['fragments'])
+            sid: _local_cleanup_list(_all_fragments(section))
             for sid, section in cleaned_sections.items()
         }
 
@@ -598,7 +614,7 @@ def polish_coverage_sections(
             )
             cleaned_text = response.strip() if isinstance(response, str) else ""
             if not cleaned_text:
-                return _local_cleanup_list(section["fragments"])
+                return _local_cleanup_list(_all_fragments(section))
             dropped = _fragments_missing_from(section["fragments"], cleaned_text)
             if dropped:
                 # The polish pass rewrites a section wholesale, and its
@@ -614,11 +630,13 @@ def polish_coverage_sections(
                     "Polish for %s dropped %d fragment(s); keeping raw text instead",
                     sid, len(dropped),
                 )
-                return _local_cleanup_list(section["fragments"])
-            return [cleaned_text]
+                return _local_cleanup_list(_all_fragments(section))
+            # Only the first chunk is sent for polishing (token budget); the
+            # rest follows verbatim so no sentence is lost from the section.
+            return [cleaned_text] + _local_cleanup_list(section.get("overflow") or [])
         except Exception as e:
             logger.warning("Polish failed for %s: %s", sid, e)
-            return _local_cleanup_list(section["fragments"])
+            return _local_cleanup_list(_all_fragments(section))
 
     # Each section's polish call is fully independent (its own prompt, its
     # own result slot) — dispatching them concurrently instead of one at a

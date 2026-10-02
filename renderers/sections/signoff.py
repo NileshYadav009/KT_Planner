@@ -22,8 +22,10 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         rows.append({"label": "Incoming owner", "value": str(fields["incoming_owner"]["value"])})
     if fields.get("date", {}).get("value"):
         rows.append({"label": "Sign-off date", "value": str(fields["date"]["value"])})
-    if fields.get("approved", {}).get("value") is not None:
-        approved = fields["approved"]["value"]
+    approved = fields.get("approved", {}).get("value")
+    # Only a real boolean is a statement about approval. An unfilled field
+    # (value "") used to render "Not yet" -- a claim the transcript never made.
+    if isinstance(approved, bool):
         rows.append({"label": "Approved by incoming owner", "value": "Yes" if approved else "Not yet"})
 
     blocks = []

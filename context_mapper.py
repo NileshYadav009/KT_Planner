@@ -272,28 +272,31 @@ def segment_sentences(
     MAX_SENT_LEN = 240
     for st in sentence_texts:
         if len(st) > MAX_SENT_LEN:
-            # Try splitting by commas conservatively
-            parts = [p.strip() for p in st.split(',') if p.strip()]
-            if len(parts) > 1:
-                # Recombine into manageable chunks
-                temp = []
-                cur = ''
-                for p in parts:
-                    if len(cur) + len(p) + 2 <= MAX_SENT_LEN:
-                        cur = (cur + ' ' + p).strip()
-                    else:
-                        if cur:
-                            temp.append(cur)
-                        cur = p
-                if cur:
+            # Split at comma boundaries while KEEPING the commas, so every
+            # chunk is a verbatim slice of full_text. The previous version
+            # split on "," and re-joined the parts with spaces; the rebuilt
+            # chunk ("North America Europe and Asia-Pacific") no longer
+            # occurred in full_text, full_text.find() below returned -1, and
+            # the chunk was silently skipped -- dropping the opening clauses
+            # of every long sentence (e.g. a system's customer reach and its
+            # business criticality) before classification ever saw them.
+            parts = [p for p in re.split(r"(?<=,)\s+", st) if p.strip()]
+            if len(parts) <= 1:
+                # No commas at all: break on whitespace near the limit
+                # rather than mid-word.
+                parts = re.split(r"\s+", st)
+            temp = []
+            cur = ''
+            for p in parts:
+                if not cur or len(cur) + len(p) + 1 <= MAX_SENT_LEN:
+                    cur = f"{cur} {p}".strip()
+                else:
                     temp.append(cur)
-                refined_sentences.extend(temp)
-                continue
-            else:
-                # Hard split by max length
-                for i in range(0, len(st), MAX_SENT_LEN):
-                    refined_sentences.append(st[i:i+MAX_SENT_LEN].strip())
-                continue
+                    cur = p
+            if cur:
+                temp.append(cur)
+            refined_sentences.extend(temp)
+            continue
         refined_sentences.append(st)
 
     sentence_texts = refined_sentences
@@ -311,10 +314,13 @@ def segment_sentences(
         if is_kt_session_meta_commentary(sent_text):
             continue
         
-        # Locate in full text
+        # Locate in full text. Never drop a sentence because it can't be
+        # located: the position only feeds timestamps, while dropping the
+        # text loses a fact outright. Fall back to the current position.
         start_pos = full_text.find(sent_text, current_pos)
         if start_pos == -1:
-            continue
+            logger.debug("segment_sentences: could not locate chunk; keeping it with approximate timing")
+            start_pos = min(current_pos, max(0, len(full_text) - 1))
         end_pos = start_pos + len(sent_text)
         current_pos = end_pos
         
@@ -1105,6 +1111,27 @@ class ContextClassifier:
 # STAGE 4: Contextual Repair & Enhancement
 # ============================================================================
 
+_REPAIR_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _is_faithful_repair(original: str, repaired: Optional[str], context_text: str) -> bool:
+    """Accept an LLM repair only if it is a correction of the same sentence:
+    similar length, and no content word that appears in neither the
+    original sentence nor its context (a genuine mishearing fix replaces a
+    garbled word with a real one, which the check tolerates up to a small
+    budget)."""
+    if not isinstance(repaired, str):
+        return False
+    repaired = repaired.strip().strip('"')
+    if not repaired or "\n" in repaired:
+        return False
+    if not (0.6 <= len(repaired) / max(1, len(original)) <= 1.4):
+        return False
+    known = set(_REPAIR_WORD_RE.findall((original + " " + context_text).lower()))
+    new_words = [w for w in _REPAIR_WORD_RE.findall(repaired.lower()) if w not in known and len(w) > 3]
+    return len(new_words) <= 2
+
+
 @dataclass
 class RepairAction:
     """Record of text repair applied."""
@@ -1255,9 +1282,10 @@ class ContextRepair:
         if result and result[0].islower():
             result = result[0].upper() + result[1:]
         
-        # Add missing period
+        # Add missing period (after dropping a trailing comma left by a
+        # clause split, which otherwise produced "...platform,.")
         if result and result[-1] not in ".!?":
-            result = result.rstrip() + "."
+            result = result.rstrip(" ,;:") + "."
         
         # Normalize whitespace
         result = re.sub(r"\s+", " ", result)
@@ -1305,16 +1333,27 @@ class ContextRepair:
         if not self.llm_fallback_fn:
             return None
         
+        # llm_fallback_fn is the provider's generate(prompt, **kwargs). It used
+        # to be called as fn(original, context_text, section_id, ...): the
+        # providers accept and ignore extra positional arguments, so the bare
+        # sentence was sent as the entire prompt with no instruction, and the
+        # model's free-form reply replaced the transcript sentence -- text
+        # that could then reach Additional Notes as if it had been said.
         try:
-            # This would be called asynchronously in production
-            # Delegate to provided LLM hook with conservative settings
-            # The llm_fallback_fn should accept (text, context_text, section_id, temperature)
-            context_text = ' '.join([c.sentence.text for c in context]) if context else ''
-            # Low temperature to avoid hallucination
-            result = self.llm_fallback_fn(original, context_text, section_id, temperature=0.2)
-            return result
+            neighbours = [c.sentence.text for c in (context or []) if c.sentence.text and c.sentence.text != original]
+            context_text = " ".join(neighbours[:4])
+            prompt = (
+                "Fix transcription errors in ONE sentence from a spoken technical "
+                "handover. Correct misheard words and punctuation only. Do not add, "
+                "remove or reinterpret facts, and do not use words that appear in "
+                "neither the sentence nor the context. Reply with the corrected "
+                "sentence only.\n\n"
+                f"Context: {context_text}\n\nSentence: {original}"
+            )
+            result = self.llm_fallback_fn(prompt, temperature=0.0, max_output_tokens=160)
         except Exception:
             return None
+        return result if _is_faithful_repair(original, result, context_text) else None
 
 
 # ============================================================================
@@ -1789,7 +1828,18 @@ def assemble_kt(
 
         referential = is_referential_sentence(cs.sentence.text)
 
-        if cs.is_unassigned:
+        # A sentence the policy gate flagged for review (confidence below
+        # confidence_accept_threshold) still HAS a best-available section,
+        # and detect_gaps() already places it there -- that coverage is what
+        # renders. Treating it as unassigned here as well hid it from
+        # section_content, which field population, per-field evidence and the
+        # architecture scan all read, while it still rendered in the section.
+        # On a real KT that split half of all sentences between two
+        # inconsistent views. Place it in its section like any other
+        # sentence, flagged for review; only a sentence with no section at
+        # all is genuinely unassigned.
+        needs_review = bool(cs.is_unassigned and cs.primary_classification)
+        if cs.is_unassigned and not cs.primary_classification:
             # Deduplicate unassigned sentences as well. Prefer repaired text when available.
             # Use repaired_map to include any improvements even for review-required sentences.
             norm = (cs.sentence.text or '').strip()
@@ -1845,13 +1895,28 @@ def assemble_kt(
                 # Also annotate target section content if present
                 if dest_sec in section_content:
                     section_content[dest_sec].setdefault("cross_references", []).append(entry)
-                continue
-        elif cs.primary_classification:
-            # Place sentence into all assigned sections (multi-label support)
-            assigned_secs = cs.multi_section_assignments or []
-            if not assigned_secs:
-                # fallback to primary only
-                assigned_secs = [cs.primary_classification.section_id]
+                # Deliberately no `continue`: "As I mentioned, the RTO is two
+                # hours" refers back to earlier content AND states a fact.
+                # Skipping it dropped that fact from every section. Exact
+                # repeats are still collapsed by the per-section dedup below.
+        if cs.primary_classification:
+            # Place sentence into all assigned sections (multi-label support).
+            # multi_section_assignments is computed when the ClassifiedSentence
+            # is constructed, i.e. BEFORE rule overrides and policy passes may
+            # replace primary_classification -- trusting it here would place
+            # the sentence in its pre-override section while detect_gaps()
+            # (which reads primary_classification) places it in the new one.
+            # The current primary always comes first; extras are kept only if
+            # they differ from it.
+            current_primary = cs.primary_classification.section_id
+            assigned_secs = [current_primary] + [
+                sid for sid in (cs.multi_section_assignments or [])
+                if sid != current_primary
+            ]
+            if cs.multi_section_assignments and cs.multi_section_assignments[0] != current_primary:
+                # The stale primary was an override casualty, not a justified
+                # extra placement.
+                assigned_secs = [sid for sid in assigned_secs if sid != cs.multi_section_assignments[0]]
 
             for sec_id in assigned_secs:
                 if sec_id not in section_content:
@@ -1912,13 +1977,14 @@ def assemble_kt(
                     "end": cs.sentence.end,
                     "speaker": cs.sentence.speaker,
                     "audio_confidence": cs.sentence.audio_confidence,
-                    "assigned_sections": list(cs.multi_section_assignments or []),
+                    "assigned_sections": list(assigned_secs),
                     # Traceability: for a sentence placed in more than one
                     # section, every non-primary placement carries the reason
                     # it was justified, so an extra placement can be audited
                     # (or blamed) without re-running the classifier.
                     "is_primary_section": is_primary_section,
                     "placement_reason": placement_reason,
+                    "needs_review": needs_review,
                     "preserve_verbatim": bool(is_protected_sentence(cs.sentence.text))
                 })
                 section_content[sec_id]["enhanced_texts"].append(enhanced_text)

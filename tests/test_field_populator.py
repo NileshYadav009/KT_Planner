@@ -222,7 +222,10 @@ def test_llm_gap_fill_tags_explicit_basis_as_llm_explicit():
     section_content = {
         "system_overview": {
             "sentences": [
-                {"text": "This is one of the company's most business critical systems.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
+                # Deliberately NOT "most business critical system": that phrasing
+                # now maps to "High" deterministically (no LLM needed), so it no
+                # longer exercises the gap-fill path this test is about.
+                {"text": "Leadership treats this system as the company's top operational priority.", "start": 0, "end": 3, "speaker": None, "audio_confidence": 0.9},
             ],
         }
     }
@@ -665,8 +668,10 @@ def test_semantic_match_requires_a_named_anchor_when_the_field_names_one(monkeyp
 
 def test_semantic_match_unaffected_when_field_names_no_technology(monkeypatch):
     # Fields with no concrete technology in their definition (most fields)
-    # must keep the original behaviour -- the anchor rule only narrows a
-    # field that actually names something to look for.
+    # are not narrowed by the anchor rule. They ARE narrowed by the topic-
+    # evidence rule (field_populator._has_topic_evidence): a candidate must
+    # mention the field's distinctive words, so the unrelated sentence is
+    # never scored at all.
     field = {"id": "business_criticality", "label": "Business Criticality", "description": "How critical is it"}
     sentences = ["This is one of the most business critical systems.", "Unrelated filler sentence."]
     captured = {}
@@ -680,7 +685,7 @@ def test_semantic_match_unaffected_when_field_names_no_technology(monkeypatch):
     class _FakeUtil:
         @staticmethod
         def cos_sim(a, b):
-            return [_ScoreRow([0.9, 0.1])]
+            return [_ScoreRow([0.9, 0.1][:len(b)])]
 
     import sys as _sys
     import types as _types
@@ -689,7 +694,7 @@ def test_semantic_match_unaffected_when_field_names_no_technology(monkeypatch):
     monkeypatch.setitem(_sys.modules, "sentence_transformers", stub)
 
     result = _extract_by_semantic(field, sentences, model=_Model())
-    assert captured["candidates"] == sentences
+    assert captured["candidates"] == [sentences[0]]
     assert result == sentences[0]
 
 

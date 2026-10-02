@@ -14,6 +14,7 @@ access to them — main.py's startup handler just calls load_models().
 
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import List, Optional
@@ -35,6 +36,8 @@ from knowledge import (
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
+    reconcile_linked_fields,
+    verify_document_coverage,
 )
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
@@ -153,6 +156,17 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             if not coverage_sentences:
                 section_content = kt.section_content.get(sec_id, {})
                 coverage_sentences = section_content.get('sentences', []) if isinstance(section_content, dict) else []
+            else:
+                # Justified secondary placements (ENABLE_MULTI_SECTION_MAPPING)
+                # exist only in section_content -- topic blocks are built from
+                # each sentence's primary section alone. Without this, a
+                # sentence placed in a second section fed that section's
+                # fields but never reached its rendered content.
+                present = {s.get('text') for s in coverage_sentences}
+                for s in (kt.section_content.get(sec_id, {}) or {}).get('sentences', []) or []:
+                    if isinstance(s, dict) and not s.get('is_primary_section', True) and s.get('text') not in present:
+                        coverage_sentences.append(dict(s, assigned_sections=s.get('assigned_sections') or [sec_id]))
+                        present.add(s.get('text'))
 
             # Raw transcribed fragments as extracted from the transcript.
             raw_content = [s.get('text', '') for s in coverage_sentences]
@@ -366,6 +380,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             logger.warning("Knowledge object build failed: %s", exc)
             knowledge_object = {}
 
+        try:
+            knowledge_object = reconcile_linked_fields(knowledge_object)
+        except Exception as exc:
+            logger.warning("Linked field reconciliation failed: %s", exc)
+
         # Fold cost_optimization's levers into known_bad_days as a combined
         # "Operational Calendar" (peak periods + cost-related patterns) —
         # reads a sibling section's already-built data, no reclassification.
@@ -438,6 +457,22 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             logger.warning("Rendered sections build failed: %s", exc)
             knowledge_object["rendered_sections"] = []
+
+        # Final completeness check against the RENDERED document: every
+        # fact-bearing transcript sentence must appear somewhere in it, or be
+        # added to Additional Notes. See verify_document_coverage().
+        try:
+            sentence_sections = {
+                re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", (sent.get("text") or "").lower())).strip(): sid
+                for sid, cov in coverage.items()
+                for sent in (cov.get("sentences") or [])
+                if isinstance(sent, dict)
+            }
+            knowledge_object = verify_document_coverage(
+                knowledge_object, [s.text for s in (kt.sentences or [])], sentence_sections
+            )
+        except Exception as exc:
+            logger.warning("Document coverage verification failed: %s", exc)
 
         # Non-fatal structural validation (schema/field-id consistency,
         # expected shapes/ranges) — see validation.py. Never blocks the

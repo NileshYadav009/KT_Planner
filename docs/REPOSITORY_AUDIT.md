@@ -3423,6 +3423,123 @@ User scoped Principle #3 precisely — controlled multi-section assignment behin
 
 **Verified**: `tests/test_multi_section_mapping.py` — 15 tests covering flag-off equivalence, legitimate promotion, rule-backed evidence, the user's four scenarios (two as negative cases), the cap, de-duplication, traceability, and two regression guards pinning the calibration lessons above.
 
+### 9uu. End-to-end mapping audit: every transcript sentence traced to the PDF
+
+**Method.** Ran the real `pipeline.run_kt_pipeline` entry point (LLM-free,
+deterministic) on the 2,900-word Atlas trading-platform KT, rendered the PDF
+through the same `render_pdf_html` + WeasyPrint path `/export/pdf` uses, and
+built a per-sentence ledger: transcript sentence -> section -> present in the
+PDF text or not. Baseline: **30 of 101 sentences appeared nowhere in the
+PDF**, while the KT Coverage page reported "0 lost". After the fixes below:
+111 sentences (segmentation no longer drops clauses), every fact-bearing
+sentence present in a section, verified by the new post-render check.
+
+**Root causes found and fixed (all generic, none keyed to this transcript):**
+
+1. *Transcript cleaning changed meaning* (`devops_transcription.py`). Fillers
+   ("so", "like", "right", "well") were deleted anywhere, including inside
+   "right-sizing"/"production-like" and in "so that"; unanchored rules deleted
+   every "continue", rewrote every "is done" to "goes down", "redone" to "red
+   zone", and corrupted "after formal" via `ter[\s-]?form`; acronym rules
+   lowercased AWS/GCP/SRE; the fuzzy corrector replaced correctly spelled
+   inflections ("load balancers", "rolled back") and branded casing ("Route
+   53") with lowercase canonical keys. Fillers are now removed only in
+   discourse positions; the rules are anchored; inflections and branded exact
+   variants are left alone.
+2. *Segmentation silently dropped clauses* (`segment_sentences`). Long
+   sentences were split on commas and re-joined with spaces; the re-joined
+   text no longer occurred in the transcript, `find()` returned -1, and the
+   chunk was skipped. Commas are kept, and an unlocatable chunk keeps
+   approximate timing instead of being dropped.
+3. *Two inconsistent views of every section* (`assemble_kt`). Sentences below
+   the 0.55 policy gate (53 of 101 here) rendered in their section (coverage)
+   but were removed from `section_content`, which field population, evidence
+   and the architecture scan read. They are now placed (flagged
+   `needs_review`); only sentences with no section are unassigned. The
+   assignment list computed before rule overrides is no longer trusted, and
+   "as I mentioned..." sentences are no longer dropped.
+4. *Renderers dropped every sentence not captured by a field*. Each renderer
+   fell back to the section's sentences only when NO field filled. Security
+   rendered 1 of 5 sentences, Ownership 1 of 13, Handover none.
+   `pdf_rendering.append_residual_content` now appends whatever a renderer
+   did not show, verbatim, de-duplicated by sentence.
+5. *The polish step truncated sections to 8 fragments* (`ai.py`), with or
+   without an LLM, and its output replaced the section content. Overflow
+   fragments are now carried through; structured extraction sees up to 20.
+6. *Fabricated values*. Boolean checks matched "done/complete/verified"
+   anywhere in the section (all five handover checks "Confirmed" on a KT whose
+   sign-off was explicitly NOT submitted); single-select matched substrings
+   ("completed" -> KT status "Complete"); Sign-off rendered "Approved: Not
+   yet" for an unfilled field; the UI cover printed a hardcoded "AWS
+   E-Commerce Platform". Booleans now need a sentence about the field's topic,
+   ignore stated requirements, and treat outstanding work as "Not confirmed".
+7. *Template fields force-filled by similarity*. Empty field labels made the
+   similarity query an empty string; with no model the first sentence was
+   returned blindly. Calibrated on five transcripts: wrong fills scored up to
+   0.72 and right ones down to 0.47, so no threshold separates them. Fixes:
+   query = label + description + humanized id; name fields (system name,
+   owners) are never similarity-filled; a candidate must contain the field's
+   distinctive topic words (those in < 50% of the section's sentences); open
+   "what/why/how/when" questions need >= 0.56; catch-all tables run after
+   specific fields, and a second catch-all table only takes lines about its
+   own topic.
+8. *Routing rules*. A role name alone ("on-call engineer") forced Ownership at
+   0.97; ties between equal-confidence rules went to list order. Added generic
+   continuation rules: enumerated items ("The second is to...") follow their
+   list heading, explanations ("The usual remediation is...") and comma
+   fragments follow the sentence they continue. Added freeze, day-1,
+   criticality, outage-impact, readiness-evidence and rollback-procedure
+   patterns.
+9. *Technology fields held sentences / false technologies*. "Cache Layer" and
+   "Security scanner" grid rows held whole sentences; "EKS node capacity"
+   produced a Node.js backend. Grids now show tool names only; ambiguous
+   product words (Node, React, Spring, Express, Flux, Airflow, Dataflow) must
+   be capitalized; ALB/EKS/MSK/Route 53 aliases and vendor-prefixed
+   duplicates collapse.
+10. *Architecture diagram*. Only the first member of each dependency layer was
+    drawn (Aurora, SQS, Route 53, WAF missing on an AWS stack); Kafka and MSK
+    would be two dependencies. All dependencies are drawn, managed offerings
+    merge ("Kafka (Amazon MSK)"), DNS/WAF join the request chain.
+11. *"Not discussed" with evidence*. Documentation link (stated wiki location),
+    "Verified by incoming owner" (linked to Handover's identical check),
+    spelled-out RTO/RPO/volume/rollback time, explicit criticality, customer
+    reach by segment and region, Day-1 access, environment names.
+12. *Coverage accounting*. "lost" was facts_identified - (mapped + dedup +
+    unmapped) with facts_identified defined as that sum: always 0.
+    `verify_document_coverage` now checks every transcript sentence against
+    the rendered document after rendering; anything missing is added to
+    Additional Notes and counted as recovered.
+13. *LLM sentence repair* passed the bare sentence as the whole prompt (the
+    providers ignore extra positional args) and used the free-form reply as
+    transcript text. It now sends an instruction prompt and rejects output
+    with new content words or a large length change.
+
+14. *LLM-mode follow-ups* (found on a live Groq run of the same KT). The
+    final check counted LLM-paraphrased facts (Day-1 checklist, week-by-week
+    30-day plan) as missing and re-added the raw sentences to Additional
+    Notes; it now also accepts a sentence when >= 60% of its content words
+    appear in the rendered text of the section it was classified into.
+    Markdown labels from the polish output ("**Access to request:**") no
+    longer render as stray paragraphs. Second Groq run: 109/109 fact-bearing
+    sentences verified in a section, none recovered, no rate-limit errors.
+
+**UI** (`static/index.html`): a "Paste transcript" input mode for the existing
+`/kt-from-transcript` endpoint; titles and markdown input HTML-escaped
+(transcript text is untrusted); quality grade replaces a tile that always read
+"—"; section titles instead of ids in alerts; verified knowledge-coverage line;
+polling tolerates transient failures; submit button guards double-clicks.
+
+**Remaining risks.** Semantic section classification of sentences with no
+rule signal is still imperfect (e.g. "approximately sixty microservices" ->
+Cost Optimization, an IAM access sentence -> Open Responsibilities); the
+residual net guarantees such sentences render, not that they render in the
+ideal section. Merged multi-sentence chunks from `semantic_chunk_sentences`
+can still straddle two topics. Open-question System Overview fields are now
+often left unfilled without an LLM (their sentences render as context). With
+an LLM, the 30-day plan is split into Week 1-4 rows although the transcript
+gave an order, not weeks; only some rows carry the "inferred" marker.
+Regression tests: `tests/test_audit_regressions.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.
