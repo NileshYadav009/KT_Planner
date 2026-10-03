@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 DEFAULT_WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 DEFAULT_WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "2"))
+WHISPER_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").strip().lower() not in ("0", "false", "no", "off")
 
 MODEL = None
 MAPPER_PIPELINE = None
@@ -645,7 +646,14 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         transcribe_kwargs = {
             "language": "en",
             "beam_size": DEFAULT_WHISPER_BEAM_SIZE,
-            "task": "transcribe"
+            "task": "transcribe",
+            # Skip non-speech (faster-whisper's built-in Silero VAD). On a
+            # real KT recording with meeting pauses, Whisper without it
+            # filled the silences with text nobody said (an invented
+            # "deployment window is outside peak business hours" and a
+            # "rollback time" repetition loop); with it, no invented text and
+            # 27% faster. Continuous speech transcribes identically.
+            "vad_filter": WHISPER_VAD_FILTER,
         }
         segments, info = MODEL.transcribe(audio_to_use, **transcribe_kwargs)
         segments = list(segments)

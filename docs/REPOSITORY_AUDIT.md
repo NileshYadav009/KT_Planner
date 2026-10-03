@@ -3649,6 +3649,34 @@ against real LLM output before they can be trusted.
 
 Tests: `tests/test_llm_cost_controls.py`.
 
+### 9xx. Library changes, measured before and after
+
+- **faster-whisper `vad_filter`** (already installed; `WHISPER_VAD_FILTER`,
+  default on). Real 7-minute KT recording with 20% meeting pauses inserted:
+  without VAD, Whisper wrote text nobody said into the silences ("the
+  deployment window is outside peak business hours", and a "rollback time"
+  repetition loop); with VAD, none. 371.8 s -> 270.0 s (27% faster); word
+  match against the clean recording's transcript 96.1% -> 98.0%. On the same
+  recording without pauses the transcript is word-for-word identical.
+- **rapidfuzz** replaces textdistance in the fuzzy term corrector (textdistance
+  kept as fallback). All 84,486 (phrase, term) score pairs the corrector
+  compares on a 1,260-word KT are bit-identical. Fuzzy correction 11-15x
+  faster, `clean_transcript` 8-11x faster (5,000 words: 11.9 s -> 1.4 s);
+  output identical on six transcripts.
+- **json-repair** + exact first-value parsing in `ai._extract_json_response`.
+  Of 12 complete-but-malformed LLM JSON answers (trailing commas, single
+  quotes, unquoted keys, None, missing commas, comments, smart quotes, a
+  remark after the JSON) the old parser recovered 0, now 12. Fixed a bug:
+  with a remark after the JSON, the old "[...]" regex returned the nested
+  escalation_chain list and the section's data was discarded. Valid JSON
+  parses as before; output cut off by the token limit is still rejected.
+- **requirements.txt**: removed packages the code never imports (pandas,
+  pydub, soundfile, python-jose, passlib, pydantic-settings,
+  python-json-logger; ~72 MB from a fresh install). scipy and scikit-learn
+  stay (required by sentence-transformers).
+
+Tests: `tests/test_library_upgrades.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

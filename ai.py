@@ -41,6 +41,13 @@ from field_populator import find_source_sentence_index
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    # Optional: repairs slightly malformed LLM JSON. Without it, such output
+    # is discarded exactly as before.
+    from json_repair import repair_json
+except ImportError:
+    repair_json = None
 import requests
 
 logger = logging.getLogger(__name__)
@@ -116,16 +123,33 @@ def _extract_json_response(text: str):
     except Exception:
         pass
 
-    # Find the first JSON array/object in the text body
-    for pattern in [r'(\[.*\])', r'(\{.*\})']:
-        match = re.search(pattern, payload, flags=re.DOTALL)
-        if match:
-            candidate = match.group(1)
+    # The first complete JSON value, wherever it starts. raw_decode stops at
+    # its end, so a lead-in or a trailing remark from the model no longer
+    # breaks parsing. The old regexes tried "[...]" first and returned an
+    # array nested inside the object ("escalation_chain"), discarding the
+    # answer whenever the model added a sentence after its JSON.
+    start = min((i for i in (payload.find('{'), payload.find('[')) if i >= 0), default=-1)
+    if start < 0:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(payload[start:])
+        return value
+    except Exception:
+        pass
+
+    # Last resort: repair common syntax slips (trailing commas, single
+    # quotes, unquoted keys, None/True, missing commas, comments). Only for
+    # output that ends like complete JSON: an answer cut off by the token
+    # limit must not be completed with guessed closing brackets.
+    if repair_json is not None:
+        body = payload[start:].rstrip()
+        if body.endswith(('}', ']')):
             try:
-                return json.loads(candidate)
+                repaired = repair_json(body, return_objects=True)
             except Exception:
-                continue
-    # Last resort: try loading any JSON-looking substring by braces count
+                repaired = None
+            if isinstance(repaired, (dict, list)) and repaired:
+                return repaired
     return None
 
 

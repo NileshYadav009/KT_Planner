@@ -1253,3 +1253,10 @@ time, retries, per stage. The UI shows this under AI Summary. URL/date field
 calls with no candidate in the text are skipped. Skipping rule-decided
 classification checks is implemented but runs in shadow mode until validated
 with a real LLM. Prompt batching is not done (needs validation).
+
+## Library changes (audit §9xx)
+
+Whisper VAD on by default (no invented text in pauses, 27% faster on a paused
+recording), rapidfuzz for fuzzy correction (identical scores, 8-15x faster),
+json-repair for LLM JSON (0/12 -> 12/12 malformed answers recovered), and
+seven unused packages removed from requirements.txt.

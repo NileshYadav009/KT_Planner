@@ -25,14 +25,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import glossary
-from devops_transcription import bucket_terms_by_word_count, candidates_for_ngram, get_known_terms
-
-try:
-    import textdistance
-    HAS_TEXTDISTANCE = True
-except ImportError:
-    textdistance = None
-    HAS_TEXTDISTANCE = False
+from devops_transcription import (
+    bucket_terms_by_word_count, candidates_for_ngram, get_known_terms,
+    jaro_winkler_similarity, HAS_TEXTDISTANCE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +122,7 @@ def detect_vocabulary_candidates(transcript: str) -> List[Dict]:
                         continue
                     best_term, best_score = None, 0.0
                     for target in candidates_for_ngram(terms_by_word_count, n, phrase):
-                        score = textdistance.jaro_winkler.normalized_similarity(phrase, target)
+                        score = jaro_winkler_similarity(phrase, target)
                         if score > best_score:
                             best_score, best_term = score, target
                     if best_term and NEAR_MISS_LOW <= best_score < NEAR_MISS_HIGH:

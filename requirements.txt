@@ -5,7 +5,6 @@ python-multipart>=0.0.9   # File upload handling
 
 # Data Validation & Serialization (Pydantic v2 - Latest with optimization)
 pydantic>=2.12.0          # Data validation with improved speed and accuracy
-pydantic-settings>=2.6.0  # Configuration management for environment variables
 
 # AI/ML Core (Latest Stable Versions for Better Accuracy)
 faster-whisper>=1.1.0     # Optimized Whisper with faster inference and better accuracy (replaces openai-whisper)
@@ -17,13 +16,10 @@ openai>=1.0.0             # OpenAI-compatible client, used by llm_provider.GroqP
 
 # Audio/Video Processing (Enhanced Processing Pipeline)
 ffmpeg-python>=0.2.0      # Audio/video format handling
-soundfile>=0.12.0         # WAV/FLAC file support for diverse audio formats
-pydub>=0.25.1             # Audio segment manipulation and normalization (NEW)
 
 # Numerical Computing & Data Processing (Optimized Performance)
 numpy>=2.0.0              # Numerical operations with optimized SIMD instructions
 scipy>=1.14.0             # Scientific computing for signal processing and statistics
-pandas>=2.2.0             # Data manipulation and analysis for better logging/analysis
 
 # Machine Learning Utilities (Detection & Scoring)
 scikit-learn>=1.5.0       # ML utilities and confidence scoring
@@ -32,14 +28,12 @@ weasyprint>=57.0          # PDF rendering support for export endpoint
 
 # Development & Logging (Recommended for Production)
 python-dotenv>=1.0.0      # Environment variable management
-python-json-logger>=2.0.7 # Structured logging for better debugging and monitoring
 
 # Type Checking (For Development)
 typing-extensions>=4.12.0 # Extended type hints for better IDE support
 
 # Security & Authentication (Enterprise Features - NEW)
-python-jose>=3.3.0        # JWT authentication support for API security
-passlib>=1.7.4            # Password hashing and verification
 cryptography>=42.0.0      # Cryptographic recipes and primitives
-textdistance>=4.6.3       # Fuzzy string matching for transcript cleanup
 google-genai>=2.7.0
+rapidfuzz>=3.9.0          # Fuzzy matching for transcript cleanup (same scores as textdistance, compiled)
+json-repair>=0.30.0       # Recovers slightly malformed JSON from the LLM structured-extraction step

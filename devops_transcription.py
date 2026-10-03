@@ -14,12 +14,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Jaro-Winkler and normalized Levenshtein similarity for the fuzzy term
+# corrector. rapidfuzz (compiled) computes the same scores as textdistance
+# (pure Python) many times faster; textdistance remains the fallback.
 try:
-    import textdistance
+    from rapidfuzz.distance import JaroWinkler as _RF_JW, Levenshtein as _RF_LEV
+
+    def jaro_winkler_similarity(a: str, b: str) -> float:
+        return _RF_JW.normalized_similarity(a, b)
+
+    def levenshtein_similarity(a: str, b: str) -> float:
+        return _RF_LEV.normalized_similarity(a, b)
+
     HAS_TEXTDISTANCE = True
 except ImportError:
-    textdistance = None
-    HAS_TEXTDISTANCE = False
+    try:
+        import textdistance
+
+        def jaro_winkler_similarity(a: str, b: str) -> float:
+            return textdistance.jaro_winkler.normalized_similarity(a, b)
+
+        def levenshtein_similarity(a: str, b: str) -> float:
+            return textdistance.levenshtein.normalized_similarity(a, b)
+
+        HAS_TEXTDISTANCE = True
+    except ImportError:
+        jaro_winkler_similarity = levenshtein_similarity = None
+        HAS_TEXTDISTANCE = False
 
 import glossary
 from devops_vocabulary import DEVOPS_VOCABULARY
@@ -709,7 +730,7 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
             best_score = 0.0
             for target in candidates_for_ngram(terms_by_word_count, n, phrase):
                 target_words = target.split()
-                score = textdistance.jaro_winkler.normalized_similarity(phrase, target)
+                score = jaro_winkler_similarity(phrase, target)
                 if score <= best_score:
                     continue
                 # Whole-phrase jaro-winkler alone is fooled by a shared leading
@@ -720,8 +741,8 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                 # every individual word to at least loosely resemble its
                 # counterpart too.
                 per_word_ok = all(
-                    textdistance.jaro_winkler.normalized_similarity(w.lower(), tw) >= MIN_PER_WORD_SIMILARITY
-                    and textdistance.levenshtein.normalized_similarity(w.lower(), tw) >= MIN_PER_WORD_LEVENSHTEIN
+                    jaro_winkler_similarity(w.lower(), tw) >= MIN_PER_WORD_SIMILARITY
+                    and levenshtein_similarity(w.lower(), tw) >= MIN_PER_WORD_LEVENSHTEIN
                     for w, tw in zip(ngram_words, target_words)
                 )
                 if not per_word_ok:
