@@ -1515,6 +1515,13 @@ def detect_gaps(
         if cs.primary_classification:
             assigned_section = cs.primary_classification.section_id
         
+        # The very first sentence opens the first block. Without this the
+        # first block kept section None and was discarded when the second
+        # began, so the opening sentence of every transcript (usually the
+        # system introduction) never reached its section.
+        if not current_block_sentences and current_block_section is None:
+            current_block_section = assigned_section
+
         # If section changes or no assignment, finalize current block
         if assigned_section != current_block_section and current_block_sentences:
             # Finalize the block
@@ -1582,6 +1589,11 @@ def detect_gaps(
         
         # Determine status directly from the semantic coverage score.
         status = coverage_analysis["status"]
+        if status == "missing" and total_sentences > 0:
+            # A low depth score means the section is thin, not absent. As
+            # "missing" the document said "Not covered in the KT session" and
+            # listed it as a knowledge gap right next to its own content.
+            status = "weak"
         if status == "covered":
             risk = max(0.0, 0.15 - coverage_analysis["scs"] * 0.1)
         elif status == "weak":
@@ -2463,11 +2475,25 @@ class ContextMappingPipeline:
         IMPLEMENTATION_INDICATORS = [i.lower() for i in policy.get("implementation_indicators", [])]
         CONCEPTUAL_SECTIONS = [c.lower() for c in policy.get("conceptual_sections", [])]
 
+        # Indicators match as whole words: as substrings, "sh " matched
+        # "push ", "run " matched "rerun ", and "1." matched "1.5". A
+        # numbered marker only counts at the start of the sentence.
+        indicator_res = []
+        for ind in IMPLEMENTATION_INDICATORS:
+            word = ind.strip()
+            if not word:
+                continue
+            if re.fullmatch(r"\d+\.", word):
+                indicator_res.append(re.compile(r"^\s*" + re.escape(word) + r"\s"))
+            else:
+                prefix = r"(?<![\w-])" if word[0].isalnum() else ""
+                suffix = r"(?![\w-])" if word[-1].isalnum() else ""
+                indicator_res.append(re.compile(prefix + re.escape(word) + suffix))
+
         def _is_implementation_step(text: str) -> bool:
             t = (text or "").lower()
-            for ind in IMPLEMENTATION_INDICATORS:
-                if ind in t:
-                    return True
+            if any(rx.search(t) for rx in indicator_res):
+                return True
             if "`" in (text or "") or "->" in (text or ""):
                 return True
             return False

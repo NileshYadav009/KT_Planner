@@ -430,3 +430,122 @@ def test_markdown_labels_from_polish_are_not_rendered_as_facts():
     rendered = append_residual_content(section, {"section_id": "day1_survival_checklist", "blocks": []})
     paragraphs = [p for b in rendered["blocks"] for p in b.get("paragraphs", [])]
     assert paragraphs == ["Internal architecture documentation"]
+
+
+# --------------------------------------------------------------------------
+# Unseen ~300-word KTs (MedRelay, TripWise): defects found end to end
+# --------------------------------------------------------------------------
+
+def test_first_sentence_of_the_transcript_reaches_its_section():
+    from context_mapper import ClassifiedSentence, detect_gaps
+
+    def cs(text, section_id):
+        return ClassifiedSentence(
+            sentence=Sentence(text=text, start=0.0, end=0.0, audio_confidence=0.8),
+            primary_classification=Classification(section_id, section_id, 0.9, "", 0.9),
+            secondary_classifications=[],
+        )
+
+    schema = [{"id": "system_overview", "title": "Overview"}, {"id": "architecture_reference", "title": "Arch"}]
+    sentences = [
+        cs("This KT is for MedRelay, the lab results notification service.", "system_overview"),
+        cs("It sends forty thousand alerts a day.", "system_overview"),
+        cs("The lab systems push HL7 messages into RabbitMQ.", "architecture_reference"),
+    ]
+    coverage = detect_gaps(sentences, schema)
+    overview = [s.text for b in coverage["system_overview"].blocks for s in b.sentences]
+    assert overview[0].startswith("This KT is for MedRelay")
+    assert coverage["system_overview"].status != "missing"
+
+
+def test_intro_routes_to_overview_and_names_the_system():
+    assert match_section_rules(
+        "This KT is for MedRelay, the lab results notification service used by our four partner hospitals."
+    ).section_id == "system_overview"
+    assert match_section_rules("Today I'm handing over TripWise, the booking backend.").section_id == "system_overview"
+    field = {"id": "system_name", "label": "System Name", "type": "text"}
+    assert _extract_by_pattern(field, "This KT is for MedRelay, the lab results notification service.") == "MedRelay"
+    assert _extract_by_pattern(field, "Today I'm handing over TripWise, the booking backend.") == "TripWise"
+    assert extract_customer_reach("the notification service used by our four partner hospitals.") == "four partner hospitals"
+
+
+def test_greeting_only_sentence_gets_no_section():
+    from section_rules import _GREETING_ONLY_RE
+    assert _GREETING_ONLY_RE.match("Alright, welcome.")
+    assert _GREETING_ONLY_RE.match("Hi everyone, thanks for joining.")
+    assert not _GREETING_ONLY_RE.match("Welcome to the TripWise handover.")
+
+
+def test_generic_routing_for_alerts_open_items_and_freeze_days():
+    assert match_section_rules(
+        "Monitoring is Prometheus with Grafana dashboards, and alerts page the on-call engineer through Opsgenie."
+    ).section_id == "monitoring_observability"
+    assert match_section_rules(
+        "Still open is the TLS certificate renewal, which expires next month and has no owner yet."
+    ).section_id == "open_responsibilities"
+    assert match_section_rules(
+        "And avoid deploying on Fridays or during the summer sale in July."
+    ).section_id == "known_bad_days"
+
+
+def test_cleaner_keeps_real_words_close_to_known_terms():
+    cleaned = clean_transcript("The fix is the Twilio rate limit. We archive old results to cold storage.")
+    assert "rate limit." in cleaned and "rate limiting" not in cleaned
+    assert "cold storage" in cleaned
+
+
+def test_completion_criterion_is_not_a_completed_status():
+    from field_populator import _only_stated_as_condition
+    text = "Handover is complete once you have done one supervised release and handled one on-call shift alone."
+    assert _only_stated_as_condition("Complete", text)
+    assert not _only_stated_as_condition("Complete", "The handover is complete.")
+    field = {"id": "kt_status", "label": "KT Status", "type": "single_select", "options": ["Complete", "In progress"]}
+    assert _extract_by_pattern(field, "KT status: " + text) in (None, "", [])
+
+
+def test_platform_and_external_services_are_recognised():
+    from field_populator import PATTERN_EXTRACTORS
+    found = PATTERN_EXTRACTORS["tools"].findall(
+        "A Go consumer service running on OpenShift calls Twilio. We go home early. Java is old."
+    )
+    assert found == ["Go", "OpenShift", "Twilio"]
+    diagram = build_architecture_flow_diagram(["Amazon ECS", "DynamoDB", "Stripe"])
+    # A third-party API is called, never contained in the platform.
+    assert "└──► Stripe" in diagram and "├── DynamoDB" in diagram
+
+
+def test_residual_net_appends_transcript_sentences_not_llm_digest():
+    section = {
+        "id": "deployment_and_rollback", "title": "Deployment", "fields": {},
+        "coverage_content": [
+            "**Trigger:** Every Tuesday evening\n**Approver:** Not specified\n\n1. Initiate deployment via Jenkins."
+        ],
+        "_source_sentences": ["Deployments go through Jenkins every Tuesday evening."],
+    }
+    rendered = append_residual_content(section, {"section_id": "deployment_and_rollback", "blocks": []})
+    paragraphs = [p for b in rendered["blocks"] for p in b.get("paragraphs", [])]
+    assert paragraphs == ["Deployments go through Jenkins every Tuesday evening."]
+
+
+def test_paraphrase_rendered_in_section_is_not_appended_again():
+    section = {
+        "id": "danger_zones", "title": "Danger", "fields": {},
+        "coverage_content": ["Never purge the dead letter queue, as it contains undelivered critical results."],
+        "_source_sentences": ["Be careful: never purge the dead letter queue, because those are undelivered critical results."],
+    }
+    rendered = {"section_id": "danger_zones", "blocks": [
+        {"type": "NarrativeBlock", "title": "Danger", "paragraphs": [
+            "Never purge the dead letter queue, as it contains undelivered critical results."]},
+    ]}
+    rendered = append_residual_content(section, rendered)
+    assert len(rendered["blocks"]) == 1
+
+
+def test_technology_summary_marks_key_technologies_as_captured():
+    from knowledge.knowledge_builder import enrich_technology_summary
+    ko = {"sections": [
+        {"id": "system_overview", "fields": {"key_technologies": {"value": "", "source": "unfilled"}}},
+        {"id": "architecture_reference", "fields": {}, "_architecture_components": ["RabbitMQ", "MongoDB"]},
+    ]}
+    entry = enrich_technology_summary(ko)["sections"][0]["fields"]["key_technologies"]
+    assert entry["value"] == "RabbitMQ, MongoDB" and entry["source"] != "unfilled"

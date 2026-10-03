@@ -7,7 +7,7 @@ DEFAULT_POLICY_FILE = "policy.json"
 DEFAULT_POLICY = {
     "confidence_accept_threshold": 0.42,
     "implementation_indicators": [
-        "kubectl","docker","compose","helm","apply -f","systemctl","service",
+        "kubectl","docker","compose","helm","apply -f","systemctl",
         "install ","pip install","npm install","sh ","bash ","curl ",".yaml",".yml",
         "deployment.yaml","step ","1.","2.","run ","execute ","sudo "
     ],

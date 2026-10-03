@@ -306,7 +306,7 @@ def _is_represented(text: str, rendered_norms: list) -> bool:
         return True
     if any(norm in r for r in rendered_norms):
         return True
-    words = [w for w in norm.split() if w not in _RESIDUAL_STOPWORDS]
+    words = [_word_key(w) for w in norm.split() if w not in _RESIDUAL_STOPWORDS]
     if not words:
         return True
     # Short sentences need every content word: at 80%, "The staging deployment
@@ -314,10 +314,30 @@ def _is_represented(text: str, rendered_norms: list) -> bool:
     # because a longer criteria sentence happened to contain 4 of them.
     required = _RESIDUAL_OVERLAP if len(words) >= 8 else 1.0
     for r in rendered_norms:
-        r_words = set(r.split())
+        r_words = {_word_key(w) for w in r.split()}
         if sum(1 for w in words if w in r_words) / len(words) >= required:
             return True
     return False
+
+
+# Share of a transcript sentence's content words a rendered paraphrase must
+# keep (same bar as knowledge_builder's post-render paraphrase check).
+_PARAPHRASE_RETENTION = 0.6
+
+
+def _retention(text: str, other_norm: str) -> float:
+    words = [_word_key(w) for w in _norm_for_match(text).split() if w not in _RESIDUAL_STOPWORDS]
+    if not words:
+        return 1.0
+    other = {_word_key(w) for w in other_norm.split()}
+    return sum(1 for w in words if w in other) / len(words)
+
+
+def _word_key(word: str) -> str:
+    # Word forms compare by their first six letters, so the polish pass's
+    # "Architecturally, ..." matches the rendered "Architecture wise, ..."
+    # instead of re-appearing as an unrendered residual sentence.
+    return word[:6] if len(word) > 6 else word
 
 
 def is_text_represented(text: str, rendered_norms: list) -> bool:
@@ -360,6 +380,20 @@ def append_residual_content(section: dict, rendered: dict) -> dict:
         items = [c for c in content if isinstance(c, str)]
     blocks = rendered.setdefault("blocks", [])
     rendered_norms = [_norm_for_match(s) for s in _block_strings(blocks) if s.strip() != NOT_COVERED_MESSAGE]
+    # Candidates are the section's transcript sentences when known. The
+    # polished coverage_content can be an LLM digest with "Not specified"
+    # placeholders and synthesized steps ("1. Initiate deployment via
+    # Jenkins."), which the net appended to Deployment as if it had been
+    # said. A transcript sentence also counts as shown when a rendered
+    # polished item paraphrases it.
+    source = [s for s in (section.get("_source_sentences") or []) if isinstance(s, str) and s.strip()]
+    paraphrase_norms = []
+    if source:
+        for polished in items:
+            polished = _MD_LABEL_RE.sub(" ", str(polished)).strip()
+            if polished and _is_represented(polished, rendered_norms):
+                paraphrase_norms.append(_norm_for_match(polished))
+        items = source
     residual = []
     for item in items:
         # Polish output can carry markdown section labels ("**Access to
@@ -371,6 +405,8 @@ def append_residual_content(section: dict, rendered: dict) -> dict:
         if not item or item == NOT_COVERED_MESSAGE:
             continue
         if _is_represented(item, rendered_norms):
+            continue
+        if any(_retention(item, p) >= _PARAPHRASE_RETENTION for p in paraphrase_norms):
             continue
         # A merged chunk ("The platform team owns X. The database team owns
         # Y.") can be fully rendered sentence by sentence (two ownership rows)

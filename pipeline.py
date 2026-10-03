@@ -425,12 +425,13 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # real section instead of letting them vanish silently (see
         # knowledge_builder.append_unmapped_findings_section docstring).
         try:
-            # `transcript` is passed so the safety net can compare the real
-            # transcript against the real document and surface anything that
-            # reached neither a section nor the classifier's own unassigned
-            # list — see _unretained_transcript_sentences().
+            # No transcript: the pre-render word-bag safety net is superseded
+            # by verify_document_coverage() below, which checks the rendered
+            # document and recognises a section's paraphrase of its own
+            # sentence. The word-bag net counted an LLM-polished danger zone
+            # as lost and published the same warning twice.
             knowledge_object = append_unmapped_findings_section(
-                knowledge_object, kt.unassigned_sentences, transcript
+                knowledge_object, kt.unassigned_sentences
             )
         except Exception as exc:
             logger.warning("Unmapped findings appendix failed: %s", exc)

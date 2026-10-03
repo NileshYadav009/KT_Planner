@@ -3540,6 +3540,70 @@ an LLM, the 30-day plan is split into Week 1-4 rows although the transcript
 gave an order, not weeks; only some rows carry the "inferred" marker.
 Regression tests: `tests/test_audit_regressions.py`.
 
+### 9vv. Generalisation check on two unseen ~300-word KTs
+
+§9uu was measured on one long transcript. To test whether the fixes
+generalise, two new short KTs were written in different domains and styles
+(MedRelay: hospital notifications on OpenShift/RabbitMQ/MongoDB/Twilio;
+TripWise: travel booking on ECS/DynamoDB/Stripe/SendGrid) and run end to end
+with Groq. Scored against the transcript, MedRelay was about 6/10 before the
+fixes below. Every defect was generic:
+
+1. *The first sentence of every transcript never reached its section*
+   (`detect_gaps`). The first topic block started with section `None` and was
+   discarded when the second began, and so was the block after any unassigned
+   sentence. The opening sentence is usually the system introduction, so the
+   system name and customer reach were lost on every KT.
+2. *"service" was an implementation-step indicator* (`policy.json`), matched
+   as a substring, as were "sh ", "run " and "1.". Any overview or
+   architecture sentence containing "service" was flagged as a misplaced CLI
+   step. Indicators now match whole words; "service" is removed.
+3. *The cleaner changed meaning*: "cold storage" became "cloud storage" and
+   "rate limit" became "rate limiting" (fuzzy correction to a nearby known
+   term). "cold storage" is now its own term; the inflection guard works in
+   both directions.
+4. *Routing rules were tied to earlier transcripts' wording* ("50,000
+   orders", "grafana and cloudwatch"). Added general phrasings: KT
+   introductions ("this KT is for X", "I'm handing over X"), monitoring
+   statements and alert routing, open/unowned items, deploy-avoidance days,
+   RTO/RPO/backups/standby, "redeploy the previous ...". "Alerts page the
+   on-call engineer" no longer counts as ownership language; greeting-only
+   sentences get no section (one was rendered as Sign-off).
+5. *Continuation rule too eager*: a sentence starting with "And" after a full
+   stop inherited the previous sentence's section; only a chunk cut at a
+   comma is a fragment now.
+6. *"Missing" with content*: a section with sentences but a low depth score
+   was "missing", and the PDF said "Not covered" next to its content. Such a
+   section is now "weak".
+7. *Architecture*: OpenShift, ECS/Fargate/Lambda, Cosmos DB/DynamoDB/
+   Cassandra, Kinesis/Event Hubs, Nginx, New Relic/Sentry, CircleCI,
+   Pulumi, third-party APIs (Twilio, Stripe, SendGrid, Okta) and "Go/Python/
+   Java service" were unrecognised in the tool regex, the diagram and the
+   technology summary. With no platform named, the diagram chained a
+   database into a queue ("MongoDB -> RabbitMQ"); dependencies are now listed
+   without edges, or drawn as calls from the named workload. External APIs
+   are always drawn as calls, never as children of the platform.
+8. *LLM output treated as transcript*: the residual safety net appended the
+   polish pass's digest ("Approver: Not specified ... 1. Initiate deployment
+   via Jenkins."). It now appends only the section's transcript sentences,
+   and counts a rendered paraphrase as shown. The pre-render word-bag
+   recovery (superseded by the post-render check) re-added an LLM-paraphrased
+   danger zone to Additional Notes; the pipeline no longer runs it.
+9. *Completion criteria read as completion*: "Handover is complete once you
+   have done one supervised release" set KT status to "Complete", by pattern
+   and by the LLM. Both are rejected now.
+10. *Smaller*: system name keeps the speaker's casing ("MedRelay", not
+    "Medrelay"); "used by our four partner hospitals" fills Customer Reach;
+    Key Technologies kept source "unfilled" after being filled, so the
+    coverage matrix called it missing; Quick Reference said "PagerDuty"
+    regardless of the tool.
+
+**Remaining risks.** The LLM can still misstate structured details (TripWise
+open item: "in_progress" for work "nobody has picked up"; escalation chain
+"PagerDuty -> Marco Silva"). Sentences with no rule signal still depend on
+similarity scoring. Routing rules remain hand-written patterns; each new
+transcript style can expose phrasing they miss.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

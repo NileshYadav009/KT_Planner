@@ -109,7 +109,11 @@ _OUTSTANDING_RE = re.compile(
 )
 _REQUIREMENT_RE = re.compile(
     r"\b(?:only\s+when|only\s+if|must|should|needs?\s+to|required\s+to|is\s+required|"
-    r"considered\s+complete|before\s+(?:taking|marking|signing))\b",
+    r"considered\s+complete|before\s+(?:taking|marking|signing)|"
+    # A completion CRITERION, not a completion: "Handover is complete once
+    # you have done one supervised release" set KT status to "Complete".
+    r"(?:complete|completed|done|finished|ready|signed\s+off)\s+(?:only\s+)?"
+    r"(?:once|when|after|if|as\s+soon\s+as|until))\b",
     re.IGNORECASE,
 )
 _CONFIRMATION_RE = re.compile(
@@ -117,6 +121,21 @@ _CONFIRMATION_RE = re.compile(
     r"granted|demonstrated|walked\s+through|signed\s+off|understands?)\b",
     re.IGNORECASE,
 )
+
+
+def _only_stated_as_condition(value: str, section_text: str) -> bool:
+    """True when every sentence containing `value` (an option word such as
+    "Complete") is a requirement, a completion criterion or a negation, so
+    the value was never actually asserted."""
+    word = str(value or "").strip().lower()
+    if not word:
+        return False
+    stem = word[:6] if len(word) > 6 else word
+    hits = [
+        s for s in _split_sentences(section_text)
+        if re.search(r"\b" + re.escape(stem), s, re.IGNORECASE)
+    ]
+    return bool(hits) and all(_REQUIREMENT_RE.search(s) or _NEGATION_RE.search(s) for s in hits)
 
 
 def _split_sentences(text: str) -> List[str]:
@@ -181,7 +200,7 @@ def _match_select_options(field: Dict[str, Any], section_text: str) -> List[str]
     for sentence in _split_sentences(section_text):
         if not _mentions_topic(sentence, stems):
             continue
-        if _NEGATION_RE.search(sentence):
+        if _NEGATION_RE.search(sentence) or _REQUIREMENT_RE.search(sentence):
             continue
         for option in options:
             if option in matched:
@@ -365,7 +384,21 @@ PATTERN_EXTRACTORS = {
         # backend tier was invisible to the component list, the Technology
         # summary and the architecture diagram alike.
         r"ASP\.NET|NET\s+microservices?|dotnet|"
-        r"(?-i:Express)|Application\s+Load\s+Balancer|ALB|Load\s+Balancer)\b",
+        r"(?-i:Express)|Application\s+Load\s+Balancer|ALB|Load\s+Balancer|"
+        # Platforms and services outside the big-three managed stacks. A KT
+        # on OpenShift + Twilio rendered no compute tier and no external
+        # dependency, and the diagram chained the database into the queue.
+        r"OpenShift|Amazon\s+ECS|ECS|Fargate|AWS\s+Lambda|Cloud\s+Run|Azure\s+Functions|"
+        r"App\s+Service|Nomad|Nginx|HAProxy|Traefik|Istio|"
+        r"Cassandra|DynamoDB|(?:Azure\s+)?Cosmos\s*DB|SQL\s+Server|Memcached|"
+        r"ActiveMQ|Kinesis|Event\s+Hubs?|NATS|"
+        r"Twilio|SendGrid|Stripe|Okta|Auth0|"
+        r"New\s+Relic|Sentry|Dynatrace|Loki|Jaeger|VictorOps|"
+        r"CircleCI|Spinnaker|Tekton|Pulumi|CloudFormation|"
+        # A language names the workload only when it is said to be one
+        # ("a Go consumer service", "the Python workers"); "go" and "Java"
+        # as ordinary words never match.
+        r"(?-i:Go|Python|Java)(?=\s+(?:\w+\s+)?(?:services?|consumers?|workers?|microservices?|API|backend|application|app)\b))\b",
         re.IGNORECASE,
     ),
     "duration": re.compile(r"\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|seconds?|secs?)\b", re.IGNORECASE),
@@ -449,6 +482,18 @@ _CUSTOMER_REACH_RE = re.compile(
 )
 
 
+# "the lab results notification service used by our four partner hospitals":
+# who the system serves, named as a plural group after used by / serves.
+_USED_BY_RE = re.compile(
+    r"\b(?:used\s+by|serves|serving|relied\s+on\s+by|depended\s+on\s+by)\s+"
+    r"(?:(?:our|the|all|its|all\s+of\s+our)\s+)?"
+    r"((?:[\w-]+\s+){0,3}(?:hospitals|clinics|customers|clients|users|partners|merchants|"
+    r"stores|branches|teams|tenants|drivers|patients|students|banks|agents|sellers|buyers|"
+    r"subscribers|members|employees|applications|apps|services))\b",
+    re.IGNORECASE,
+)
+
+
 def extract_customer_reach(text: str) -> Optional[str]:
     """Who/what channels the system serves, e.g. "web and mobile applications".
 
@@ -463,11 +508,13 @@ def extract_customer_reach(text: str) -> Optional[str]:
     if not text:
         return None
     seen: List[str] = []
-    for match in _CUSTOMER_REACH_RE.finditer(text):
+    matches = list(_CUSTOMER_REACH_RE.finditer(text)) + list(_USED_BY_RE.finditer(text))
+    for match in matches:
         # Original casing kept: lowercasing everything turned "across North
         # America, Europe, and Asia-Pacific" into "north america, europe".
         phrase = re.sub(r"\s+", " ", match.group(1)).strip()
-        if phrase.lower() not in [s.lower() for s in seen]:
+        low = phrase.lower()
+        if not any(low in s.lower() or s.lower() in low for s in seen):
             seen.append(phrase)
     if not seen:
         return None
@@ -786,6 +833,22 @@ def _extract_by_pattern(
             name = _trim_name_capture(direct_match.group(1).strip())
             if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
                 return name.title()
+
+        # "This KT is for MedRelay, the lab results notification service" —
+        # a proper name in apposition, so no descriptor word follows it
+        # directly. Capitalized words only (case-sensitive), which is what
+        # separates a name from "this KT is for the new joiners."
+        intro_match = re.search(
+            r"(?:\b(?:[Tt]his|[Tt]he|[Tt]oday's)\s+(?:KT|kt|handover|knowledge\s+transfer|session|walkthrough)\s+"
+            r"(?:is\s+)?(?:for|about|on|covers)|\b[Hh]anding\s+over|\b[Ww]elcome\s+to)\s+(?:the\s+)?"
+            r"([A-Z][\w\-]*(?:\s+[A-Z][\w\-]*){0,3})(?=\s*[,.(]|\s+(?:platform|system|application|service)\b)",
+            section_text,
+        )
+        if intro_match:
+            name = _trim_name_capture(intro_match.group(1).strip())
+            if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+                # Keep the speaker's casing: "MedRelay", not "Medrelay".
+                return name
 
         match = re.search(
             # Trigger phrase, then 0-3 structural filler words ("the",
@@ -1536,6 +1599,11 @@ def _populate_fields_recursive(
                     # spelling the glossary already knows gets pulled back.
                     val, _ = apply_devops_corrections(val)
                 basis = lines[1].upper() if len(lines) > 1 else "INFERRED"
+                if val and field_type in ("single_select", "boolean") and _only_stated_as_condition(val, section_text):
+                    # "Handover is complete once you have done one supervised
+                    # release" states a criterion; the model answered KT
+                    # status "Complete" from it.
+                    val = ""
                 if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
                     # The gap-fill prompt forbids inventing ungrounded values,
                     # so a returned value is always an extraction — but only

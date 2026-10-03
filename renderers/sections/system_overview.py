@@ -83,7 +83,28 @@ _TECH_CATEGORY_MAP = {
     "cloud build": "GitOps / deployment",
     "dataflow": "Data processing", "airflow": "Workflow orchestration",
     "vertex ai": "Machine learning",
-    "cloud storage": "Storage",
+    "cloud storage": "Storage", "cold storage": "Storage",
+    # Platforms outside the big-three managed stacks, and third-party APIs
+    # the system calls. Kept in step with PATTERN_EXTRACTORS["tools"] and
+    # architecture_diagram._LAYER_TERMS.
+    "openshift": "Compute", "amazon ecs": "Compute", "ecs": "Compute", "fargate": "Compute",
+    "aws lambda": "Compute", "cloud run": "Compute", "azure functions": "Compute",
+    "app service": "Compute", "nomad": "Compute",
+    "go": "Backend", "python": "Backend", "java": "Backend",
+    "nginx": "Edge / ingress", "haproxy": "Edge / ingress", "traefik": "Edge / ingress",
+    "istio": "Edge / ingress",
+    "cassandra": "Database", "dynamodb": "Database", "cosmos db": "Database",
+    "azure cosmos db": "Database", "sql server": "Database",
+    "memcached": "Cache",
+    "activemq": "Messaging", "kinesis": "Messaging", "event hubs": "Messaging",
+    "event hub": "Messaging", "nats": "Messaging",
+    "twilio": "External services", "sendgrid": "External services", "stripe": "External services",
+    "okta": "Security", "auth0": "Security",
+    "new relic": "Observability", "sentry": "Observability", "dynatrace": "Observability",
+    "loki": "Observability", "jaeger": "Observability",
+    "victorops": "Alerting",
+    "circleci": "GitOps / deployment", "spinnaker": "GitOps / deployment", "tekton": "GitOps / deployment",
+    "pulumi": "Infrastructure", "cloudformation": "Infrastructure",
 }
 
 

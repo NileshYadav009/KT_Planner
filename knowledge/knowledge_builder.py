@@ -167,7 +167,11 @@ def _infer_system_name(
         sys_field = (populated_fields.get("system_overview", {}) or {}).get("system_name", {})
         val = sys_field.get("value")
         if isinstance(val, str) and val.strip():
-            normalized = val.strip().title()
+            # A name the speaker cased themselves ("MedRelay", "CorePay")
+            # keeps that casing; .title() turned it into "Medrelay".
+            stripped = val.strip()
+            has_own_casing = any(ch.isupper() for word in stripped.split() for ch in word[1:])
+            normalized = stripped if has_own_casing else stripped.title()
             if len(normalized.split()) <= 6:
                 return normalized
 
@@ -291,8 +295,15 @@ def build_knowledge_object(
             "evidence": section_evidence_list,
             "relationships": section_relations,
             "fields": field_objects,
+            # The section's transcript sentences, verbatim. coverage_content
+            # may be an LLM rewrite; the rendering safety net checks these.
+            "_source_sentences": [
+                str(s.get("text") or "").strip()
+                for s in (section_cov.get("sentences") or [])
+                if isinstance(s, dict) and str(s.get("text") or "").strip()
+            ],
         }
-        
+
         # Include structured data if available (e.g., for monitoring section)
         if "_structured" in section_cov:
             section_dict["_structured"] = section_cov["_structured"]
@@ -753,9 +764,16 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
             deduped.append(tool)
     deduped = _drop_subsumed_components(deduped)
 
-    overview_section.setdefault("fields", {}).setdefault(
+    entry = overview_section.setdefault("fields", {}).setdefault(
         "key_technologies", {"id": "key_technologies", "label": "Key Technologies", "type": "text", "confidence": 0.6, "source": "cross_section", "evidence": []}
-    )["value"] = ", ".join(deduped)
+    )
+    entry["value"] = ", ".join(deduped)
+    if entry.get("source", "unfilled") == "unfilled":
+        # An existing unfilled entry kept source "unfilled" while gaining a
+        # value, so the coverage matrix listed Key Technologies as missing
+        # right after the Technology summary had rendered it.
+        entry["source"] = "cross_section"
+        entry["confidence"] = 0.6
 
     return knowledge_object
 
@@ -1378,7 +1396,7 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     monitoring = _find_section(knowledge_object, "monitoring_observability")
     value = _join_if_list(_field_value(monitoring, "first_response_steps"))
     if value:
-        rows.append({"Situation": "Alert / PagerDuty trigger", "Immediate reference": value})
+        rows.append({"Situation": "An alert fires", "Immediate reference": value})
 
     failures = _find_section(knowledge_object, "common_failures")
     value = _first_failure_fix(failures, "pod", "deploy")

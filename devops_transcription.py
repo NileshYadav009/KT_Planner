@@ -741,12 +741,16 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                     # make (this can happen when best_term resolves back to
                     # the same phrase via canonicalization).
                     continue
-                if _is_inflected_form(ngram_words, best_term.split()):
+                if _is_inflected_form(ngram_words, best_term.split()) or _is_inflected_form(
+                    best_term.split(), ngram_words
+                ):
                     # "load balancers", "canary deployments", "rolled back"
                     # are correctly spelled inflections of a known term, not
                     # mishearings. Replacing them with the canonical key
                     # silently rewrote plurals to singulars and verbs to
                     # nouns ("can be rolled back" -> "can be rollback").
+                    # The reverse holds too: "rate limit" is not a garbled
+                    # "rate limiting".
                     continue
                 if phrase == best_term and any(ch.isupper() for ch in " ".join(ngram_words)):
                     # An exact listed variant that already carries branded

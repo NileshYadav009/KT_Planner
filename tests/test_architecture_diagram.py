@@ -67,7 +67,25 @@ def test_no_compute_hub_falls_back_to_flat_chain_instead_of_inventing_a_branch_p
     assert diagram is not None
     assert "├──" not in diagram
     lines = [l.strip() for l in diagram.splitlines() if l.strip() and l.strip() not in ("│", "▼")]
-    assert lines == ["Customer", "React", "FastAPI", "Redis"]
+    # The workload ends the request chain; Redis is what it calls out to,
+    # not a further hop in the request path.
+    assert lines == ["Customer", "React", "FastAPI", "└──► Redis"]
+
+
+def test_dependencies_without_a_workload_or_hub_are_listed_not_chained():
+    # Only a database and a queue were recognised. Drawing "MongoDB -> RabbitMQ"
+    # states a data flow nobody described.
+    diagram = build_architecture_flow_diagram(["MongoDB", "RabbitMQ"])
+    assert "▼" not in diagram and "►" not in diagram
+    assert "MongoDB" in diagram and "RabbitMQ" in diagram
+
+
+def test_workload_on_a_named_platform_calls_out_to_external_services():
+    diagram = build_architecture_flow_diagram(["RabbitMQ", "Go", "OpenShift", "MongoDB", "Twilio"])
+    lines = [l.strip() for l in diagram.split("\n\n")[0].splitlines() if l.strip() not in ("│", "")]
+    assert lines[0] == "OpenShift"
+    assert lines[1] == "└── Go"
+    assert set(lines[2:]) == {"├──► RabbitMQ", "├──► MongoDB", "└──► Twilio"}
 
 
 def test_registry_only_renders_without_a_request_flow_chain():

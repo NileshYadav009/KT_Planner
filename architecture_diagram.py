@@ -28,13 +28,19 @@ _LAYER_TERMS: Dict[str, List[str]] = {
     "dns": ["route 53", "route53", "azure dns", "cloud dns"],
     "cdn": ["cloudfront", "azure front door"],
     "waf": ["aws waf", "waf", "azure waf", "cloud armor"],
-    "load_balancer": ["application load balancer", "alb", "load balancer", "application gateway"],
+    "load_balancer": [
+        "application load balancer", "alb", "load balancer", "application gateway",
+        "nginx", "haproxy", "traefik", "istio",
+    ],
     "compute": [
         "amazon eks", "azure kubernetes service", "aks",
         "google kubernetes engine", "gke",
+        "openshift", "amazon ecs", "ecs", "fargate", "aws lambda", "cloud run",
+        "azure functions", "app service", "nomad",
         "kubernetes", "docker", "rancher",
     ],
     "service": [
+        "go", "python", "java",
         "fastapi", "fast api", "django", "flask", "node.js", "node", "express",
         ".net", "asp.net", "dotnet", ".net microservices", "spring boot", "spring",
     ],
@@ -42,30 +48,36 @@ _LAYER_TERMS: Dict[str, List[str]] = {
         "postgresql", "mysql", "mongodb", "amazon rds", "azure sql",
         "aurora", "aurora postgresql", "amazon aurora", "dynamodb", "azure cosmos db",
         "bigquery", "cloud sql", "firestore", "bigtable", "cloud spanner",
+        "cassandra", "cosmos db", "sql server",
     ],
-    "cache": ["redis", "memorystore"],
+    "cache": ["redis", "memorystore", "memcached"],
     "queue": [
         "kafka", "amazon msk", "msk", "rabbitmq", "sqs", "amazon sqs",
         "azure service bus", "service bus", "pub/sub",
+        "activemq", "kinesis", "event hubs", "event hub", "nats",
     ],
+    # Third-party APIs the workload calls out to (SMS, email, payments,
+    # identity). A dependency like a database, never part of the cluster.
+    "external": ["twilio", "sendgrid", "stripe", "okta", "auth0"],
     "registry": ["amazon ecr", "azure container registry", "acr", "artifact registry", "container registry"],
-    "cicd": ["github actions", "gitlab ci", "jenkins", "azure devops", "cloud build"],
+    "cicd": ["github actions", "gitlab ci", "jenkins", "azure devops", "cloud build", "circleci", "spinnaker", "tekton"],
     "gitops": ["argocd", "argo cd", "flux"],
-    "iac": ["terraform", "bicep", "ansible"],
+    "iac": ["terraform", "bicep", "ansible", "pulumi", "cloudformation"],
     "secrets": ["vault", "azure key vault", "key vault", "consul", "secret manager", "aws kms", "kms"],
     "monitoring": [
         "prometheus", "grafana", "cloudwatch", "datadog", "splunk", "elk",
         "elasticsearch", "logstash", "kibana", "azure monitor", "application insights",
         "cloud monitoring", "cloud logging", "stackdriver", "opensearch", "amazon opensearch",
+        "new relic", "sentry", "dynatrace", "loki", "jaeger",
     ],
-    "alerting": ["pagerduty", "opsgenie"],
+    "alerting": ["pagerduty", "opsgenie", "victorops"],
     # Data/ML-pipeline roles that don't fit the web-request-flow chain
     # (a data platform is often not customer-facing at all) — shown as
     # their own standalone arrows instead, same as iac/secrets/alerting.
     "orchestration": ["airflow"],
     "ml_platform": ["vertex ai"],
     "data_pipeline": ["dataflow"],
-    "object_storage": ["cloud storage", "blob storage", "azure blob storage", "s3"],
+    "object_storage": ["cloud storage", "cold storage", "blob storage", "azure blob storage", "s3"],
 }
 
 # Within the "compute" layer, prefer whichever actually-mentioned term is
@@ -76,6 +88,8 @@ _LAYER_TERMS: Dict[str, List[str]] = {
 _COMPUTE_SPECIFICITY = [
     "amazon eks", "azure kubernetes service", "aks",
     "google kubernetes engine", "gke",
+    "openshift", "amazon ecs", "ecs", "fargate", "aws lambda", "cloud run",
+    "azure functions", "app service", "nomad",
     "kubernetes", "docker", "rancher",
 ]
 
@@ -94,7 +108,7 @@ _ENTRY_LAYERS = ["frontend", "dns", "cdn", "waf", "load_balancer"]
 # implied every one of them was hosted inside the compute node/cluster,
 # which is only true for "service".
 _HOSTED_LAYERS = ["service"]
-_DEPENDENCY_LAYERS = ["database", "cache", "queue"]
+_DEPENDENCY_LAYERS = ["database", "cache", "queue", "external"]
 _FANOUT_LAYERS = _HOSTED_LAYERS + _DEPENDENCY_LAYERS
 
 _ROOT_LABEL = "Customer"
@@ -210,10 +224,23 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
 
     has_hub = "compute" in by_layer
     if not has_hub and fanout:
-        chain = chain + fanout
+        # No platform was named, so nothing HOSTS the workload. Chaining the
+        # fan-out onto the request path ("MongoDB -> RabbitMQ") drew a data
+        # flow nobody described. A named workload still owns its
+        # dependencies; with no workload either, the dependencies are listed
+        # without edges.
+        if not hosted:
+            block = ["Data & messaging dependencies"] + [
+                f"   {'└──' if i == len(dependencies) - 1 else '├──'} {d}"
+                for i, d in enumerate(dependencies)
+            ]
+            if chain:
+                head = ([_ROOT_LABEL] if any(layer in by_layer for layer in _ENTRY_LAYERS) else []) + chain
+                return _vertical_chain(head) + "\n\n" + "\n".join(block)
+            return "\n".join(block)
+        chain = chain + hosted[:1]
         hosted = []
-        dependencies = []
-        fanout = []
+        fanout = dependencies
 
     has_customer_entry = any(layer in by_layer for layer in _ENTRY_LAYERS)
 
@@ -271,9 +298,16 @@ def _build_main_flow(by_layer: Dict[str, List[str]]) -> Optional[str]:
         else:
             # Only one kind of child is present, so there is no relationship
             # to disambiguate -- a plain tree is correct and least cluttered.
+            # Under a workload (no platform named) the children are what it
+            # calls out to, not what it contains.
             total = len(fanout)
             for idx, child in enumerate(fanout, start=1):
                 connector = "└──" if idx == total else "├──"
+                if not has_hub or child in by_layer.get("external", []):
+                    # Called, not contained: a third-party API is never
+                    # inside the platform, and with no platform named the
+                    # workload's children are what it calls.
+                    connector += "►"
                 lines.append(f"   {connector} {child}")
                 if idx < total:
                     lines.append("   │")

@@ -124,6 +124,9 @@ DEVOPS_VOCABULARY = {
     "cloud run": ["cloud run", "gcp cloud run"],
     "cloud functions": ["cloud functions", "gcp cloud functions"],
     "cloud storage": ["cloud storage", "gcs", "google cloud storage"],
+    # Its own term (an archive tier), so the fuzzy corrector stops
+    # "fixing" it into the one-letter-away "cloud storage".
+    "cold storage": ["cold storage"],
     "bigquery": ["bigquery", "big query"],
     "cloud sql": ["cloud sql", "gcp cloud sql"],
     "pub/sub": ["pub/sub", "pub sub", "pubsub"],

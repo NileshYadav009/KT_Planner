@@ -85,9 +85,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # approves" is a calendar rule. Bare role mentions forced both
             # into Ownership at 0.97, above every other signal. A role only
             # routes here together with ownership/escalation language.
+            # "Alerts page the on-call engineer" is alert routing (Monitoring),
+            # so paging is not ownership language.
             r"\b(?:on-?call\s+engineer|head\s+of\s+engineering|platform\s+engineering\s+manager|engineering\s+director)\b"
-            r".{0,80}\b(?:escalat\w*|owns?|responsible|contact|page[sd]?|involve)\b",
-            r"\b(?:escalat\w*|owns?|responsible|contact|page[sd]?)\b.{0,80}"
+            r".{0,80}\b(?:escalat\w*|owns?|responsible|contact|involve)\b",
+            r"\b(?:escalat\w*|owns?|responsible|contact)\b.{0,80}"
             r"\b(?:on-?call\s+engineer|head\s+of\s+engineering|platform\s+engineering\s+manager|engineering\s+director)\b",
         ],
         0.97,
@@ -117,9 +119,21 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # Change freezes are calendar rules regardless of who can grant
             # an exception to them.
             r"\bdeployments?\s+(?:are|is)\s+(?:also\s+)?frozen\b",
-            r"\b(?:deployment|change)\s+freezes?\b",
+            r"\b(?:deployment|change|code|release)\s+freezes?\b",
         ],
         0.96,
+    ),
+    (
+        # Days and periods to stay away from, in general form: "avoid
+        # deploying on Fridays or during the summer sale in July" went to
+        # Danger Zones (a prohibition, but a calendar one).
+        "known_bad_days",
+        [
+            r"\bavoid\s+(?:deploying|releasing|deployments?|releases?|changes)\b",
+            r"\b(?:no|never|don'?t|do\s+not)\s+(?:deploy|release|ship)\w*\s+(?:on|during|over)\s+"
+            r"(?:fridays?|weekends?|holidays?|the\s+\w+\s+(?:sale|season|peak|close))\b",
+        ],
+        0.975,
     ),
     (
         "deployment_and_rollback",
@@ -153,6 +167,8 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\b(?:previous|last)\s+(?:known[\s-]good\s+)?(?:\w+\s+)?(?:release|version|revision)\s+can\s+be\s+(?:restored|redeployed|rolled\s+back)\b",
             r"\brollout\s+can\s+be\s+(?:stopped|paused|aborted|halted)\b",
             r"\breverted\s+in\s+git\b",
+            r"\bredeploy\s+the\s+(?:previous|last)\b",
+            r"\bif\s+a\s+(?:release|deploy(?:ment)?|rollout)\s+(?:misbehaves|fails|breaks|goes\s+wrong|goes\s+bad)\b",
         ],
         0.965,
     ),
@@ -170,6 +186,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bretained\s+for\s+30\s+days\b",
             r"\binfrastructure\s+as\s+code\b",
             r"\binfrastructure\s+as\s+cold\b",
+            # Recovery objectives and mechanisms in general form.
+            r"\b(?:rto|rpo)\s+(?:is|of|target|was)\b",
+            r"\brecovery\s+(?:time|point)\s+objectives?\b",
+            r"\bpoint[\s-]in[\s-]time\s+recovery\b",
+            r"\bbackups?\s+(?:use|are|run|is|get|taken|stored)\b",
+            r"\b(?:warm|hot|cold)\s+standby\b",
         ],
         0.95,
     ),
@@ -341,6 +363,47 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         0.97,
     ),
     (
+        # Generic phrasings. Every earlier monitoring pattern names one tool
+        # or one transcript's wording ("grafana and cloudwatch"), so
+        # "Monitoring is Prometheus with Grafana dashboards, and alerts page
+        # the on-call engineer" went to Ownership on a role mention.
+        "monitoring_observability",
+        [
+            r"^\W*(?:our\s+|the\s+)?(?:monitoring|observability|alerting)\s+(?:is|are|uses|runs|stack|setup|covers)\b",
+            r"\balerts?\s+(?:page|pages|paging|are\s+routed|route|go\s+to|fire|trigger)\b",
+            r"\b(?:key|main|critical|most\s+important|primary)\s+(?:alert|metric|dashboard|slo|sli)s?\b",
+        ],
+        0.97,
+    ),
+    (
+        # Unfinished work with no owner. "Still open is the TLS certificate
+        # renewal ... has no owner yet" was scored into Ownership by
+        # similarity to "owner", and Open Responsibilities reported "not
+        # covered".
+        "open_responsibilities",
+        [
+            r"\bstill\s+(?:open|outstanding|pending|unresolved|to\s+be\s+done)\b",
+            r"\b(?:has|have)\s+no\s+(?:clear\s+|named\s+)?owner\b",
+            r"\bno\s+owner\s+(?:yet|assigned)\b",
+            r"\bunowned\b",
+            r"\b(?:open|outstanding|pending|unresolved)\s+(?:items?|tasks?|actions?|work|issues?|questions?)\b",
+            r"\bnot\s+yet\s+(?:been\s+)?(?:assigned|resolved|completed|done|migrated|fixed)\b",
+        ],
+        0.975,
+    ),
+    (
+        # How a KT introduces its subject, in general form.
+        "system_overview",
+        [
+            r"\b(?:this|the|today's)\s+(?:kt|handover|knowledge\s+transfer|session|walkthrough)\s+(?:is\s+)?(?:for|about|on|covers)\b",
+            r"\b(?:i'?m|i\s+am|we'?re|we\s+are|i'?ll\s+be|i\s+will\s+be)\s+(?:going\s+to\s+be\s+)?handing\s+over\b",
+            r"\bwelcome\s+to\s+(?:the\s+)?[\w-]+\s+(?:kt|handover|knowledge\s+transfer|session|walkthrough)\b",
+            r"\b(?:service|platform|system|application)\s+(?:used|relied\s+on|depended\s+on)\s+by\b",
+            r"\b(?:\w+\s+){0,3}(?:depend|rely|relies)\s+on\s+(?:it|this\s+(?:service|platform|system))\b",
+        ],
+        0.97,
+    ),
+    (
         "environments",
         [
             r"\bstaging\s+environment\b.*\bmirrors?\s+production\b",
@@ -446,6 +509,17 @@ def find_overview_reassignment(text: str) -> Optional[SectionRuleMatch]:
     return best
 
 
+_GREETING_WORD = (
+    r"(?:ok(?:ay)?|alright|all\s+right|hi|hello|hey|welcome|thanks?|thank\s+you|"
+    r"good\s+(?:morning|afternoon|evening)|so|right|everyone|all|team|folks|guys|then|again|back|"
+    r"for|joining|coming|being|here|today|and)"
+)
+_GREETING_ONLY_RE = re.compile(
+    r"^\W*" + _GREETING_WORD + r"(?:[\s,!.]+" + _GREETING_WORD + r")*\W*$",
+    re.IGNORECASE,
+)
+
+
 def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict]) -> None:
     """
     Apply deterministic routing and pull misplaced sentences out of system_overview.
@@ -456,6 +530,14 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
 
     for idx, cs in enumerate(classified_sentences):
         text = cs.sentence.text or ""
+        if _GREETING_ONLY_RE.match(text):
+            # "Alright, welcome." carries no knowledge; similarity scoring
+            # still gave it a section, and Sign-off rendered it.
+            cs.primary_classification = None
+            cs.secondary_classifications = []
+            cs.multi_section_assignments = []
+            cs.is_unassigned = True
+            continue
         rule_match = match_section_rules(text)
 
         current_section = (
@@ -637,7 +719,13 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
         # production approval process.") starts lowercase or with a
         # coordinating conjunction and has no subject of its own; it belongs
         # wherever the sentence it was cut from went.
-        is_fragment = bool(_FRAGMENT_START_RE.match(raw)) or (raw[:1].islower())
+        # A conjunction opener is only a cut-off clause when the previous
+        # chunk really ended mid-sentence. After a full stop, "And avoid
+        # deploying on Fridays..." is a new statement with its own topic,
+        # and inheriting dragged it from the calendar into Danger Zones.
+        prev_text = (classified_sentences[idx - 1].sentence.text or "").rstrip() if idx > 0 else ""
+        cut_off = prev_text.endswith((",", ";", ":")) or not prev_text.endswith((".", "!", "?"))
+        is_fragment = (bool(_FRAGMENT_START_RE.match(raw)) and cut_off) or (raw[:1].islower())
         if (is_fragment or _DEPENDENT_CONTINUATION_RE.search(text)) and idx > 0:
             prev = classified_sentences[idx - 1]
             if prev.primary_classification and (

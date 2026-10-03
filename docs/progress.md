@@ -1235,3 +1235,12 @@ test KT now appears in a section, verified after rendering. See audit §9uu for
 the list and the remaining risks; regressions are pinned in
 `tests/test_audit_regressions.py`.
 
+
+## Generalisation check on unseen KTs (audit §9vv)
+
+Ran two new ~300-word KTs in different domains end to end with Groq. Found
+and fixed generic defects: the first transcript sentence never reached its
+section, "service" flagged sentences as CLI steps, cleaning changed "cold
+storage"/"rate limit", routing rules were tied to old transcripts' wording,
+LLM digests were appended as if spoken, and completion criteria were read as
+completion. See audit §9vv.
