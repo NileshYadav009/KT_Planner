@@ -344,6 +344,18 @@
     }
     .coverage-proof svg{width:16px;height:16px;flex-shrink:0;margin-top:1px}
     .coverage-proof.recovered{background:var(--amber-dim);color:var(--amber)}
+    .llm-usage{margin-top:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);font-size:13px}
+    .llm-usage > summary{cursor:pointer;padding:10px 13px;color:var(--text2);list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center}
+    .llm-usage > summary::-webkit-details-marker{display:none}
+    .llm-usage > summary::before{content:'▸';color:var(--text3)}
+    .llm-usage[open] > summary::before{content:'▾'}
+    .llm-usage .lu-title{font-weight:600;color:var(--text)}
+    .llm-usage .lu-body{padding:0 13px 12px;overflow-x:auto}
+    .llm-usage table{width:100%;border-collapse:collapse;font-size:12.5px}
+    .llm-usage th,.llm-usage td{text-align:right;padding:5px 6px;border-bottom:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums}
+    .llm-usage th:first-child,.llm-usage td:first-child{text-align:left}
+    .llm-usage th{color:var(--text3);font-weight:500}
+    .llm-usage .lu-note{color:var(--text3);font-size:12px;margin-top:8px;line-height:1.5}
 
     /* ── BUTTONS ──────────────────────────────────────────────── */
     .btn{
@@ -1573,6 +1585,50 @@ function renderSummary(data){
     p.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12 11 15 16 9"/></svg><span>${escapeHtml(text)}</span>`;
     aiSummaryEl.appendChild(p);
   }
+
+  renderLlmUsage(data.llm_usage);
+}
+
+/* ── LLM usage for this KT ──────────────────────────────────── */
+function renderLlmUsage(u){
+  if(!u || !Array.isArray(u.stages)) return;
+  const n = v => Number(v||0).toLocaleString();
+  const approx = u.estimated_tokens ? '~' : '';
+  const box = document.createElement('details'); box.className = 'llm-usage';
+  const parts = [];
+  if(!u.llm_calls && !u.cache_hits){
+    parts.push('No LLM calls were made for this KT (rules and local models only).');
+  } else {
+    parts.push(`${n(u.llm_calls)} LLM call${u.llm_calls===1?'':'s'}`);
+    parts.push(`${approx}${n(u.input_tokens)} input / ${approx}${n(u.output_tokens)} output tokens`);
+    if(u.cache_hits) parts.push(`${n(u.cache_hits)} answered from cache`);
+    if(u.skipped) parts.push(`${n(u.skipped)} skipped by rules`);
+    if(typeof u.estimated_cost_usd === 'number') parts.push(`≈ $${u.estimated_cost_usd.toFixed(4)}`);
+  }
+  box.innerHTML = `<summary><span class="lu-title">LLM usage</span>${parts.map(p=>`<span>${escapeHtml(p)}</span>`).join('')}</summary>`;
+
+  if(u.stages.length){
+    const rows = u.stages.map(s => `<tr>
+        <td>${escapeHtml(s.label || s.stage)}</td>
+        <td>${n(s.llm_calls)}</td><td>${n(s.cache_hits)}</td><td>${n(s.skipped)}</td>
+        <td>${s.estimated_tokens?'~':''}${n(s.input_tokens)}</td><td>${s.estimated_tokens?'~':''}${n(s.output_tokens)}</td>
+        <td>${Number(s.llm_seconds||0).toFixed(1)}s</td></tr>`).join('');
+    const notes = [];
+    const model = [u.provider, u.model].filter(Boolean).join(' · ');
+    if(model) notes.push(`Model: ${model}.`);
+    notes.push(`Time waiting on the LLM: ${Number(u.llm_seconds||0).toFixed(1)}s.`);
+    if(u.retries) notes.push(`${n(u.retries)} rate-limit retr${u.retries===1?'y':'ies'}.`);
+    if(u.failed) notes.push(`${n(u.failed)} call${u.failed===1?'':'s'} failed and fell back to the non-LLM result.`);
+    if(u.tokens_saved_by_cache) notes.push(`Cache saved ${approx}${n(u.tokens_saved_by_cache)} tokens.`);
+    if(u.would_skip) notes.push(`${n(u.would_skip)} call${u.would_skip===1?'':'s'} could be skipped (decided by routing rules; currently measured only).`);
+    if(u.estimated_tokens) notes.push('~ = estimated; the provider did not report exact token counts for some calls.');
+    notes.push(`Response cache: ${u.cache_mode || 'readwrite'}.`);
+    const body = document.createElement('div'); body.className = 'lu-body';
+    body.innerHTML = `<table><thead><tr><th>Stage</th><th>Calls</th><th>Cached</th><th>Skipped</th><th>Input</th><th>Output</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>`
+      + `<div class="lu-note">${notes.map(escapeHtml).join(' ')}</div>`;
+    box.appendChild(body);
+  }
+  aiSummaryEl.appendChild(box);
 }
 
 /* ── Render coverage ────────────────────────────────────────── */

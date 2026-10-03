@@ -10,6 +10,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from devops_transcription import apply_devops_corrections
+from llm.usage import record_skip as record_llm_skip
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,31 @@ _CONFIRMATION_RE = re.compile(
     r"granted|demonstrated|walked\s+through|signed\s+off|understands?)\b",
     re.IGNORECASE,
 )
+
+
+# Anything that could be a link or a date. Deliberately broad: a gap-fill call
+# is skipped only when NONE of these appear, so a borderline text still goes
+# to the model exactly as before.
+_LINK_CANDIDATE_RE = re.compile(
+    r"https?://|www\.|\b[\w-]+\.(?:com|io|net|org|dev|cloud|app|ai|co|in|uk|us|internal|local|corp)\b"
+    r"|\b[\w.-]+/[\w./-]+|\b(?:confluence|wiki|sharepoint|notion|github|gitlab|bitbucket|jira|drive|"
+    r"portal|link|url|page|repo|repository|readme|docs?)\b",
+    re.IGNORECASE,
+)
+_DATE_CANDIDATE_RE = re.compile(
+    r"\d|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b"
+    r"|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|yesterday|"
+    r"week|month|quarter|year|q[1-4]|last|next|ago|recently|updated|date)\b",
+    re.IGNORECASE,
+)
+
+
+def _may_contain_literal(field_type: str, text: str) -> bool:
+    if field_type == "url":
+        return bool(_LINK_CANDIDATE_RE.search(text or ""))
+    if field_type == "date":
+        return bool(_DATE_CANDIDATE_RE.search(text or ""))
+    return True
 
 
 def _only_stated_as_condition(value: str, section_text: str) -> bool:
@@ -1577,7 +1603,12 @@ def _populate_fields_recursive(
                 already_captured.append(f"{field_label}: {value}")
                 continue
 
-        if llm_provider and section_text.strip() and field_type != "table":
+        if llm_provider and section_text.strip() and field_type in ("url", "date") and not _may_contain_literal(field_type, section_text):
+            # The gap-fill prompt requires a literal URL/date for these types
+            # and tells the model to answer NOT_MENTIONED otherwise. With no
+            # candidate in the text that answer is already known.
+            record_llm_skip("field_fill", f"no literal {field_type} in section")
+        elif llm_provider and section_text.strip() and field_type != "table":
             try:
                 prompt = _build_llm_gap_fill_prompt(
                     section_title=section_title,

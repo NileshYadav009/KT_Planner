@@ -334,6 +334,41 @@ def _extract_retry_delay_seconds(exc: Exception, fallback: float) -> float:
     return fallback
 
 
+# Per-thread record of the call in progress (real token usage reported by the
+# provider, retries), read by llm/cached_provider.py for the per-KT usage
+# panel. Thread-local because polish and structured extraction run calls
+# concurrently on a shared provider.
+_CALL_STATS = threading.local()
+
+
+def reset_call_stats() -> None:
+    _CALL_STATS.data = {"retries": 0, "input_tokens": None, "output_tokens": None}
+
+
+def consume_call_stats() -> dict:
+    data = getattr(_CALL_STATS, "data", None) or {"retries": 0, "input_tokens": None, "output_tokens": None}
+    reset_call_stats()
+    return data
+
+
+def _note_usage(input_tokens, output_tokens) -> None:
+    data = getattr(_CALL_STATS, "data", None)
+    if data is None:
+        reset_call_stats()
+        data = _CALL_STATS.data
+    try:
+        data["input_tokens"] = int(input_tokens) if input_tokens is not None else None
+        data["output_tokens"] = int(output_tokens) if output_tokens is not None else None
+    except (TypeError, ValueError):
+        pass
+
+
+def _note_retry() -> None:
+    data = getattr(_CALL_STATS, "data", None)
+    if data is not None:
+        data["retries"] = data.get("retries", 0) + 1
+
+
 def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: int = 0):
     """Call call_fn() (a zero-arg callable making the real API request),
     retrying on rate-limit errors with the provider's own suggested delay
@@ -382,6 +417,7 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: 
                 "%s rate-limited (attempt %d/%d), retrying in %.1fs: %s",
                 provider_label, attempt + 1, LLM_RETRY_MAX_ATTEMPTS, delay, exc,
             )
+            _note_retry()
             time.sleep(delay)
             last_exc = exc
     raise last_exc
@@ -437,6 +473,9 @@ class GeminiProvider(LLMProvider):
                     max_output_tokens=config_kwargs.get("max_output_tokens", 0),
                 ),
             )
+            meta = getattr(response, "usage_metadata", None)
+            if meta is not None:
+                _note_usage(getattr(meta, "prompt_token_count", None), getattr(meta, "candidates_token_count", None))
             text = getattr(response, "text", None) or str(response)
             return text.strip()
 
@@ -544,9 +583,12 @@ class GroqProvider(LLMProvider):
         # systematic under-estimate can't accumulate into a 429 storm. See
         # reconcile_token_usage().
         try:
-            actual = getattr(getattr(response, "usage", None), "total_tokens", None)
-            if actual is None and isinstance(response, dict):
-                actual = (response.get("usage") or {}).get("total_tokens")
+            usage = getattr(response, "usage", None)
+            if usage is None and isinstance(response, dict):
+                usage = response.get("usage") or {}
+            read = (lambda k: usage.get(k)) if isinstance(usage, dict) else (lambda k: getattr(usage, k, None))
+            _note_usage(read("prompt_tokens"), read("completion_tokens"))
+            actual = read("total_tokens")
             if actual:
                 reconcile_token_usage("Groq", estimated, int(actual))
         except Exception:
@@ -595,7 +637,11 @@ def create_llm_provider() -> LLMProvider:
 
 def get_llm_provider() -> Optional[LLMProvider]:
     try:
-        return create_llm_provider()
+        provider = create_llm_provider()
     except Exception as e:
         LOGGER.warning("Failed to initialize LLM provider: %s", e)
         return None
+    # Exact-response cache + per-KT usage accounting around every call. The
+    # wrapper passes prompts, parameters and responses through unchanged.
+    from llm.cached_provider import CachedLLMProvider
+    return CachedLLMProvider(provider)

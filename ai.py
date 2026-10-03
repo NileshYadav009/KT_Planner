@@ -39,6 +39,7 @@ from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
 from field_populator import find_source_sentence_index
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
@@ -645,7 +646,12 @@ def polish_coverage_sections(
     # own rate throttle is shared/thread-safe, so this can't send more
     # requests per minute than the sequential version did.
     with ThreadPoolExecutor(max_workers=min(LLM_PARALLEL_WORKERS, len(cleaned_sections)) or 1) as pool:
-        futures = {pool.submit(_polish_one, sid, section): sid for sid, section in cleaned_sections.items()}
+        # copy_context(): worker threads count their calls against the
+        # current KT's usage tracker (llm/usage.py).
+        futures = {
+            pool.submit(contextvars.copy_context().run, _polish_one, sid, section): sid
+            for sid, section in cleaned_sections.items()
+        }
         for future in as_completed(futures):
             results[futures[future]] = future.result()
 

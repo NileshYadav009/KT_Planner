@@ -96,3 +96,6 @@ session_state.json
 # bootstrap content each starts from lives in code (glossary.DEFAULT_GLOSSARY).
 glossary.json
 glossary_candidates.json
+
+# Local LLM response cache (contains transcript-derived text)
+data/llm_cache.sqlite*

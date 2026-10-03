@@ -33,7 +33,11 @@ from policy import (
 from runtime_policy import load_policy
 from devops_transcription import clean_transcript
 from entity_extractor import EntityExtractor
-from section_rules import match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost
+from section_rules import (
+    match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost,
+    RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE,
+)
+from llm.usage import record_skip as record_llm_skip
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
@@ -856,8 +860,16 @@ class ContextClassifier:
         primary: Optional[Classification],
         secondary: List[Classification],
         context_text: str = "",
+        rule_decided: bool = False,
     ) -> Tuple[Optional[Classification], List[Classification], Optional[str]]:
         """Selective LLM verification for genuinely borderline classifications.
+
+        rule_decided: a >= RULE_OVERRIDE_CONFIDENCE routing rule (or greeting
+        filter) will replace this sentence's section later regardless of the
+        answer. LLM_VERIFY_RULE_DECIDED=shadow (default) still calls and only
+        counts the call as skippable; =skip saves it. Not provably identical:
+        the discarded answer still feeds topic memory for the next sentences,
+        so skipping stays opt-in until shadow runs show unchanged placements.
 
         Shared by classify_sentence() and ContextMappingPipeline.process()'s
         batched classification loop, which duplicates classify_sentence's
@@ -889,6 +901,14 @@ class ContextClassifier:
         )
         if not is_borderline:
             return primary, secondary, None
+
+        if rule_decided:
+            mode = os.getenv("LLM_VERIFY_RULE_DECIDED", "shadow").strip().lower()
+            if mode == "skip":
+                record_llm_skip("classification_check", "decided by a routing rule")
+                return primary, secondary, None
+            if mode == "shadow":
+                record_llm_skip("classification_check", "decided by a routing rule", shadow=True)
 
         verify_candidates = [primary] + secondary[:2]
         verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates, context_text)
@@ -2402,8 +2422,19 @@ class ContextMappingPipeline:
             filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
             primary = filtered[0] if filtered else (classifications[0] if classifications else None)
             secondary = filtered[1:3] if filtered else (classifications[1:3] if len(classifications) > 1 else [])
+            # apply_rule_overrides() later replaces the primary of any sentence
+            # with a >= 0.94 rule (or a greeting) regardless of what the LLM
+            # check chose, so that check's answer is discarded. "shadow"
+            # (default) still makes the call and only counts it; "skip" saves
+            # it. Not provably identical: the discarded answer still feeds
+            # topic memory for the next sentences, so "skip" stays opt-in
+            # until shadow runs show no change in final placements.
+            rule_decided = bool(
+                _GREETING_ONLY_RE.match(s.text or "")
+                or (rule_match is not None and getattr(rule_match, "confidence", 0) >= RULE_OVERRIDE_CONFIDENCE)
+            )
             primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(
-                s.text, primary, secondary, context_text=context_texts[i]
+                s.text, primary, secondary, context_text=context_texts[i], rule_decided=rule_decided
             )
             is_unassigned = primary is None
             explanation = ""

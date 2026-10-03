@@ -509,6 +509,11 @@ def find_overview_reassignment(text: str) -> Optional[SectionRuleMatch]:
     return best
 
 
+# A rule at or above this confidence replaces the classifier's section
+# unconditionally (apply_rule_overrides). context_mapper uses the same value
+# to know which LLM classification checks would be discarded.
+RULE_OVERRIDE_CONFIDENCE = 0.94
+
 _GREETING_WORD = (
     r"(?:ok(?:ay)?|alright|all\s+right|hi|hello|hey|welcome|thanks?|thank\s+you|"
     r"good\s+(?:morning|afternoon|evening)|so|right|everyone|all|team|folks|guys|then|again|back|"
@@ -554,7 +559,7 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
                 current_section in {"security_controls", "deployment_and_rollback"}
                 and rule_match.section_id == "system_overview"
             )
-            or rule_match.confidence >= 0.94
+            or rule_match.confidence >= RULE_OVERRIDE_CONFIDENCE
         ):
             meta = schema_metadata.get(rule_match.section_id, {})
             cs.primary_classification = Classification(

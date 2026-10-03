@@ -3604,6 +3604,51 @@ open item: "in_progress" for work "nobody has picked up"; escalation chain
 similarity scoring. Routing rules remain hand-written patterns; each new
 transcript style can expose phrasing they miss.
 
+### 9ww. LLM cost controls and per-KT usage panel
+
+**Measured first** (stub provider, no network): a 300-word KT made 66-70
+calls (~24k input tokens); a 1,260-word KT 140. Classification checks fired
+on almost every sentence (blended scores never clear the "borderline" bar)
+and 45-81% of them were for sentences a >= 0.94 routing rule later
+re-routes anyway; field gap-fill used ~60% of input tokens. No prompt was
+repeated within a run.
+
+**Built (output-neutral):**
+- `llm/cached_provider.py` wraps every provider returned by
+  `get_llm_provider()`: exact-response cache lookup, then the real call.
+  The key is a hash of provider, model, parameters, system prompt and the
+  full prompt text, so any change to a prompt, an input or the model is a
+  different key; call sites re-validate a cached response exactly as on the
+  first run. Failures and empty replies are never stored. Stage labels come
+  from the calling function, so no call site changed.
+- `llm/cache.py`: SQLite at `data/llm_cache.sqlite` (gitignored; stores key
+  hashes and responses, not prompts). `LLM_CACHE=readwrite|read|off`,
+  `LLM_CACHE_PATH`, `LLM_CACHE_TTL_DAYS` (90), `LLM_CACHE_NAMESPACE` (change
+  to invalidate everything, or set per tenant). Purge:
+  `python -m llm.cache [days]`.
+- `llm/usage.py`: per-KT tracker (calls, cache hits, skips, input/output
+  tokens, time, retries, failures, per stage) carried into the thread pools
+  with `contextvars.copy_context()`; `result["llm_usage"]`. Token counts are
+  the provider's own (`usage` for Groq, `usage_metadata` for Gemini), else
+  estimated and marked "~". Cost only when `LLM_PRICE_INPUT_PER_MTOK` and
+  `LLM_PRICE_OUTPUT_PER_MTOK` are set.
+- URL/date gap-fill precheck: the prompt already requires a literal URL/date
+  and tells the model to answer NOT_MENTIONED otherwise; with no candidate
+  in the section text (broad patterns) the call is skipped.
+- UI: collapsible "LLM usage" block in the AI Summary card.
+
+**Built but off (shadow):** `LLM_VERIFY_RULE_DECIDED=shadow|skip|off`. In
+`shadow` (default) rule-decided classification checks are still made and
+only counted as skippable. `skip` saves them, but is not provably identical:
+the discarded answer feeds topic memory for following sentences. Enable after
+shadow runs with a real LLM show unchanged final placements.
+
+**Not built:** batching gap-fill per section and classification checks per
+KT (largest saving, ~70%) change prompts, so they need a recorded comparison
+against real LLM output before they can be trusted.
+
+Tests: `tests/test_llm_cost_controls.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -1244,3 +1244,12 @@ section, "service" flagged sentences as CLI steps, cleaning changed "cold
 storage"/"rate limit", routing rules were tied to old transcripts' wording,
 LLM digests were appended as if spoken, and completion criteria were read as
 completion. See audit §9vv.
+
+## LLM cost controls and usage panel (audit §9ww)
+
+Every LLM call now goes through an exact-response cache (SQLite, versioned by
+the full request) and is counted per KT: calls, cache hits, skips, tokens,
+time, retries, per stage. The UI shows this under AI Summary. URL/date field
+calls with no candidate in the text are skipped. Skipping rule-decided
+classification checks is implemented but runs in shadow mode until validated
+with a real LLM. Prompt batching is not done (needs validation).

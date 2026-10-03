@@ -41,6 +41,8 @@ from knowledge import (
 )
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
+from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
+import contextvars
 from pdf_rendering import build_rendered_sections
 from quality_score import compute_quality_score
 from renderers.sections import validate_renderer_registry
@@ -102,6 +104,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     Always writes either a "completed" or "failed" result into JOB_QUEUE[job_id]
     and returns that same dict — safe to hand directly to BackgroundTasks.
     """
+    # Every LLM call made for this KT (including those on the thread pools
+    # below, which copy this context) is counted here. See llm/usage.py.
+    usage_tracker = LLMUsageTracker(job_id)
+    usage_token = start_tracking(usage_tracker)
     try:
         if segments is None:
             segments = [{
@@ -228,7 +234,12 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # overhead with nothing to overlap.
         if structured_section_ids and get_llm_provider() is not None:
             with ThreadPoolExecutor(max_workers=min(LLM_PARALLEL_WORKERS, len(structured_section_ids))) as pool:
-                futures = {pool.submit(_extract_one, sid): sid for sid in structured_section_ids}
+                # copy_context(): the worker threads count their calls
+                # against this KT's usage tracker.
+                futures = {
+                    pool.submit(contextvars.copy_context().run, _extract_one, sid): sid
+                    for sid in structured_section_ids
+                }
                 for future in as_completed(futures):
                     section_id = futures[future]
                     try:
@@ -563,6 +574,9 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "status": "failed",
             "error": str(e)
         }
+    finally:
+        stop_tracking(usage_token)
+    result["llm_usage"] = usage_tracker.summary()
 
     with JOB_LOCK:
         JOB_QUEUE[job_id] = result
