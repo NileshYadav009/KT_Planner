@@ -1260,3 +1260,12 @@ Whisper VAD on by default (no invented text in pauses, 27% faster on a paused
 recording), rapidfuzz for fuzzy correction (identical scores, 8-15x faster),
 json-repair for LLM JSON (0/12 -> 12/12 malformed answers recovered), and
 seven unused packages removed from requirements.txt.
+
+## Component catalog and vocabulary round 3 (audit §9yy)
+
+`component_catalog.py` is now the single place to add a technology product
+(spellings, display name, category, diagram layer); 109 products added. 36
+current tools added to the transcript vocabulary. A KT naming current tooling
+now has 32 technologies recognised instead of 2, with no false matches on
+1.16M words of ordinary English and identical cleaning of existing
+transcripts.

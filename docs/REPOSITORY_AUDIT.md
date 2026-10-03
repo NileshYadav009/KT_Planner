@@ -3677,6 +3677,43 @@ Tests: `tests/test_llm_cost_controls.py`.
 
 Tests: `tests/test_library_upgrades.py`.
 
+### 9yy. Component catalog and vocabulary round 3
+
+**Gap measured.** The transcript vocabulary knew 483 terms, but only ~105 of
+them were recognised as technologies by the tool regex, ~93 placed in a
+diagram layer and ~99 categorised in the Technology Summary; three
+hand-maintained lists that had already drifted (OpenShift/Twilio). 43 of 81
+widely used current tools were not in the vocabulary at all.
+
+**`component_catalog.py`**: one entry per product (display name, spellings,
+Technology Summary category, diagram layer). The tool recogniser, diagram
+layers, category map and display-name canonicalization read it after their
+own original entries, so nothing they already recognised changes:
+`ToolMatcher` keeps every original match and adds a catalog match only where
+the original found nothing, or where the catalog name is strictly longer and
+contains it ("Kafka Connect" over "Kafka"). 109 products. Single-word names
+that are ordinary words are case-sensitive and need a related word nearby
+(Harbor near image/registry, Chef near cookbook/provision).
+
+**Vocabulary**: 36 products added with only their multi-word misheard forms
+("open tofu", "click house", "cockroach db"); the corrector only rewrites 2-4
+word phrases. Real phrases are never variants ("open search" was tried and
+removed: it rewrote "open search results").
+
+**Measured:**
+- Ordinary English (NLTK Brown corpus, 1.16M words): catalog false hits 25
+  -> 0 after the context rule. (The original hand-written regex has 109:
+  "Spring", "angular", "rancher", "Jenkins" as a surname, "flask", "stripe";
+  not changed here.)
+- Technologies recognised, full pipeline: MedRelay 10 -> 10, TripWise 9 -> 10
+  (AWS Secrets Manager), e-commerce 20 -> 21 ("GitHub repositories"), a
+  probe KT naming current tooling 2 -> 32 (Technology Summary rows 2 -> 18).
+- Six existing transcripts cleaned byte-identically before and after.
+- Fixed: a dynamic "Cache Layer" row repeated a product already listed under
+  a different spelling (ElastiCache vs Amazon ElastiCache).
+
+Tests: `tests/test_component_catalog.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

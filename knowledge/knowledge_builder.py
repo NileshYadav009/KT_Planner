@@ -8,6 +8,7 @@ from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
 from architecture_diagram import build_architecture_flow_diagram
+from component_catalog import display_name
 from renderers.blocks.common import split_bullet_blob
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
@@ -848,7 +849,12 @@ def _drop_subsumed_components(components: List[str]) -> List[str]:
 
 
 def _canonicalize_component_term(term: str) -> str:
-    return _CANONICAL_TERM_ALIASES.get(term.strip().lower(), term)
+    alias = _CANONICAL_TERM_ALIASES.get(term.strip().lower())
+    if alias:
+        return alias
+    # Products from component_catalog.py display under their catalog name
+    # ("ec2" -> "Amazon EC2", "opentofu" -> "OpenTofu").
+    return display_name(term) or term
 
 
 # Sections whose sentences genuinely describe the architecture itself

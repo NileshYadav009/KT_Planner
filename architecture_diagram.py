@@ -80,6 +80,13 @@ _LAYER_TERMS: Dict[str, List[str]] = {
     "object_storage": ["cloud storage", "cold storage", "blob storage", "azure blob storage", "s3"],
 }
 
+# Products from component_catalog.py join their layer after the entries above.
+from component_catalog import layer_terms as _catalog_layer_terms
+
+for _layer, _terms in _catalog_layer_terms().items():
+    _existing = _LAYER_TERMS.setdefault(_layer, [])
+    _existing.extend(t for t in _terms if t not in _existing)
+
 # Within the "compute" layer, prefer whichever actually-mentioned term is
 # most specific/branded (a managed-Kubernetes product name) over a generic
 # term like bare "Kubernetes" — a transcript that says both "Amazon EKS"

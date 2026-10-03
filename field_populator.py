@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from devops_transcription import apply_devops_corrections
 from llm.usage import record_skip as record_llm_skip
+from component_catalog import ToolMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,11 @@ PATTERN_EXTRACTORS = {
         r"(\d[\d,]+)\s*(?:[A-Za-z]+\s+){0,2}orders?\s*(?:per|a)\s*day", re.IGNORECASE
     ),
 }
+
+# Products listed in component_catalog.py are recognised in addition to the
+# hand-written pattern above. Every match the pattern above makes is kept as
+# it was; see component_catalog.ToolMatcher.
+PATTERN_EXTRACTORS["tools"] = ToolMatcher(PATTERN_EXTRACTORS["tools"])
 
 # Minimum cosine similarity (BAAI/bge-large-en-v1.5, normalized embeddings)
 # between a field's query text and a sentence before that sentence may fill

@@ -597,4 +597,53 @@ DEVOPS_VOCABULARY = {
     "on-call rotation": ["on-call rotation", "oncall rotation"],
     "alert fatigue": ["alert fatigue"],
     "knowledge base": ["knowledge base"],
+
+    # ------------------------------------------------------------------
+    # Current platform tooling — round 3. Each product is also listed in
+    # component_catalog.py (display name, category, diagram layer). Only
+    # multi-word variants actually correct anything (the fuzzy corrector
+    # works on 2-4 word phrases), and none may be an ordinary English
+    # phrase: "status page", "fire hydrant", "open cost" and real words
+    # such as "carpenter" (Karpenter) are deliberately not variants.
+    # Ordinary-word product names (Harbor, Temporal, Backstage, Cosign,
+    # Renovate) are left out entirely.
+    # ------------------------------------------------------------------
+    "opentofu": ["opentofu", "open tofu", "open-tofu"],
+    "karpenter": ["karpenter"],
+    "keda": ["keda", "k-e-d-a"],
+    "argo rollouts": ["argo rollouts", "argo roll outs", "argos rollouts"],
+    "argo workflows": ["argo workflows", "argos workflows"],
+    "dapr": ["dapr"],
+    "external secrets operator": ["external secrets operator", "external secret operator"],
+    "sealed secrets": ["sealed secrets"],
+    "grype": ["grype"],
+    "syft": ["syft"],
+    "sigstore": ["sigstore", "sig store"],
+    "checkov": ["checkov"],
+    "tfsec": ["tfsec", "tf sec", "t f sec"],
+    "kubecost": ["kubecost", "kube cost"],
+    "opencost": ["opencost"],
+    "spacelift": ["spacelift", "space lift"],
+    "flagger": ["flagger"],
+    "nexus": ["nexus repository", "sonatype nexus"],
+    "artifactory": ["artifactory", "jfrog artifactory"],
+    "dependabot": ["dependabot", "dependa bot", "depend a bot"],
+    "amazon bedrock": ["amazon bedrock", "aws bedrock"],
+    "vertex ai": ["vertex ai", "vertex a i"],
+    "dbt": ["dbt", "d b t"],
+    "airbyte": ["airbyte", "air byte"],
+    "fivetran": ["fivetran", "five tran"],
+    "kafka connect": ["kafka connect"],
+    "debezium": ["debezium"],
+    # Not "open search": "open search results in a new tab" became
+    # "opensearch results".
+    "opensearch": ["opensearch", "amazon opensearch"],
+    "grafana oncall": ["grafana oncall", "grafana on call", "grafana on-call"],
+    "incident.io": ["incident.io", "incident io", "incident dot io"],
+    "rootly": ["rootly"],
+    "firehydrant": ["firehydrant"],
+    "cloudflare": ["cloudflare", "cloud flare"],
+    "clickhouse": ["clickhouse", "click house"],
+    "cockroachdb": ["cockroachdb", "cockroach db", "cockroach d b"],
+    "victoriametrics": ["victoriametrics", "victoria metrics"],
 }

@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+from component_catalog import category_map as _catalog_category_map, display_name as _catalog_display_name
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.common import (
@@ -107,6 +108,10 @@ _TECH_CATEGORY_MAP = {
     "pulumi": "Infrastructure", "cloudformation": "Infrastructure",
 }
 
+# Products from component_catalog.py; the entries above take precedence.
+for _term, _category in _catalog_category_map().items():
+    _TECH_CATEGORY_MAP.setdefault(_term, _category)
+
 
 def _drop_generic_duplicates(values: List[str]) -> List[str]:
     """Remove a generic term when the branded product it names is also
@@ -190,7 +195,10 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # and a category the grid already lists needs no second row.
     shown_tools = {v.strip().lower() for row in tech_rows for v in row["value"].split(";")}
     for label, field_id in (("Cache Layer", "cache_layer"), ("Event Streaming", "event_streaming")):
-        names = [n for n in tool_names_in(_field_value(fields, field_id)) if n.lower() not in shown_tools]
+        # Compared under the catalog display name, so "ElastiCache" is seen
+        # as the "Amazon ElastiCache" already listed rather than a new row.
+        names = [_catalog_display_name(n) or n for n in tool_names_in(_field_value(fields, field_id))]
+        names = [n for n in dict.fromkeys(names) if n.lower() not in shown_tools]
         if names:
             tech_rows.append({"label": label, "value": "; ".join(names)})
 
