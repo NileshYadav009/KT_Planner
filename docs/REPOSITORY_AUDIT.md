@@ -3714,6 +3714,56 @@ removed: it rewrote "open search results").
 
 Tests: `tests/test_component_catalog.py`.
 
+### 9zz. Screen-share capture: dashboards and links from the recording
+
+The first screenshot feature (removed, §4.3) grabbed one frame per transcript
+segment, i.e. effectively at random. `screen_capture.py` replaces it with a
+selective algorithm over the uploaded meeting video:
+
+1. ffmpeg samples 160x90 grey frames at 1 fps. A new "screen" starts when the
+   whole frame OR any of 48 regions changes (region check added after a
+   Grafana -> Kibana switch in the same theme changed the frame mean by only
+   0.67 but one region by 9.15). Screens held < 3 s (tab switching) and moving
+   camera footage never form a stable screen.
+2. One sharp full-size frame per stable screen (sharpest of three mid-dwell
+   frames) is OCR'd with RapidOCR (CPU, ~4 s/frame; capped at 60 frames).
+3. Classification: < 6 readable lines and no URL = camera/blank; meeting,
+   chat, mail and search pages are ignored; terminals are recognised before
+   keyword page types; dashboards score on monitoring tool names, dashboard
+   vocabulary, time-axis labels and metric units.
+4. Intent: a screenshot needs the speaker to refer to the screen or name the
+   tool/metrics while it is visible (5 s before to 2 s after), or a 10 s+
+   hold of a strong dashboard. Links need the same (reference or 10 s+).
+   Transcript timestamps are shifted back by the leading silence the audio
+   trim removed (measured with ffmpeg silencedetect).
+5. Never saved: any screen matching a credential pattern (password=, AWS
+   keys, private keys, provider tokens, JWTs). URLs lose credentials and
+   sensitive query parameters (token, key, sig, code, ...).
+6. De-duplication by 64-bit dHash and by URL; at most SCREEN_CAPTURE_MAX (10)
+   screenshots.
+
+Captures go into the section being discussed at the time (majority section
+of the sentences in the window; a runbook always to Common Failures; page
+type as fallback), as an `ImageBlock` (embedded as a data URI in the PDF) and
+a "Links shown on screen" list. Files live in `data/kt_assets/<job_id>/`
+(gitignored) and are served by `GET /kt-assets/{job_id}/screen_NN.jpg` only.
+The UI's Visual Evidence panel shows them with time, section and link, plus
+how many screens were skipped and why.
+
+**Measured** on a synthetic 2-minute KT recording with TTS narration and a
+known ground truth (camera, discussed Grafana dashboard, terminal showing an
+AWS secret, Confluence runbook, 2 s Datadog flash, the Grafana dashboard
+again, an undiscussed Kibana dashboard, Slack, still camera): every screen
+handled as intended - 1 screenshot (Grafana, in Monitoring), 2 links, secret
+never written, duplicate/undiscussed/chat/camera skipped with their reasons.
+
+**Limits.** Only recorded uploads (no live meeting capture). OCR can confuse
+I/l inside query strings ("orgId" read as "orgld"). Dashboards are recognised
+by text, so a chart-only screen with no readable labels is not recognised.
+Not yet run on real Teams/Zoom recordings.
+
+Tests: `tests/test_screen_capture.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -8,6 +8,7 @@ access, not `from pipeline import ...`) so writes made by
 """
 
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime
@@ -102,6 +103,19 @@ async def export_pdf(job_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}.pdf\""},
     )
+
+
+@router.get("/kt-assets/{job_id}/{name}")
+def kt_asset(job_id: str, name: str):
+    """A screenshot captured from the shared screen (screen_capture.py).
+    Only the job id and the exact screen_NN.jpg name pattern are accepted, so
+    no other file can be reached through this route."""
+    if not re.fullmatch(r"[0-9A-Za-z\-]{8,64}", job_id or "") or not re.fullmatch(r"screen_\d{2}\.jpg", name or ""):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = os.path.join(pipeline.KT_ASSETS_DIR, job_id, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.post("/upload")

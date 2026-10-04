@@ -5,6 +5,7 @@ document string handed to WeasyPrint. No FastAPI dependency — moved out of
 main.py as part of the Phase 3 architecture split (see REPOSITORY_AUDIT.md).
 """
 
+import base64
 import os
 import re
 
@@ -76,6 +77,27 @@ def _render_inline_text(value) -> str:
 
 
 NOT_COVERED_CELL = "Not covered during KT"
+
+
+def _render_image_block(block: dict) -> str:
+    """A captured screenshot, embedded in the PDF itself (data URI) so the
+    exported document does not depend on the server's files."""
+    path = block.get("image_path") or ""
+    try:
+        with open(path, "rb") as fh:
+            data = base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return f"<p>{html_escape(block.get('caption', ''))} (image no longer available)</p>"
+    parts = [
+        "<figure style=\"margin:0\">",
+        f"<img src=\"data:image/jpeg;base64,{data}\" style=\"width:100%;border:1px solid #d0d6e2;border-radius:4px\" alt=\"\"/>",
+        f"<figcaption style=\"font-size:9pt;color:#555;margin-top:4px\">{html_escape(block.get('caption', ''))}",
+    ]
+    if block.get("url"):
+        url = html_escape(block["url"])
+        parts.append(f"<br/>Link: <a href=\"{url}\">{url}</a>")
+    parts.append("</figcaption></figure>")
+    return "".join(parts)
 
 
 def render_section_blocks(rendered_sections: list) -> str:
@@ -160,6 +182,8 @@ def render_section_blocks(rendered_sections: list) -> str:
                 html.append(
                     f"<pre><code>{html_escape(block.get('code', ''))}</code></pre>"
                 )
+            elif block_type == "ImageBlock":
+                html.append(_render_image_block(block))
             else:
                 html.append(f"<p>{html_escape(block.get('description', ''))}</p>")
             html.append("</div>")
@@ -246,7 +270,7 @@ def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
             if paragraphs:
                 if not all(p.strip() == NOT_COVERED_MESSAGE for p in paragraphs):
                     return True
-        elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock"}:
+        elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock", "ImageBlock"}:
             return True
     return False
 
@@ -283,7 +307,7 @@ def _block_strings(value) -> list:
     elif isinstance(value, dict):
         cells = []
         for key, inner in value.items():
-            if key in ("type", "title", "columns", "language"):
+            if key in ("type", "title", "columns", "language", "image_path", "src"):
                 continue
             inner_strings = _block_strings(inner)
             out.extend(inner_strings)

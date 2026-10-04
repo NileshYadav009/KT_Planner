@@ -537,6 +537,15 @@
     .rp-empty-hint{font-size:11px;color:var(--text3)}
     .rp-shots{display:grid;gap:8px}
     .rp-shots img{width:100%;border-radius:8px;border:1px solid var(--border-lt);display:block}
+    .rp-shot{margin:0}
+    .rp-shot figcaption,.rp-links li{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text2);margin-top:6px;overflow-wrap:anywhere}
+    .rp-shot figcaption span,.rp-links li span{color:var(--text3)}
+    .rp-shot a,.rp-links a{color:var(--blue)}
+    .rp-links{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}
+    .rp-shots-note{font-size:11.5px;color:var(--text3);margin-top:12px;line-height:1.5}
+    .doc-figure{margin:6px 0}
+    .doc-figure img{width:100%;border:1px solid var(--border);border-radius:6px;display:block}
+    .doc-figure figcaption{font-size:12px;color:var(--text3);margin-top:6px;overflow-wrap:anywhere}
 
     /* ── FORM ─────────────────────────────────────────────────── */
     .field-wrap{margin-bottom:10px}
@@ -1741,8 +1750,60 @@ function renderBlockHtml(block){
       return `${title('Troubleshooting')}<ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
       return `${title('Code')}<pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
+    case 'ImageBlock':
+      return `${title('Screenshot')}<figure class="doc-figure"><img src="${escapeHtml(block.src||'')}" alt="${escapeHtml(block.title||'Screenshot')}" loading="lazy"/><figcaption>${escapeHtml(block.caption||'')}${safeLink(block.url) ? `<br/>${safeLink(block.url)}` : ''}</figcaption></figure>`;
     default:
       return `${title(block.type)}<p>${renderInlineText(block.description||'')}</p>`;
+  }
+}
+
+// A link from OCR'd screen content: only http(s), always escaped, opens in a new tab.
+function safeLink(url){
+  if(typeof url !== 'string' || !/^https?:\/\//i.test(url)) return '';
+  const u = escapeHtml(url);
+  return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`;
+}
+
+function renderScreenCaptures(data){
+  const shotsEl = document.getElementById('screenshots');
+  shotsEl.innerHTML = '';
+  const shots = data.screenshots || [];
+  const shotUrls = new Set(shots.map(s => s && s.url).filter(Boolean));
+  const links = (data.screen_links || []).filter(l => !shotUrls.has(l.url));
+  if(shots.length){
+    const grid = document.createElement('div'); grid.className = 'rp-shots';
+    shots.forEach(s => {
+      const src = typeof s === 'string' ? s : s.src;
+      const fig = document.createElement('figure'); fig.className = 'rp-shot';
+      const meta = typeof s === 'string' ? '' :
+        `<figcaption><strong>${escapeHtml(s.title||'Dashboard')}</strong><span>${escapeHtml([s.time, s.section].filter(Boolean).join(' · '))}</span>${safeLink(s.url)}</figcaption>`;
+      fig.innerHTML = `<a href="${escapeHtml(src)}" target="_blank" rel="noopener"><img src="${escapeHtml(src)}" alt="${escapeHtml((s && s.title) || 'Screenshot')}" loading="lazy"/></a>${meta}`;
+      grid.appendChild(fig);
+    });
+    shotsEl.appendChild(grid);
+  }
+  if(links.length){
+    const list = document.createElement('ul'); list.className = 'rp-links';
+    links.forEach(l => {
+      const li = document.createElement('li');
+      li.innerHTML = `<strong>${escapeHtml(l.title||'Link')}</strong><span>${escapeHtml([l.time, l.section].filter(Boolean).join(' · '))}</span>${safeLink(l.url)}`;
+      list.appendChild(li);
+    });
+    shotsEl.appendChild(list);
+  }
+  const st = data.screen_capture;
+  if(st && st.video){
+    const skipped = Object.entries(st.skipped || {});
+    const total = skipped.reduce((n, [, c]) => n + c, 0);
+    const note = document.createElement('p'); note.className = 'rp-shots-note';
+    note.textContent = `${st.stable_screens} screen(s) held on the shared screen were checked`
+      + (total ? `; skipped: ${skipped.map(([r, c]) => `${r} (${c})`).join(', ')}.` : '.');
+    shotsEl.appendChild(note);
+  }
+  if(!shots.length && !links.length){
+    const empty = document.createElement('div'); empty.className = 'rp-empty-state';
+    empty.innerHTML = `<div class="rp-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div><p class="rp-empty-text">${st && st.video ? 'No dashboards or links were discussed on screen.' : 'Upload a meeting recording with screen sharing to capture dashboards and links.'}</p>`;
+    shotsEl.prepend(empty);
   }
 }
 
@@ -1820,16 +1881,7 @@ function pollJobStatus(jobId){
         transcriptEl.textContent=data.transcript||'(none)';
         renderCoverage(data.coverage||{});
         populateCoverBlock(data);
-        const shotsEl=document.getElementById('screenshots');
-        shotsEl.innerHTML='';
-        const shots=data.screenshots||[];
-        if(shots.length){
-          const grid=document.createElement('div'); grid.className='rp-shots';
-          shots.forEach(s=>{ const img=document.createElement('img'); img.src=s; grid.appendChild(img); });
-          shotsEl.appendChild(grid);
-        } else {
-          shotsEl.innerHTML='<div class="rp-empty-state"><div class="rp-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div><p class="rp-empty-text">No screenshots captured.</p></div>';
-        }
+        renderScreenCaptures(data);
 
         try{
           const schemaResp=await fetch(`/schema/${jobId}`);

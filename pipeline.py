@@ -43,6 +43,10 @@ from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
 import contextvars
+import screen_capture
+
+# Screenshots captured from shared screens, one folder per job (gitignored).
+KT_ASSETS_DIR = os.getenv("KT_ASSETS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "kt_assets"))
 from pdf_rendering import build_rendered_sections
 from quality_score import compute_quality_score
 from renderers.sections import validate_renderer_registry
@@ -90,7 +94,8 @@ def load_models():
         )
 
 
-def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None) -> dict:
+def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None,
+                    screen: Optional[dict] = None) -> dict:
     """Run classification through rendering for an already-transcribed, already-cleaned
     transcript, and store the result in JOB_QUEUE.
 
@@ -471,6 +476,16 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             logger.warning("Rendered sections build failed: %s", exc)
             knowledge_object["rendered_sections"] = []
 
+        # Dashboards and links shown on the shared screen (screen_capture.py),
+        # placed in the section that was being discussed at the time.
+        screen_assets = list((screen or {}).get("assets") or [])
+        if screen_assets:
+            try:
+                screen_capture.assign_sections(screen_assets, coverage, (screen or {}).get("transcript_offset", 0.0))
+                screen_capture.attach_to_rendered_sections(knowledge_object["rendered_sections"], screen_assets, job_id)
+            except Exception as exc:
+                logger.warning("Placing screen captures failed: %s", exc)
+
         # Final completeness check against the RENDERED document: every
         # fact-bearing transcript sentence must appear somewhere in it, or be
         # added to Additional Notes. See verify_document_coverage().
@@ -537,10 +552,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             if job_id in JOB_QUEUE:
                 JOB_QUEUE[job_id]["progress"] = 60
 
-        # Screenshot capture is disabled (see REPOSITORY_AUDIT.md §4.3 for the removed
-        # implementation and why); kept as an empty list since the frontend reads
-        # job.screenshots unconditionally.
-        screenshots = []
+        # Dashboards and links captured from the shared screen (empty for a
+        # pasted transcript or an audio-only upload).
+        section_titles = {sid: (cov or {}).get("title", sid) for sid, cov in coverage.items()}
+        screen_view = screen_capture.ui_payload(screen_assets, job_id, section_titles)
+        screenshots = screen_view["screenshots"]
 
         with JOB_LOCK:
             if job_id in JOB_QUEUE:
@@ -564,6 +580,8 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "missing_required": missing_required,
             "progress": progress,
             "screenshots": screenshots,
+            "screen_links": screen_view["links"],
+            "screen_capture": (screen or {}).get("stats"),
             "dynamic_schema": dynamic_schema,
             "populated_fields": populated_fields,
             "validation_warnings": validation_warnings,
@@ -692,7 +710,26 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         if not transcript:
             raise ValueError("No speech detected in the uploaded file.")
 
-        run_kt_pipeline(job_id, transcript, result.get('segments', []))
+        # A recorded meeting with a screen share: capture the dashboards and
+        # links that were shown and discussed (screen_capture.py). Runs here
+        # because the uploaded file is deleted when this task ends. Never
+        # fails the KT: on any error the document is built without captures.
+        screen = None
+        if screen_capture.enabled():
+            try:
+                with JOB_LOCK:
+                    if job_id in JOB_QUEUE:
+                        JOB_QUEUE[job_id]["progress"] = 35
+                offset = screen_capture.leading_silence_seconds(input_path)
+                screen = screen_capture.analyze_screen_shares(
+                    input_path, result.get('segments', []), os.path.join(KT_ASSETS_DIR, job_id),
+                    transcript_offset=offset,
+                )
+                screen["transcript_offset"] = offset
+            except Exception as exc:
+                logger.warning("Screen capture failed: %s", exc)
+
+        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen)
     except Exception as e:
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {

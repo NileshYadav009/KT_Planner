@@ -1269,3 +1269,12 @@ current tools added to the transcript vocabulary. A KT naming current tooling
 now has 32 technologies recognised instead of 2, with no false matches on
 1.16M words of ordinary English and identical cleaning of existing
 transcripts.
+
+## Screen-share capture (audit §9zz)
+
+Uploaded meeting recordings are now scanned for the KT giver's screen share:
+dashboards that were shown and discussed are captured as screenshots, and
+useful links (dashboards, runbooks, pipelines, repos, consoles) are recorded,
+both placed in the section being discussed. Camera views, chat/meeting
+windows, brief tab switches, repeats, undiscussed screens and anything that
+looks like a secret are skipped, and the UI says why.

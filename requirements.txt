@@ -37,3 +37,4 @@ cryptography>=42.0.0      # Cryptographic recipes and primitives
 google-genai>=2.7.0
 rapidfuzz>=3.9.0          # Fuzzy matching for transcript cleanup (same scores as textdistance, compiled)
 json-repair>=0.30.0       # Recovers slightly malformed JSON from the LLM structured-extraction step
+rapidocr>=3.0            # OCR for screen-share capture (screen_capture.py); runs on onnxruntime, CPU only
