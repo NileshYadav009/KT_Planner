@@ -1,10 +1,16 @@
 # Scripts
 
-This folder is intended to contain helper scripts and one-off tooling used to interact with the KT Planner application (audio generation, upload-and-retrieve flows, quick checks).
+Helper scripts for manual workflows. They are not part of the app, and `pytest` does not collect them (`pytest.ini` limits it to `tests/`).
 
-Current guidance:
-- Keep production code inside the project root modules (`main.py`, `context_mapper.py`, etc.).
-- Place helper scripts here (e.g. `generate_audio.py`, `upload_and_get_kt.py`, `check_kt.py`).
-- Do not rely on screenshot extraction; screenshot functionality has been disabled in core code by request.
+| Script | What it does |
+|---|---|
+| `test_kt_from_transcript.py` | Sends a transcript to a running server (`/kt-from-transcript`) and waits for the KT |
+| `upload_and_get_kt.py` | Uploads a recording to a running server and downloads the result |
+| `check_kt.py` | Quick check of a running server's KT output |
+| `generate_audio.py` | Turns a sample transcript into speech for test recordings (needs `pyttsx3`) |
+| `review_vocabulary.py` | Approve or reject learned vocabulary candidates |
+| `debug_glossary.py` | Try glossary corrections on a sentence |
+| `test_pipeline.py`, `test_coverage_extraction.py` | Older walkthroughs of the mapping pipeline that print each stage |
+| `demo_coverage_polish.py`, `demo_topic_blocks.py` | Demonstrations of the polish pass and topic blocks |
 
-To move existing scripts into this folder, copy the files and update any references you may have in tooling.
+Run them from the project root, e.g. `python scripts/test_kt_from_transcript.py`. Scripts that import project modules add the project root to `sys.path` themselves.

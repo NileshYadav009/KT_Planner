@@ -1480,86 +1480,282 @@ def _first_matching_paragraph(section: Optional[Dict[str, Any]], *keywords: str)
     return None
 
 
-def _first_failure_fix(section: Optional[Dict[str, Any]], *symptom_keywords: str) -> Optional[str]:
-    """The "How to Fix" value from common_failures's _structured.failures
-    list for the first entry whose symptom matches — common_failures has no
-    `fields` structure either; its data lives under `_structured`."""
-    failures = (section.get("_structured") or {}).get("failures") if section else None
-    if not isinstance(failures, list):
-        return None
-    for item in failures:
-        if not isinstance(item, dict):
+QUICK_REFERENCE_COLUMNS = ["Situation", "What to do", "Source"]
+_QR_MAX_FAILURES = 6
+_QR_MAX_CAUTIONS = 6
+# Digests and the coverage report restate other sections; the card reads
+# real sections only.
+_QR_SKIP_SECTIONS = frozenset({"quick_reference", "tribal_knowledge", "kt_coverage"})
+
+_QR_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(A-Z0-9])")
+_QR_LEAD_RE = re.compile(r"^(?:and|so|but|also|plus|then|by the way|one more thing|oh and)\b[,\s]*", re.IGNORECASE)
+_ALERT_CUE_RE = re.compile(
+    r"\b(alerts?|alerting|alarms?|pages? us|paged|pager|on-?call|threshold|drops? below|goes? (?:above|over)|exceeds?|"
+    r"dashboard to (?:watch|check|open)|first (?:thing|check|step)s?)\b", re.IGNORECASE)
+_ROLLBACK_CUE_RE = re.compile(
+    r"\b(roll(?:ed|ing)?[ -]?back|revert(?:ed|ing)?|redeploy(?:ing)? the previous|previous (?:version|release|"
+    r"task definition|image|build|deployment|revision))\b", re.IGNORECASE)
+# An instruction not to do something, at the start of a sentence or clause
+# ("Never delete…", "…, so don't run…"); "We never agreed…" is not one.
+_PROHIBITION_RE = re.compile(
+    r"(?:^|[,;:]\s*|\b(?:and|so|but|also|please)\s+)(never|don't|do not|avoid|must not|mustn't|should not|"
+    r"shouldn't|under no circumstances)\b", re.IGNORECASE)
+# The same, but only as the sentence's opening instruction: used to find
+# never-do rules that were filed under another section.
+_OPENING_PROHIBITION_RE = re.compile(
+    r"^(?:(?:and|but|also|so|please)\s+)?(?:never|do not|don't|under no circumstances)\b"
+    r"(?!\s+(?:worry|hesitate|mind|forget))", re.IGNORECASE)
+_CAUTION_RE = re.compile(
+    r"\b(careful|dangerous|danger|risky|risk|fragile|break|breaks|corrupt\w*|irreversibl\w*|data loss|lose|outage|"
+    r"only copy|critical|impact\w*|without (?:telling|asking|approval))\b", re.IGNORECASE)
+_FREEZE_CUE_RE = re.compile(
+    r"\b(freeze|blackout|no (?:deploy\w*|changes|releases)|deploy\w* on fridays?|avoid deploying|do not deploy|"
+    r"don't deploy|only (?:run|deploy|release)\w* on)\b", re.IGNORECASE)
+_ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+|reach out to|call\s+[A-Z]\w+|"
+                                r"ping\s+[A-Z]\w+)", re.IGNORECASE)
+# "One recurring problem is X", "The most common production issue is X",
+# "Another issue is X, which …; fix …".
+_FAILURE_INTRO_RE = re.compile(
+    r"^(?:(?:one|another|a|an|the|our)\s+)?(?:[\w-]+\s+){0,4}?"
+    r"(?:problem|issue|failure(?:\s+mode)?|error|incident|gotcha|outage)s?\s+"
+    r"(?:is|was|we\s+(?:see|hit|get)(?:\s+is)?|that\s+(?:comes\s+up|happens)\s+is)\s+"
+    r"(?P<what>.+?)\s*(?:[;,]\s*(?P<rest>.+))?$", re.IGNORECASE)
+# "There was a major outage last year caused by …"
+_PAST_INCIDENT_RE = re.compile(
+    r"^there\s+(?:was|were|has\s+been|have\s+been)\s+(?:(?:a|an|one)\s+)?"
+    r"(?P<what>.*\b(?:outage|incident|failure|problem|issue)s?\b.*)$", re.IGNORECASE)
+# A runbook step: "When invoices get stuck, check whether …".
+_RUNBOOK_RE = re.compile(
+    r"^(?:when|if|whenever)\s+(?P<symptom>[^,;]{4,120}?),\s*(?:then\s+|first\s+)?"
+    r"(?P<action>(?:check|restart|run|scale|rotate|renew|redeploy|roll\s+back|switch|verify|look\s+at|open|clear|"
+    r"flush|drain|increase|bump|fail\s+over|re-?run|recreate|delete\s+the\s+pod|kill)\b.+)$", re.IGNORECASE)
+_FOLLOW_UP_ACTION_RE = re.compile(
+    r"^(?:then\s+)?(?:check|restart|run|scale|rotate|renew|redeploy|roll\s+back|switch|verify|clear|flush|drain|"
+    r"increase|bump|fail\s+over|re-?run|recreate)\b", re.IGNORECASE)
+_FIX_CUE_RE = re.compile(
+    r"\b(fix|fixed|resolve\w*|workaround|restart\w*|rotate\w*|switch\w*|scale\w*|clear\w*|flush\w*|re-?run\w*|"
+    r"redeploy\w*|roll\w* back|increase\w*|bump\w*|purge\w*|recreate\w*|failover|fail over|archive\w*|verify|check)\b",
+    re.IGNORECASE)
+_NO_FIX_STATED = "No fix was stated in the KT. Ask the outgoing owner."
+
+
+def _qr_sentences(section: Optional[Dict[str, Any]], skip=None) -> List[str]:
+    """The section's sentences that can be acted on: no questions, no
+    statements that something is missing or unknown, and none that `skip`
+    rejects (superseded or contradicted, see append_quick_reference_section)."""
+    if not section:
+        return []
+    content = section.get("coverage_content") or []
+    if isinstance(content, str):
+        content = [content]
+    out: List[str] = []
+    for item in content:
+        for sentence in _QR_SENTENCE_RE.split(str(item).strip()):
+            sentence = sentence.strip()
+            if sentence and not sentence.endswith("?") and not is_gap_statement(sentence) \
+                    and not (skip and skip(sentence)):
+                out.append(sentence)
+    return out
+
+
+def _qr_key(text: str) -> str:
+    return re.sub(r"\W+", " ", _tidy(text).lower()).strip()
+
+
+def _tidy(text: str) -> str:
+    """Drop a spoken lead-in ("And …", "So …") and start with a capital."""
+    text = _QR_LEAD_RE.sub("", text.strip())
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _clause(text: str) -> str:
+    """The rest of a failure sentence after its subject ("which silently
+    stop …", "so we archive …"), as a sentence of its own."""
+    return _tidy(re.sub(r"^(?:which|that|so)\s+", "", text.strip(), flags=re.IGNORECASE))
+
+
+def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]:
+    """(symptom, what to do) pairs from Common Failures: the structured
+    list when the LLM produced one, otherwise the speaker's own sentences,
+    grouped into one item per failure they introduced."""
+    structured = (section.get("_structured") or {}).get("failures") if section else None
+    if isinstance(structured, list) and structured:
+        pairs = []
+        for item in structured:
+            if isinstance(item, dict) and str(item.get("symptom") or "").strip():
+                pairs.append((str(item["symptom"]).strip(), str(item.get("fix") or "").strip() or _NO_FIX_STATED))
+        return pairs[:_QR_MAX_FAILURES]
+
+    items: List[Dict[str, Any]] = []
+    for sentence in _qr_sentences(section, skip):
+        bare = _QR_LEAD_RE.sub("", sentence).rstrip(".")
+        intro = _FAILURE_INTRO_RE.match(bare)
+        past = _PAST_INCIDENT_RE.match(bare)
+        runbook = _RUNBOOK_RE.match(bare)
+        if intro:
+            items.append({"what": intro.group("what"), "parts": [intro.group("rest")] if intro.group("rest") else []})
+        elif past:
+            items.append({"what": past.group("what"), "parts": []})
+        elif runbook and not (items and not items[-1]["parts"]):
+            items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
+        elif items:
+            items[-1]["parts"].append(sentence)
+        elif _FIX_CUE_RE.search(sentence):
+            items.append({"what": None, "parts": [sentence]})
+    pairs = []
+    for item in items:
+        action = " ".join(_clause(p).rstrip(".") + "." for p in item["parts"] if p and p.strip())
+        situation = _tidy(item["what"].rstrip(".")) if item["what"] else "Known failure"
+        pairs.append((situation, action or _NO_FIX_STATED))
+    return pairs[:_QR_MAX_FAILURES]
+
+
+def _runbook_steps(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]:
+    """"When X, check/restart …" steps (and the instruction right after
+    one) wherever they were filed."""
+    steps: List[tuple] = []
+    sentences = _qr_sentences(section, skip)
+    for i, sentence in enumerate(sentences):
+        match = _RUNBOOK_RE.match(_QR_LEAD_RE.sub("", sentence).rstrip("."))
+        if not match:
             continue
-        symptom = str(item.get("symptom") or "").lower()
-        if any(kw.lower() in symptom for kw in symptom_keywords):
-            fix = str(item.get("fix") or "").strip()
-            if fix:
-                return fix
-    return None
+        action = _tidy(match.group("action")).rstrip(".") + "."
+        if i + 1 < len(sentences) and _FOLLOW_UP_ACTION_RE.match(_QR_LEAD_RE.sub("", sentences[i + 1])):
+            action += " " + _tidy(sentences[i + 1])
+        steps.append((_tidy(match.group("symptom")), action))
+    return steps
 
 
 def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
-    """A cheat-sheet of the most operationally urgent facts, assembled
-    purely by looking up data other sections already produced — each lookup
-    matches that section's actual shape (some have a `fields` map, some only
-    `_structured`, some only raw `coverage_content`). Any row whose source
-    is empty is skipped, never fabricated, so this adapts to whatever the
-    transcript actually covered.
+    """The incident card: what to check when an alert fires, how to fix the
+    known failures, how to roll back, who to page, and what never to do.
+
+    Every line is a field value or the speaker's own sentence (a spoken
+    lead-in such as "And" dropped), and names the section it came from in
+    the Source column; nothing is written that the KT did not say, except
+    that a known failure without a stated fix says so. Questions and "we
+    don't know" statements are never quoted as guidance. Runbook steps and
+    never-do rules are also picked up from other sections, because a
+    misfiled step is still the step someone needs during an incident.
     """
     rows: List[Dict[str, str]] = []
+    used: set = set()
+    real_sections = [s for s in knowledge_object.get("sections") or [] if s.get("id") not in _QR_SKIP_SECTIONS]
+
+    # What the session corrected or contradicted (apply_conflicts, P0-5) is
+    # never quoted as an instruction: a sentence naming a tool the speaker
+    # said was replaced is dropped (the correction itself is kept), and each
+    # contradiction becomes one "confirm first" row instead of two orders.
+    superseded = [t for t in knowledge_object.get("_superseded_tools") or [] if isinstance(t, dict) and t.get("old")]
+    conflicts = [c for c in knowledge_object.get("_conflicts") or [] if c.get("a") and c.get("b")]
+    conflicted = {_qr_key(c["a"]) for c in conflicts} | {_qr_key(c["b"]) for c in conflicts}
+
+    def stale(sentence: str) -> bool:
+        if _qr_key(sentence) in conflicted:
+            return True
+        return any(re.search(r"\b" + re.escape(t["old"]) + r"\b", sentence, re.IGNORECASE)
+                   and _qr_key(sentence) != _qr_key(t.get("quote") or "") for t in superseded)
+
+    def title_of(section: Optional[Dict[str, Any]], fallback: str) -> str:
+        return str((section or {}).get("title") or fallback)
+
+    def add(situation: str, action: Any, section: Optional[Dict[str, Any]], fallback_title: str) -> None:
+        text = _join_if_list(action)
+        if not text:
+            return
+        key = re.sub(r"\W+", " ", _tidy(text).lower()).strip()
+        if key in used:
+            return
+        used.add(key)
+        rows.append({"Situation": situation, "What to do": _tidy(text), "Source": title_of(section, fallback_title)})
+
+    def first_matching(section, pattern, limit=2) -> Optional[str]:
+        hits = [_tidy(s) for s in _qr_sentences(section, stale) if pattern.search(s)]
+        return " ".join(hits[:limit]) or None
 
     monitoring = _find_section(knowledge_object, "monitoring_observability")
-    value = _join_if_list(_field_value(monitoring, "first_response_steps"))
-    if value:
-        rows.append({"Situation": "An alert fires", "Immediate reference": value})
+    add("An alert fires", _field_value(monitoring, "first_response_steps") or first_matching(monitoring, _ALERT_CUE_RE),
+        monitoring, "Monitoring")
 
     failures = _find_section(knowledge_object, "common_failures")
-    value = _first_failure_fix(failures, "pod", "deploy")
-    if value:
-        rows.append({"Situation": "Pod fails immediately after deployment", "Immediate reference": value})
+    known = _known_failures(failures, stale)
+    for symptom, fix in known:
+        add(symptom, fix, failures, "Common Failures")
+    for section in real_sections:
+        if section.get("id") in ("common_failures", "deployment_and_rollback") or len(known) >= _QR_MAX_FAILURES:
+            continue
+        for symptom, action in _runbook_steps(section, stale):
+            if len(known) < _QR_MAX_FAILURES:
+                add(symptom, action, section, "")
+                known.append((symptom, action))
 
+    # Rollback: the speaker's own "how", plus trigger, approval and target
+    # time when those fields were filled.
     deployment = _find_section(knowledge_object, "deployment_and_rollback")
-    value = _field_value(deployment, "rollback_procedure", "rollback_time")
-    if value:
-        rows.append({"Situation": "Rollback required", "Immediate reference": f"Target completion: {value}"})
+    rollback_parts = [first_matching(deployment, _ROLLBACK_CUE_RE)]
+    for label, field_id in (("Trigger", "rollback_trigger"), ("Approval", "rollback_approval"), ("Target time", "rollback_time")):
+        value = _join_if_list(_field_value(deployment, "rollback_procedure", field_id))
+        if value and not (rollback_parts[0] and value.lower() in rollback_parts[0].lower()):
+            rollback_parts.append(f"{label}: {value.rstrip('.')}.")
+    add("A release misbehaves (roll back)", " ".join(p for p in rollback_parts if p) or None, deployment, "Deployment")
+
+    ownership = _find_section(knowledge_object, "ownership_escalation")
+    escalation = _field_value(ownership, "escalation_chain")
+    if not escalation:
+        for sid in ("ownership_escalation", "monitoring_observability", "open_responsibilities", "day1_survival_checklist"):
+            section = _find_section(knowledge_object, sid)
+            escalation = first_matching(section, _ESCALATION_CUE_RE)
+            if escalation:
+                ownership = section
+                break
+    add("Who to page or escalate to", escalation, ownership, "Ownership & Escalation")
 
     danger = _find_section(knowledge_object, "danger_zones")
-    value = _first_matching_paragraph(danger, "terraform")
-    if value:
-        rows.append({"Situation": "Terraform state", "Immediate reference": value})
+    cautions = []
+    for sentence in _qr_sentences(danger, stale):
+        if _PROHIBITION_RE.search(sentence):
+            cautions.append(("Never", sentence, danger))
+        elif _CAUTION_RE.search(sentence):
+            cautions.append(("Be careful", sentence, danger))
+    calendar = _find_section(knowledge_object, "known_bad_days")
+    for section in real_sections:
+        if section.get("id") == "danger_zones":
+            continue
+        for sentence in _qr_sentences(section, stale):
+            if _OPENING_PROHIBITION_RE.match(sentence):
+                cautions.append(("Never", sentence, section))
+    for situation, sentence, section in cautions[:_QR_MAX_CAUTIONS]:
+        add(situation, sentence, section, "Danger Zones")
+
+    freeze = first_matching(calendar, _FREEZE_CUE_RE) or _field_value(calendar, "deployment_blackout_times")
+    add("Do not deploy", freeze, calendar, "Operational Calendar")
+
+    for c in conflicts:
+        section = _find_section(knowledge_object, c.get("section_id") or "")
+        add("Conflicting guidance — confirm first",
+            f"“{_tidy(c['a'])}” but also “{_tidy(c['b'])}” Ask the outgoing owner before acting on either.",
+            section, "KT session")
 
     # "If you are unsure ... contact X" guidance can be classified into any
     # of several sections (open responsibilities, ownership, danger zones);
     # look in all of them rather than only the one a past transcript used.
-    value = None
     for sid in ("open_responsibilities", "ownership_escalation", "danger_zones", "day1_survival_checklist"):
-        value = _first_matching_paragraph(_find_section(knowledge_object, sid), "unaware", "unsure", "not sure", "in doubt")
+        section = _find_section(knowledge_object, sid)
+        value = _first_matching_paragraph(section, "unaware", "unsure", "not sure", "in doubt")
         if value:
+            add("Production activity unclear", value, section, "Ownership & Escalation")
             break
-    if value:
-        rows.append({"Situation": "Production activity unclear", "Immediate reference": value})
 
     overview = _find_section(knowledge_object, "system_overview")
-    value = _field_value(overview, "impact_if_down", "what_breaks")
-    if value:
-        rows.append({"Situation": "System unavailable", "Immediate reference": value})
-
-    ownership = _find_section(knowledge_object, "ownership_escalation")
-    value = _field_value(ownership, "escalation_chain") or _first_matching_paragraph(
-        ownership, "escalation point", "escalation path", "escalation chain", "escalation goes", "escalate to"
-    )
-    if value:
-        rows.append({"Situation": "Escalation", "Immediate reference": value})
-
-    value = _field_value(deployment, "deployment_window")
-    if value:
-        rows.append({"Situation": "Planning a production change", "Immediate reference": value})
+    add("System unavailable (impact)", _field_value(overview, "impact_if_down", "what_breaks"), overview, "System Overview")
 
     dr = _find_section(knowledge_object, "disaster_recovery")
     rto, rpo = _field_value(dr, "rto_metric"), _field_value(dr, "rpo_metric")
     if rto or rpo:
         parts = [f"RTO {rto}" if rto else "", f"RPO {rpo}" if rpo else ""]
-        rows.append({"Situation": "Disaster recovery", "Immediate reference": "Recovery objectives: " + ", ".join(p for p in parts if p)})
+        add("Disaster recovery", "Recovery objectives: " + ", ".join(p for p in parts if p) + ".", dr, "Disaster Recovery")
+
+    add("Planning a production change", _field_value(deployment, "deployment_window"), deployment, "Deployment")
 
     if not rows:
         return knowledge_object
@@ -1568,7 +1764,7 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
         "id": QUICK_REFERENCE_SECTION_ID,
         "title": QUICK_REFERENCE_TITLE,
         "section_type": "digest",
-        "description": "Incident and production cheat sheet.",
+        "description": "Incident card: alert, known failures, rollback, escalation and never-do list.",
         "status": "covered",
         "confidence": 0.5,
         "sentence_count": len(rows),

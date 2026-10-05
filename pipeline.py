@@ -46,6 +46,7 @@ from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
 import contextvars
+import media_guard
 import screen_capture
 from job_store import JobStore, PersistentJobs
 from auth import tenant_llm_policy
@@ -755,28 +756,23 @@ def trim_leading_trailing_silence(input_path: str, output_path: str) -> bool:
     return os.path.exists(output_path) and os.path.getsize(output_path) > 0
 
 
-def process_upload_task(job_id: str, input_path: str, audio_path: str):
-    """Background task for transcription and classification from an uploaded audio file."""
+def _extract_audio(input_path: str, media_format: Optional[str]) -> str:
+    """The upload's audio as 16 kHz mono WAV. Only this file, which ffmpeg
+    wrote, reaches the Whisper decoder; the upload itself never does."""
+    return media_guard.extract_audio(input_path, media_format, f"{input_path}.wav")
+
+
+def process_upload_task(job_id: str, input_path: str, audio_path: str, media_format: Optional[str] = None):
+    """Background task for transcription and classification from an uploaded
+    recording. The route has already checked it (media_guard.probe)."""
     try:
         if os.path.getsize(input_path) == 0:
             raise ValueError("Uploaded file is empty.")
 
-        # Try to extract/convert audio; fall back to original if conversion fails
-        audio_to_use = input_path
         try:
-            # Try to extract audio as WAV (more compatible than MP3)
-            audio_path_wav = f"{input_path}.wav"
-            if not input_path.lower().endswith(('.wav', '.mp3')):
-                ffmpeg.input(input_path).output(
-                    audio_path_wav, acodec="pcm_s16le", ac=1, ar=16000
-                ).overwrite_output().run(quiet=True, stderr=None, stdout=None)
-            else:
-                audio_path_wav = input_path
-            if os.path.exists(audio_path_wav) and os.path.getsize(audio_path_wav) > 0:
-                audio_to_use = audio_path_wav
-        except Exception as e:
-            # If conversion fails, try the original file directly
-            pass
+            audio_to_use = _extract_audio(input_path, media_format)
+        except media_guard.MediaRejected as exc:
+            raise ValueError(exc.message) from exc
 
         # Trim only leading/trailing silence to speed up transcription.
         try:

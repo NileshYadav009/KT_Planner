@@ -108,7 +108,6 @@ KT_Planner/
 ├── check_kt.py                 # validation utility script
 ├── context_mapper.py           # active semantic mapping pipeline
 ├── devops_transcription.py     # transcription helper
-├── enterprise_semantic_mapper.py # alternate semantic mapper implementation
 ├── glossary.py                 # glossary corrections support
 ├── kt_schema_new.json          # active schema definition
 ├── main.py                     # FastAPI server entry point

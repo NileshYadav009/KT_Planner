@@ -180,8 +180,11 @@
     .tb-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:rgba(255,255,255,.5);padding:0 4px}
     .tb-status-dot{width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.18)}
     .tb-workspace-slot{display:inline-flex;align-items:center;gap:10px}
-    .tb-workspace{font-size:13px;font-weight:600;color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .tb-signout{background:none;border:0;cursor:pointer;font:inherit}
+    .tb-workspace{font-size:13px;font-weight:600;color:rgba(255,255,255,.82);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tb-signout{background:none;border:0;cursor:pointer;font-family:inherit}
+    .role-note{margin:0 12px 0 0;font-size:12.5px;color:var(--text3);align-self:center;text-align:right}
+    .tb-role{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;color:rgba(255,255,255,.75);
+      border:1px solid rgba(255,255,255,.18);white-space:nowrap}
     .icon-btn{
       display:flex;align-items:center;justify-content:center;
       width:32px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,.12);
@@ -1136,7 +1139,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.9A5 5 0 0 1 6 5.3 6 6 0 0 1 17.7 8h.3a4.5 4.5 0 0 1 1 8.9"/><path d="M12 12v9"/><path d="M9 15l3-3 3 3"/></svg>
             </div>
             <div class="uz-title">Drop a file or click to browse</div>
-            <div class="uz-sub">MP4, MP3, WAV, MOV, WEBM — up to 500 MB</div>
+            <div class="uz-sub">MP4, MP3, WAV, MOV, WEBM — up to 2 GB</div>
             <div class="uz-file" id="fileNameDisplay"></div>
           </div>
         </label>
@@ -1144,6 +1147,7 @@
         </div>
 
         <div style="display:flex;justify-content:flex-end;margin-top:12px">
+          <p class="role-note" id="roleNote" hidden></p>
           <button id="upload" class="btn btn-primary">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             <span id="uploadLabel">Upload &amp; Process</span>
@@ -1418,6 +1422,21 @@ window.fetch = async (input, init = {}) => {
   return resp;
 };
 
+/* Roles (auth.py PERMISSIONS): a KT receiver can open and export KTs but
+   not create or correct them; the server enforces this, the UI just says so. */
+function applyRolePermissions(me){
+  const perms = new Set(me.permissions || []);
+  if(!perms.has('kt:create')){
+    const btn = document.getElementById('upload');
+    if(btn){ btn.disabled = true; btn.title = 'Your role can view KTs but not create them'; btn.dataset.roleLocked = '1'; }
+    const note = document.getElementById('roleNote');
+    if(note){
+      note.textContent = `As a ${me.role_label || me.role} you can open and export KTs. Ask your workspace admin for the giver or reviewer role to create one.`;
+      note.hidden = false;
+    }
+  }
+}
+
 async function signOut(){
   try{ await fetch('/logout', {method:'POST'}); }catch(e){}
   try{ localStorage.removeItem('kt-last-job'); }catch(e){}
@@ -1431,10 +1450,13 @@ async function signOut(){
     const me = await resp.json();
     const slot = document.getElementById('tbWorkspace');
     if(!slot) return;
+    applyRolePermissions(me);
     if(me.auth === 'disabled'){
       slot.innerHTML = '<span class="tb-badge" title="CONTINUUM_AUTH=disabled">Sign-in off (local)</span>';
     } else {
-      slot.innerHTML = `<span class="tb-workspace" title="Signed in with key: ${escapeHtml(me.key_label||'')}">${escapeHtml(me.workspace||'')}</span>`
+      const how = me.method === 'sso' ? 'with single sign-on' : 'with an API key';
+      slot.innerHTML = `<span class="tb-workspace" title="${escapeHtml(me.user||'')}, signed in ${how}">${escapeHtml(me.workspace||'')}</span>`
+        + `<span class="tb-role" title="${escapeHtml(me.user||'')}">${escapeHtml(me.role_label||me.role||'')}</span>`
         + '<button class="tb-link tb-signout" type="button" id="signOutBtn">Sign out</button>';
       document.getElementById('signOutBtn').addEventListener('click', signOut);
     }
@@ -2069,7 +2091,7 @@ uploadBtn.addEventListener('click',async()=>{
   finally{
     // Re-enabled once the job is accepted; polling reports the rest. This
     // stops a double click from queueing the same KT twice.
-    uploadBtn.disabled = false;
+    uploadBtn.disabled = uploadBtn.dataset.roleLocked === '1';
   }
 });
 
@@ -2136,11 +2158,11 @@ async function loadHistory(){
       </button>
       <span class="history-actions">
         <button class="history-act" type="button" data-act="pdf" ${done ? '' : 'disabled'} title="Download PDF" aria-label="Download PDF for ${escapeHtml(title)}">${HISTORY_ICONS.pdf}</button>
-        <button class="history-act danger" type="button" data-act="delete" title="Delete" aria-label="Delete ${escapeHtml(title)}">${HISTORY_ICONS.del}</button>
+        ${job.can_delete ? `<button class="history-act danger" type="button" data-act="delete" title="Delete" aria-label="Delete ${escapeHtml(title)}">${HISTORY_ICONS.del}</button>` : ''}
       </span>`;
     li.querySelector('.history-open').addEventListener('click', () => openHistoryJob(job.job_id));
     li.querySelector('[data-act="pdf"]').addEventListener('click', () => downloadKtPdf(job.job_id, title));
-    li.querySelector('[data-act="delete"]').addEventListener('click', () => deleteHistoryJob(job.job_id, title));
+    li.querySelector('[data-act="delete"]')?.addEventListener('click', () => deleteHistoryJob(job.job_id, title));
     list.appendChild(li);
   });
 }
@@ -2161,7 +2183,10 @@ async function deleteHistoryJob(jobId, title){
   if(!window.confirm(`Delete "${title}"?\n\nThis permanently removes its transcript, document and screenshots.`)) return;
   try{
     const resp = await fetch(`/jobs/${encodeURIComponent(jobId)}`, {method:'DELETE'});
-    if(!resp.ok){ showToast('Could not delete this KT', 5000, 'error'); return; }
+    if(!resp.ok){
+      const detail = resp.status === 403 ? (await resp.json().catch(() => ({}))).detail : '';
+      showToast(detail || 'Could not delete this KT', 6000, 'error'); return;
+    }
   }catch(e){ showToast('Could not delete this KT', 5000, 'error'); return; }
   showToast(`Deleted "${title}"`);
   if(jobId === currentJobId){

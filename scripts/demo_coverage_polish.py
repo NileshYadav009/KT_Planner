@@ -20,7 +20,9 @@ import json
 import os
 import sys
 
-from context_mapper import ContextMappingPipeline
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # project root; this script lives in scripts/
+
+from context_mapper import ContextMappingPipeline  # noqa: E402
 
 # Import the polish function the same way main.py does, so we exercise the
 # production code path rather than a copy.
@@ -28,7 +30,7 @@ from ai import polish_coverage_sections, GEMINI_ENABLED
 
 # Reuse the canonical e-commerce transcript so the demo is directly comparable
 # to the output you have been looking at.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests"))
 from test_ecommerce_kt import TRANSCRIPT, build_segments  # noqa: E402
 
 

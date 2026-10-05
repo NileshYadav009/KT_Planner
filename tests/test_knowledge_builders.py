@@ -774,7 +774,7 @@ def test_append_quick_reference_section_skips_rows_with_no_source_data():
     result = append_quick_reference_section(ko)
     qr = next(s for s in result["sections"] if s["id"] == "quick_reference")
     rows = qr["_quick_reference_rows"]
-    assert rows == [{"Situation": "Escalation", "Immediate reference": "on-call -> manager"}]
+    assert rows == [{"Situation": "Who to page or escalate to", "What to do": "On-call -> manager", "Source": "OWNERSHIP"}]
 
 
 def test_append_quick_reference_section_noop_when_nothing_available():

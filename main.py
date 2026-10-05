@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
@@ -7,6 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from api import router
+import media_guard
 import pipeline
 
 app = FastAPI()
@@ -19,6 +21,22 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Continuum-CSRF"],
 )
+
+
+
+@app.middleware("http")
+async def refuse_oversized_uploads(request: Request, call_next):
+    """Refuse an upload that declares a size over the limit before its body
+    is read (media_guard.save_upload also stops one that does not declare
+    it). Set the same limit on the reverse proxy in production."""
+    if request.method == "POST" and request.url.path == "/upload":
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > media_guard.max_upload_bytes() + 64 * 1024:   # + multipart overhead
+            detail = (f"The file is larger than {media_guard.upload_limit_label()}. "
+                      "Upload a shorter recording or the audio track only.")
+            return JSONResponse({"detail": detail}, status_code=413)
+    return await call_next(request)
+
 
 # Serve the frontend static files
 app.mount("/static", StaticFiles(directory="static"), name="static")

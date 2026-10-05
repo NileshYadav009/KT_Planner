@@ -17,7 +17,6 @@ except Exception:
     util = _Util()
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 import logging
 import time
 import os
@@ -34,9 +33,6 @@ except Exception:
     # python-dotenv is optional; if it's missing we simply rely on the real env.
     pass
 
-from devops_transcription import clean_transcript
-from context_mapper import AudioSegment, ContextClassifier, segment_sentences
-from enterprise_semantic_mapper import create_semantic_mapper
 from field_populator import find_source_sentence_index
 from grounding import ground_structured, added_specifics
 from llm.usage import record_rejected as record_llm_rejected
@@ -284,40 +280,7 @@ def warmup_models():
 from kt_schema_loader import SCHEMA
 
 SENT_MODEL: Optional[SentenceTransformer] = None
-SECTION_EMBEDS: Optional[Dict[str, np.ndarray]] = None
-CONFIDENCE_THRESHOLD = 0.65  # Minimum confidence for auto-classification
 
-def _build_section_hints():
-    hints_map = {}
-    def collect_field_text(field):
-        texts = []
-        if isinstance(field, dict):
-            if field.get("label"):
-                texts.append(field["label"])
-            if field.get("id"):
-                texts.append(field["id"].replace('_', ' '))
-            if field.get("options"):
-                texts.extend([str(o) for o in field.get("options")])
-            if field.get("columns"):
-                texts.extend(field.get("columns"))
-            if field.get("fields"):
-                for sub in field.get("fields"):
-                    texts.extend(collect_field_text(sub))
-        return texts
-
-    for s in SCHEMA:
-        items = set()
-        for h in s.get("hints", []):
-            items.add(h.lower())
-        for field in s.get("fields", []) or []:
-            for t in collect_field_text(field):
-                items.add(t.lower())
-        hints_map[s["id"]] = items
-    return hints_map
-
-SECTION_HINTS = _build_section_hints()
-
-WORD_RE = re.compile(r"\b\w+\b")
 
 def get_sentence_model(model_name: str = "all-MiniLM-L6-v2") -> Optional[SentenceTransformer]:
     global SENT_MODEL
@@ -327,89 +290,6 @@ def get_sentence_model(model_name: str = "all-MiniLM-L6-v2") -> Optional[Sentenc
         except Exception:
             SENT_MODEL = None
     return SENT_MODEL
-
-def get_section_embeds() -> Dict[str, np.ndarray]:
-    """Compute and cache embeddings for each section (title + hints).
-
-    Returns a dict mapping section id -> numpy embedding array.
-    """
-    global SECTION_EMBEDS
-    if SECTION_EMBEDS is not None:
-        return SECTION_EMBEDS
-
-    model = get_sentence_model()
-    embeds = {}
-    for s in SCHEMA:
-        parts = [s.get("title", "")]
-        parts.extend(s.get("hints", []))
-
-        # include field labels, option values and column names to improve hint coverage
-        def collect_field_text(field):
-            texts = []
-            if isinstance(field, dict):
-                if field.get("label"):
-                    texts.append(field["label"])
-                if field.get("id"):
-                    texts.append(field["id"].replace('_', ' '))
-                if field.get("options"):
-                    texts.extend([str(o) for o in field.get("options")])
-                if field.get("columns"):
-                    texts.extend(field.get("columns"))
-                if field.get("fields"):
-                    for sub in field.get("fields"):
-                        texts.extend(collect_field_text(sub))
-            return texts
-
-        for field in s.get("fields", []) or []:
-            parts.extend(collect_field_text(field))
-
-        text = "\n".join([p for p in parts if p])
-        if model is not None:
-            vec = model.encode(text, convert_to_tensor=False, normalize_embeddings=True)
-            embeds[s["id"]] = np.asarray(vec, dtype=np.float32)
-        else:
-            v = np.random.rand(384).astype(np.float32)
-            v /= (np.linalg.norm(v) + 1e-9)
-            embeds[s["id"]] = v
-
-    SECTION_EMBEDS = embeds
-    return SECTION_EMBEDS
-
-CONTEXT_CLASSIFIER: Optional[ContextClassifier] = None
-
-
-def get_context_classifier(similarity_threshold: float = 0.20) -> ContextClassifier:
-    global CONTEXT_CLASSIFIER
-    if CONTEXT_CLASSIFIER is None:
-        CONTEXT_CLASSIFIER = ContextClassifier(similarity_threshold=similarity_threshold)
-        CONTEXT_CLASSIFIER.index_schema(SCHEMA)
-    else:
-        CONTEXT_CLASSIFIER.similarity_threshold = similarity_threshold
-    return CONTEXT_CLASSIFIER
-
-
-def build_section_paragraphs(transcript: str):
-    """Build reconstructed paragraphs for each section from a transcript."""
-    import traceback
-    try:
-        provider = get_llm_provider()
-        sentences = _prepare_sentences(transcript)
-        if not sentences:
-            return {}
-
-        sentence_tuples = [(f"sent_{idx}", sent.text) for idx, sent in enumerate(sentences)]
-        llm_refiner = provider.generate if provider else None
-        mapper = create_semantic_mapper(SCHEMA, llm_refiner=llm_refiner)
-        result = mapper.process_transcript(sentence_tuples)
-        paragraphs = result.get("paragraphs", {})
-        if paragraphs:
-            return paragraphs
-        # If no paragraphs produced, log and return empty
-        logger.debug("build_section_paragraphs: mapper returned empty paragraphs dict")
-        return {}
-    except Exception as e:
-        logger.exception("build_section_paragraphs failed: %s", e)
-        return {}
 
 
 PRIORITY_COVERAGE_SECTION_IDS = [
@@ -716,108 +596,6 @@ def polish_coverage_text(
     return polished.get(section_id, [])
 
 
-def _prepare_sentences(transcript: str):
-    """Segment transcript into sentence objects using context_mapper."""
-    cleaned_text = clean_transcript(transcript)
-    audio_seg = AudioSegment(text=cleaned_text, start=0.0, end=0.0, avg_logprob=-1.0)
-    return segment_sentences([audio_seg])
-
-
-def _classify_transcript_sentences(transcript: str, similarity_threshold: float = 0.20):
-    """Classify transcript at sentence granularity with neighbor-aware embeddings."""
-    sentences = _prepare_sentences(transcript)
-    if not sentences:
-        return []
-
-    classifier = get_context_classifier(similarity_threshold)
-    texts = [s.text for s in sentences]
-    embeddings = classifier.model.encode(texts, convert_to_tensor=True)
-
-    classified_sentences = []
-    for idx, sentence in enumerate(sentences):
-        window_size = 2
-        start = max(0, idx - window_size)
-        end = min(len(sentences), idx + window_size + 1)
-        context_text = " ".join([sentences[j].text for j in range(start, end)])
-        classified_sentence = classifier.classify_sentence(
-            sentence,
-            sent_embedding=embeddings[idx],
-            context_text=context_text
-        )
-        classified_sentences.append(classified_sentence)
-    return classified_sentences
-
-
-def classify_transcript(transcript: str, *, similarity_threshold: float = 0.20):
-    """Classify transcript at sentence level into KT sections."""
-    coverage = {s["id"]: [] for s in SCHEMA}
-    classified_sentences = _classify_transcript_sentences(transcript, similarity_threshold=similarity_threshold)
-
-    for classified in classified_sentences:
-        if classified.is_unassigned or classified.primary_classification is None:
-            continue
-        confidence = classified.primary_classification.confidence or 0.0
-        if confidence < similarity_threshold:
-            continue
-        section_id = classified.primary_classification.section_id
-        coverage[section_id].append(classified.sentence.text)
-
-    return coverage
-
-
-def analyze_transcript(transcript: str, *, similarity_threshold: float = 0.20, min_chunks_for_covered: int = 2):
-    """Produce structured KT coverage per section using sentence-level classification."""
-    section_ids = [s['id'] for s in SCHEMA]
-    classified_sentences = _classify_transcript_sentences(transcript, similarity_threshold=similarity_threshold)
-
-    if not classified_sentences:
-        return {
-            s['id']: {
-                'status': 'missing',
-                'confidence': 0.0,
-                'extracted_text': '',
-                'chunks': [],
-                'scores': []
-            }
-            for s in SCHEMA
-        }
-
-    results = {sec_id: {'matched_chunks': [], 'matched_scores': []} for sec_id in section_ids}
-    for classified in classified_sentences:
-        if classified.is_unassigned or classified.primary_classification is None:
-            continue
-        confidence = classified.primary_classification.confidence or 0.0
-        if confidence < similarity_threshold:
-            continue
-        sec_id = classified.primary_classification.section_id
-        results[sec_id]['matched_chunks'].append(classified.sentence.text)
-        results[sec_id]['matched_scores'].append(confidence)
-
-    final_results = {}
-    for sec_id in section_ids:
-        matched_chunks = results[sec_id]['matched_chunks']
-        matched_scores = results[sec_id]['matched_scores']
-
-        if len(matched_chunks) == 0:
-            status = 'missing'
-        elif len(matched_chunks) < min_chunks_for_covered:
-            status = 'partial'
-        else:
-            status = 'covered'
-
-        confidence = max(matched_scores) if matched_scores else 0.0
-        confidence = float(np.clip(confidence, 0.0, 1.0))
-        final_results[sec_id] = {
-            'status': status,
-            'confidence': confidence,
-            'extracted_text': '\n'.join(matched_chunks),
-            'chunks': matched_chunks,
-            'scores': matched_scores
-        }
-
-    return final_results
-
-
 def map_analysis_to_fields(analysis: dict, schema: list, *, min_similarity: float = 0.25):
     """Map analyzed chunks to concrete schema fields.
 
@@ -883,99 +661,3 @@ def map_analysis_to_fields(analysis: dict, schema: list, *, min_similarity: floa
                 }
 
     return mappings
-
-def summarize_coverage(analysis: dict, schema: list):
-    required_ids = [s['id'] for s in schema if s.get('required')]
-    covered = 0
-    partial = 0
-    confidences = []
-    missing_ids = []
-    for sid in required_ids:
-        info = analysis.get(sid, {})
-        status = info.get('status', 'missing')
-        if status == 'covered':
-            covered += 1
-        elif status == 'partial':
-            partial += 1
-        else:
-            missing_ids.append(sid)
-        confidences.append(float(info.get('confidence', 0.0)))
-    total = len(required_ids)
-    coverage_pct = 0.0 if total == 0 else (covered + 0.5 * partial) / total
-    avg_conf = float(np.mean(confidences)) if confidences else 0.0
-    risk = 1.0 - coverage_pct
-    if total > 0:
-        risk += len(missing_ids) / total * 0.5
-    risk = float(np.clip(risk, 0.0, 1.0))
-    return {
-        'coverage_percentage': coverage_pct,
-        'confidence_score': avg_conf,
-        'risk_score': risk,
-        'missing_required_sections': missing_ids
-    }
-
-def explainability_logs(analysis: dict):
-    logs = {}
-    for sid, info in analysis.items():
-        status = info.get('status', 'missing')
-        if status == 'missing':
-            expected = list(SECTION_HINTS.get(sid, []))[:10]
-            logs[sid] = {
-                'status': status,
-                'reason': 'no matched chunks',
-                'expected_hints': expected,
-                'matched': []
-            }
-        else:
-            logs[sid] = {
-                'status': status,
-                'matched_count': len(info.get('chunks', [])),
-                'top_score': max(info.get('scores', [0.0])) if info.get('scores') else 0.0
-            }
-    return logs
-
-def generate_report(transcript: str, similarity_threshold: float = 0.20, min_chunks_for_covered: int = 2, tenant_id: str = "", project_id: str = "", team_id: str = "", session_state: str = "In Progress"):
-    analysis = analyze_transcript(transcript, similarity_threshold=similarity_threshold, min_chunks_for_covered=min_chunks_for_covered)
-    summary = summarize_coverage(analysis, SCHEMA)
-    logs = explainability_logs(analysis)
-    heatmap = {}
-    for s in SCHEMA:
-        sid = s['id']
-        info = analysis.get(sid, {})
-        status = info.get('status', 'missing')
-        conf = float(info.get('confidence', 0.0))
-        if status == 'covered':
-            heat = 1.0 * conf
-        elif status == 'partial':
-            heat = 0.5 * conf
-        else:
-            heat = 0.0
-        heatmap[sid] = heat
-    incomplete_mandatory = summary['missing_required_sections']
-    recommended_state = "Pending Review"
-    complete_with_risk = False
-    if len(incomplete_mandatory) > 0:
-        recommended_state = "Completed with Risk"
-        complete_with_risk = True
-    paragraph_data = build_section_paragraphs(transcript)
-    audit = {
-        'timestamp': datetime.utcnow().isoformat() + "Z",
-        'tenant_id': tenant_id,
-        'project_id': project_id,
-        'team_id': team_id,
-        'session_state': session_state,
-        'coverage_summary': summary,
-        'incomplete_mandatory_sections': incomplete_mandatory
-    }
-    return {
-        'analysis': analysis,
-        'coverage_map': {sid: analysis[sid]['status'] for sid in analysis},
-        'heatmap': heatmap,
-        'paragraphs': paragraph_data,
-        'auto_highlight_incomplete_mandatory': incomplete_mandatory,
-        'summary': summary,
-        'risk_warning': complete_with_risk,
-        'recommended_state': recommended_state,
-        'audit_log': audit,
-        'explainability': logs
-    }

@@ -51,7 +51,6 @@ def _job(pipeline, job_id, tenant_id):
     ("get", "/jobs", None),
     ("post", "/kt-from-transcript", {"transcript": "x"}),
     ("post", "/feedback", {"job_id": "x", "sentence_id": 0, "corrected_classification": "danger_zones"}),
-    ("post", "/semantic-placement", {"transcript": "x"}),
 ])
 def test_every_job_route_requires_a_key(client, method, path, body):
     resp = getattr(client, method)(path, json=body) if body is not None else getattr(client, method)(path)

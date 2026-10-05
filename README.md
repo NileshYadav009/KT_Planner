@@ -66,24 +66,25 @@ KT_Planner/
 │   ├── REPOSITORY_AUDIT.md     # Full session-by-session technical audit trail
 │   ├── progress.md             # Handoff/orientation doc for picking work back up
 │   └── ...                     # ARCHITECTURE.md, TESTING.md, etc.
-├── scripts/                    # Small helper scripts for manual workflows
+├── scripts/                    # Helper scripts for manual workflows (not part of the app or the test suite)
 │   ├── check_kt.py
+│   ├── demo_coverage_polish.py
+│   ├── demo_topic_blocks.py
 │   ├── generate_audio.py
 │   ├── README.md
+│   ├── test_coverage_extraction.py
+│   ├── test_kt_from_transcript.py
+│   ├── test_pipeline.py
 │   └── upload_and_get_kt.py
 ├── static/                     # Web UI files and evidence screenshots
 │   ├── index.html
 │   ├── review.html
 │   └── screenshots/
 ├── templates/                  # Stored template files (currently empty)
-├── tests/                      # Test code and validation helpers
-│   └── test_pipeline.py
-├── ai.py                       # Legacy AI classification helpers
-├── check_kt.py                 # CLI/utility validator for KT output
+├── tests/                      # The pytest suite (pytest.ini limits collection to this folder)
+├── ai.py                       # LLM helpers: structured extraction, polish, field mapping
 ├── context_mapper.py           # Main semantic mapping pipeline
 ├── devops_transcription.py     # Transcription-specific helper script
-├── enterprise_semantic_mapper.py # Alternate semantic mapper implementation
-├── generate_audio.py           # Audio generation or processing utility
 ├── glossary.json               # Glossary term definitions
 ├── glossary.py                 # Glossary support and corrections
 ├── README.md                   # This file
@@ -92,7 +93,6 @@ KT_Planner/
 ├── policy.json                 # Runtime policy configuration
 ├── runtime_policy.py           # Policy loader and runtime behavior
 ├── templates.py                # Template manager for schema versions
-├── upload_and_get_kt.py        # Upload helper and KT retrieval utility
 └── main.py                     # FastAPI application entry point
 ```
 
@@ -117,10 +117,7 @@ The active knowledge transfer schema. It defines section IDs, labels, hints, and
 Defines glossary terms and applies conservative corrections to transcription text to improve semantic quality.
 
 ### `ai.py`
-Legacy support for older classification logic. It is kept as a reference and backup; active sentence-level mapping is handled by `context_mapper.py`.
-
-### `enterprise_semantic_mapper.py`
-An alternate or experimental semantic mapper implementation. It is not currently part of the main processing flow but is useful for comparison or future enhancement.
+LLM helpers used by the pipeline: structured extraction per section, the coverage polish pass (with its lossless and grounding checks), and embedding-based field mapping. Sentence classification itself is done only by `context_mapper.py`; the second classifier (`enterprise_semantic_mapper.py`) and the `/semantic-placement` endpoint were removed.
 
 ### `pii_anonymizer.py`
 Wraps PII detection and anonymization logic (based on Microsoft Presidio). It provides:

@@ -87,6 +87,7 @@ def test_upload_of_a_non_kt_recording_fails_with_the_reason(tmp_path, monkeypatc
                           avg_logprob=-0.2, compression_ratio=1.0, no_speech_prob=0.01)
     monkeypatch.setattr(pipeline, "MODEL", SimpleNamespace(transcribe=lambda *a, **k: ([seg], SimpleNamespace(language="en"))))
     monkeypatch.setattr(pipeline.screen_capture, "enabled", lambda: False)
+    monkeypatch.setattr(pipeline, "_extract_audio", lambda path, media_format: path)   # no ffmpeg needed here
     src = tmp_path / "upload.tmp"
     src.write_bytes(b"not really audio")
     pipeline.process_upload_task("gate-upload-0001", str(src), str(src) + ".mp3")

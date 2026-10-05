@@ -34,6 +34,8 @@ typing-extensions>=4.12.0 # Extended type hints for better IDE support
 
 # Security & Authentication (Enterprise Features - NEW)
 cryptography>=42.0.0      # Cryptographic recipes and primitives
+python-jose[cryptography]>=3.4.0  # Verifies SSO ID tokens (sso.py); 3.4.0 fixes the algorithm-confusion CVEs
+httpx>=0.27.0             # Talks to the SSO identity provider (discovery, keys, token endpoint)
 google-genai>=2.7.0
 rapidfuzz>=3.9.0          # Fuzzy matching for transcript cleanup (same scores as textdistance, compiled)
 json-repair>=0.30.0       # Recovers slightly malformed JSON from the LLM structured-extraction step

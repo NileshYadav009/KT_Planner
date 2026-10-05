@@ -7,30 +7,33 @@ access, not `from pipeline import ...`) so writes made by
 `pipeline.process_upload_task` in the background task are always visible here.
 """
 
+import logging
 import os
 import re
-import tempfile
 import uuid
 from datetime import datetime
 
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, BackgroundTasks, Depends, Request
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from ai import generate_report
 from auth import (
-    SESSION_COOKIE, SESSION_TTL_SECONDS, Principal, create_session, end_session, ensure_job_access,
-    optional_principal, principal_for_key, require_principal, sign_asset_urls, tenant_name, verify_asset_signature,
+    ROLE_LABELS, SESSION_COOKIE, SESSION_TTL_SECONDS, Principal, audit, can_delete_job, create_session, end_session,
+    ensure_job_access, optional_principal, principal_for_key, require_permission, require_principal, sign_asset_urls,
+    tenant_name, verify_asset_signature,
 )
 from devops_transcription import clean_transcript
 from input_gate import assess_transcript
 from kt_schema_loader import SCHEMA
+import media_guard
 import pdf_rendering
 import pipeline
+import sso
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/healthz")
@@ -141,32 +144,44 @@ def kt_asset(job_id: str, name: str, exp: Optional[int] = None, sig: Optional[st
     return FileResponse(path, media_type="image/jpeg")
 
 
+def _new_job(principal: Principal) -> dict:
+    return {"status": "processing", "progress": 0, "tenant_id": principal.tenant_id,
+            "created_by": principal.key_label, "created_by_id": principal.actor}
+
+
 @router.post("/upload")
 async def upload(file: UploadFile, background_tasks: BackgroundTasks,
-                 principal: Principal = Depends(require_principal)):
+                 principal: Principal = Depends(require_permission("kt:create"))):
     if not file:
         raise HTTPException(status_code=400, detail="No file uploaded.")
 
     input_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as tmp:
-            tmp.write(await file.read())
-            input_path = tmp.name
+        # Streamed to disk with a size cap, then identified by ffprobe with
+        # only audio/video containers allowed, before anything decodes it
+        # (media_guard.py). A refusal comes back now, not as a failed job.
+        input_path = await media_guard.save_upload(file)
+        media = await run_in_threadpool(media_guard.probe, input_path)
 
         job_id = str(uuid.uuid4())
         audio_path = f"{input_path}.mp3"
 
         with pipeline.JOB_LOCK:
-            pipeline.JOB_QUEUE[job_id] = {"status": "processing", "progress": 0, "tenant_id": principal.tenant_id}
+            pipeline.JOB_QUEUE[job_id] = _new_job(principal)
 
         # Queue background task and return immediately
-        background_tasks.add_task(pipeline.process_upload_task, job_id, input_path, audio_path)
+        background_tasks.add_task(pipeline.process_upload_task, job_id, input_path, audio_path,
+                                  media_format=media["format"])
 
         return {
             "job_id": job_id,
             "status": "processing",
             "message": "File queued for processing. Poll /status/{job_id} for results."
         }
+    except media_guard.MediaRejected as exc:
+        if input_path and os.path.exists(input_path):
+            os.unlink(input_path)
+        raise HTTPException(status_code=exc.status, detail=exc.message)
     except Exception as e:
         if input_path and os.path.exists(input_path):
             os.unlink(input_path)
@@ -175,7 +190,7 @@ async def upload(file: UploadFile, background_tasks: BackgroundTasks,
 
 @router.post("/kt-from-transcript")
 async def kt_from_transcript(payload: dict, background_tasks: BackgroundTasks,
-                             principal: Principal = Depends(require_principal)):
+                             principal: Principal = Depends(require_permission("kt:create"))):
     """Run the KT pipeline directly from a transcript, skipping audio/Whisper entirely.
 
     A test/dev entry point so classification, vocabulary corrections, and
@@ -201,7 +216,7 @@ async def kt_from_transcript(payload: dict, background_tasks: BackgroundTasks,
 
     job_id = str(uuid.uuid4())
     with pipeline.JOB_LOCK:
-        pipeline.JOB_QUEUE[job_id] = {"status": "processing", "progress": 0, "tenant_id": principal.tenant_id}
+        pipeline.JOB_QUEUE[job_id] = _new_job(principal)
 
     background_tasks.add_task(pipeline.run_kt_pipeline, job_id, cleaned_transcript,
                               warnings=gate["reasons"] if gate["verdict"] != "ok" else [])
@@ -216,15 +231,24 @@ async def kt_from_transcript(payload: dict, background_tasks: BackgroundTasks,
 @router.get("/jobs")
 async def list_jobs(limit: int = 50, principal: Principal = Depends(require_principal)):
     """The caller's KT jobs, newest first (persisted across restarts)."""
-    return {"jobs": pipeline.JOB_STORE.list(principal.tenant_id, limit=max(1, min(limit, 200)))}
+    jobs = pipeline.JOB_STORE.list(principal.tenant_id, limit=max(1, min(limit, 200)))
+    for job in jobs:
+        job["can_delete"] = can_delete_job(job, principal)
+        job.pop("created_by_id", None)
+    return {"jobs": jobs}
 
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, principal: Principal = Depends(require_principal)):
-    """Delete a KT: its record, transcript, document and screenshots."""
+    """Delete a KT: its record, transcript, document and screenshots.
+    Admins may delete any KT in the workspace; others only their own."""
     with pipeline.JOB_LOCK:
-        ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        if not can_delete_job(job, principal):
+            raise HTTPException(status_code=403, detail="Only a workspace admin or the person who created this KT can delete it.")
+        title = (job.get("knowledge_object") or {}).get("system_name") or job.get("title")
         pipeline.delete_job_data(job_id)
+    audit(principal.tenant_id, principal.key_label, "kt_deleted", {"job_id": job_id, "title": title})
     return {"status": "deleted", "job_id": job_id}
 
 
@@ -234,45 +258,6 @@ async def get_status(job_id: str, principal: Principal = Depends(require_princip
     with pipeline.JOB_LOCK:
         job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
         return sign_asset_urls(dict(job, job_id=job_id))
-
-
-@router.post("/semantic-placement")
-async def semantic_placement(payload: dict, principal: Principal = Depends(require_principal)):
-    """Classify raw transcript text into KT sections and return quality metrics."""
-    transcript = payload.get("transcript", "")
-    if not isinstance(transcript, str) or not transcript.strip():
-        raise HTTPException(status_code=400, detail="Transcript is required and must be non-empty.")
-
-    similarity_threshold = payload.get("similarity_threshold", 0.20)
-    try:
-        similarity_threshold = float(similarity_threshold)
-    except (TypeError, ValueError):
-        similarity_threshold = 0.20
-
-    try:
-        report = generate_report(transcript, similarity_threshold=similarity_threshold)
-        assignment_counts = {sid: len(report["analysis"][sid].get("chunks", [])) for sid in report["analysis"]}
-        total_assigned = sum(assignment_counts.values())
-        return {
-            "status": "success",
-            "transcript": transcript,
-            "metrics": {
-                "total_sentences": total_assigned,
-                "assigned_sentences": total_assigned,
-                "unclassified_sentences": 0,
-                "duplicate_rate": 0.0,
-                "avg_confidence": float(report["summary"]["confidence_score"]),
-                "clauses_split": 0,
-            },
-            "assignments": {sid: report["analysis"][sid].get("chunks", []) for sid in report["analysis"]},
-            "paragraphs": report["paragraphs"],
-            "summary": report["summary"],
-            "explainability": report["explainability"],
-            "risk_warning": report["risk_warning"],
-            "recommended_state": report["recommended_state"],
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -292,23 +277,36 @@ async def root(request: Request):
     return HTMLResponse(content="KT Planner API is running.")
 
 
+def _secure_cookies(request: Request) -> bool:
+    return request.url.scheme == "https" or os.getenv("CONTINUUM_SECURE_COOKIES") == "1"
+
+
+def _set_session_cookie(resp, request: Request, principal: Principal) -> None:
+    resp.set_cookie(SESSION_COOKIE, create_session(principal), max_age=SESSION_TTL_SECONDS, httponly=True,
+                    samesite="lax", secure=_secure_cookies(request), path="/")
+
+
 @router.post("/login")
 async def login(payload: dict, request: Request):
     """Exchange an API key for an HttpOnly session cookie (browser sign-in)."""
     principal = principal_for_key(str(payload.get("api_key") or "").strip())
     if principal is None:
         raise HTTPException(status_code=401, detail="That API key was not accepted.")
-    token = create_session(principal)
+    if sso.sso_enforced(principal.tenant_id):
+        audit(principal.tenant_id, principal.key_label, "sign_in_refused", {"method": "key", "reason": "sso_required"})
+        raise HTTPException(status_code=403, detail="This workspace signs in with single sign-on. "
+                                                    "Use Continue with SSO and your work email.")
     resp = JSONResponse({"status": "signed_in", "workspace": tenant_name(principal.tenant_id)})
-    secure = request.url.scheme == "https" or os.getenv("CONTINUUM_SECURE_COOKIES") == "1"
-    resp.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SECONDS, httponly=True, samesite="lax",
-                    secure=secure, path="/")
+    _set_session_cookie(resp, request, principal)
+    audit(principal.tenant_id, principal.key_label, "sign_in", {"method": "key"})
     return resp
 
 
 @router.post("/logout")
 async def logout(request: Request):
-    end_session(request.cookies.get(SESSION_COOKIE))
+    principal = end_session(request.cookies.get(SESSION_COOKIE))
+    if principal is not None:
+        audit(principal.tenant_id, principal.key_label, "sign_out", {"method": principal.method})
     resp = JSONResponse({"status": "signed_out"})
     resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp
@@ -316,14 +314,68 @@ async def logout(request: Request):
 
 @router.get("/me")
 async def me(principal: Principal = Depends(require_principal)):
-    """Who the caller is signed in as (workspace shown in the UI header)."""
+    """Who the caller is signed in as (workspace, person and role in the UI header)."""
     return {"tenant_id": principal.tenant_id, "workspace": tenant_name(principal.tenant_id),
-            "key_label": principal.key_label, "role": principal.role,
-            "auth": "disabled" if principal.tenant_id == "local" and principal.key_label == "auth-disabled" else "on"}
+            "key_label": principal.key_label, "user": principal.key_label, "method": principal.method,
+            "role": principal.role, "role_label": ROLE_LABELS.get(principal.role, principal.role),
+            "permissions": sorted(principal.permissions),
+            "auth": "disabled" if principal.method == "disabled" else "on"}
+
+
+# --------------------------------------------------------------------------
+# Single sign-on (OpenID Connect, see sso.py)
+# --------------------------------------------------------------------------
+
+def _sso_failed(code: str) -> RedirectResponse:
+    """Back to the sign-in page, which turns the code into a message. Only
+    known codes are passed, never free text."""
+    resp = RedirectResponse(f"/?sso_error={code}", status_code=302, headers=_NO_STORE)
+    resp.delete_cookie(sso.STATE_COOKIE, path="/sso")
+    return resp
+
+
+@router.get("/sso/start")
+async def sso_start(request: Request, email: str = "", next: str = "/"):
+    """Send the browser to the identity provider of the workspace that owns
+    this email domain."""
+    provider = sso.provider_for_email(email)
+    if provider is None:
+        return _sso_failed("sso_unknown_domain")
+    try:
+        url, state = await run_in_threadpool(sso.begin, provider, sso.redirect_uri_for(str(request.base_url)),
+                                              next, email.strip().lower())
+    except sso.SSOError as exc:
+        logger.warning("SSO start failed for tenant %s: %s", provider["tenant_id"], exc.reason)
+        return _sso_failed("sso_failed")
+    resp = RedirectResponse(url, status_code=302, headers=_NO_STORE)
+    resp.set_cookie(sso.STATE_COOKIE, state, max_age=sso.REQUEST_TTL_SECONDS, httponly=True, samesite="lax",
+                    secure=_secure_cookies(request), path="/sso")
+    return resp
+
+
+@router.get("/sso/callback")
+async def sso_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None,
+                       error: Optional[str] = None):
+    """The identity provider sends the browser back here with a code."""
+    tenant_id = sso.tenant_for_state(state)
+    if error:
+        audit(tenant_id, None, "sign_in_failed", {"method": "sso", "reason": "provider_error", "error": error[:80]})
+        return _sso_failed("sso_denied")
+    try:
+        principal, next_path = await run_in_threadpool(sso.complete, code, state, request.cookies.get(sso.STATE_COOKIE))
+    except sso.SSOError as exc:
+        logger.warning("SSO sign-in failed (tenant %s): %s", tenant_id, exc.reason)
+        audit(tenant_id, None, "sign_in_failed", {"method": "sso", "reason": exc.code, "detail": exc.reason[:200]})
+        return _sso_failed(exc.code)
+    resp = RedirectResponse(next_path, status_code=302, headers=_NO_STORE)
+    resp.delete_cookie(sso.STATE_COOKIE, path="/sso")
+    _set_session_cookie(resp, request, principal)
+    audit(principal.tenant_id, principal.key_label, "sign_in", {"method": "sso", "role": principal.role})
+    return resp
 
 
 @router.post('/feedback')
-async def receive_feedback(payload: dict, principal: Principal = Depends(require_principal)):
+async def receive_feedback(payload: dict, principal: Principal = Depends(require_permission("kt:correct"))):
     """Accept human feedback from the UI, apply correction to coverage, and return updated state.
 
     Expected payload keys: job_id, sentence_id, corrected_classification, user, feedback_notes

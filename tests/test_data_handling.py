@@ -174,12 +174,14 @@ def test_deleting_a_tenant_removes_everything_it_owns(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_CACHE", "readwrite")
     tenant = auth.create_tenant("Leaving Ltd")
     key = auth.create_key(tenant, "k")
+    auth.add_user(tenant, "leaver@leaving.example", "giver")
     pipeline.JOB_QUEUE["data-tenant-0001"] = {"status": "completed", "tenant_id": tenant}
     with tenant_scope(tenant):
         cache.put(cache.make_key(provider="p", model="m", prompt="x", params={}), response="r", call_site="s",
                   provider="p", model="m", input_tokens=1, output_tokens=1)
     report = auth.delete_tenant(tenant)
-    assert report == {"tenant_id": tenant, "jobs": 1, "cached_llm_responses": 1, "api_keys": 1}
+    assert report == {"tenant_id": tenant, "jobs": 1, "cached_llm_responses": 1, "api_keys": 1, "people": 1}
+    assert auth.list_users(tenant) == []
     assert pipeline.JOB_STORE.get("data-tenant-0001") is None
     assert auth.principal_for_key(key) is None
 

@@ -29,12 +29,21 @@
   input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);
         color:var(--text);font:inherit;font-size:14px}
   input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--focus)}
-  button{margin-top:16px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:var(--blue);color:#fff;
+  button{margin-top:14px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:var(--blue);color:#fff;
          font:inherit;font-weight:600;font-size:14px;cursor:pointer}
   button:hover{background:var(--blue-dk)} button:disabled{opacity:.6;cursor:default}
-  button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--focus)}
-  .error{display:none;margin-top:14px;padding:9px 12px;border-radius:8px;background:var(--red-dim);color:var(--red);font-size:13px}
-  .help{margin-top:20px;font-size:12.5px;color:var(--text3);line-height:1.55}
+  button:focus-visible,summary:focus-visible{outline:none;box-shadow:0 0 0 3px var(--focus)}
+  button.secondary{background:transparent;color:var(--blue);border:1px solid var(--border)}
+  button.secondary:hover{background:var(--bg)}
+  .error{display:none;margin-bottom:16px;padding:9px 12px;border-radius:8px;background:var(--red-dim);color:var(--red);
+         font-size:13px;line-height:1.45}
+  .divider{display:flex;align-items:center;gap:10px;margin:22px 0 4px;color:var(--text3);font-size:12px}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border)}
+  details summary{cursor:pointer;list-style:none;font-size:13.5px;font-weight:600;color:var(--text2);padding:8px 0;border-radius:6px}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"\25B8";display:inline-block;margin-right:6px;transition:transform .15s}
+  details[open] summary::before{transform:rotate(90deg)}
+  .help{margin-top:12px;font-size:12.5px;color:var(--text3);line-height:1.55}
   code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
 </style>
 </head>
@@ -42,43 +51,83 @@
 <main class="card">
   <div class="brand"><div class="logo">C</div><b>Continuum</b><span>KT Planner</span></div>
   <h1>Sign in</h1>
-  <p class="lead">Enter your workspace API key. You only see knowledge transfers that belong to your workspace.</p>
-  <form id="loginForm" autocomplete="off">
-    <label for="apiKey">API key</label>
-    <input id="apiKey" name="apiKey" type="password" placeholder="ckt_…" required autofocus spellcheck="false">
-    <button id="submitBtn" type="submit">Sign in</button>
-    <div class="error" id="error" role="alert"></div>
+  <p class="lead">Use your work account. You only see knowledge transfers that belong to your workspace.</p>
+  <div class="error" id="error" role="alert"></div>
+
+  <form id="ssoForm" autocomplete="on">
+    <label for="email">Work email</label>
+    <input id="email" name="email" type="email" placeholder="you@company.com" required autofocus autocomplete="email" spellcheck="false">
+    <button id="ssoBtn" type="submit">Continue with SSO</button>
   </form>
-  <p class="help">Don't have a key? Ask your workspace admin. Admins create one on the server with
-    <code>python -m auth create-tenant "Team name"</code>.</p>
+
+  <div class="divider">or</div>
+
+  <details id="keyDetails">
+    <summary>Sign in with an API key</summary>
+    <form id="keyForm" autocomplete="off">
+      <label for="apiKey">API key</label>
+      <input id="apiKey" name="apiKey" type="password" placeholder="ckt_…" required spellcheck="false">
+      <button id="keyBtn" class="secondary" type="submit">Sign in with key</button>
+    </form>
+    <p class="help">For pilots and workspaces without single sign-on. Admins create keys on the server with
+      <code>python -m auth create-tenant "Team name"</code>.</p>
+  </details>
 </main>
 <script>
-  const form = document.getElementById('loginForm');
-  const input = document.getElementById('apiKey');
-  const btn = document.getElementById('submitBtn');
   const err = document.getElementById('error');
+  function showError(message){ err.textContent = message; err.style.display = 'block'; }
+
+  // The server sends only these codes back from a failed SSO sign-in.
+  const SSO_ERRORS = {
+    sso_unknown_domain: "No workspace signs in with single sign-on for that email domain. Check the address, or sign in with an API key.",
+    sso_failed: "Sign-in with your identity provider didn't complete. Try again. If it keeps failing, ask your workspace admin to check the SSO setup.",
+    sso_expired: "That sign-in expired or was started in another browser. Try again.",
+    sso_not_allowed: "Your account isn't allowed in this workspace. Ask your workspace admin to add you.",
+    sso_disabled: "Your access to this workspace has been turned off. Ask your workspace admin.",
+    sso_denied: "Your identity provider didn't allow the sign-in.",
+  };
+  const params = new URLSearchParams(location.search);
+  const code = params.get('sso_error');
+  if (code) showError(SSO_ERRORS[code] || SSO_ERRORS.sso_failed);
+  // Where to go after signing in: the page that was asked for (e.g. /?job=…).
+  params.delete('sso_error');
+  const next = '/' + (params.toString() ? '?' + params.toString() : '');
+  if (code) history.replaceState(null, '', next);
+
   // Keys from the old in-browser storage are no longer used.
   try { localStorage.removeItem('kt-api-key'); } catch (e) {}
-  form.addEventListener('submit', async (e) => {
+  try { const last = localStorage.getItem('kt-sso-email'); if (last) document.getElementById('email').value = last; } catch (e) {}
+
+  document.getElementById('ssoForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    try { localStorage.setItem('kt-sso-email', email); } catch (ex) {}
+    const btn = document.getElementById('ssoBtn');
+    btn.disabled = true; btn.textContent = 'Redirecting…';
+    location.assign('/sso/start?' + new URLSearchParams({email, next}).toString());
+  });
+
+  const keyForm = document.getElementById('keyForm');
+  const keyBtn = document.getElementById('keyBtn');
+  keyForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.style.display = 'none';
-    btn.disabled = true; btn.textContent = 'Signing in…';
+    keyBtn.disabled = true; keyBtn.textContent = 'Signing in…';
     try {
       const resp = await fetch('/login', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({api_key: input.value.trim()}), credentials: 'same-origin',
+        body: JSON.stringify({api_key: document.getElementById('apiKey').value.trim()}), credentials: 'same-origin',
       });
-      if (resp.ok) { window.location.replace('/'); return; }
+      if (resp.ok) { window.location.replace(next); return; }
       const data = await resp.json().catch(() => ({}));
-      err.textContent = data.detail || 'Sign-in failed. Check the key and try again.';
-      err.style.display = 'block';
+      showError(data.detail || 'Sign-in failed. Check the key and try again.');
     } catch (ex) {
-      err.textContent = 'Could not reach the server. Try again in a moment.';
-      err.style.display = 'block';
+      showError('Could not reach the server. Try again in a moment.');
     } finally {
-      btn.disabled = false; btn.textContent = 'Sign in';
+      keyBtn.disabled = false; keyBtn.textContent = 'Sign in with key';
     }
   });
+  if (params.get('key') === '1') document.getElementById('keyDetails').open = true;
 </script>
 </body>
 </html>

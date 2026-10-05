@@ -48,6 +48,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import numpy as np
 
+import media_guard
+
 LOGGER = logging.getLogger(__name__)
 
 SAMPLE_W, SAMPLE_H = 160, 90
@@ -177,7 +179,9 @@ class _Stable:
 def has_video_stream(path: str) -> bool:
     try:
         import av
-        with av.open(path) as container:
+        # The upload is untrusted: local files only, allowed formats only (media_guard.py).
+        with av.open(path, options={"protocol_whitelist": "file",
+                                    "format_whitelist": ",".join(media_guard.ALLOWED_DEMUXERS)}) as container:
             return any(s.type == "video" and (s.frames or s.duration or s.average_rate) for s in container.streams)
     except Exception:
         return False
@@ -188,7 +192,8 @@ def _iter_gray_samples(path: str, fps: float):
     vf = (f"fps={fps},scale={SAMPLE_W}:{SAMPLE_H}:force_original_aspect_ratio=decrease,"
           f"pad={SAMPLE_W}:{SAMPLE_H}:(ow-iw)/2:(oh-ih)/2")
     proc = subprocess.Popen(
-        ["ffmpeg", "-v", "error", "-i", path, "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        ["ffmpeg", "-v", "error", "-nostdin", *media_guard.input_args(path), "-an", "-vf", vf, "-f", "rawvideo",
+         "-pix_fmt", "gray", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     size = SAMPLE_W * SAMPLE_H
@@ -262,7 +267,7 @@ def find_stable_screens(path: str, fps: float, min_dwell: float) -> List[_Stable
 def _grab_frame(path: str, t: float, max_width: int = 1600):
     from PIL import Image
     out = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{max(t, 0):.2f}", "-i", path, "-frames:v", "1",
+        ["ffmpeg", "-v", "error", "-nostdin", "-ss", f"{max(t, 0):.2f}", *media_guard.input_args(path), "-frames:v", "1",
          "-vf", f"scale='min({max_width},iw)':-2", "-f", "image2pipe", "-vcodec", "png", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
     )
@@ -454,7 +459,8 @@ def leading_silence_seconds(path: str, threshold_db: str = "-50dB", min_silence:
     relative to the video."""
     try:
         out = subprocess.run(
-            ["ffmpeg", "-v", "info", "-i", path, "-vn", "-af", f"silencedetect=noise={threshold_db}:d={min_silence}",
+            ["ffmpeg", "-v", "info", "-nostdin", *media_guard.input_args(path), "-vn",
+             "-af", f"silencedetect=noise={threshold_db}:d={min_silence}",
              "-t", "900", "-f", "null", "-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False, text=True, errors="ignore",
         ).stderr

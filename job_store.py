@@ -47,6 +47,10 @@ class JobStore:
         self._lock = threading.Lock()
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            # Added with roles: who created the KT (an admin may delete any KT,
+            # anyone else only their own).
+            if "created_by" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN created_by TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -67,16 +71,17 @@ class JobStore:
         title = ko.get("system_name") or job.get("title")
         with self._lock, self._connect() as db:
             db.execute(
-                """INSERT INTO jobs (job_id, tenant_id, status, title, created_at, updated_at, error, payload)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO jobs (job_id, tenant_id, status, title, created_at, updated_at, error, payload, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(job_id) DO UPDATE SET status=excluded.status,
                        title=COALESCE(excluded.title, jobs.title), updated_at=excluded.updated_at,
                        error=excluded.error, payload=excluded.payload,
-                       tenant_id=COALESCE(jobs.tenant_id, excluded.tenant_id)""",
+                       tenant_id=COALESCE(jobs.tenant_id, excluded.tenant_id),
+                       created_by=COALESCE(jobs.created_by, excluded.created_by)""",
                 # A job created outside the API (scripts, tests) belongs to the
                 # "local" tenant, the same one auth.ensure_job_access assumes.
                 (job_id, job.get("tenant_id") or "local", job.get("status", "processing"), title, now, now,
-                 job.get("error"), self._pack(job)),
+                 job.get("error"), self._pack(job), job.get("created_by_id")),
             )
 
     def get(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -99,7 +104,7 @@ class JobStore:
         return row[0] if row else None
 
     def list(self, tenant_id: Optional[str], limit: int = 50) -> List[Dict[str, Any]]:
-        sql = "SELECT job_id, status, title, created_at, updated_at, error FROM jobs"
+        sql = "SELECT job_id, status, title, created_at, updated_at, error, created_by FROM jobs"
         args: list = []
         if tenant_id is not None:
             sql += " WHERE tenant_id = ?"
@@ -109,7 +114,7 @@ class JobStore:
         with self._connect() as db:
             rows = db.execute(sql, args).fetchall()
         return [{"job_id": r[0], "status": r[1], "title": r[2], "created_at": r[3], "updated_at": r[4],
-                 "error": r[5]} for r in rows]
+                 "error": r[5], "created_by_id": r[6]} for r in rows]
 
     def delete(self, job_id: str) -> bool:
         with self._lock, self._connect() as db:

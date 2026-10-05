@@ -6,8 +6,13 @@ Validates that sentences are properly extracted from blocks and
 displayed in the API response.
 """
 
-from context_mapper import ContextMappingPipeline
 import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # project root; this script lives in scripts/
+
+from context_mapper import ContextMappingPipeline  # noqa: E402
 
 
 TRANSCRIPT = """

@@ -198,6 +198,15 @@ th, td {
   white-space: normal;
 }
 
+/* Incident card (Quick Reference): the instruction gets the room; the
+   source section is a small reference beside it. */
+/* Widths leave room for cell padding (they are scaled up to fill the row). */
+#quick_reference .grid-table th:nth-child(1), #quick_reference .grid-table td:nth-child(1) { width: 23%; }
+#quick_reference .grid-table th:nth-child(2), #quick_reference .grid-table td:nth-child(2) { width: 47%; }
+#quick_reference .grid-table th:nth-child(3), #quick_reference .grid-table td:nth-child(3) { width: 17%; }
+#quick_reference .grid-table td:nth-child(3) { font-size: 0.82em; color: #6b7280; }
+#quick_reference .grid-table tr { break-inside: avoid; }
+
 th {
   background: #eef2ff;
   color: #1e293b;

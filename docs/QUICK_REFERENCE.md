@@ -60,7 +60,6 @@ python check_kt.py
 
 ## Main API endpoints
 
-- `POST /semantic-placement`
   - Input: transcript text or uploaded audio payload
   - Output: section assignments, confidence, coverage
 
