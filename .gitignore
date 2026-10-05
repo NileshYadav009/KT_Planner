@@ -102,3 +102,6 @@ data/llm_cache.sqlite*
 
 # Screenshots captured from shared screens (may show internal dashboards)
 data/kt_assets/
+
+# KT jobs and documents (customer data; job_store.py)
+data/continuum.sqlite*

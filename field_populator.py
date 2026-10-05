@@ -11,6 +11,9 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from devops_transcription import apply_devops_corrections
 from llm.usage import record_skip as record_llm_skip
+from llm.usage import record_rejected as record_llm_rejected
+from grounding import ungrounded, looks_malformed
+from dialogue import is_field_candidate
 from component_catalog import ToolMatcher
 
 logger = logging.getLogger(__name__)
@@ -685,12 +688,17 @@ def extract_rto_rpo(text: str) -> Dict[str, str]:
     result: Dict[str, str] = {}
     if not text:
         return result
-    rto = _RTO_RE.search(text)
-    if rto:
-        result["rto_metric"] = rto.group(1).strip()
-    rpo = _RPO_RE.search(text)
-    if rpo:
-        result["rpo_metric"] = rpo.group(1).strip()
+    # Every stated value, with its sentence: a speaker who corrects the RTO
+    # ("Actually the RTO is thirty minutes, the four hours was the old
+    # target") must not have the withdrawn value headlined (conflicts.py).
+    from conflicts import resolve_single_value
+    for field_id, rx in (("rto_metric", _RTO_RE), ("rpo_metric", _RPO_RE)):
+        candidates = [(m.group(1).strip(), sentence)
+                      for sentence in _split_sentences(text) for m in rx.finditer(sentence)]
+        value, note = resolve_single_value(candidates)
+        if value:
+            result[field_id] = f"{value} ({note})" if note and not value.startswith("Conflicting") else (
+                f"{value} - confirm with the outgoing owner" if note else value)
     return result
 
 
@@ -1087,6 +1095,19 @@ def _extract_by_semantic_scored(
         # and had nothing to disqualify it).
         sentences = [s for s in sentences if not _primary_entity_is_other(s)]
 
+        # A sentence that lists sibling entities ("We have three environments:
+        # dev, staging, and production.") describes none of them in
+        # particular. It was filed as the Staging characteristic because
+        # staging happened to be named first.
+        ids = [w for w in [own_identity_word, *other_identity_words] if w]
+        if len(ids) >= 2:
+            alt = "|".join(re.escape(w) for w in ids)
+            enum_re = re.compile(
+                rf"(?<![\w-])(?:{alt})(?![\w-])\s*(?:,|/|&|\band\b|\bor\b)\s*(?:and\s+|or\s+)?"
+                rf"(?<![\w-])(?:{alt})(?![\w-])"
+            )
+            sentences = [s for s in sentences if not enum_re.search(s.lower())]
+
     if not sentences:
         return None, None
     if model is None:
@@ -1350,6 +1371,7 @@ def populate_fields(
             content = cov_entry_.get("content", [])
             if isinstance(content, list):
                 all_sentence_texts.extend(c for c in content if isinstance(c, str) and c.strip())
+    all_sentence_texts = [t for t in all_sentence_texts if is_field_candidate(t)]
 
     result = {}
     for section in dynamic_schema:
@@ -1389,8 +1411,12 @@ def populate_fields(
             # first_safe_actions' text). Joined with "\n" (not " ") so the
             # line-based table-extraction heuristic below treats each
             # sentence as its own candidate row.
-            section_text = "\n".join(raw_sentence_texts)
-            sentences = raw_sentence_texts
+            # A bare question or a "we don't have that" answer is not a value
+            # for any field (dialogue.py). The full list stays intact for
+            # evidence indexing (raw_sentence_texts).
+            candidate_texts = [t for t in raw_sentence_texts if is_field_candidate(t)]
+            section_text = "\n".join(candidate_texts)
+            sentences = candidate_texts
         else:
             # Fallback for the rare case section_content wasn't threaded
             # through for this section.
@@ -1427,7 +1453,48 @@ def populate_fields(
                 phase=phase,
             )
 
+    if isinstance(result.get("first_30_day_ownership"), dict):
+        _redistribute_weeks(result["first_30_day_ownership"])
     return result
+
+
+_WEEK_WORDS = {
+    1: r"first|1st|one|1", 2: r"second|2nd|two|2", 3: r"third|3rd|three|3", 4: r"fourth|4th|four|4|last|final",
+}
+_WEEK_REF_RES = {
+    n: re.compile(rf"\b(?:(?:{w})\s+week|week\s+(?:{w}))\b", re.IGNORECASE) for n, w in _WEEK_WORDS.items()
+}
+
+
+def _redistribute_weeks(fields: Dict[str, Any]) -> None:
+    """Put each sentence of the week plan under the week it names.
+
+    "In your first week, shadow the on-call and read the runbooks. By week
+    three you should own releases." arrived as one chunk and was filed whole
+    under Week 1, so Week 3 read as missing although it was stated."""
+    moves: Dict[str, List[str]] = {}
+    for n in range(1, 5):
+        fid = f"week{n}"
+        entry = fields.get(fid)
+        if not isinstance(entry, dict) or not isinstance(entry.get("value"), str) or not entry["value"].strip():
+            continue
+        keep: List[str] = []
+        for sentence in _split_sentences(entry["value"]):
+            named = [k for k, rx in _WEEK_REF_RES.items() if rx.search(sentence)]
+            target = named[0] if len(named) == 1 else n
+            (keep if target == n else moves.setdefault(f"week{target}", [])).append(sentence)
+        if len(keep) != len(_split_sentences(entry["value"])):
+            entry["value"] = " ".join(keep)
+            if not keep:
+                entry.update(value="", confidence=0.0, source="unfilled")
+    for fid, sentences in moves.items():
+        entry = fields.get(fid)
+        moved = " ".join(sentences)
+        if isinstance(entry, dict) and isinstance(entry.get("value"), str) and entry["value"].strip():
+            if moved not in entry["value"]:
+                entry["value"] = f"{entry['value']} {moved}"
+        else:
+            fields[fid] = {"value": moved, "confidence": 0.7, "source": "pattern"}
 
 
 def find_source_sentence_index(value: Any, raw_sentence_texts: List[str]) -> Optional[int]:
@@ -1641,6 +1708,20 @@ def _populate_fields_recursive(
                     # release" states a criterion; the model answered KT
                     # status "Complete" from it.
                     val = ""
+                if val and val.upper() != "NOT_MENTIONED":
+                    # The model's own EXPLICIT/INFERRED line is not evidence.
+                    # Every specific in the value (number, name, product,
+                    # region, channel) must be in the text it was given, or
+                    # be one of the field's own options; chatter and JSON
+                    # fragments are not values at all.
+                    allowed = " ".join([section_text, field_label, str(field.get("description", "")),
+                                        " ".join(map(str, field.get("options") or []))])
+                    missing = [] if looks_malformed(val) else ungrounded(val, allowed)
+                    if looks_malformed(val) or missing:
+                        logger.warning("Discarded LLM value for %s.%s (%s): %r", section_id, field_id,
+                                       "malformed" if looks_malformed(val) else f"not in transcript: {missing}", val[:200])
+                        record_llm_rejected("field_fill", f"{section_id}.{field_id}: {val[:120]}")
+                        val = ""
                 if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
                     # The gap-fill prompt forbids inventing ungrounded values,
                     # so a returned value is always an extraction — but only

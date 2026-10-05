@@ -194,10 +194,16 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # tribal-knowledge paragraph about cache hit ratios after deployments),
     # and a category the grid already lists needs no second row.
     shown_tools = {v.strip().lower() for row in tech_rows for v in row["value"].split(";")}
-    for label, field_id in (("Cache Layer", "cache_layer"), ("Event Streaming", "event_streaming")):
+    for label, field_id, categories in (("Cache Layer", "cache_layer", {"Cache"}),
+                                        ("Event Streaming", "event_streaming", {"Messaging", "Data processing"})):
         # Compared under the catalog display name, so "ElastiCache" is seen
         # as the "Amazon ElastiCache" already listed rather than a new row.
         names = [_catalog_display_name(n) or n for n in tool_names_in(_field_value(fields, field_id))]
+        # The field is filled with a whole sentence, which names other tiers
+        # too ("files go to Blob Storage ... Redis is Azure Cache for Redis"
+        # put Blob Storage in a Cache Layer row). Only a tool of the row's
+        # own kind belongs in it.
+        names = [n for n in names if _TECH_CATEGORY_MAP.get(n.lower()) in categories]
         names = [n for n in dict.fromkeys(names) if n.lower() not in shown_tools]
         if names:
             tech_rows.append({"label": label, "value": "; ".join(names)})

@@ -614,128 +614,78 @@ def test_append_tribal_knowledge_section_noop_with_no_matches():
     assert not any(s["id"] == "tribal_knowledge" for s in result["sections"])
 
 
-def test_append_coverage_matrix_section_buckets_directly_from_status():
-    # Regression test: bucketing used to also require confidence >= 0.6 on
-    # top of status == "covered", but the pipeline's confidence signal
-    # (mean block-confidence) and its status signal (semantic_coverage_score,
-    # already required/optional- and density-aware) are only loosely
-    # correlated — real runs showed "covered" status with confidence well
-    # under 0.6, so "Strong" never fired. Bucketing must now come straight
-    # from status alone.
+def _cov(*texts):
+    return {"status": "weak" if texts else "missing", "confidence": 0.85, "sentence_count": len(texts),
+            "sentences": [{"text": t} for t in texts]}
+
+
+def test_append_coverage_matrix_section_judges_coverage_by_topic_not_template_fields():
+    # P0-8. The matrix used to count filled template fields, so TripWise's
+    # Operational Calendar read "0 of 3 known field(s) captured; missing:
+    # high_traffic_periods, month_end_windows, deployment_blackout_times"
+    # directly under "Avoid deploying on Fridays or during the summer sale".
+    ko = {"sections": [{"id": "known_bad_days", "title": "OPERATIONAL CALENDAR", "fields": {
+        "high_traffic_periods": {"value": "", "source": "unfilled"},
+        "month_end_windows": {"value": "", "source": "unfilled"},
+        "deployment_blackout_times": {"value": "", "source": "unfilled"},
+    }}], "summary": {}}
+    dynamic_schema = [{"id": "known_bad_days", "title": "OPERATIONAL CALENDAR", "fields": [
+        {"id": "high_traffic_periods", "type": "text"}, {"id": "month_end_windows", "type": "text"},
+        {"id": "deployment_blackout_times", "type": "text"}]}]
+    coverage = {"known_bad_days": _cov("Avoid deploying on Fridays or during the summer sale in July.")}
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Coverage"] == "Partial"
+    assert row["Assessment"] == "2 of 3 topics covered; not discussed: Month-end windows."
+    assert "_" not in row["Assessment"]          # never a raw field id
+
+
+def test_append_coverage_matrix_section_credits_topics_discussed_under_another_section():
     ko = {"sections": [], "summary": {}}
-    dynamic_schema = [
-        {"id": "system_overview", "title": "SYSTEM OVERVIEW"},
-        {"id": "architecture_reference", "title": "ARCHITECTURE REFERENCE"},
-        {"id": "cost_optimization", "title": "COST OPTIMIZATION"},
-    ]
+    dynamic_schema = [{"id": "deployment_and_rollback", "title": "DEPLOYMENT & ROLLBACK"},
+                      {"id": "known_bad_days", "title": "OPERATIONAL CALENDAR"}]
     coverage = {
-        "system_overview": {"status": "covered", "confidence": 0.2, "sentence_count": 5},
-        "architecture_reference": {"status": "weak", "confidence": 0.9, "sentence_count": 2},
-        "cost_optimization": {"status": "missing", "confidence": 0.0, "sentence_count": 0},
+        "deployment_and_rollback": _cov("GitHub Actions deploys to staging automatically on merge.",
+                                        "If a release misbehaves, redeploy the previous task definition; that takes ten minutes."),
+        "known_bad_days": _cov("Avoid deploying on Fridays."),
     }
     result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
-    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
-    rows = {row["Domain"]: row["Coverage"] for row in matrix["_coverage_rows"]}
-    assert rows == {
-        "SYSTEM OVERVIEW": "Strong",
-        "ARCHITECTURE REFERENCE": "Partial",
-        "COST OPTIMIZATION": "Missing",
-    }
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Assessment"].startswith("5 of 6 topics covered (1 under OPERATIONAL CALENDAR)")
+    assert row["Assessment"].endswith("not discussed: Repository and pipeline links.")
 
 
-def test_append_coverage_matrix_section_reports_field_level_coverage():
-    # A raw sentence count says nothing about completeness (five sentences
-    # might back one field or ten) — when the section has a real fields
-    # schema, the assessment should say how many of those known fields
-    # actually got captured instead.
-    ko = {
-        "sections": [{
-            "id": "system_overview", "title": "SYSTEM OVERVIEW", "status": "covered",
-            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
-            "relationships": [], "coverage_content": [],
-            "fields": {
-                "business_criticality": {"value": "High", "source": "llm_explicit"},
-                "customer_reach": {"value": "global", "source": "llm_explicit"},
-                "impact_if_down": {"value": "", "source": "unfilled"},
-            },
-        }],
-        "summary": {},
-    }
-    dynamic_schema = [{
-        "id": "system_overview", "title": "SYSTEM OVERVIEW",
-        "fields": [
-            {"id": "business_criticality", "label": "Business Criticality", "type": "single_select"},
-            {"id": "customer_reach", "label": "Customer Reach", "type": "text"},
-            {"id": "impact_if_down", "label": "Impact if Down", "type": "text"},
-        ],
-    }]
-    coverage = {"system_overview": {"status": "covered", "confidence": 0.8, "sentence_count": 5}}
-
+def test_append_coverage_matrix_section_keeps_architecture_components_as_coverage():
+    ko = {"sections": [{"id": "architecture_reference", "title": "ARCHITECTURE REFERENCE",
+                        "_architecture_components": ["EKS", "RDS", "Redis"], "fields": {}}], "summary": {}}
+    dynamic_schema = [{"id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "fields_role": "metadata"}]
+    coverage = {"architecture_reference": _cov("Workloads run on EKS and store orders in RDS.")}
     result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
-    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
-    row = matrix["_coverage_rows"][0]
-    assert row["Coverage"] == "Strong"
-    assert "2 of 3 known field(s) captured" in row["Assessment"]
-    assert "Impact if Down" in row["Assessment"]
-    assert "supporting sentence" not in row["Assessment"]
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Coverage"] == "Partial"
+    assert row["Assessment"].startswith("1 of 3 topics covered")
 
 
-def test_append_coverage_matrix_section_splits_knowledge_from_metadata_for_metadata_role_sections():
-    # architecture_reference's 3 leaf fields (doc link, last updated,
-    # verified-by) are purely administrative metadata — real architecture
-    # knowledge lives in _architecture_components instead. Reporting "0 of
-    # 3 known field(s) captured" there reads as "nothing was captured" even
-    # when the transcript described a rich, real component stack. A
-    # fields_role: "metadata" section with knowledge items must report both
-    # halves instead of collapsing to the raw field count.
-    ko = {
-        "sections": [{
-            "id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "status": "covered",
-            "confidence": 0.8, "risk": 0.0, "facts": [], "entities": [], "evidence": [],
-            "relationships": [], "coverage_content": [],
-            "_architecture_components": ["EKS", "React", "CloudFront", "ALB", "FastAPI", "RDS", "Redis", "SQS", "ECR"],
-            "fields": {
-                "architecture_link": {"value": "", "source": "unfilled"},
-                "last_updated": {"value": "", "source": "unfilled"},
-                "verified_by_incoming_owner": {"value": "", "source": "unfilled"},
-            },
-        }],
-        "summary": {},
-    }
-    dynamic_schema = [{
-        "id": "architecture_reference", "title": "ARCHITECTURE REFERENCE", "fields_role": "metadata",
-        "fields": [
-            {"id": "architecture_link", "label": "Documentation link", "type": "url"},
-            {"id": "last_updated", "label": "Last updated", "type": "date"},
-            {"id": "verified_by_incoming_owner", "label": "Verified by incoming owner", "type": "boolean"},
-        ],
-    }]
-    coverage = {"architecture_reference": {"status": "covered", "confidence": 0.8, "sentence_count": 6}}
-
-    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
-    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
-    row = matrix["_coverage_rows"][0]
-    assert row["Coverage"] == "Strong"
-    assert "9 component(s) identified" in row["Assessment"]
-    assert "EKS" in row["Assessment"]
-    assert "0 of 3 metadata field(s) discussed" in row["Assessment"]
-
-
-def test_append_coverage_matrix_section_collects_knowledge_gaps_separately():
+def test_append_coverage_matrix_section_collects_follow_up_items():
     ko = {"sections": [], "summary": {}}
     dynamic_schema = [
-        {"id": "system_overview", "title": "SYSTEM OVERVIEW"},
+        {"id": "disaster_recovery", "title": "DISASTER RECOVERY"},
         {"id": "first_30_day_ownership", "title": "FIRST 30-DAY OWNERSHIP PLAN"},
-        {"id": "handover_completion", "title": "HANDOVER COMPLETION CHECK"},
+        {"id": "signoff", "title": "Sign-off"},
     ]
     coverage = {
-        "system_overview": {"status": "covered", "confidence": 0.9, "sentence_count": 5},
-        "first_30_day_ownership": {"status": "missing", "confidence": 0.0, "sentence_count": 0},
-        "handover_completion": {"status": "missing", "confidence": 0.0, "sentence_count": 0},
+        "disaster_recovery": _cov("RTO is four hours.", "Backups use DynamoDB point in time recovery."),
+        "first_30_day_ownership": _cov(),
+        "signoff": _cov(),
     }
     result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
     matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
-    assert matrix["_knowledge_gaps"] == ["FIRST 30-DAY OWNERSHIP PLAN", "HANDOVER COMPLETION CHECK"]
+    assert matrix["_knowledge_gaps"] == [
+        "DISASTER RECOVERY: RPO, Failover / standby, DR testing",
+        "FIRST 30-DAY OWNERSHIP PLAN",
+    ]
+    signoff = next(r for r in matrix["_coverage_rows"] if r["Domain"] == "Sign-off")
+    assert signoff["Coverage"] == "After review"
 
 
 def test_append_coverage_matrix_section_builds_knowledge_coverage_summary_with_zero_lost():

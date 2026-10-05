@@ -280,3 +280,26 @@ code {
   text-align: center;
   margin-top: 24mm;
 }
+
+/* Shown on the cover when stages failed or LLM calls fell back (P0-6). */
+.degraded-banner {
+  margin-top: 1.4rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #f0b4ad;
+  border-left: 4px solid #b42318;
+  background: #fdf1ef;
+  font-size: 9.5pt;
+  color: #3b1410;
+}
+.degraded-banner .degraded-title {
+  font-weight: 700;
+  color: #b42318;
+  margin: 0 0 0.25rem;
+}
+.degraded-banner p { margin: 0 0 0.25rem; }
+.degraded-banner ul { margin: 0.2rem 0 0 1.1rem; padding: 0; }
+.generation-note {
+  margin-top: 0.8rem;
+  font-size: 9pt;
+  color: #6b7280;
+}

@@ -9,6 +9,8 @@ from .knowledge_builder import (
     append_quick_reference_section,
     reconcile_linked_fields,
     verify_document_coverage,
+    apply_conflicts,
+    attach_conflict_warnings,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "append_quick_reference_section",
     "reconcile_linked_fields",
     "verify_document_coverage",
+    "apply_conflicts",
+    "attach_conflict_warnings",
 ]

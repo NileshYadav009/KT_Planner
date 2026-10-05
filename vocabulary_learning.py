@@ -20,6 +20,7 @@ codebase's existing regex-based correction style (see devops_transcription.py):
 import json
 import logging
 import os
+import threading
 import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -32,7 +33,8 @@ from devops_transcription import (
 
 logger = logging.getLogger(__name__)
 
-CANDIDATES_PATH = os.path.join(os.path.dirname(__file__), "glossary_candidates.json")
+CANDIDATES_PATH = os.getenv("CONTINUUM_VOCAB_CANDIDATES_PATH",
+                            os.path.join(os.path.dirname(__file__), "glossary_candidates.json"))
 
 # Matches devops_transcription.apply_fuzzy_term_corrections's auto-correct
 # threshold (0.88) as the upper bound of the "near miss" gray zone. The lower
@@ -163,8 +165,17 @@ def load_candidates(path: str = CANDIDATES_PATH) -> Dict:
 
 
 def _save_candidates(data: Dict, path: str = CANDIDATES_PATH) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    # Written to a temporary file and swapped in, so a crash or a concurrent
+    # job can never leave a truncated file behind.
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+# Concurrent KT jobs record candidates at the same time; without this the
+# read-modify-write lost each other's updates.
+_CANDIDATES_LOCK = threading.Lock()
 
 
 def record_candidates(candidates: List[Dict], job_id: str, path: str = CANDIDATES_PATH) -> None:
@@ -177,6 +188,14 @@ def record_candidates(candidates: List[Dict], job_id: str, path: str = CANDIDATE
     if not candidates:
         return
 
+    with _CANDIDATES_LOCK:
+        _record_candidates_locked(candidates, path)
+
+
+def _record_candidates_locked(candidates: List[Dict], path: str) -> None:
+    # This file is shared by every customer, so it holds terms and counts
+    # only: no example sentences and no job ids (P0-9). A reviewer sees a
+    # candidate's context in the KT it came from, not here.
     store = load_candidates(path)
     now = _now_iso()
 
@@ -189,11 +208,8 @@ def record_candidates(candidates: List[Dict], job_id: str, path: str = CANDIDATE
         if existing:
             existing["occurrence_count"] = existing.get("occurrence_count", 1) + 1
             existing["last_seen"] = now
-            if job_id not in existing.get("source_jobs", []):
-                existing.setdefault("source_jobs", []).append(job_id)
-            examples = existing.setdefault("example_contexts", [])
-            if cand["example_sentence"] not in examples and len(examples) < 5:
-                examples.append(cand["example_sentence"])
+            existing.pop("source_jobs", None)
+            existing.pop("example_contexts", None)
         else:
             store[key] = {
                 "phrase": cand["phrase"],
@@ -202,8 +218,6 @@ def record_candidates(candidates: List[Dict], job_id: str, path: str = CANDIDATE
                 "occurrence_count": 1,
                 "first_seen": now,
                 "last_seen": now,
-                "source_jobs": [job_id],
-                "example_contexts": [cand["example_sentence"]],
                 "near_miss_of": cand.get("near_miss_of"),
                 "score": cand.get("score"),
                 "trigger": cand.get("trigger"),

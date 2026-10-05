@@ -26,6 +26,8 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from llm.tenant_context import CURRENT_TENANT
+
 LOGGER = logging.getLogger(__name__)
 
 # Bump when the key layout or stored format changes.
@@ -41,7 +43,9 @@ def cache_mode() -> str:
 
 
 def cache_path() -> str:
-    return os.getenv("LLM_CACHE_PATH", os.path.join("data", "llm_cache.sqlite"))
+    # Absolute, so the cache does not move with the working directory.
+    return os.getenv("LLM_CACHE_PATH", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                    "data", "llm_cache.sqlite"))
 
 
 def _ttl_seconds() -> float:
@@ -57,6 +61,9 @@ def make_key(*, provider: str, model: str, prompt: str, params: Dict[str, Any]) 
         {
             "v": CACHE_SCHEMA_VERSION,
             "ns": os.getenv("LLM_CACHE_NAMESPACE", ""),
+            # Tenants never share entries: identical prompts from two
+            # customers are two cache rows, each deletable with its tenant.
+            "tenant": CURRENT_TENANT.get(),
             "provider": provider,
             "model": model,
             "params": params,
@@ -84,6 +91,10 @@ def _connect(path: str) -> sqlite3.Connection:
                     " response TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER,"
                     " created_at REAL, last_hit_at REAL, hit_count INTEGER DEFAULT 0)"
                 )
+                try:
+                    conn.execute("ALTER TABLE llm_responses ADD COLUMN tenant TEXT")
+                except sqlite3.OperationalError:
+                    pass  # column already present
                 conn.commit()
                 _INITIALISED.add(path)
     return conn
@@ -127,9 +138,10 @@ def put(key: str, *, response: str, call_site: str, provider: str, model: str,
         try:
             conn.execute(
                 "INSERT OR REPLACE INTO llm_responses"
-                " (key, call_site, provider, model, response, input_tokens, output_tokens, created_at, last_hit_at, hit_count)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)",
-                (key, call_site, provider, model, response, int(input_tokens or 0), int(output_tokens or 0), time.time()),
+                " (key, call_site, provider, model, response, input_tokens, output_tokens, created_at, last_hit_at, hit_count, tenant)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?)",
+                (key, call_site, provider, model, response, int(input_tokens or 0), int(output_tokens or 0), time.time(),
+                 CURRENT_TENANT.get()),
             )
             conn.commit()
         finally:
@@ -154,6 +166,17 @@ def purge(*, older_than_days: Optional[float] = None) -> int:
     finally:
         conn.close()
 
+
+
+def purge_tenant(tenant_id: str) -> int:
+    """Delete every cached response produced for one tenant."""
+    conn = _connect(cache_path())
+    try:
+        cur = conn.execute("DELETE FROM llm_responses WHERE tenant = ?", (tenant_id,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
     import sys

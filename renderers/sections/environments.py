@@ -39,7 +39,7 @@ def _not_provided_note(text: str):
         listed = missing[0]
     else:
         listed = ", ".join(missing[:-1]) + " and " + missing[-1]
-    return f"{listed[:1].upper() + listed[1:]} were not covered — do not infer them."
+    return f"{listed[:1].upper() + listed[1:]} were not covered in the session; confirm them with the outgoing owner."
 
 
 def _field_value(fields: Dict[str, Any], field_id: str):
@@ -90,7 +90,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
 
         note = _not_provided_note(" ".join(_coverage_paragraphs(section)))
         if note:
-            blocks.append(build_narrative_block("Do not over-infer", [note]))
+            blocks.append(build_narrative_block("Not covered for environments", [note]))
         return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
 
     fallback = _coverage_paragraphs(section)
@@ -98,7 +98,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         blocks.append(build_narrative_block(title, fallback))
         note = _not_provided_note(" ".join(fallback))
         if note:
-            blocks.append(build_narrative_block("Do not over-infer", [note]))
+            blocks.append(build_narrative_block("Not covered for environments", [note]))
     else:
         blocks.append(no_coverage_block(title))
 

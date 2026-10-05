@@ -179,6 +179,9 @@
     }
     .tb-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:rgba(255,255,255,.5);padding:0 4px}
     .tb-status-dot{width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.18)}
+    .tb-workspace-slot{display:inline-flex;align-items:center;gap:10px}
+    .tb-workspace{font-size:13px;font-weight:600;color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tb-signout{background:none;border:0;cursor:pointer;font:inherit}
     .icon-btn{
       display:flex;align-items:center;justify-content:center;
       width:32px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,.12);
@@ -219,7 +222,35 @@
     .ws-title{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.1px}
     .ws-desc{font-size:12px;color:var(--text3);line-height:1.5}
 
-    .nav-group{padding:12px 0 4px}
+    .nav-group{padding:12px 0 4px;flex-shrink:0}
+    .history-group{padding-bottom:10px}
+    .history-head{display:flex;align-items:center;justify-content:space-between;padding-right:12px}
+    .history-head .nav-group-label{margin-bottom:4px}
+    .history-refresh{background:none;border:0;color:var(--text3);cursor:pointer;padding:3px;border-radius:6px;display:flex}
+    .history-refresh:hover{color:var(--blue);background:var(--bg)}
+    .history-refresh svg{width:13px;height:13px}
+    .history-list{list-style:none;margin:0;padding:0 8px;display:grid;gap:2px}
+    .history-empty{font-size:12px;color:var(--text3);line-height:1.5;padding:4px 10px}
+    .history-item{display:flex;align-items:center;gap:4px;border-radius:8px;padding-right:4px}
+    .history-item:hover,.history-item:focus-within{background:var(--bg)}
+    .history-item.active{background:var(--blue-dim)}
+    .history-open{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;text-align:left;background:none;border:0;
+      cursor:pointer;padding:7px 10px;font:inherit;color:inherit;border-radius:8px}
+    .history-title{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .history-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3);flex-wrap:wrap}
+    .history-status{font-size:10px;font-weight:700;letter-spacing:.02em;padding:1px 6px;border-radius:999px}
+    .st-ok{background:var(--green-dim);color:var(--green)}
+    .st-warn{background:var(--amber-dim);color:var(--amber)}
+    .st-run{background:var(--blue-dim);color:var(--blue)}
+    .st-fail{background:var(--red-dim);color:var(--red)}
+    .history-actions{display:flex;gap:2px;opacity:.55}
+    .history-item:hover .history-actions,.history-item:focus-within .history-actions{opacity:1}
+    .history-act{background:none;border:0;color:var(--text3);cursor:pointer;padding:5px;border-radius:6px;display:flex}
+    .history-act:hover{background:var(--surface);color:var(--blue)}
+    .history-act.danger:hover{color:var(--red)}
+    .history-act:disabled{opacity:.35;cursor:default}
+    .history-act svg{width:14px;height:14px}
+    .history-open:focus-visible,.history-act:focus-visible,.history-refresh:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
     .nav-group-label{
       font-size:10px;font-weight:700;color:var(--text3);
       letter-spacing:.08em;text-transform:uppercase;
@@ -245,6 +276,7 @@
     .nav-link-icon svg{width:15px;height:15px}
     .nav-link.active .nav-link-icon{opacity:1}
     .nav-footer{
+      flex-shrink:0;
       margin-top:auto;padding:14px 18px;border-top:1px solid var(--border-lt);
     }
     .nav-footer-text{font-size:11px;color:var(--text3);line-height:1.6}
@@ -495,6 +527,7 @@
       overflow-y:auto;
     }
     .rp-card{
+      flex-shrink:0; /* full height; the panel scrolls instead of clipping card text */
       background:var(--surface);
       border:1px solid var(--border);
       border-radius:var(--radius-lg);
@@ -979,6 +1012,7 @@
   <div class="tb-right">
     <span class="tb-status"><span class="tb-status-dot"></span>Live</span>
     <span class="tb-badge">Beta</span>
+    <span id="tbWorkspace" class="tb-workspace-slot"></span>
     <a class="tb-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
     <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle color theme" title="Toggle light / dark mode"></button>
   </div>
@@ -1026,6 +1060,16 @@
       <a class="nav-link" data-nav="formContainer" href="#formContainer">
         <span class="nav-link-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>KT Form
       </a>
+    </div>
+
+    <div class="nav-group history-group">
+      <div class="history-head">
+        <p class="nav-group-label">Past KTs</p>
+        <button class="history-refresh" id="historyRefresh" type="button" title="Refresh list" aria-label="Refresh past KTs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+      </div>
+      <ul class="history-list" id="historyList"><li class="history-empty">Loading…</li></ul>
     </div>
 
     <div class="nav-footer">
@@ -1357,6 +1401,46 @@ const THEME_ICONS = {
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
 };
+/* Sign-in (auth.py): the browser holds an HttpOnly session cookie, never the
+   API key. Requests that change data carry the CSRF header; a 401 means the
+   session ended, so go back to the sign-in page. */
+try{ localStorage.removeItem('kt-api-key'); }catch(e){}
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const url = typeof input === 'string' ? input : input.url;
+  const sameOrigin = url.startsWith('/') || url.startsWith(location.origin);
+  if(!sameOrigin) return _nativeFetch(input, init);
+  const method = String(init.method || 'GET').toUpperCase();
+  const headers = new Headers(init.headers || {});
+  if(!['GET','HEAD','OPTIONS'].includes(method)) headers.set('X-Continuum-CSRF', '1');
+  const resp = await _nativeFetch(input, Object.assign({}, init, {headers, credentials: 'same-origin'}));
+  if(resp.status === 401){ window.location.replace('/'); }
+  return resp;
+};
+
+async function signOut(){
+  try{ await fetch('/logout', {method:'POST'}); }catch(e){}
+  try{ localStorage.removeItem('kt-last-job'); }catch(e){}
+  window.location.replace('/');
+}
+
+(async function showWorkspace(){
+  try{
+    const resp = await fetch('/me');
+    if(!resp.ok) return;
+    const me = await resp.json();
+    const slot = document.getElementById('tbWorkspace');
+    if(!slot) return;
+    if(me.auth === 'disabled'){
+      slot.innerHTML = '<span class="tb-badge" title="CONTINUUM_AUTH=disabled">Sign-in off (local)</span>';
+    } else {
+      slot.innerHTML = `<span class="tb-workspace" title="Signed in with key: ${escapeHtml(me.key_label||'')}">${escapeHtml(me.workspace||'')}</span>`
+        + '<button class="tb-link tb-signout" type="button" id="signOutBtn">Sign out</button>';
+      document.getElementById('signOutBtn').addEventListener('click', signOut);
+    }
+  }catch(e){}
+})();
+
 (function initTheme(){
   const root = document.documentElement;
   const toggleBtn = document.getElementById('themeToggle');
@@ -1551,7 +1635,8 @@ function renderSummary(data){
   summaryConfidence.textContent = (typeof q.overall_score === 'number')
     ? `${q.grade || ''} ${Math.round(q.overall_score)}`.trim()
     : '—';
-  sessionJob.textContent=data.job_id?(data.job_id.slice(0,14)+'…'):'—';
+  const shownId = data.job_id || currentJobId;
+  sessionJob.textContent = shownId ? (shownId.slice(0,14)+'…') : '—';
   sessionCoverage.textContent=pct+'%';
   sessionMissing.textContent=data.missing_required?.length??missing;
   sessionWeak.textContent=weak;
@@ -1627,6 +1712,7 @@ function renderLlmUsage(u){
     if(model) notes.push(`Model: ${model}.`);
     notes.push(`Time waiting on the LLM: ${Number(u.llm_seconds||0).toFixed(1)}s.`);
     if(u.retries) notes.push(`${n(u.retries)} rate-limit retr${u.retries===1?'y':'ies'}.`);
+    if(u.rejected) notes.push(`${n(u.rejected)} LLM value${u.rejected===1?' was':'s were'} discarded because the transcript does not support ${u.rejected===1?'it':'them'}.`);
     if(u.failed) notes.push(`${n(u.failed)} call${u.failed===1?'':'s'} failed and fell back to the non-LLM result.`);
     if(u.tokens_saved_by_cache) notes.push(`Cache saved ${approx}${n(u.tokens_saved_by_cache)} tokens.`);
     if(u.would_skip) notes.push(`${n(u.would_skip)} call${u.would_skip===1?'':'s'} could be skipped (decided by routing rules; currently measured only).`);
@@ -1638,6 +1724,21 @@ function renderLlmUsage(u){
     box.appendChild(body);
   }
   aiSummaryEl.appendChild(box);
+}
+
+/* A document built with failed stages or failed LLM calls says so first,
+   before any coverage numbers (P0-6). */
+function renderJobWarnings(data){
+  const warnings = data.warnings || [];
+  const notices = data.notices || [];
+  if(!warnings.length && !notices.length) return;
+  const box = document.createElement('div');
+  box.className = 'alert-row ' + (warnings.length ? 'danger' : 'warn');
+  const items = warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('');
+  const note = notices.map(escapeHtml).join(' ');
+  box.innerHTML = `<span>${warnings.length ? '<strong>Review before relying on this document.</strong> It was generated with problems:<ul style="margin:4px 0 0 18px">' + items + '</ul>' : ''}${note ? `<div style="margin-top:${warnings.length ? 6 : 0}px">${note}</div>` : ''}</span>`;
+  aiSummaryEl.prepend(box);
+  if(warnings.length) showToast('KT generated with warnings — review before use', 6000, 'warn');
 }
 
 /* ── Render coverage ────────────────────────────────────────── */
@@ -1664,7 +1765,7 @@ function renderCoverage(cov){
         // Escaped BEFORE markdown: transcript text is untrusted input (the
         // /kt-from-transcript endpoint accepts arbitrary text) and marked
         // passes raw HTML such as <img onerror=...> straight through.
-        div.innerHTML = marked.parse(escapeHtml(String(c || '')));
+        div.innerHTML = safeMarked(marked.parse(escapeHtml(String(c || ''))));
         body.appendChild(div);
       });
     } else {
@@ -1733,7 +1834,7 @@ function renderBlockHtml(block){
   const title = fallback => `<div class="doc-block-title">${escapeHtml(String(block.title||fallback))}</div>`;
   switch(block.type){
     case 'NarrativeBlock':
-      return `${title('Narrative')}${(block.paragraphs||[]).map(p=>`<p>${marked.parseInline(escapeHtml(String(p||'')))}</p>`).join('')}`;
+      return `${title('Narrative')}${(block.paragraphs||[]).map(p=>`<p>${safeMarked(marked.parseInline(escapeHtml(String(p||''))))}</p>`).join('')}`;
     case 'ChecklistBlock':
       return `${title('Checklist')}<ul>${(block.items||[]).map(item=>`<li>${renderInlineText(item)}</li>`).join('')}</ul>`;
     case 'WarningBlock':
@@ -1807,6 +1908,24 @@ function renderScreenCaptures(data){
   }
 }
 
+/* marked does not sanitise link targets: text that is already HTML-escaped
+   can still produce [x](javascript:...) links or ![x](http://...) images.
+   Keep only http(s)/mailto/# links and drop images. */
+function safeMarked(html){
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('img,script,iframe,object,embed').forEach(el => el.remove());
+  tpl.content.querySelectorAll('a').forEach(a => {
+    const href = (a.getAttribute('href') || '').trim();
+    if(!/^(https?:|mailto:|#)/i.test(href)){ a.removeAttribute('href'); }
+    else { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); }
+  });
+  tpl.content.querySelectorAll('*').forEach(el => {
+    [...el.attributes].forEach(attr => { if(/^on/i.test(attr.name)) el.removeAttribute(attr.name); });
+  });
+  return tpl.innerHTML;
+}
+
 function escapeHtml(text){
   if(typeof text !== 'string') return '';
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -1868,16 +1987,18 @@ function pollJobStatus(jobId){
   pollInterval=setInterval(async()=>{
     try{
       const resp=await fetch(`/status/${jobId}`);
-      if(resp.status===404){ showToast('Job not found — the server may have restarted'); clearInterval(pollInterval); progressWrap.style.display='none'; return; }
+      if(resp.status===404){ showToast('This KT is no longer available'); try{ localStorage.removeItem('kt-last-job'); }catch(e){} clearInterval(pollInterval); progressWrap.style.display='none'; return; }
       if(!resp.ok){ fail('Status check failed'); return; }
       failures = 0;
       const data=await resp.json();
       if(data.status==='processing'){
         // Server progress runs 0-100; keep the bar short of 100 until done.
         setProgress(Math.max(10, Math.min(95, data.progress||0)));
-      } else if(data.status==='completed'){
+      } else if(data.status==='completed' || data.status==='completed_with_warnings'){
         setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
         renderSummary(data);
+        renderJobWarnings(data);
+        loadHistory();
         transcriptEl.textContent=data.transcript||'(none)';
         renderCoverage(data.coverage||{});
         populateCoverBlock(data);
@@ -1897,6 +2018,7 @@ function pollJobStatus(jobId){
         renderKnowledgeDocument(data.knowledge_object || {});
       } else if(data.status==='failed'){
         showToast('Processing failed: '+(data.error||'Unknown error'));
+        loadHistory();
         setProgress(0); progressWrap.style.display='none'; clearInterval(pollInterval);
       }
     }catch(err){ fail('Poll error: '+err); }
@@ -1924,16 +2046,24 @@ uploadBtn.addEventListener('click',async()=>{
   uploadBtn.disabled = true;
   try{
     const resp=await request;
-    if(!resp.ok){ const t=await resp.text(); showToast('Submission failed: '+resp.status+' '+t); setProgress(0); progressWrap.style.display='none'; uploadBtn.disabled=false; return; }
+    if(!resp.ok){
+      const t = await resp.text();
+      let msg = t;
+      try{ const j = JSON.parse(t); if(typeof j.detail === 'string') msg = j.detail; }catch(e){}
+      showToast((resp.status===422 ? 'Not a usable KT transcript: ' : 'Submission failed: '+resp.status+' ') + msg, 9000, 'error');
+      setProgress(0); progressWrap.style.display='none'; uploadBtn.disabled=false; return;
+    }
     setProgress(20);
     const data=await resp.json();
     currentJobId=data.job_id;
+    try{ localStorage.setItem('kt-last-job', currentJobId); }catch(e){}
     if(data.status==='processing'){
       transcriptEl.textContent='Processing…';
       coverageEl.innerHTML='<p class="empty-state" style="padding:6px">Processing — please wait…</p>';
       aiSummaryEl.innerHTML='<p class="empty-state">Waiting for analysis results…</p>';
       sessionJob.textContent=currentJobId.slice(0,14)+'…';
       pollJobStatus(currentJobId);
+      loadHistory();
     }
   }catch(err){ showToast('Error: '+err); setProgress(0); progressWrap.style.display='none'; }
   finally{
@@ -1942,6 +2072,108 @@ uploadBtn.addEventListener('click',async()=>{
     uploadBtn.disabled = false;
   }
 });
+
+/* Jobs are stored on the server (job_store.py): reopen the last KT after a
+   page refresh instead of losing it. */
+(function resumeLastJob(){
+  // ?job=<id> opens a specific KT (a link to it); otherwise the last one.
+  let id = new URLSearchParams(location.search).get('job');
+  if(!id){ try{ id = localStorage.getItem('kt-last-job'); }catch(e){} }
+  if(!id) return;
+  currentJobId = id;
+  sessionJob.textContent = id.slice(0,14)+'…';
+  progressWrap.style.display = 'block';
+  pollJobStatus(id);
+})();
+
+/* ── Past KTs (GET /jobs) ─────────────────────────────────────
+   Every KT of this workspace is stored on the server (job_store.py); this
+   list reopens, downloads or deletes them. */
+const HISTORY_STATUS = {
+  completed: ['Completed', 'st-ok'],
+  completed_with_warnings: ['Needs review', 'st-warn'],
+  processing: ['Processing', 'st-run'],
+  failed: ['Failed', 'st-fail'],
+};
+const HISTORY_ICONS = {
+  pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+};
+
+function historyDate(epochSeconds){
+  if(!epochSeconds) return '';
+  const d = new Date(epochSeconds * 1000);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? 'Today, ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+    : d.toLocaleDateString([], {day:'numeric', month:'short', year:'numeric'});
+}
+
+async function loadHistory(){
+  const list = document.getElementById('historyList');
+  if(!list) return;
+  let jobs = [];
+  try{
+    const resp = await fetch('/jobs?limit=50');
+    if(!resp.ok) return;
+    jobs = (await resp.json()).jobs || [];
+  }catch(e){ return; }
+  list.innerHTML = '';
+  if(!jobs.length){
+    list.innerHTML = '<li class="history-empty">No KTs yet. Upload a recording or paste a transcript to create one.</li>';
+    return;
+  }
+  jobs.forEach(job => {
+    const [label, cls] = HISTORY_STATUS[job.status] || [job.status || 'Unknown', 'st-run'];
+    const title = job.title || (job.status === 'processing' ? 'New KT' : 'Untitled KT');
+    const done = job.status === 'completed' || job.status === 'completed_with_warnings';
+    const li = document.createElement('li');
+    li.className = 'history-item' + (job.job_id === currentJobId ? ' active' : '');
+    li.innerHTML = `
+      <button class="history-open" type="button" title="Open this KT">
+        <span class="history-title">${escapeHtml(title)}</span>
+        <span class="history-meta"><span class="history-status ${cls}">${escapeHtml(label)}</span><span>${escapeHtml(historyDate(job.created_at))}</span></span>
+      </button>
+      <span class="history-actions">
+        <button class="history-act" type="button" data-act="pdf" ${done ? '' : 'disabled'} title="Download PDF" aria-label="Download PDF for ${escapeHtml(title)}">${HISTORY_ICONS.pdf}</button>
+        <button class="history-act danger" type="button" data-act="delete" title="Delete" aria-label="Delete ${escapeHtml(title)}">${HISTORY_ICONS.del}</button>
+      </span>`;
+    li.querySelector('.history-open').addEventListener('click', () => openHistoryJob(job.job_id));
+    li.querySelector('[data-act="pdf"]').addEventListener('click', () => downloadKtPdf(job.job_id, title));
+    li.querySelector('[data-act="delete"]').addEventListener('click', () => deleteHistoryJob(job.job_id, title));
+    list.appendChild(li);
+  });
+}
+
+function openHistoryJob(jobId){
+  currentJobId = jobId;
+  try{ localStorage.setItem('kt-last-job', jobId); }catch(e){}
+  sessionJob.textContent = jobId.slice(0,14) + '…';
+  transcriptEl.textContent = 'Loading…';
+  progressWrap.style.display = 'block';
+  pollJobStatus(jobId);
+  document.querySelectorAll('.history-item').forEach(li => li.classList.remove('active'));
+  loadHistory();
+  document.getElementById('pageTop')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function deleteHistoryJob(jobId, title){
+  if(!window.confirm(`Delete "${title}"?\n\nThis permanently removes its transcript, document and screenshots.`)) return;
+  try{
+    const resp = await fetch(`/jobs/${encodeURIComponent(jobId)}`, {method:'DELETE'});
+    if(!resp.ok){ showToast('Could not delete this KT', 5000, 'error'); return; }
+  }catch(e){ showToast('Could not delete this KT', 5000, 'error'); return; }
+  showToast(`Deleted "${title}"`);
+  if(jobId === currentJobId){
+    try{ localStorage.removeItem('kt-last-job'); }catch(e){}
+    window.location.reload();
+    return;
+  }
+  loadHistory();
+}
+
+document.getElementById('historyRefresh')?.addEventListener('click', loadHistory);
+loadHistory();
 
 /* ── Edit modal ─────────────────────────────────────────────── */
 let editState={sentenceIndex:null,sentenceObj:null};
@@ -2222,22 +2454,22 @@ function openRenderedDocumentPrintPreview(){
   return true;
 }
 
-async function downloadKtPdf(){
-  if(!currentJobId){ showToast('No active job to export'); return; }
+async function downloadKtPdf(jobId = currentJobId, title = ''){
+  if(!jobId){ showToast('No active job to export'); return; }
 
   try{
-    const statusResp = await fetch(`/status/${currentJobId}`);
+    const statusResp = await fetch(`/status/${jobId}`);
     if(!statusResp.ok){
       showToast('Unable to verify job status for PDF export');
       return;
     }
     const statusData = await statusResp.json();
-    if(statusData.status !== 'completed'){
+    if(statusData.status !== 'completed' && statusData.status !== 'completed_with_warnings'){
       showToast('KT PDF is not ready yet. Wait until processing completes.');
       return;
     }
 
-    const resp = await fetch(`/export/pdf/${currentJobId}`);
+    const resp = await fetch(`/export/pdf/${jobId}`);
     if(!resp.ok){
       const contentType = resp.headers.get('content-type') || '';
       let details = '';
@@ -2254,7 +2486,8 @@ async function downloadKtPdf(){
       console.error('KT PDF download failed', resp.status, details);
       const msg = details || `HTTP ${resp.status}`;
       const shouldFallback = resp.status === 503 || msg.toLowerCase().includes('weasyprint') || msg.toLowerCase().includes('404');
-      if(shouldFallback){
+      // The print-preview fallback shows the KT open on screen, so only for that one.
+      if(shouldFallback && jobId === currentJobId){
         const fallback = openRenderedDocumentPrintPreview();
         if(fallback){
           showToast('Fallback: opened rendered KT document for print/PDF');
@@ -2270,7 +2503,8 @@ async function downloadKtPdf(){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `kt_${stamp}.pdf`;
+    const slug = (title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    a.download = slug ? `kt_${slug}.pdf` : `kt_${stamp}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('Downloaded KT PDF');

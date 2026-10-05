@@ -83,7 +83,7 @@ def test_environments_renders_populated_environments_as_table():
         "Known characteristics": "Closely mirrors production; payments are mocked.",
     }]
     # Must always include the "do not over-infer" callout when it renders a table.
-    assert any(b["title"] == "Do not over-infer" for b in result["blocks"])
+    assert any(b["title"] == "Not covered for environments" for b in result["blocks"])
 
 
 def test_environments_no_coverage_when_nothing_populated():
@@ -140,10 +140,11 @@ def test_kt_coverage_renders_knowledge_gaps_as_distinct_checklist():
         "_knowledge_gaps": ["SIGN-OFF"],
     }
     result = render_kt_coverage(section)
-    assert len(result["blocks"]) == 3
+    # Matrix, then the follow-up checklist. (The engineering "completeness
+    # invariant" paragraph that sat between them is no longer printed.)
+    assert len(result["blocks"]) == 2
     assert result["blocks"][0]["type"] == "DecisionTable"
-    assert result["blocks"][1]["type"] == "NarrativeBlock"
-    gaps_block = result["blocks"][2]
+    gaps_block = result["blocks"][1]
     assert gaps_block["type"] == "ChecklistBlock"
     assert gaps_block["items"] == ["SIGN-OFF"]
 
@@ -155,8 +156,9 @@ def test_kt_coverage_omits_gaps_block_when_nothing_missing():
         "_knowledge_gaps": [],
     }
     result = render_kt_coverage(section)
-    assert len(result["blocks"]) == 2
+    assert len(result["blocks"]) == 1
     assert not any(b["type"] == "ChecklistBlock" for b in result["blocks"])
+    assert not any("invariant" in (b.get("title") or "").lower() for b in result["blocks"])
 
 
 def test_kt_coverage_renders_knowledge_coverage_summary_before_the_matrix():

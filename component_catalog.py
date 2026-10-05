@@ -55,7 +55,12 @@ CATALOG: List[Product] = [
     P("AWS Secrets Manager", "Secrets", "secrets", ("AWS Secrets Manager", "Secrets Manager")),
     P("AWS CloudTrail", "Security", None, ("AWS CloudTrail", "CloudTrail", "Cloud Trail")),
     P("AWS IAM", "Security", None, ("AWS IAM", "IAM")),
-    P("Amazon VPC", "Networking", None, ("Amazon VPC", "AWS VPC", "VPC")),
+    # A bare "VPC" exists on every cloud: on a GCP KT ("VPC Service
+    # Controls") it was labelled Amazon VPC. Only the vendor-qualified
+    # spelling names the AWS product.
+    P("Amazon VPC", "Networking", None, ("Amazon VPC", "AWS VPC")),
+    P("VPC", "Networking", None, ("VPC",), case_sensitive=True),
+    P("VPC Service Controls", "Security", None, ("VPC Service Controls", "VPC-SC"), case_sensitive=True),
     P("Amazon Redshift", "Database", "database", ("Amazon Redshift", "Redshift")),
     P("Amazon Athena", "Data processing", "data_pipeline", ("Amazon Athena", "Athena"), case_sensitive=True),
     P("Amazon EBS", "Storage", None, ("Amazon EBS", "EBS")),
@@ -305,6 +310,10 @@ class ToolMatcher:
 
     def findall(self, text: str) -> List[str]:
         return [g for _, _, g in self._matches(text)]
+
+    def spans(self, text: str) -> List[Tuple[int, int, str]]:
+        """(start, end, name) for every technology mentioned, in order."""
+        return self._matches(text)
 
     def search(self, text: str):
         found = self.base.search(text or "")

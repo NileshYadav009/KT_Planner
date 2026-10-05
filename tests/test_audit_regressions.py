@@ -308,7 +308,7 @@ def test_environment_note_only_lists_details_that_were_not_mentioned():
     rendered = render_environments({"id": "environments", "title": "Environments", "fields": {}, "coverage_content": [
         "The environments are development, integration, staging, pre-production, and production.",
     ]})
-    note = next(b for b in rendered["blocks"] if b["title"] == "Do not over-infer")["paragraphs"][0]
+    note = next(b for b in rendered["blocks"] if b["title"] == "Not covered for environments")["paragraphs"][0]
     assert "environment names" not in note
     assert "URLs" in note
 

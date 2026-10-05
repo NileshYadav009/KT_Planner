@@ -636,6 +636,11 @@ def create_llm_provider() -> LLMProvider:
 
 
 def get_llm_provider() -> Optional[LLMProvider]:
+    # A tenant whose policy forbids external LLMs gets no provider at all, so
+    # every stage takes its rules-only path (llm/tenant_context.py).
+    from llm.tenant_context import llm_allowed
+    if not llm_allowed():
+        return None
     try:
         provider = create_llm_provider()
     except Exception as e:

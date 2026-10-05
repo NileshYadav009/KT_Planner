@@ -32,6 +32,7 @@ from policy import (
 
 from runtime_policy import load_policy
 from devops_transcription import clean_transcript
+from dialogue import merge_question_answers
 from entity_extractor import EntityExtractor
 from section_rules import (
     match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost,
@@ -359,6 +360,11 @@ def segment_sentences(
         )
         sentences.append(sent)
     
+    # A receiver's question and the giver's answer are one statement: split,
+    # the question was mapped as a fact and the answer lost its topic
+    # ("What is the RTO?" / "We never agreed one with the business."). See
+    # dialogue.py.
+    sentences = merge_question_answers(sentences, lambda s: s.text, _merge_sentences)
     return semantic_chunk_sentences(sentences)
 
 

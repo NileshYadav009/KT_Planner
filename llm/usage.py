@@ -41,7 +41,7 @@ class LLMUsageTracker:
 
     def _stage(self, call_site: str) -> Dict[str, Any]:
         return self._stages.setdefault(call_site, {
-            "llm_calls": 0, "cache_hits": 0, "skipped": 0, "would_skip": 0, "failed": 0,
+            "llm_calls": 0, "cache_hits": 0, "skipped": 0, "would_skip": 0, "failed": 0, "rejected": 0,
             "input_tokens": 0, "output_tokens": 0, "estimated_tokens": False,
             "llm_seconds": 0.0, "retries": 0, "skip_reasons": {},
         })
@@ -77,6 +77,16 @@ class LLMUsageTracker:
             key = reason + (" (shadow)" if shadow else "")
             st["skip_reasons"][key] = st["skip_reasons"].get(key, 0) + 1
 
+    def record_rejected(self, call_site: str, detail: str) -> None:
+        """An LLM value discarded because the transcript does not support it
+        (grounding.py) or because it was malformed."""
+        with self._lock:
+            st = self._stage(call_site)
+            st["rejected"] = st.get("rejected", 0) + 1
+            self._rejected_examples = getattr(self, "_rejected_examples", [])
+            if len(self._rejected_examples) < 20:
+                self._rejected_examples.append(f"{call_site}: {detail[:200]}")
+
     def summary(self) -> Dict[str, Any]:
         with self._lock:
             order = list(STAGE_LABELS)
@@ -111,6 +121,8 @@ class LLMUsageTracker:
                 "cache_hits": total("cache_hits"),
                 "skipped": total("skipped"),
                 "would_skip": total("would_skip"),
+                "rejected": total("rejected"),
+                "rejected_examples": list(getattr(self, "_rejected_examples", [])),
                 "failed": total("failed"),
                 "input_tokens": total("input_tokens"),
                 "output_tokens": total("output_tokens"),
@@ -142,6 +154,12 @@ def start_tracking(tracker: LLMUsageTracker):
 
 def stop_tracking(token) -> None:
     _CURRENT.reset(token)
+
+
+def record_rejected(call_site: str, detail: str) -> None:
+    tracker = current_tracker()
+    if tracker is not None:
+        tracker.record_rejected(call_site, detail)
 
 
 def record_skip(call_site: str, reason: str, *, shadow: bool = False) -> None:

@@ -26,6 +26,7 @@ from faster_whisper import WhisperModel
 from ai import map_analysis_to_fields, polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript
+from input_gate import assess_transcript
 from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
 from knowledge import (
     build_knowledge_object,
@@ -38,12 +39,18 @@ from knowledge import (
     append_quick_reference_section,
     reconcile_linked_fields,
     verify_document_coverage,
+    apply_conflicts,
+    attach_conflict_warnings,
 )
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
 import contextvars
 import screen_capture
+from job_store import JobStore, PersistentJobs
+from auth import tenant_llm_policy
+from llm.tenant_context import CURRENT_TENANT, LLM_POLICY
+from redaction import redact_secrets
 
 # Screenshots captured from shared screens, one folder per job (gitignored).
 KT_ASSETS_DIR = os.getenv("KT_ASSETS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "kt_assets"))
@@ -64,8 +71,43 @@ WHISPER_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").strip().lower() not
 
 MODEL = None
 MAPPER_PIPELINE = None
-JOB_QUEUE = {}  # job_id -> {status, transcript, coverage, missing_required, progress, error}
+# job_id -> {status, transcript, coverage, missing_required, progress, error};
+# persisted to SQLite (job_store.py) so a restart loses nothing.
+JOB_STORE = JobStore()
+JOB_QUEUE = PersistentJobs(JOB_STORE)
 JOB_LOCK = Lock()
+# A finished job whose document can be exported. completed_with_warnings means
+# stages failed or LLM calls fell back; the warnings are shown to the reader.
+COMPLETED_STATUSES = ("completed", "completed_with_warnings")
+
+
+def delete_job_data(job_id: str) -> bool:
+    """Remove a job's record and its captured screenshots."""
+    import shutil
+    if re.fullmatch(r"[0-9A-Za-z-]{8,64}", job_id or ""):
+        shutil.rmtree(os.path.join(KT_ASSETS_DIR, job_id), ignore_errors=True)
+    try:
+        del JOB_QUEUE[job_id]
+        return True
+    except KeyError:
+        return False
+
+
+def apply_retention() -> int:
+    """Delete jobs (and their screenshots) older than CONTINUUM_RETENTION_DAYS.
+    Unset or 0 keeps everything."""
+    try:
+        days = float(os.getenv("CONTINUUM_RETENTION_DAYS", "0") or 0)
+    except ValueError:
+        days = 0
+    if days <= 0:
+        return 0
+    import shutil
+    removed = JOB_STORE.purge_older_than(days)
+    for job_id in removed:
+        if re.fullmatch(r"[0-9A-Za-z-]{8,64}", job_id or ""):
+            shutil.rmtree(os.path.join(KT_ASSETS_DIR, job_id), ignore_errors=True)
+    return len(removed)
 
 
 def load_models():
@@ -94,8 +136,42 @@ def load_models():
         )
 
 
+class DocumentAssemblyError(RuntimeError):
+    """A stage without which no usable document exists failed."""
+
+
+def _stage_failed(stage_errors: list, stage: str, exc: Exception, notice: Optional[str] = None,
+                  *, fatal: bool = False) -> None:
+    """Record a failed pipeline stage instead of only logging it.
+
+    `notice` is the sentence shown to the reader (UI banner and PDF) when the
+    failure changes what the document contains; None for internal stages.
+    A fatal stage fails the job: a document without it would look complete
+    while missing its sections."""
+    logger.warning("%s failed: %s", stage, exc, exc_info=True)
+    stage_errors.append({"stage": stage, "error": f"{type(exc).__name__}: {exc}", "notice": notice})
+    if fatal:
+        raise DocumentAssemblyError(f"{stage} failed: {exc}") from exc
+
+
+def _job_warnings(stage_errors: list, usage: dict, upstream: Optional[List[str]] = None) -> List[str]:
+    """Reader-facing warnings for a completed job: stage failures that change
+    the document, and LLM calls that failed and fell back to rules."""
+    warnings = list(upstream or [])
+    for err in stage_errors:
+        if err.get("notice") and err["notice"] not in warnings:
+            warnings.append(err["notice"])
+    failed, calls = int(usage.get("failed") or 0), int(usage.get("llm_calls") or 0)
+    if failed:
+        warnings.append(
+            f"{failed} of {calls} LLM calls failed (provider error or quota). The affected fields and "
+            f"sections were filled by rules only or left empty, so some 'not covered' entries may be wrong."
+        )
+    return warnings
+
+
 def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None,
-                    screen: Optional[dict] = None) -> dict:
+                    screen: Optional[dict] = None, warnings: Optional[List[str]] = None) -> dict:
     """Run classification through rendering for an already-transcribed, already-cleaned
     transcript, and store the result in JOB_QUEUE.
 
@@ -114,6 +190,25 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     # below, which copy this context) is counted here. See llm/usage.py.
     usage_tracker = LLMUsageTracker(job_id)
     usage_token = start_tracking(usage_tracker)
+    stage_errors: list = []
+
+    # The tenant this job belongs to scopes the LLM cache and decides whether
+    # transcript content may reach an external LLM at all (P0-9).
+    tenant_id = ((JOB_QUEUE.get(job_id) or {}) if job_id in JOB_QUEUE else {}).get("tenant_id") or "local"
+    llm_policy = tenant_llm_policy(tenant_id)
+    tenant_token = CURRENT_TENANT.set(tenant_id)
+    policy_token = LLM_POLICY.set(llm_policy)
+
+    # Credentials never go further than this line: not to the LLM, the
+    # cache, the job store or the PDF.
+    transcript, redacted = redact_secrets(transcript)
+    if segments is not None:
+        clean_segments = []
+        for seg in segments:
+            text, n = redact_secrets(seg.get("text", "") if isinstance(seg, dict) else "")
+            redacted += n
+            clean_segments.append(dict(seg, text=text) if isinstance(seg, dict) else seg)
+        segments = clean_segments
     try:
         if segments is None:
             segments = [{
@@ -205,7 +300,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 max_fragments_per_section=8,
             )
         except Exception as e:
-            logger.warning("Batch coverage polish failed: %s", e)
+            _stage_failed(stage_errors, "Text polishing", e, "Text polishing failed; sections show the speaker's original sentences.")
             polished_sections = {}
 
         # Extract structured data for sections with structured prompts. Each
@@ -253,7 +348,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                         if structured:
                             structured_data[section_id] = structured
                     except Exception as e:
-                        logger.warning("Structured extraction failed for %s: %s", section_id, e)
+                        _stage_failed(stage_errors, f"Structured extraction ({section_id})", e, f"Structured extraction failed for {coverage.get(section_id, {}).get('title', section_id)}; that section shows plain sentences instead of its table.")
         else:
             for section_id in structured_section_ids:
                 try:
@@ -261,7 +356,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                     if structured:
                         structured_data[section_id] = structured
                 except Exception as e:
-                    logger.warning("Structured extraction failed for %s: %s", section_id, e)
+                    _stage_failed(stage_errors, f"Structured extraction ({section_id})", e, f"Structured extraction failed for {coverage.get(section_id, {}).get('title', section_id)}; that section shows plain sentences instead of its table.")
 
         for sid, section_payload in coverage.items():
             display_content = polished_sections.get(sid)
@@ -280,7 +375,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 include_missing_required=True,
             )
         except Exception as exc:
-            logger.warning("Dynamic schema generation failed: %s", exc)
+            _stage_failed(stage_errors, "Dynamic schema", exc, None)
             dynamic_schema = SCHEMA
 
         try:
@@ -313,7 +408,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 section_content=kt.section_content,
             )
         except Exception as exc:
-            logger.warning("Field population failed: %s", exc)
+            _stage_failed(stage_errors, "Field population", exc, "Field extraction failed; owners, RTO/RPO, environments and other fields were not filled, and the content appears as plain sentences.")
             populated_fields = {}
 
         # Merge structured-extraction data into populated_fields using the exact
@@ -394,13 +489,12 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 section_content=kt.section_content,
             )
         except Exception as exc:
-            logger.warning("Knowledge object build failed: %s", exc)
-            knowledge_object = {}
+            _stage_failed(stage_errors, "Document assembly", exc, fatal=True)
 
         try:
             knowledge_object = reconcile_linked_fields(knowledge_object)
         except Exception as exc:
-            logger.warning("Linked field reconciliation failed: %s", exc)
+            _stage_failed(stage_errors, "Linked fields", exc, None)
 
         # Fold cost_optimization's levers into known_bad_days as a combined
         # "Operational Calendar" (peak periods + cost-related patterns) —
@@ -408,7 +502,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         try:
             knowledge_object = enrich_operational_calendar(knowledge_object)
         except Exception as exc:
-            logger.warning("Operational calendar enrichment failed: %s", exc)
+            _stage_failed(stage_errors, "Operational calendar", exc, "The Operational Calendar summary could not be built.")
 
         # Fold tool mentions correctly classified into their own dedicated
         # sections (Monitoring's tools, Security's scanner) into System
@@ -431,12 +525,21 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         try:
             knowledge_object = enrich_architecture_knowledge(knowledge_object, kt.section_content)
         except Exception as exc:
-            logger.warning("Architecture knowledge enrichment failed: %s", exc)
+            _stage_failed(stage_errors, "Architecture summary", exc, "The architecture summary and diagram could not be built.")
 
         try:
             knowledge_object = enrich_technology_summary(knowledge_object)
         except Exception as exc:
-            logger.warning("Technology summary enrichment failed: %s", exc)
+            _stage_failed(stage_errors, "Technology summary", exc, "The technology summary may be incomplete.")
+
+        # Corrections and contradictions the speaker made: replaced tools are
+        # swapped for the current ones, and contradictory rules are kept for
+        # the reader to confirm (conflicts.py).
+        try:
+            knowledge_object = apply_conflicts(knowledge_object, coverage)
+        except Exception as exc:
+            _stage_failed(stage_errors, "Conflict detection", exc,
+                          "Corrections and contradictions in the session could not be checked; review single-valued facts (RTO, owners, tools).")
 
         # Surface sentences the classifier never confidently placed in any
         # real section instead of letting them vanish silently (see
@@ -451,30 +554,30 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 knowledge_object, kt.unassigned_sentences
             )
         except Exception as exc:
-            logger.warning("Unmapped findings appendix failed: %s", exc)
+            _stage_failed(stage_errors, "Additional notes", exc, "Sentences that fit no section could not be listed under Additional Notes.")
 
         # Cross-section digests synthesized from data the pipeline has
         # already produced above — no new classification, just reshaping.
         try:
             knowledge_object = append_tribal_knowledge_section(knowledge_object, kt.section_content)
         except Exception as exc:
-            logger.warning("Tribal knowledge digest failed: %s", exc)
+            _stage_failed(stage_errors, "Tribal knowledge", exc, None)
 
         try:
             knowledge_object = append_coverage_matrix_section(knowledge_object, coverage, dynamic_schema)
         except Exception as exc:
-            logger.warning("Coverage matrix digest failed: %s", exc)
+            _stage_failed(stage_errors, "Coverage summary", exc, "The KT coverage summary could not be built.")
 
         try:
             knowledge_object = append_quick_reference_section(knowledge_object)
         except Exception as exc:
-            logger.warning("Quick reference digest failed: %s", exc)
+            _stage_failed(stage_errors, "Quick reference", exc, "The quick reference page could not be built.")
 
         try:
             knowledge_object["rendered_sections"] = build_rendered_sections(knowledge_object)
+            attach_conflict_warnings(knowledge_object["rendered_sections"], knowledge_object)
         except Exception as exc:
-            logger.warning("Rendered sections build failed: %s", exc)
-            knowledge_object["rendered_sections"] = []
+            _stage_failed(stage_errors, "Document rendering", exc, fatal=True)
 
         # Dashboards and links shown on the shared screen (screen_capture.py),
         # placed in the section that was being discussed at the time.
@@ -484,7 +587,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 screen_capture.assign_sections(screen_assets, coverage, (screen or {}).get("transcript_offset", 0.0))
                 screen_capture.attach_to_rendered_sections(knowledge_object["rendered_sections"], screen_assets, job_id)
             except Exception as exc:
-                logger.warning("Placing screen captures failed: %s", exc)
+                _stage_failed(stage_errors, "Screen captures", exc, "Captured dashboards and links could not be placed in the document.")
 
         # Final completeness check against the RENDERED document: every
         # fact-bearing transcript sentence must appear somewhere in it, or be
@@ -500,7 +603,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 knowledge_object, [s.text for s in (kt.sentences or [])], sentence_sections
             )
         except Exception as exc:
-            logger.warning("Document coverage verification failed: %s", exc)
+            _stage_failed(stage_errors, "Completeness check", exc, "The completeness check did not run, so some transcript sentences may be missing from this document.")
 
         # Non-fatal structural validation (schema/field-id consistency,
         # expected shapes/ranges) — see validation.py. Never blocks the
@@ -516,7 +619,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             for warning in validation_warnings:
                 logger.warning("[validation] %s: %s", job_id, warning)
         except Exception as exc:
-            logger.warning("Validation itself failed: %s", exc)
+            _stage_failed(stage_errors, "Validation", exc, None)
             validation_warnings = []
 
         # Document-level quality score — aggregates the per-section
@@ -532,7 +635,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 validation_warnings=validation_warnings,
             )
         except Exception as exc:
-            logger.warning("Quality score computation failed: %s", exc)
+            _stage_failed(stage_errors, "Quality score", exc, None)
             quality_score = {}
 
         # Learn new DevOps vocabulary from this transcript. Detection only ever
@@ -543,7 +646,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             if candidates:
                 record_candidates(candidates, job_id)
         except Exception as exc:
-            logger.warning("Vocabulary candidate detection failed: %s", exc)
+            _stage_failed(stage_errors, "Vocabulary learning", exc, None)
 
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
@@ -589,13 +692,38 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "error": None
         }
     except Exception as e:
+        logger.exception("KT pipeline failed for %s", job_id)
         result = {
             "status": "failed",
             "error": str(e)
         }
     finally:
         stop_tracking(usage_token)
+        LLM_POLICY.reset(policy_token)
+        CURRENT_TENANT.reset(tenant_token)
     result["llm_usage"] = usage_tracker.summary()
+    result["stage_errors"] = stage_errors
+
+    # A document that was built with failed stages or failed LLM calls must
+    # say so: it can look complete while missing what those stages produce.
+    if result["status"] == "completed":
+        job_warnings = _job_warnings(stage_errors, result["llm_usage"], warnings)
+        result["warnings"] = job_warnings
+        result["notices"] = []
+        if llm_policy == "none":
+            result["notices"].append("External LLM disabled for this workspace: rules and local models only.")
+        elif get_llm_provider() is None:
+            result["notices"].append("Generated without an LLM: rules and local models only.")
+        if redacted:
+            result["notices"].append(f"{redacted} credential(s) found in the transcript were redacted before processing.")
+        rejected = int(result["llm_usage"].get("rejected") or 0)
+        if rejected:
+            result["notices"].append(
+                f"{rejected} LLM-generated value(s) were discarded because the transcript does not "
+                f"support them; those fields are left empty rather than guessed."
+            )
+        if job_warnings:
+            result["status"] = "completed_with_warnings"
 
     with JOB_LOCK:
         JOB_QUEUE[job_id] = result
@@ -680,7 +808,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         cleaned_segments = []
         raw_parts = []
         for s in segments:
-            cleaned_text = clean_transcript(s.text)
+            cleaned_text, _ = redact_secrets(clean_transcript(s.text))
             raw_parts.append(cleaned_text)
             cleaned_segments.append({
                 "id": s.id,
@@ -710,6 +838,17 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
         if not transcript:
             raise ValueError("No speech detected in the uploaded file.")
 
+        # Refuse recordings that cannot produce a KT document (an empty
+        # meeting, a few pleasantries, a stand-up uploaded by mistake); carry
+        # softer findings to the document as warnings.
+        upstream_warnings: List[str] = []
+        gate = assess_transcript(transcript, source="audio")
+        if gate["verdict"] == "reject":
+            raise ValueError("The recording does not contain enough KT content to build a document. "
+                             + " ".join(gate["reasons"]))
+        if gate["verdict"] == "warn":
+            upstream_warnings.extend(gate["reasons"])
+
         # A recorded meeting with a screen share: capture the dashboards and
         # links that were shown and discussed (screen_capture.py). Runs here
         # because the uploaded file is deleted when this task ends. Never
@@ -727,9 +866,10 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str):
                 )
                 screen["transcript_offset"] = offset
             except Exception as exc:
-                logger.warning("Screen capture failed: %s", exc)
+                logger.warning("Screen capture failed: %s", exc, exc_info=True)
+                upstream_warnings.append("Screen capture failed; dashboards and links shown on screen were not captured.")
 
-        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen)
+        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen, warnings=upstream_warnings)
     except Exception as e:
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {

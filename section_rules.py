@@ -188,6 +188,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\binfrastructure\s+as\s+cold\b",
             # Recovery objectives and mechanisms in general form.
             r"\b(?:rto|rpo)\s+(?:is|of|target|was)\b",
+            # Asked rather than stated ("What is the RTO? We never agreed
+            # one."): still a disaster-recovery topic, merged with its answer.
+            r"\b(?:what(?:'s|\s+is|\s+are)|is\s+there\s+an?|do\s+we\s+have\s+an?)\s+(?:the\s+|our\s+)?(?:rto|rpo)s?\b",
             r"\brecovery\s+(?:time|point)\s+objectives?\b",
             r"\bpoint[\s-]in[\s-]time\s+recovery\b",
             r"\bbackups?\s+(?:use|are|run|is|get|taken|stored)\b",
@@ -400,6 +403,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bwelcome\s+to\s+(?:the\s+)?[\w-]+\s+(?:kt|handover|knowledge\s+transfer|session|walkthrough)\b",
             r"\b(?:service|platform|system|application)\s+(?:used|relied\s+on|depended\s+on)\s+by\b",
             r"\b(?:\w+\s+){0,3}(?:depend|rely|relies)\s+on\s+(?:it|this\s+(?:service|platform|system))\b",
+            # "Thanks for taking over Pinecart, the checkout service ..." introduces
+            # the system; it was filed under Handover Completion.
+            r"\b(?:thanks?|thank\s+you)\s+for\s+taking\s+over\b",
         ],
         0.97,
     ),

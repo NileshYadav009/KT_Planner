@@ -44,17 +44,59 @@ def build_toc_sections(rendered_sections: list) -> list:
     return toc
 
 
+# Link schemes a rendered paragraph may keep. Anything else (file:, data:,
+# javascript:, internal hosts written as bare paths) loses its href.
+_SAFE_HREF_RE = re.compile(r"^(?:https?:|mailto:|#)", re.IGNORECASE)
+
+
+def _neutralise_markup(html: str) -> str:
+    """Markdown output built from escaped text can still carry links and
+    images written in markdown syntax. Images are dropped (nothing in a
+    transcript should make the renderer fetch a resource) and links keep only
+    safe schemes."""
+    html = re.sub(r"<img\b[^>]*>", "", html, flags=re.IGNORECASE)
+
+    def _href(m):
+        url = m.group(2)
+        return m.group(0) if _SAFE_HREF_RE.match(url) else ""
+
+    return re.sub(r"""\s(href)\s*=\s*"([^"]*)\"""", _href, html, flags=re.IGNORECASE)
+
+
 def _render_paragraph_text(text: str) -> str:
+    """Paragraph text from the transcript or an LLM is untrusted: it is
+    escaped before markdown conversion, so a tag in it is printed, never
+    interpreted. (It used to be passed through raw whenever it contained a
+    tag, which let a transcript make WeasyPrint fetch URLs and embed server
+    files in the PDF.)"""
     if not isinstance(text, str):
         return ""
     content = text.strip()
     if not content:
         return ""
-    if re.search(r"<[^>]+>", content):
-        return text
+    escaped = html_escape(content)
     if markdown_to_html:
-        return markdown_to_html(text)
-    return html_escape(text)
+        return _neutralise_markup(markdown_to_html(escaped))
+    return escaped
+
+
+def safe_url_fetcher(url, *args, **kwargs):
+    """WeasyPrint URL fetcher for KT documents: only inline data: URIs are
+    loaded (the stylesheet is inline and screenshots are embedded as data
+    URIs). Any other URL in the document, file:// or http(s)://, is refused,
+    so no content can make the renderer read server files or call internal
+    addresses."""
+    if str(url).startswith("data:"):
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher(url, *args, **kwargs)
+    raise ValueError(f"External resource blocked in KT document: {str(url)[:80]}")
+
+
+def html_to_pdf_bytes(html_doc: str) -> bytes:
+    """Render a KT document with the restricted fetcher. The only entry point
+    the API should use to produce a PDF."""
+    from weasyprint import HTML
+    return HTML(string=html_doc, url_fetcher=safe_url_fetcher).write_pdf()
 
 
 def _render_inline_text(value) -> str:
@@ -83,6 +125,12 @@ def _render_image_block(block: dict) -> str:
     """A captured screenshot, embedded in the PDF itself (data URI) so the
     exported document does not depend on the server's files."""
     path = block.get("image_path") or ""
+    # Only screenshots this app captured, never an arbitrary server path.
+    assets_root = os.path.realpath(os.getenv(
+        "KT_ASSETS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "kt_assets")))
+    real = os.path.realpath(path) if path else ""
+    if not real.startswith(assets_root + os.sep) or not re.fullmatch(r"screen_\d{2}\.jpg", os.path.basename(real)):
+        return f"<p>{html_escape(block.get('caption', ''))} (image not available)</p>"
     try:
         with open(path, "rb") as fh:
             data = base64.b64encode(fh.read()).decode("ascii")
@@ -199,7 +247,11 @@ def load_template_environment():
     return Environment(loader=loader, autoescape=select_autoescape(["html", "xml"]))
 
 
-def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str) -> str:
+def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
+                    warnings: list = None, notices: list = None) -> str:
+    """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
+    degraded document never looks like a complete one; `notices` are
+    informational (e.g. built without an LLM)."""
     env = load_template_environment()
     template = env.get_template("kt_document.html")
     toc_sections = build_toc_sections(rendered_sections)
@@ -217,6 +269,8 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
         toc_sections=toc_sections,
         content_html=content_html,
         style_css=style_css,
+        warnings=[w for w in (warnings or []) if w],
+        notices=[n for n in (notices or []) if n],
     )
 
 

@@ -9,6 +9,13 @@ from section_rules import is_tribal_knowledge
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
 from architecture_diagram import build_architecture_flow_diagram
 from component_catalog import display_name
+from dialogue import is_gap_statement, is_field_candidate
+from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
+
+
+def _short_quote(text: str, limit: int = 140) -> str:
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
 from renderers.blocks.common import split_bullet_blob
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
@@ -691,6 +698,104 @@ def enrich_operational_calendar(knowledge_object: Dict[str, Any]) -> Dict[str, A
     return knowledge_object
 
 
+def _replace_superseded(value: Any, superseded: Dict[str, Dict[str, Optional[str]]]) -> Any:
+    """A field value naming a tool the session says was replaced or dropped
+    gets the current tool (or is marked as no longer used). Only values that
+    ARE tool names are touched; a quoted sentence stays the speaker's words."""
+    def _swap(item: str) -> Optional[str]:
+        info = superseded.get(item.strip().lower())
+        if not info:
+            return item
+        return info["new"] or None
+
+    if isinstance(value, list):
+        out: List[Any] = []
+        for item in value:
+            new = _swap(item) if isinstance(item, str) else item
+            if new is not None and new not in out:
+                out.append(new)
+        return out
+    if isinstance(value, str):
+        if value.strip().lower() in superseded:
+            return _swap(value) or f"{value.strip()} (no longer used, per the KT session)"
+        if "," in value:  # key_technologies is a comma-separated tool list
+            parts = [p.strip() for p in value.split(",")]
+            if any(p.lower() in superseded for p in parts):
+                kept: List[str] = []
+                for p in parts:
+                    new = _swap(p)
+                    if new and new not in kept:
+                        kept.append(new)
+                return ", ".join(kept)
+    return value
+
+
+def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply what the session said about change and contradiction (P0-5,
+    conflicts.py) to the knowledge object before it is rendered:
+
+    - tools the speaker says were replaced ("we moved off PagerDuty") are
+      replaced by the current one in tool-valued fields and the technology
+      summary;
+    - pairs of statements that permit and forbid the same thing are stored
+      on knowledge_object["_conflicts"] for the section and the coverage
+      page to show.
+    """
+    from conflicts import find_contradictions, find_superseded_tools
+
+    sentence_section: Dict[str, str] = {}
+    texts: List[str] = []
+    for sid, cov in (coverage or {}).items():
+        for s in (cov or {}).get("sentences") or []:
+            text = (s or {}).get("text", "") if isinstance(s, dict) else ""
+            # Classification units can hold several sentences (semantic
+            # chunking joined "Deploying on Fridays is fine for us. Never
+            # deploy on Fridays..."); contradictions are found per sentence.
+            for part in re.split(r"(?<=[.!?])\s+", text.strip()):
+                if part.strip():
+                    texts.append(part)
+                    sentence_section.setdefault(part, sid)
+
+    superseded = find_superseded_tools(texts)
+    if superseded:
+        def _walk(fields: Any) -> None:
+            if not isinstance(fields, dict):
+                return
+            for entry in fields.values():
+                if isinstance(entry, dict) and "value" in entry:
+                    new_value = _replace_superseded(entry.get("value"), superseded)
+                    if new_value != entry.get("value"):
+                        entry["value"] = new_value
+                        entry["superseded"] = sorted(info["old"] for info in superseded.values())
+                elif isinstance(entry, dict):
+                    _walk(entry)
+
+        for section in knowledge_object.get("sections") or []:
+            _walk(section.get("fields"))
+        knowledge_object["_superseded_tools"] = list(superseded.values())
+
+    knowledge_object["_conflicts"] = [
+        {"section_id": sentence_section.get(a), "a": a, "b": b} for a, b in find_contradictions(texts)
+    ]
+    return knowledge_object
+
+
+def attach_conflict_warnings(rendered_sections: List[Dict[str, Any]], knowledge_object: Dict[str, Any]) -> None:
+    """Show each contradiction found by apply_conflicts() as a warning in the
+    section where it was said."""
+    by_section: Dict[str, List[str]] = {}
+    for c in knowledge_object.get("_conflicts") or []:
+        by_section.setdefault(c.get("section_id"), []).append(f"“{c['a']}” but also “{c['b']}”")
+    for sec in rendered_sections or []:
+        warnings = by_section.get(sec.get("section_id"))
+        if warnings:
+            sec.setdefault("blocks", []).insert(0, {
+                "type": "WarningBlock",
+                "title": "Possible conflict — confirm with the outgoing owner",
+                "warnings": warnings,
+            })
+
+
 def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
     """Fold tool mentions that correctly classified into their own dedicated
     sections (monitoring_observability's `tools`, security_controls'
@@ -1182,6 +1287,14 @@ def append_coverage_matrix_section(
     rows: List[Dict[str, str]] = []
     gaps: List[str] = []
     mapped_sentence_total = 0
+    titles = {s.get("id"): (s.get("title") or s.get("id")) for s in dynamic_schema}
+    all_texts = [(sid, s.get("text", "")) for sid, c in (coverage or {}).items()
+                 for s in ((c or {}).get("sentences") or []) if isinstance(s, dict)
+                 and is_field_candidate(s.get("text", ""))]
+
+    def other_texts_for(section_id):
+        return [(sid, t) for sid, t in all_texts if sid != section_id]
+
     for section in dynamic_schema:
         section_id = section.get("id")
         title = section.get("title") or section_id
@@ -1203,82 +1316,69 @@ def append_coverage_matrix_section(
         else:
             bucket = "Missing"
 
-        if bucket == "Missing":
-            assessment = "Not covered in the KT session."
-            gaps.append(title)
-        else:
-            # Prefer a meaningful "how many of this section's known fields
-            # actually got captured" readout over a raw sentence count —
-            # five sentences can back one field or ten, so the count alone
-            # says nothing about completeness. Falls back to the sentence
-            # count only for schema-less/digest sections (no leaf fields to
-            # check against, e.g. danger_zones' free-text list).
-            leaf_specs = _leaf_field_specs(section.get("fields"))
-            section_obj = _find_section(knowledge_object, section_id)
-            field_objects = (section_obj or {}).get("fields") or {}
-            knowledge_items = (section_obj or {}).get("_architecture_components") or []
-            if leaf_specs:
-                missing_labels = []
-                filled_count = 0
-                for fid, label in leaf_specs:
-                    entry = field_objects.get(fid) or {}
-                    has_value = (
-                        entry.get("source", "unfilled") != "unfilled"
-                        and entry.get("value") not in (None, "", [], {})
-                    )
-                    if has_value:
-                        filled_count += 1
-                    else:
-                        missing_labels.append(label)
+        # "Do we have a DR plan? No, there is no DR plan" is a gap stated in
+        # the session, not coverage (dialogue.py). A section discussed only
+        # to say so is Missing, with the speaker's words as the reason.
+        texts = [s.get("text", "") for s in (cov.get("sentences") or []) if isinstance(s, dict)]
+        stated_gaps = [t for t in texts if is_gap_statement(t)]
+        only_stated_gaps = bool(texts) and len(stated_gaps) == len(texts)
+        if only_stated_gaps:
+            bucket = "Missing"
 
-                # Keep the bucket consistent with the field count it is shown
-                # next to: "Partial" beside "5 of 5 fields captured" and
-                # "Strong" beside "1 of 7" both contradicted themselves.
-                if section.get("fields_role") != "metadata":
-                    if leaf_specs and filled_count == len(leaf_specs):
-                        bucket = "Strong"
-                    elif bucket == "Strong" and filled_count * 2 < len(leaf_specs):
-                        bucket = "Partial"
+        section_obj = _find_section(knowledge_object, section_id)
+        field_objects = (section_obj or {}).get("fields") or {}
+        knowledge_items = (section_obj or {}).get("_architecture_components") or []
+        structured = cov.get("_structured") if isinstance(cov.get("_structured"), dict) else {}
+        own_texts = [t for t in texts if is_field_candidate(t)]
+        topic_states = assess_topics(section_id, field_objects, own_texts, other_texts_for(section_id), structured)
 
-                # A section whose leaf fields are purely administrative
-                # metadata (e.g. architecture_reference's doc link / last
-                # updated / verified-by) can have real knowledge captured
-                # elsewhere in the section (its own _architecture_components
-                # digest) even when none of those admin fields were ever
-                # discussed. Reporting only "0 of 3 fields" there reads as
-                # "nothing was captured" when the opposite is true — split
-                # the assessment into knowledge captured vs. metadata
-                # discussed instead of collapsing both into one field count.
-                if section.get("fields_role") == "metadata" and knowledge_items:
-                    shown_items = ", ".join(knowledge_items[:8])
-                    extra = len(knowledge_items) - 8
-                    if extra > 0:
-                        shown_items += f" (+{extra} more)"
-                    assessment = (
-                        f"{len(knowledge_items)} component(s) identified ({shown_items}); "
-                        f"{filled_count} of {len(leaf_specs)} metadata field(s) discussed"
-                    )
-                    if missing_labels:
-                        shown = ", ".join(missing_labels[:4])
-                        assessment += f" (missing: {shown})."
-                    else:
-                        assessment += "."
-                else:
-                    assessment = f"{filled_count} of {len(leaf_specs)} known field(s) captured"
-                    if missing_labels:
-                        shown = ", ".join(missing_labels[:4])
-                        extra = len(missing_labels) - 4
-                        if extra > 0:
-                            shown += f" (+{extra} more)"
-                        assessment += f"; missing: {shown}."
-                    else:
-                        assessment += "."
+        if section_id in AFTER_REVIEW_SECTIONS:
+            # Sign-off happens when the document is reviewed, not in the
+            # recorded session; listing it as a session gap was misleading.
+            bucket = "After review"
+            assessment = "Recorded when the document is reviewed and signed, not during the KT session."
+        elif only_stated_gaps:
+            bucket = "Missing"
+            assessment = f"Discussed, but stated as not in place: “{_short_quote(stated_gaps[0])}”"
+            gaps.append(f"{title}: stated as not in place (“{_short_quote(stated_gaps[0])}”)")
+        elif topic_states is not None:
+            # Coverage per expected topic, from what the session actually
+            # said (coverage_topics.py), not from which template fields
+            # happened to be filled.
+            if section_id == "architecture_reference" and knowledge_items:
+                topic_states = [("Components and data flow", "captured", None)] + topic_states
+            total = len(topic_states)
+            covered = [t for t in topic_states if t[1] != "missing"]
+            elsewhere = [t for t in topic_states if t[1] == "elsewhere"]
+            missing = [t[0] for t in topic_states if t[1] == "missing"]
+            if not covered and not (texts or sentence_count):
+                bucket = "Missing"
+                assessment = "Not covered in the KT session."
+                gaps.append(title)
             else:
-                assessment = (
-                    f"{sentence_count} supporting sentence(s) captured with good confidence."
-                    if bucket == "Strong"
-                    else f"{sentence_count} supporting sentence(s) captured; some detail may be missing."
-                )
+                bucket = "Strong" if not missing else ("Partial" if covered else "Missing")
+                if not missing:
+                    assessment = "Covered" if total == 1 else f"All {total} topics covered"
+                else:
+                    assessment = f"{len(covered)} of {total} topics covered"
+                if elsewhere:
+                    where = sorted({titles.get(w, w) for _, _, w in elsewhere})
+                    assessment += f" ({len(elsewhere)} under {', '.join(where)})"
+                assessment += f"; not discussed: {', '.join(missing)}." if missing else "."
+                if missing:
+                    gaps.append(f"{title}: {', '.join(missing)}")
+        else:
+            if not (texts or sentence_count):
+                bucket = "Missing"
+                assessment = "Not covered in the KT session."
+                gaps.append(title)
+            else:
+                bucket = "Partial"
+                assessment = f"{len(texts) or sentence_count} statement(s) captured."
+
+        if stated_gaps and not only_stated_gaps:
+            assessment = f"{assessment} Stated gap: “{_short_quote(stated_gaps[0])}”"
+            gaps.append(f"{title}: “{_short_quote(stated_gaps[0])}”")
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})
 
@@ -1297,6 +1397,12 @@ def append_coverage_matrix_section(
     # only ever nonzero if facts_identified was computed independently of
     # mapped+deduplicated+unmapped and the two disagree, which would mean a
     # real accounting bug rather than something to paper over.
+    for conflict in knowledge_object.get("_conflicts") or []:
+        gaps.append(
+            f"Possible conflict ({titles.get(conflict.get('section_id'), 'KT session')}): "
+            f"“{_short_quote(conflict['a'])}” vs “{_short_quote(conflict['b'])}” — confirm with the outgoing owner"
+        )
+
     dedup_stats = knowledge_object.pop("_dedup_stats", {}) or {}
     deduplicated = int(dedup_stats.get("deduplicated", 0) or 0)
     unmapped = int(dedup_stats.get("unmapped", 0) or 0)
@@ -1366,6 +1472,9 @@ def _first_matching_paragraph(section: Optional[Dict[str, Any]], *keywords: str)
         content = [content]
     for item in content:
         text = str(item).strip()
+        # A question or "I'm not sure who" is not a reference to act on.
+        if text and is_gap_statement(text) or text.rstrip().endswith("?"):
+            continue
         if text and any(kw.lower() in text.lower() for kw in keywords):
             return text
     return None

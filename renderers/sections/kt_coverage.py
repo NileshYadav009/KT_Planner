@@ -13,8 +13,8 @@ COMPLETENESS_INVARIANT = (
 )
 
 KNOWLEDGE_GAPS_TITLE = (
-    "Knowledge gaps — the following areas were not covered in this KT "
-    "session and should be followed up with the outgoing owner"
+    "Follow up with the outgoing owner: topics not discussed, stated gaps "
+    "and possible conflicts"
 )
 
 
@@ -56,7 +56,8 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         ]))
 
     blocks.append(build_decision_table("Coverage matrix", COLUMNS, rows))
-    blocks.append(build_narrative_block("Completeness invariant", [COMPLETENESS_INVARIANT]))
+    # The completeness invariant is an engineering rule (see
+    # knowledge_builder.verify_document_coverage), not reader content.
 
     # Kept visually/structurally separate from open_responsibilities' Open
     # Tasks table: a knowledge gap is "the KT session never covered this,"

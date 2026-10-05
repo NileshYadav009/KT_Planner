@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from llm import cache
 from llm.usage import current_tracker
+from llm.tenant_context import LLMDisabledForTenant, llm_allowed
 
 # Function names on the call stack -> pipeline stage. Lets the wrapper label
 # each call without changing any call site's signature.
@@ -50,6 +51,13 @@ class CachedLLMProvider:
 
         call_site = infer_call_site()
         tracker = current_tracker()
+        if not llm_allowed():
+            # The tenant does not allow transcript content to leave for an
+            # external LLM. Counted as a skip, not a failure; every caller
+            # falls back to its rules-only result.
+            if tracker is not None:
+                tracker.record_skip(call_site, "tenant policy: no external LLM")
+            raise LLMDisabledForTenant("External LLM disabled for this tenant")
         provider = _provider_name(self.inner)
         model = str(getattr(self.inner, "model", "") or "")
         params = {

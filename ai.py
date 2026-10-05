@@ -38,6 +38,8 @@ from devops_transcription import clean_transcript
 from context_mapper import AudioSegment, ContextClassifier, segment_sentences
 from enterprise_semantic_mapper import create_semantic_mapper
 from field_populator import find_source_sentence_index
+from grounding import ground_structured, added_specifics
+from llm.usage import record_rejected as record_llm_rejected
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -486,6 +488,13 @@ def _extract_structured_section(
         response_text = response.strip() if isinstance(response, str) else ""
         parsed = _extract_json_response(response_text)
         if isinstance(parsed, dict):
+            # Keep only values the fragments support: an invented contact,
+            # region or tool would otherwise reach the document as fact.
+            dropped: List[str] = []
+            parsed = ground_structured(parsed, "\n".join(cleaned[:STRUCTURED_MAX_FRAGMENTS]), dropped)
+            for item in dropped:
+                logger.warning("Discarded unsupported structured value for %s: %s", section_id, item[:200])
+                record_llm_rejected("structured_extraction", f"{section_id}: {item[:120]}")
             return parsed
     except Exception as e:
         logger.warning("Structured extraction failed for %s: %s", section_id, e)
@@ -639,6 +648,14 @@ def polish_coverage_sections(
             )
             cleaned_text = response.strip() if isinstance(response, str) else ""
             if not cleaned_text:
+                return _local_cleanup_list(_all_fragments(section))
+            added = added_specifics(cleaned_text, list(section["fragments"]) + [prompt])
+            if added:
+                # The rewrite states specifics (names, numbers, products) that
+                # none of its fragments contain: an invented fact. Same rule as
+                # a dropped fact below: keep the speaker's own words.
+                logger.warning("Polish for %s added unsupported specifics %s; keeping raw text instead", sid, added[:5])
+                record_llm_rejected("section_polish", f"{sid}: added {', '.join(added[:5])}")
                 return _local_cleanup_list(_all_fragments(section))
             dropped = _fragments_missing_from(section["fragments"], cleaned_text)
             if dropped:
