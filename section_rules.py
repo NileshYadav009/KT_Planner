@@ -22,6 +22,19 @@ class SectionRuleMatch:
 
 # (section_id, compiled_patterns, base_confidence)
 # Order matters: earlier specialized rules win ties.
+def _data_components() -> str:
+    """Names of data stores, queues, caches, storage and pipelines (the
+    architecture diagram's catalog), as one regex alternation, longest first."""
+    from architecture_diagram import _LAYER_TERMS
+
+    names = {n for layer in ("database", "cache", "queue", "object_storage", "data_pipeline")
+             for n in _LAYER_TERMS.get(layer, [])}
+    return "|".join(r"\s+".join(re.escape(word) for word in n.split())
+                    for n in sorted(names, key=len, reverse=True))
+
+
+_DATA_COMPONENTS = _data_components()
+
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "danger_zones",
@@ -417,6 +430,95 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         ],
         0.97,
     ),
+    # ------------------------------------------------------------------
+    # General phrasings found by the golden suite (tests/goldens, P1-11).
+    # Each is a way of saying something, not a fact from one transcript.
+    # ------------------------------------------------------------------
+    (
+        # A sentence that opens with a prohibition is a danger-zone rule
+        # ("Never rotate the SQL admin password without telling finance",
+        # "Also do not restart Vault without the unseal keys"). Below the
+        # calendar rule (0.975), so "never deploy on Fridays" stays a
+        # calendar rule.
+        "danger_zones",
+        [
+            r"^(?:\W*(?:and|but|also|so|please|be\s+careful)\b[\s,:]*)*(?:never|do\s+not|don'?t)\s+"
+            r"(?!worry\b|hesitate\b|forget\b|mind\b)[a-z]+",
+        ],
+        0.955,
+    ),
+    (
+        "common_failures",
+        [
+            # A runbook step: "When invoices get stuck, check whether ..."
+            r"^(?:\W*(?:and|so|also)\s+)?(?:when|whenever|if)\s+[^,;]{4,120}?,\s*(?:then\s+|first\s+)?"
+            r"(?:check|restart|run|scale|rotate|renew|redeploy|switch|verify|look\s+at|clear|flush|drain|"
+            r"increase|bump|recreate)\b",
+            # A failure introduced as such, and its fix.
+            r"\b(?:one|another|the|a)\s+(?:(?:most|second|third|other|big|main|recurring|common|known|frequent|"
+            r"typical)\s+){1,3}(?:production\s+)?(?:problem|issue|failure)s?\s+(?:is|was|we\s+(?:see|hit))\b",
+            r"\bthe\s+fix\s+(?:is|was)\b",
+            # The instruction that follows a symptom: "Renew it in Key Vault and restart the worker."
+            r"^(?:then\s+)?(?:renew|restart)\s+(?:it|the|them)\b",
+        ],
+        0.955,
+    ),
+    (
+        "deployment_and_rollback",
+        [
+            r"\bdeployments?\s+(?:go|goes|run|runs|happen|happens|are\s+done|is\s+done)\s+"
+            r"(?:through|via|with|using|every|on|weekly|nightly)\b",
+            r"\breleases?\s+(?:go|goes)\s+out\s+(?:every|on|weekly)\b",
+        ],
+        0.955,
+    ),
+    (
+        # How data moves through the system's components.
+        "architecture_reference",
+        [
+            r"\b(?:events?|messages?|jobs?|payloads?)\s+(?:go|goes|flow|flows|are\s+(?:sent|published|pushed|queued))\s+"
+            r"(?:through|via|to|into|on)\s+(?:kafka|rabbitmq|sqs|sns|pub/?sub|kinesis|service\s+bus|event\s*hubs?|"
+            r"nats|activemq)\b",
+            r"\b(?:cached|caches|caching)\s+(?:in|with|on)\s+(?:redis|memcached|memorystore|elasticache)\b",
+            # A data-moving verb and a named data component: "Devices publish
+            # to Pub/Sub", "writes them to BigQuery", "archived in Cloud
+            # Storage". Scored by similarity alone, these went to Disaster
+            # Recovery ("archived" reads like a backup).
+            r"\b(?:publish\w*|writ(?:e|es|ten|ing)|stor(?:e|es|ed|ing)|archiv\w*|reads?|reading|send\w*|stream\w*|"
+            r"push\w*|load\w*|ingest\w*|enqueue\w*)\b[^.;]{0,40}?\b(?:to|into|in|from|on)\s+(?:the\s+|a\s+|an\s+)?"
+            r"(?:" + _DATA_COMPONENTS + r")\b",
+        ],
+        0.95,
+    ),
+    (
+        # Who uses the system: "Finance and sales operations use it to pull
+        # monthly reports." Not "we use it to ...", where "it" is a tool.
+        "system_overview",
+        [
+            r"^(?!\s*(?:we|you|they|i)\b)(?:\W*[\w-]+\s+){1,6}?(?:use|uses|rely\s+on|relies\s+on)\s+it\s+(?:to|for)\b",
+        ],
+        0.95,
+    ),
+    (
+        "disaster_recovery",
+        [
+            r"\bgeo-?replicat\w*",
+            r"\bsecondary\s+(?:region|data\s*cent(?:er|re)|site)\b",
+            r"\btest\s+failover\b",
+        ],
+        0.96,
+    ),
+    (
+        "security_controls",
+        [
+            r"\bleast\s+privilege\b",
+            r"\bservice\s+controls\b",
+            r"\bsecrets?\s+(?:live|lives|are\s+kept|are\s+stored)\s+in\b",
+            r"\b(?:production\s+)?access\s+goes\s+through\b",
+            r"\bhardware\s+(?:security\s+)?keys?\b",
+        ],
+        0.95,
+    ),
 ]
 
 # Content that must NOT remain in system_overview when matched.
@@ -523,10 +625,19 @@ RULE_OVERRIDE_CONFIDENCE = 0.94
 _GREETING_WORD = (
     r"(?:ok(?:ay)?|alright|all\s+right|hi|hello|hey|welcome|thanks?|thank\s+you|"
     r"good\s+(?:morning|afternoon|evening)|so|right|everyone|all|team|folks|guys|then|again|back|"
-    r"for|joining|coming|being|here|today|and)"
+    r"for|joining|coming|being|here|today|and|"
+    # Session openers: "Let's start." / "Okay, let's get started." On a GCP
+    # KT, "Let's start." was scored into Disaster Recovery and the
+    # architecture sentences after it followed it there.
+    r"let'?s|let\s+us|start|started|begin|get|kick|off|go|ahead|dive|in)"
+)
+# Closers that carry no knowledge: "That is all we had time for today."
+_CLOSING_ONLY = (
+    r"(?:that'?s|that\s+is)\s+(?:all|it|everything)(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|"
+    r"from\s+(?:me|my\s+side)))?(?:\s+today)?"
 )
 _GREETING_ONLY_RE = re.compile(
-    r"^\W*" + _GREETING_WORD + r"(?:[\s,!.]+" + _GREETING_WORD + r")*\W*$",
+    r"^\W*(?:" + _GREETING_WORD + r"(?:[\s,!.]+" + _GREETING_WORD + r")*|" + _CLOSING_ONLY + r")\W*$",
     re.IGNORECASE,
 )
 

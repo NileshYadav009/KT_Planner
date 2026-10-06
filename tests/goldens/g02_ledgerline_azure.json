@@ -1,0 +1,186 @@
+{
+ "id": "g02_ledgerline_azure",
+ "title": "Ledgerline: AKS, Azure SQL, Service Bus, Key Vault, Azure DevOps",
+ "proves": "The runbook goes to Common Failures, not Security; the 'Never rotate' rule goes to Danger Zones.",
+ "source": "audit transcript (synthetic)",
+ "transcript": "Thanks for joining. This handover covers Ledgerline, the invoicing platform our finance customers use to bill about four thousand businesses.\nLedgerline runs on Azure Kubernetes Service in West Europe. The API and the PDF worker are separate deployments in the billing namespace.\nInvoices are stored in Azure SQL Database, files go to Blob Storage, and we use Azure Service Bus to queue invoice generation jobs. Redis is Azure Cache for Redis.\nInfrastructure is Terraform, and Azure DevOps pipelines deploy with Helm. Production deploys need two approvals and only run on Tuesday or Thursday mornings.\nMonitoring is Azure Monitor with Application Insights. The alert that matters is queue depth on Service Bus above five thousand messages.\nWhen invoices get stuck, check whether the PDF worker pods are in CrashLoopBackOff; usually the Key Vault secret for the signing certificate expired. Renew it in Key Vault and restart the worker.\nSecrets live in Key Vault and pods read them through workload identity. Never rotate the SQL admin password without telling the finance on-call first.\nGeo-replication to North Europe is configured. RPO is fifteen minutes and RTO is one hour, and we test failover every quarter.\nThe platform team owns the cluster; we own the application. Priya Nair is the escalation contact after thirty minutes.\nMonth end is the busiest time, so no changes in the last three days of the month.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the invoicing platform our finance customers use",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "bill about four thousand businesses",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Ledgerline runs on Azure Kubernetes Service in West Europe",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The API and the PDF worker are separate deployments",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Invoices are stored in Azure SQL Database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Redis is Azure Cache for Redis",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Azure DevOps pipelines deploy with Helm",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Production deploys need two approvals",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Monitoring is Azure Monitor with Application Insights",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "queue depth on Service Bus above five thousand messages",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "When invoices get stuck, check whether the PDF worker pods",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Renew it in Key Vault and restart the worker",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Secrets live in Key Vault and pods read them through workload identity",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Never rotate the SQL admin password without telling the finance on-call first",
+   "in": [
+    "danger_zones"
+   ],
+   "not_in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Geo-replication to North Europe is configured",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "RPO is fifteen minutes and RTO is one hour",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "fifteen minutes"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "we test failover every quarter",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "The platform team owns the cluster",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "platform team",
+    "cluster"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Priya Nair is the escalation contact",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "no changes in the last three days of the month",
+   "in": [
+    "known_bad_days"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation"
+ ],
+ "missing": [
+  "cost_optimization"
+ ]
+}

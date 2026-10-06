@@ -582,6 +582,7 @@
     .doc-figure{margin:6px 0}
     .doc-figure img{width:100%;border:1px solid var(--border);border-radius:6px;display:block}
     .doc-figure figcaption{font-size:12px;color:var(--text3);margin-top:6px;overflow-wrap:anywhere}
+    .doc-diagram img{background:#fff;padding:6px}  /* the SVG is drawn for a light page */
 
     /* ── FORM ─────────────────────────────────────────────────── */
     .field-wrap{margin-bottom:10px}
@@ -1873,6 +1874,11 @@ function renderBlockHtml(block){
       return `${title('Troubleshooting')}<ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
       return `${title('Code')}<pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
+    case 'DiagramBlock': {
+      // Server-drawn SVG, shown through <img> so it is never run as markup.
+      const uri = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/.test(block.svg_uri||'') ? block.svg_uri : '';
+      return uri ? `${title('Diagram')}<figure class="doc-figure doc-diagram"><img src="${uri}" alt="${escapeHtml(block.title||'Diagram')}"/><figcaption>${escapeHtml(block.caption||'')}</figcaption></figure>` : '';
+    }
     case 'ImageBlock':
       return `${title('Screenshot')}<figure class="doc-figure"><img src="${escapeHtml(block.src||'')}" alt="${escapeHtml(block.title||'Screenshot')}" loading="lazy"/><figcaption>${escapeHtml(block.caption||'')}${safeLink(block.url) ? `<br/>${safeLink(block.url)}` : ''}</figcaption></figure>`;
     default:

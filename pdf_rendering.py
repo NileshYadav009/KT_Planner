@@ -121,6 +121,23 @@ def _render_inline_text(value) -> str:
 NOT_COVERED_CELL = "Not covered during KT"
 
 
+_SVG_URI_RE = re.compile(r"data:image/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}")
+
+
+def _render_diagram_block(block: dict) -> str:
+    """A server-drawn SVG diagram (architecture_diagram.py). Only an SVG
+    data: URI is accepted, so the block cannot point the renderer at a file
+    or a URL."""
+    uri = block.get("svg_uri") or ""
+    if not _SVG_URI_RE.fullmatch(uri):
+        return ""
+    return (
+        "<figure class=\"diagram-figure\">"
+        f"<img src=\"{uri}\" alt=\"{html_escape(block.get('title', 'Diagram'))}\"/>"
+        f"<figcaption>{html_escape(block.get('caption', ''))}</figcaption></figure>"
+    )
+
+
 def _render_image_block(block: dict) -> str:
     """A captured screenshot, embedded in the PDF itself (data URI) so the
     exported document does not depend on the server's files."""
@@ -230,6 +247,8 @@ def render_section_blocks(rendered_sections: list) -> str:
                 html.append(
                     f"<pre><code>{html_escape(block.get('code', ''))}</code></pre>"
                 )
+            elif block_type == "DiagramBlock":
+                html.append(_render_diagram_block(block))
             elif block_type == "ImageBlock":
                 html.append(_render_image_block(block))
             else:
@@ -324,7 +343,7 @@ def _has_meaningful_rendered_blocks(rendered: dict) -> bool:
             if paragraphs:
                 if not all(p.strip() == NOT_COVERED_MESSAGE for p in paragraphs):
                     return True
-        elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock", "ImageBlock"}:
+        elif block_type in {"ChecklistBlock", "TechnologyGrid", "DeploymentTimeline", "OwnershipTable", "DecisionTable", "TroubleshootingBlock", "WarningBlock", "ImageBlock", "DiagramBlock"}:
             return True
     return False
 
@@ -361,7 +380,7 @@ def _block_strings(value) -> list:
     elif isinstance(value, dict):
         cells = []
         for key, inner in value.items():
-            if key in ("type", "title", "columns", "language", "image_path", "src"):
+            if key in ("type", "title", "columns", "language", "image_path", "src", "svg_uri"):
                 continue
             inner_strings = _block_strings(inner)
             out.extend(inner_strings)

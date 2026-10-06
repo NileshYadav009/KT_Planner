@@ -1,0 +1,217 @@
+{
+ "id": "h01_quill_onprem_java",
+ "holdout": true,
+ "notes": "Written after the rules were tuned on the other goldens and scored once; no rule was changed for it. Its score is the suite's measure of accuracy on unseen KTs.",
+ "title": "Quill: Java monolith on VMs, Oracle RAC, Jenkins and Ansible, Nagios",
+ "proves": "A non-cloud KT in plain operational language places correctly.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Quill is the claims processing system for the insurance back office. About six hundred adjusters work in it every day, and if it stops, claims payments stop with it.\n\nIt is a Java monolith on Tomcat, running on four virtual machines behind an F5 load balancer. The database is Oracle on a two-node RAC cluster. Scanned documents are kept on a NetApp file share.\n\nWe build with Maven in Jenkins, and Ansible copies the release to the servers. A release goes out every second Thursday night. If a release goes bad, we put back the previous WAR file from the Jenkins archive, which takes about twenty minutes.\n\nNagios watches the servers and the Tomcat thread pools, and it pages the on-call phone through OpsGenie.\n\nThe usual incident is the Tomcat thread pool running out when the scanning service sends a burst of documents. Restarting the scanning connector clears it. The other one we see is Oracle archive logs filling the disk on Monday mornings, and the DBA team purges them.\n\nWatch out for the nightly batch at 2 AM: do not restart Tomcat while it runs, or the claims batch has to be run again from the start.\n\nBackups are full Oracle backups every night to tape, and we can restore within eight hours. There is no second site.\n\nUser access goes through Active Directory groups, and the database passwords are stored in CyberArk.\n\nThe application team owns Quill, the DBA team owns Oracle, and the infrastructure team owns the virtual machines. If you cannot reach the on-call, call Raj Patel, the application manager.\n\nIn your first week you need access to the admin AD group and a CyberArk account.\n\nThe licence renewal for the PDF library is still open and nobody is assigned to it.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the claims processing system for the insurance back office",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "About six hundred adjusters work in it every day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "claims payments stop with it",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Java monolith on Tomcat, running on four virtual machines behind an F5 load balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The database is Oracle on a two-node RAC cluster",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Scanned documents are kept on a NetApp file share",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "We build with Maven in Jenkins, and Ansible copies the release to the servers",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "A release goes out every second Thursday night",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "put back the previous WAR file from the Jenkins archive",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Nagios watches the servers and the Tomcat thread pools",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "pages the on-call phone through OpsGenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Tomcat thread pool running out when the scanning service sends a burst of documents",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Restarting the scanning connector clears it",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Oracle archive logs filling the disk on Monday mornings",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "do not restart Tomcat while it runs",
+   "in": [
+    "danger_zones",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "full Oracle backups every night to tape",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "we can restore within eight hours",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "There is no second site",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "User access goes through Active Directory groups",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the database passwords are stored in CyberArk",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "The application team owns Quill",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "application team",
+    "quill"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "the DBA team owns Oracle",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "dba team",
+    "oracle"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "call Raj Patel, the application manager",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "you need access to the admin AD group and a CyberArk account",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "The licence renewal for the PDF library is still open",
+   "in": [
+    "open_responsibilities"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation",
+  "day1_survival_checklist",
+  "open_responsibilities"
+ ],
+ "missing": [
+  "cost_optimization",
+  "environments"
+ ]
+}

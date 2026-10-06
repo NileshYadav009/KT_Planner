@@ -1,0 +1,185 @@
+{
+ "id": "g09_medrelay_onprem",
+ "title": "MedRelay: OpenShift, RabbitMQ, MongoDB, Twilio, Jenkins",
+ "proves": "On-premises platform placed correctly; day-one access and handover check captured.",
+ "source": "audit transcript (synthetic)",
+ "transcript": "Okay, so this KT is for MedRelay, the lab results notification service used by our four partner hospitals. It sends roughly forty thousand patient alerts a day, so it is business critical. Clinicians depend on it for urgent results.\n\nArchitecture wise, the lab systems push HL7 messages into RabbitMQ. A Go consumer service running on OpenShift reads the queue, stores each result in MongoDB, and calls Twilio to send SMS. Secrets live in HashiCorp Vault.\n\nDeployments go through Jenkins every Tuesday evening. We use blue-green releases, and rollback means switching the route back to the blue stack, which takes about five minutes.\n\nMonitoring is Prometheus with Grafana dashboards, and alerts page the on-call engineer through Opsgenie. The key alert is queue depth above ten thousand messages.\n\nThe most common failure is the Twilio rate limit. When that happens messages back up in RabbitMQ. The fix is to scale the consumer down to two replicas and let the retry job drain the backlog. The second issue is MongoDB disk filling up during month end reporting, so we archive old results to cold storage.\n\nBe careful: never purge the dead letter queue, because those are undelivered critical results. Also do not restart Vault without the unseal keys from the security team.\n\nDisaster recovery is a warm standby in the second data center. RTO is one hour and RPO is fifteen minutes.\n\nThe platform team owns OpenShift, and the integration team owns the HL7 feeds. Escalations go to Priya Nair, the engineering manager.\n\nOn day one you need Vault access, the Jenkins admin role, and the Opsgenie rotation. Still open is the TLS certificate renewal for the hospital endpoints, which expires next month and has no owner yet.\n\nHandover is complete once you have done one supervised release and handled one on-call shift alone.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the lab results notification service",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "roughly forty thousand patient alerts a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "push HL7 messages into RabbitMQ",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "A Go consumer service running on OpenShift reads the queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Secrets live in HashiCorp Vault",
+   "in": [
+    "security_controls",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Deployments go through Jenkins every Tuesday evening",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "switching the route back to the blue stack",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Monitoring is Prometheus with Grafana dashboards",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "queue depth above ten thousand messages",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "The most common failure is the Twilio rate limit",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "scale the consumer down to two replicas",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "MongoDB disk filling up during month end reporting",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "never purge the dead letter queue",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "do not restart Vault without the unseal keys",
+   "in": [
+    "danger_zones"
+   ],
+   "not_in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "warm standby in the second data center",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "RTO is one hour and RPO is fifteen minutes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "fifteen minutes"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "The platform team owns OpenShift",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "platform team",
+    "openshift"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Escalations go to Priya Nair",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "On day one you need Vault access",
+   "in": [
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "TLS certificate renewal for the hospital endpoints",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Handover is complete once you have done one supervised release",
+   "in": [
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation",
+  "day1_survival_checklist",
+  "open_responsibilities"
+ ],
+ "missing": [
+  "cost_optimization"
+ ]
+}

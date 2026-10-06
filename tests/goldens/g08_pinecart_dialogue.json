@@ -1,0 +1,24 @@
+{
+ "id": "g08_pinecart_dialogue",
+ "title": "Pinecart: receiver questions with negative answers",
+ "proves": "'No DR plan', 'not really', 'I'm not sure' are gaps, not coverage.",
+ "source": "existing test transcript (synthetic)",
+ "transcript": "Thanks for taking over Pinecart, the checkout service on Google Kubernetes Engine.\nDo we have a disaster recovery plan? No, honestly there is no DR plan and nobody has tested restores.\nIs there a staging environment? Not really, we test directly in production behind a feature flag.\nWhat is the RTO? We never agreed one with the business.\nWho do I escalate to? I am not sure anymore, the old manager left.\nIs the database backed up? I think so, but I have never checked.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Thanks for taking over Pinecart, the checkout service on Google Kubernetes Engine",
+   "in": [
+    "system_overview"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview"
+ ],
+ "missing": [
+  "disaster_recovery",
+  "environments",
+  "ownership_escalation"
+ ]
+}

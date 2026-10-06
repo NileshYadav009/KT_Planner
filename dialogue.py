@@ -37,6 +37,11 @@ _GAP_RES = [
     re.compile(r"\b(?:i|we)\s+(?:don'?t|do\s+not)\s+(?:really\s+)?know\b", re.IGNORECASE),
     re.compile(r"\b(?:i|we)\s+have\s+never\s+(?:checked|tested|seen|verified)\b", re.IGNORECASE),
     re.compile(r"\b(?:not|never)\s+(?:been\s+)?(?:documented|tested|defined|agreed)\b", re.IGNORECASE),
+    # A topic put off to a later session is not covered: "We will cover
+    # deployment and the rest next week."
+    re.compile(r"\b(?:we(?:'ll|\s+will)|let'?s|i(?:'ll|\s+will))\s+(?:cover|go\s+(?:over|through)|discuss|"
+               r"talk\s+about|walk\s+through|do)\b[^.]*\b(?:next\s+(?:week|time|session|call)|later|"
+               r"another\s+(?:session|time|call)|tomorrow|separately)\b", re.IGNORECASE),
 ]
 # An answer that opens with a plain "no" to the question before it.
 _NEGATIVE_ANSWER_RE = re.compile(r"\?\s*(?:no|nope|not\s+really|not\s+yet|none|nothing)\b", re.IGNORECASE)

@@ -41,6 +41,7 @@ from knowledge import (
     verify_document_coverage,
     apply_conflicts,
     attach_conflict_warnings,
+    dedupe_rendered_sections,
 )
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
@@ -579,6 +580,13 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             attach_conflict_warnings(knowledge_object["rendered_sections"], knowledge_object)
         except Exception as exc:
             _stage_failed(stage_errors, "Document rendering", exc, fatal=True)
+
+        # One home per fact: a sentence already shown is not printed again,
+        # and the Tribal Knowledge digest points to where it is (P1-10).
+        try:
+            knowledge_object["_dedup"] = dedupe_rendered_sections(knowledge_object["rendered_sections"])
+        except Exception as exc:
+            _stage_failed(stage_errors, "Duplicate removal", exc, None)
 
         # Dashboards and links shown on the shared screen (screen_capture.py),
         # placed in the section that was being discussed at the time.

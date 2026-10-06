@@ -1,0 +1,93 @@
+{
+ "id": "g06_lumen_incomplete",
+ "title": "Lumen: only architecture and monitoring discussed",
+ "proves": "Exactly the undiscussed sections are reported Missing.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Hi, this is the handover for Lumen, our internal reporting API. Finance and sales operations use it to pull monthly reports.\n\nLumen runs on Amazon EKS and stores report definitions in PostgreSQL on Amazon RDS. Generated reports are cached in Redis for an hour. Requests come in through an Application Load Balancer.\n\nFor monitoring we use Grafana dashboards on top of Prometheus. The main alert fires when p95 latency goes above two seconds, and alerts are routed to the team channel in Slack.\n\nThat is all we had time for today. We will cover deployment and the rest next week.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "our internal reporting API",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Finance and sales operations use it to pull monthly reports",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Lumen runs on Amazon EKS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "stores report definitions in PostgreSQL on Amazon RDS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Generated reports are cached in Redis for an hour",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Requests come in through an Application Load Balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Grafana dashboards on top of Prometheus",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "p95 latency goes above two seconds",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "alerts are routed to the team channel in Slack",
+   "in": [
+    "monitoring_observability"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability"
+ ],
+ "missing": [
+  "environments",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "day1_survival_checklist"
+ ]
+}

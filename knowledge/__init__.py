@@ -12,6 +12,7 @@ from .knowledge_builder import (
     apply_conflicts,
     attach_conflict_warnings,
 )
+from .document_dedup import dedupe_rendered_sections
 
 __all__ = [
     "build_knowledge_object",
@@ -26,4 +27,5 @@ __all__ = [
     "verify_document_coverage",
     "apply_conflicts",
     "attach_conflict_warnings",
+    "dedupe_rendered_sections",
 ]

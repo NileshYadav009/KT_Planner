@@ -1,0 +1,57 @@
+{
+ "id": "g07_orbitpay_contradictory",
+ "title": "Orbitpay: corrections, a tool migration, an owner change",
+ "proves": "The latest value wins; contradictions are flagged with both quotes.",
+ "source": "audit transcript (synthetic)",
+ "transcript": "This KT is for Orbitpay, our payout service on AWS Lambda with DynamoDB.\nThe RTO is four hours. Actually the RTO is thirty minutes, the four hours was the old target.\nDeploying on Fridays is fine for us. Never deploy on Fridays, we had an outage last time.\nAlerts go to PagerDuty. Alerts go to Opsgenie now, we moved off PagerDuty last month.\nThe payments team owns the service. Actually the platform team owns it since the reorg.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "our payout service on AWS Lambda with DynamoDB",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "the RTO is thirty minutes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "thirty minutes"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Alerts go to Opsgenie now",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "the platform team owns it since the reorg",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "platform team"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "disaster_recovery",
+  "monitoring_observability",
+  "ownership_escalation"
+ ],
+ "missing": [
+  "security_controls",
+  "cost_optimization"
+ ],
+ "conflicts": [
+  "Fridays"
+ ]
+}

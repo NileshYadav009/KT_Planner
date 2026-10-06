@@ -1,0 +1,158 @@
+{
+ "id": "g10_ecommerce_long",
+ "title": "AWS e-commerce: a long, loosely ordered KT with transcription errors",
+ "proves": "Topics that jump around still land in the right sections.",
+ "source": "existing test transcript (synthetic)",
+ "transcript": "Hi everyone, today I will be handing over the aws e-commerce platform.\n\nBefore talking about the architecture, let me mention that this platform processes around 50,000 orders per day and is one of the company's most business critical system.\n\nThe platform consists of React front-end applications, Python fast API services, PostgreSQL, databases and Redis Cache Clear.\n\nBy the way, if you receive a PagerDuty alert at night, the first thing you should check is Grafana because most incidents are visible there immediately.\n\nComing back to architecture, all services run on Amazon EKS. Traffic enters through cloud front and application load balancer before reaching Kubernetes workload.\n\nThe most common production issue is database connection pool exhaustion during flash sales.\n\nDevelopers own application code while the platform engineers team own Kubernetes infrastructure.\n\nFor development, code is merged into the main branch and GitHub Action Triggers, CSED pipelines automatically.\n\nThere is one important thing to remember, never modify terraform state files manually because recovering from state corruption is extremely difficult.\n\nThe disaster recovery processrequiresrestoring RDS snapshots and recreating Kubernetes workload from infrastructure as cold.\n\nWe use Prometheus, Grafana and CloudWatch for monitoring.\n\nAnother common issue is missing Kubernetes secrets. If pod fails immediately after deployment, verify secret references before investigating application code.\n\nThe staging environment variables mirrors production. However, many payments integrations are mocked in staging.\n\nOne tribal knowledge item is that cloud front cache invalidation can take longer than expected during large releases.\n\nroll back normally performed using Helm roll back should be completed within 15 minutes.\n\nThe platform becomes extremely busy during Black Friday, month-end sales and major promotional campaigns. Deployments must be avoided during those periods.\n\nThe primary database runs on Amazon RDS and Postgres SQL with multiple az enabled.\n\nIf the system is unavailable, customers cannot place orders and warehouse fulfillment stops almost immediately.\n\nDesklation path starts with an on-call engineer followed by the platform engineering manager and then the head of engineering.\n\nFor new team members, start by reviewing Grafana dashboards, GitHub repositories, Kubernetes namespace and deployment pipelines.\n\nWe use terraform state infrastructure provisioning, Argos CD for GitOps, deployments and Vault for secret management.\n\nOne dangerous area is that production Kubernetes cluster autoscaler configuration because one dangerous area is the production Kubernetes cluster autoscaler configuration because incorrect changes can impact the entire platform.\n\nThe architecture diagram is maintained in Confluence and should be reviewed before making intra changes.\n\nThere were a major outage last year caused by Redis memory saturation issue.\n\nSecurity scanning is performed using Trevi and container images are stored in Amazon ECR.\n\nDaily backups are retained for 30 days and disaster recovery testing is performed quarterly.\n\nCost optimization is important. We use spot instance in non-production environment variables schedule scaling during load traffic periods.\n\nThe platform serves customer globally and handles payments, inventory updates and shipment orchestration.\n\nIf you are unaware about my production activity, contact platform engineering before proceeding. Thank you.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "processes around 50,000 orders per day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "all services run on Amazon EKS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Traffic enters through",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "the first thing you should check is Grafana",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "database connection pool exhaustion during flash sales",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Developers own application code",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "developers",
+    "application code"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "never modify terraform state files manually",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "restoring RDS snapshots",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "We use Prometheus, Grafana and CloudWatch for monitoring",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "missing Kubernetes secrets",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "many payments integrations are mocked in staging",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "should be completed within 15 minutes",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Deployments must be avoided during those periods",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "customers cannot place orders and warehouse fulfillment stops",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "start by reviewing Grafana dashboards",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Daily backups are retained for 30 days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "We use spot instance in non-production",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "contact platform engineering before proceeding",
+   "in": [
+    "ownership_escalation",
+    "open_responsibilities",
+    "danger_zones"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "cost_optimization"
+ ],
+ "missing": []
+}

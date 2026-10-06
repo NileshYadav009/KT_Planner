@@ -551,8 +551,10 @@ def test_enrich_architecture_knowledge_attaches_a_flow_diagram_when_a_request_fl
     }
     result = enrich_architecture_knowledge(ko)
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
-    assert "_architecture_diagram" in arch
-    assert "Amazon EKS" in arch["_architecture_diagram"]
+    assert "Amazon EKS" in arch["_architecture_svg"]
+    assert arch["_architecture_graph"]["central"]["header"] == "Amazon EKS"
+    # "...Amazon EKS, which uses Amazon RDS": a stated connection, with its sentence.
+    assert [(c["Connection"], c["To"]) for c in arch["_architecture_connections"]] == [("stores data in", "Amazon RDS")]
 
 
 def test_enrich_architecture_knowledge_diagram_has_no_main_chain_when_only_supporting_infrastructure_is_named():
@@ -570,11 +572,10 @@ def test_enrich_architecture_knowledge_diagram_has_no_main_chain_when_only_suppo
     }
     result = enrich_architecture_knowledge(ko)
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
-    diagram = arch.get("_architecture_diagram")
-    assert diagram is not None
-    assert "Customer" not in diagram
-    assert "Terraform" in diagram
-    assert "Jenkins" in diagram
+    graph = arch.get("_architecture_graph")
+    assert graph is not None
+    assert graph["entry"] == []                                   # no Users node without an entry point
+    assert [n["label"] for n in graph["delivery"]] == ["Jenkins", "Terraform"]
 
 
 def test_enrich_architecture_knowledge_omits_diagram_entirely_when_nothing_recognized():
@@ -587,7 +588,7 @@ def test_enrich_architecture_knowledge_omits_diagram_entirely_when_nothing_recog
     }
     result = enrich_architecture_knowledge(ko)
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
-    assert "_architecture_diagram" not in arch
+    assert "_architecture_svg" not in arch and "_architecture_graph" not in arch
 
 
 def test_append_tribal_knowledge_section_tags_marker_phrases_by_source_section():

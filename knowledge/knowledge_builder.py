@@ -7,7 +7,7 @@ from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
-from architecture_diagram import build_architecture_flow_diagram
+from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
 from dialogue import is_gap_statement, is_field_candidate
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
@@ -997,10 +997,11 @@ def enrich_architecture_knowledge(
       a section's raw ['sentences'] and its coverage_content are populated
       by two independent mechanisms that can disagree (see below). Never
       paraphrased or generated — verbatim transcript text only.
-    - `_architecture_diagram`: a top-down "mental model" diagram built from
-      the component list's coarse layer classification (see
-      architecture_diagram.py) — None when nothing resembling a
-      request-flow position was named.
+    - `_architecture_graph`, `_architecture_svg`, `_architecture_connections`:
+      the High-Level Architecture picture (architecture_diagram.py):
+      components placed by what they are, joined only where a sentence
+      states the connection, and those connections with their sentences.
+      Absent when fewer than two components were named.
     """
     arch_section = _find_section(knowledge_object, "architecture_reference")
     if not arch_section:
@@ -1009,6 +1010,10 @@ def enrich_architecture_knowledge(
     tools_pattern = PATTERN_EXTRACTORS["tools"]
     found: List[str] = []
     descriptive_sentences: List[str] = []
+    # For the diagram's stated connections: every sentence that names a
+    # component (from any section), and the spellings each was named by.
+    connection_sentences: List[str] = []
+    spellings: Dict[str, set] = {}
 
     def _scan_text(text: str, *, describes_architecture: bool = True) -> None:
         """Collect components from `text`; additionally keep the sentence
@@ -1032,6 +1037,10 @@ def enrich_architecture_knowledge(
             found.extend(matches)
             if describes_architecture:
                 descriptive_sentences.append(text)
+            for match in matches:
+                spellings.setdefault(_canonicalize_component_term(match).lower(), set()).add(match.lower())
+            for part in split_bullet_blob([text]) or [text]:
+                connection_sentences.extend(p.strip() for p in _SENTENCE_SPLIT_RE.split(part) if p.strip())
 
     if section_content:
         for sc_id, sc in section_content.items():
@@ -1125,9 +1134,18 @@ def enrich_architecture_knowledge(
     if deduped_sentences:
         arch_section["_architecture_sentences"] = deduped_sentences
 
-    diagram = build_architecture_flow_diagram(deduped)
-    if diagram:
-        arch_section["_architecture_diagram"] = diagram
+    # The High-Level Architecture picture: components placed by what they
+    # are, joined only where a sentence states the connection (P1-9).
+    graph = build_architecture_graph(
+        deduped,
+        list(dict.fromkeys(connection_sentences)),
+        {name: sorted(names) for name, names in spellings.items()},
+        knowledge_object.get("system_name"),
+    )
+    if graph:
+        arch_section["_architecture_graph"] = graph
+        arch_section["_architecture_svg"] = render_architecture_svg(graph)
+        arch_section["_architecture_connections"] = describe_connections(graph)
 
     return knowledge_object
 

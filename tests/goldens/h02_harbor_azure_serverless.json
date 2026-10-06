@@ -1,0 +1,160 @@
+{
+ "id": "h02_harbor_azure_serverless",
+ "holdout": true,
+ "notes": "Written after the rules were tuned on the other goldens and scored once; no rule was changed for it. Its score is the suite's measure of accuracy on unseen KTs.",
+ "title": "Harbor: conversational Azure serverless KT (IoT Hub, Functions, Cosmos DB)",
+ "proves": "Casual phrasing and serverless architecture place correctly.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Hey, thanks for jumping on. So Harbor is our fleet telemetry thing, it takes readings from about thirty thousand delivery vans.\n\nEverything is serverless on Azure. The vans send readings to IoT Hub, an Azure Function picks them up and writes them into Cosmos DB, and a second function rolls them up into Azure Data Explorer for the dashboards the fleet managers use.\n\nThe code lives in GitHub and we deploy with GitHub Actions straight to the function apps. There is a staging slot, and we swap it into production.\n\nFor alerts we rely on Application Insights, and the one that matters is the function failure rate going over five percent, which posts to the on-call Teams channel.\n\nBiggest gotcha: Cosmos DB throttles when the vans reconnect after a network outage, and the readings pile up. Bump the RU limit for an hour and it catches up.\n\nPlease never delete the IoT Hub consumer groups, the analytics team reads from them.\n\nWe keep two environments, staging and prod, and staging uses a simulator instead of real vans.\n\nCosmos has continuous backup turned on, but we have never actually tried a restore.\n\nThe fleet platform squad owns all of this, and escalation goes to Mia Chen.\n\nWe spend a lot on Cosmos, so the RU limits are scaled down overnight.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "it takes readings from about thirty thousand delivery vans",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Everything is serverless on Azure",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "The vans send readings to IoT Hub",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "an Azure Function picks them up and writes them into",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "rolls them up into Azure Data Explorer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "we deploy with GitHub Actions straight to the function apps",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "There is a staging slot, and we swap it into production",
+   "in": [
+    "deployment_and_rollback",
+    "environments"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "For alerts we rely on Application Insights",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "the function failure rate going over five percent",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Cosmos DB throttles when the vans reconnect after a network outage",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Bump the RU limit for an hour and it catches up",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "never delete the IoT Hub consumer groups",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "We keep two environments, staging and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "staging uses a simulator instead of real vans",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Cosmos has continuous backup turned on",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "The fleet platform squad owns all of this",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "fleet platform squad"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "escalation goes to Mia Chen",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "the RU limits are scaled down overnight",
+   "in": [
+    "cost_optimization"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation",
+  "cost_optimization"
+ ],
+ "missing": [
+  "security_controls"
+ ]
+}

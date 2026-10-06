@@ -198,6 +198,11 @@ th, td {
   white-space: normal;
 }
 
+/* Architecture diagram (architecture_diagram.py): full width, kept on one page. */
+.diagram-figure { margin: 0 0 0.8rem; break-inside: avoid; }
+.diagram-figure img { width: 100%; height: auto; }
+.diagram-figure figcaption { font-size: 0.8em; color: #6b7280; margin-top: 4px; }
+
 /* Incident card (Quick Reference): the instruction gets the room; the
    source section is a small reference beside it. */
 /* Widths leave room for cell padding (they are scaled up to fill the row). */

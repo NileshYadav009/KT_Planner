@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from architecture_diagram import build_architecture_flow_diagram
+from architecture_diagram import build_architecture_graph
 from context_mapper import (
     AudioSegment,
     Classification,
@@ -344,15 +344,14 @@ def test_component_aliases_and_vendor_prefixed_duplicates_collapse():
 
 
 def test_diagram_draws_every_dependency_and_the_stated_request_path():
-    diagram = build_architecture_flow_diagram([
+    graph = build_architecture_graph([
         "Route 53", "CloudFront", "AWS WAF", "Application Load Balancer", "Amazon EKS", "Spring Boot",
         "Aurora PostgreSQL", "Redis", "Kafka", "Amazon MSK", "Amazon SQS", "Vault", "AWS KMS",
     ])
-    chain = [line for line in diagram.splitlines() if line in ("Customer", "Route 53", "CloudFront", "AWS WAF", "Application Load Balancer", "Amazon EKS")]
-    assert chain[:6] == ["Customer", "Route 53", "CloudFront", "AWS WAF", "Application Load Balancer", "Amazon EKS"]
-    for dependency in ("Aurora PostgreSQL", "Redis", "Kafka (Amazon MSK)", "Amazon SQS"):
-        assert f"► {dependency}" in diagram, dependency
-    assert "Vault, AWS KMS ──► Secrets & keys" in diagram
+    assert [n["label"] for n in graph["entry"]] == ["Users", "Route 53", "CloudFront", "AWS WAF", "Application Load Balancer"]
+    assert graph["central"]["header"] == "Amazon EKS"
+    assert [n["label"] for n in graph["data"]] == ["Aurora PostgreSQL", "Redis", "Kafka (Amazon MSK)", "Amazon SQS"]
+    assert [n["label"] for n in graph["operations"]] == ["Vault", "AWS KMS"]
 
 
 # --------------------------------------------------------------------------
@@ -509,9 +508,10 @@ def test_platform_and_external_services_are_recognised():
         "A Go consumer service running on OpenShift calls Twilio. We go home early. Java is old."
     )
     assert found == ["Go", "OpenShift", "Twilio"]
-    diagram = build_architecture_flow_diagram(["Amazon ECS", "DynamoDB", "Stripe"])
-    # A third-party API is called, never contained in the platform.
-    assert "└──► Stripe" in diagram and "├── DynamoDB" in diagram
+    graph = build_architecture_graph(["Amazon ECS", "DynamoDB", "Stripe"])
+    # A third-party API sits outside the cloud account; a database beside the platform.
+    assert [n["label"] for n in graph["external"]] == ["Stripe"]
+    assert [n["label"] for n in graph["data"]] == ["DynamoDB"]
 
 
 def test_residual_net_appends_transcript_sentences_not_llm_digest():

@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import component_catalog as cc
-from architecture_diagram import _LAYER_TERMS, build_architecture_flow_diagram
+from architecture_diagram import _LAYER_TERMS, build_architecture_graph
 from field_populator import PATTERN_EXTRACTORS
 from knowledge.knowledge_builder import _canonicalize_component_term
 from renderers.sections.system_overview import _TECH_CATEGORY_MAP
@@ -109,9 +109,10 @@ def test_display_names_and_categories_come_from_the_catalog():
 
 
 def test_catalog_products_reach_the_diagram():
-    diagram = build_architecture_flow_diagram(["Amazon EC2", "Go", "CockroachDB", "Amazon ElastiCache", "Cloudflare"])
-    assert "Amazon EC2" in diagram and "CockroachDB" in diagram and "Amazon ElastiCache" in diagram
-    assert diagram.splitlines()[0] == "Customer"  # a CDN is a customer-facing entry point
+    graph = build_architecture_graph(["Amazon EC2", "Go", "CockroachDB", "Amazon ElastiCache", "Cloudflare"])
+    assert graph["central"]["header"] == "Amazon EC2" and graph["central"]["caption"] == "Go"
+    assert [n["label"] for n in graph["data"]] == ["CockroachDB", "Amazon ElastiCache"]
+    assert graph["entry"][0]["label"] == "Users"  # a CDN is a customer-facing entry point
 
 
 def test_dynamic_cache_row_does_not_repeat_a_listed_product_under_another_spelling():

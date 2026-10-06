@@ -1,0 +1,325 @@
+{
+ "id": "g04_meridian_complex",
+ "title": "Meridian: multi-service payments platform, five owning teams",
+ "proves": "Ownership across five teams complete; environments described; nothing repeated across sections.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Today I'm handing over Meridian, the payments clearing platform behind our retail banking apps. It settles about two million card transactions a day, and if it is down, customers cannot pay by card.\n\nThe platform runs on Amazon EKS in two regions. Customer traffic comes through CloudFront and an Application Load Balancer. There are four services: the authorization service, the clearing service, the ledger writer and the notifications service. The authorization service is written in Java Spring Boot, and the other three are written in Go.\n\nCard authorizations are stored in Aurora PostgreSQL. The ledger writer publishes settlement events to Kafka on Amazon MSK. Redis caches merchant profiles for the authorization service. Customer notifications are sent through Twilio.\n\nWe have four environments: dev, test, staging and production. Staging runs the production configuration with synthetic card data. The test environment is shared with the fraud team.\n\nGitHub Actions builds the images and pushes them to Amazon ECR, and ArgoCD syncs them to the clusters. Production releases need approval from the change advisory board. To roll back, revert the release in ArgoCD, which takes about five minutes.\n\nWe monitor the platform with Prometheus and Grafana, and application logs go to OpenSearch. PagerDuty pages the on-call engineer when the authorization error rate goes above one percent.\n\nThe most common failure is Kafka consumer lag on the clearing service after a large batch. The fix is to scale the clearing consumers to six replicas and wait for the lag to drain. Another issue is Aurora connection exhaustion during the morning peak, and the fix is to restart the ledger writer pods to release the connections.\n\nNever replay the settlement topic without approval from the finance controller, because it double-posts payments. Do not change the KMS key policy, or the ledger becomes unreadable.\n\nDisaster recovery uses a warm standby in a second AWS region. RTO is one hour and RPO is five minutes. We test failover twice a year.\n\nSecrets are kept in AWS Secrets Manager, encryption keys are in AWS KMS, and production access goes through Okta with hardware keys.\n\nOwnership is split across five teams. The authorization team owns the authorization service. The clearing team owns the clearing service and the ledger writer. The platform team owns the EKS clusters and Kafka. The data team owns the OpenSearch cluster. The messaging team owns notifications. Escalate to Ana Ruiz, the head of payments engineering, if an incident lasts more than thirty minutes.\n\nAvoid releases on the last business day of the month and on Black Friday.\n\nTo save money, the test environment only runs during working hours.\n\nIn your first two weeks, shadow two on-call shifts and complete the PCI training. By the end of the month you should lead a production release.\n\nStill open: the Kafka upgrade to version three has no owner yet.\n\nThe handover is complete when you have led one release and handled one incident on your own.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Meridian, the payments clearing platform",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "settles about two million card transactions a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "customers cannot pay by card",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The platform runs on Amazon EKS in two regions",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Customer traffic comes through CloudFront and an Application Load Balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "There are four services",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Card authorizations are stored in Aurora PostgreSQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "publishes settlement events to Kafka on Amazon MSK",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Redis caches merchant profiles",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "four environments: dev, test, staging and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Staging runs the production configuration with synthetic card data",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "The test environment is shared with the fraud team",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "pushes them to Amazon ECR, and ArgoCD syncs them to the clusters",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Production releases need approval from the change advisory board",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "revert the release in ArgoCD",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "We monitor the platform with Prometheus and Grafana",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "authorization error rate goes above one percent",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Kafka consumer lag on the clearing service after a large batch",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "scale the clearing consumers to six replicas",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Aurora connection exhaustion during the morning peak",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Never replay the settlement topic without approval from the finance controller",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Do not change the KMS key policy",
+   "in": [
+    "danger_zones"
+   ],
+   "not_in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "warm standby in a second AWS region",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "RTO is one hour and RPO is five minutes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "five minutes"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "We test failover twice a year",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "production access goes through Okta with hardware keys",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The authorization team owns the authorization service",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "authorization team",
+    "authorization service"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The clearing team owns the clearing service and the ledger writer",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "clearing team",
+    "ledger writer"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "The platform team owns the EKS clusters and Kafka",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "platform team",
+    "eks clusters"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "The data team owns the OpenSearch cluster",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "data team",
+    "opensearch cluster"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "The messaging team owns notifications",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "messaging team",
+    "notifications"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Escalate to Ana Ruiz",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Avoid releases on the last business day of the month",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "the test environment only runs during working hours",
+   "in": [
+    "cost_optimization",
+    "environments"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "shadow two on-call shifts and complete the PCI training",
+   "in": [
+    "first_30_day_ownership",
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "By the end of the month you should lead a production release",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "the Kafka upgrade to version three has no owner yet",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "The handover is complete when you have led one release",
+   "in": [
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "cost_optimization"
+ ],
+ "missing": []
+}

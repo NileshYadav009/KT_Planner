@@ -1,0 +1,215 @@
+{
+ "id": "g01_tripwise_aws",
+ "title": "TripWise: AWS ECS, DynamoDB, Stripe, GitHub Actions, Datadog",
+ "proves": "Managed services and third parties placed correctly; failures as symptom and fix; ownership rows.",
+ "source": "audit transcript (synthetic)",
+ "transcript": "Alright, welcome. Today I'm handing over TripWise, the booking backend behind our travel mobile app. Around two hundred thousand travellers use it each month, mostly in Europe.\n\nThe app talks to an API on Amazon ECS with Fargate. Bookings are written to DynamoDB, payments go through Stripe, and confirmation emails are sent with SendGrid. Infrastructure is defined in CloudFormation.\n\nWe have three environments: dev, staging, and production. Staging uses Stripe test keys, so you can book freely there.\n\nGitHub Actions builds the container and deploys to staging automatically on merge. Production needs a manual approval from the tech lead. If a release misbehaves, redeploy the previous task definition; that takes around ten minutes.\n\nDatadog is our monitoring tool. The dashboard to watch is booking success rate, and PagerDuty pages us if it drops below ninety five percent.\n\nOne recurring problem is DynamoDB throttling during flash sales. The symptom is slow checkout, and the fix is to switch the table to on-demand capacity. Another issue is expired Stripe webhooks secrets, which silently stop payment confirmations; rotate the secret in Secrets Manager.\n\nNever delete items from the bookings table by hand, since refunds depend on that history. And avoid deploying on Fridays or during the summer sale in July.\n\nTo save money we scale staging down to zero every night.\n\nBackups use DynamoDB point in time recovery. RTO is four hours.\n\nThe mobile team owns the app, and our squad owns the backend. Escalate to Marco Silva if PagerDuty is not acknowledged within fifteen minutes.\n\nIn your first week, shadow the on-call and read the runbooks. By week three you should own releases.\n\nThe payment retry service migration is not yet completed, and nobody has picked it up.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "handing over TripWise, the booking backend",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "two hundred thousand travellers use it each month",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "talks to an API on Amazon ECS with Fargate",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Bookings are written to DynamoDB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Infrastructure is defined in CloudFormation",
+   "in": [
+    "architecture_reference",
+    "deployment_and_rollback",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "three environments: dev, staging, and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Staging uses Stripe test keys",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "builds the container and deploys to staging automatically on merge",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Production needs a manual approval from the tech lead",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "redeploy the previous task definition",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Datadog is our monitoring tool",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "pages us if it drops below ninety five percent",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "One recurring problem is DynamoDB throttling during flash sales",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "switch the table to on-demand capacity",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "expired Stripe webhooks secrets",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Never delete items from the bookings table by hand",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "avoid deploying on Fridays or during the summer sale in July",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback",
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "scale staging down to zero every night",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Backups use DynamoDB point in time recovery",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "RTO is four hours",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "four hours"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "The mobile team owns the app",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "mobile team",
+    "app"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Escalate to Marco Silva",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "shadow the on-call and read the runbooks",
+   "in": [
+    "first_30_day_ownership",
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "By week three you should own releases",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "payment retry service migration is not yet completed",
+   "in": [
+    "open_responsibilities"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "cost_optimization"
+ ],
+ "missing": []
+}

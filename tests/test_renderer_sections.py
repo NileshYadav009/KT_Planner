@@ -435,7 +435,9 @@ def test_architecture_reference_renders_details_and_diagram_blocks_when_present(
             "Amazon RDS PostgreSQL is the primary database.",
             "Redis is used for caching and short-lived session data.",
         ],
-        "_architecture_diagram": "Customer\n   │\n   ▼\nReact",
+        "_architecture_svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>',
+        "_architecture_connections": [{"From": "Shop (Amazon EKS)", "Connection": "stores data in", "To": "Amazon RDS",
+                                       "Said in the KT": "Amazon RDS PostgreSQL is the primary database."}],
     }
     result = render_architecture_reference(section)
     titles = [b["title"] for b in result["blocks"]]
@@ -449,8 +451,11 @@ def test_architecture_reference_renders_details_and_diagram_blocks_when_present(
     assert "Redis is used for caching and short-lived session data." in details_block["paragraphs"]
 
     diagram_block = next(b for b in result["blocks"] if b["title"] == "High-Level Architecture")
-    assert diagram_block["type"] == "CodeBlock"
-    assert diagram_block["code"] == "Customer\n   │\n   ▼\nReact"
+    assert diagram_block["type"] == "DiagramBlock"
+    assert diagram_block["svg_uri"].startswith("data:image/svg+xml;base64,")
+    connections = next(b for b in result["blocks"] if b["title"] == "Connections stated in the KT")
+    assert connections["columns"] == ["From", "Connection", "To", "Said in the KT"]
+    assert connections["rows"][0]["To"] == "Amazon RDS"
 
 
 def test_architecture_reference_omits_details_and_diagram_blocks_when_absent():

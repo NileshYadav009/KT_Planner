@@ -1,335 +1,203 @@
-"""Tests for architecture_diagram.py's build_architecture_flow_diagram() —
-turns a flat list of detected component names into a top-down "mental
-model" diagram: the main request-flow tree, plus separate supporting-
-infrastructure flows (CI/CD, IaC, secrets, observability, alerting) — using
-a coarse layer classification rather than parsing arbitrary transcript
-sentences for relationship language.
-"""
-import sys
+"""P1-9: the architecture diagram is an SVG with typed connections.
+
+Before: an ASCII tree hung every database, queue and cache off the compute
+node ("AKS ├── Azure SQL, Redis, Service Bus"), which reads as "runs inside
+the cluster", and "Terraform ──► Infrastructure" pointed at a category
+label. Now components are placed by what they are (managed services beside
+the compute platform, third-party services outside the cloud account) and a
+line is drawn only where a sentence states the connection."""
 import os
+import re
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from architecture_diagram import build_architecture_flow_diagram
+from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
+
+SNAPSHOTS = os.path.join(os.path.dirname(__file__), "snapshots")
+
+TRIPWISE_COMPONENTS = ["Amazon ECS", "Fargate", "DynamoDB", "Stripe", "SendGrid", "CloudFormation", "GitHub Actions",
+                       "Datadog", "PagerDuty", "AWS Secrets Manager"]
+TRIPWISE_SENTENCES = [
+    "The app talks to an API on Amazon ECS with Fargate.",
+    "Bookings are written to DynamoDB, payments go through Stripe, and confirmation emails are sent with SendGrid.",
+    "Infrastructure is defined in CloudFormation.",
+    "GitHub Actions builds the container and deploys to staging automatically on merge.",
+    "Datadog is our monitoring tool.",
+    "Another issue is expired Stripe webhooks secrets, which silently stop payment confirmations; "
+    "rotate the secret in Secrets Manager.",
+]
+TRIPWISE_ALIASES = {"aws secrets manager": ["secrets manager"]}
+
+GCP_COMPONENTS = ["Pub/Sub", "Dataflow", "BigQuery", "Cloud Storage", "Cloud Run", "Memorystore", "Cloud SQL",
+                  "Terraform", "Cloud Build", "Cloud Monitoring", "Opsgenie"]
+GCP_SENTENCES = [
+    "Devices publish to Pub/Sub.",
+    "A Dataflow job enriches the events and writes them to BigQuery, and raw payloads are archived in Cloud Storage.",
+    "The query API runs on Cloud Run and reads from BigQuery and a Memorystore cache.",
+    "Device metadata is in Cloud SQL for Postgres.",
+    "Everything is in Terraform, and Cloud Build deploys to Cloud Run on every merge to main.",
+    "We watch Cloud Monitoring dashboards; the key alert is Pub/Sub oldest unacked message age over ten minutes, "
+    "which pages through Opsgenie.",
+    "Do not delete the BigQuery raw dataset; it is the only copy for the compliance team.",
+]
 
 
-def test_full_diagram_covers_main_flow_and_every_supporting_section():
-    components = [
-        "FastAPI", "Terraform", "GitHub Actions", "Amazon EKS", "React",
-        "CloudFront", "Application Load Balancer", "Amazon RDS",
-        "PostgreSQL", "Redis", "Amazon SQS", "Amazon ECR", "Prometheus",
-        "Grafana", "CloudWatch", "PagerDuty", "Vault", "ArgoCD",
-    ]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
-
-    lines = diagram.splitlines()
-    # Main chain, in order: Customer -> React -> CloudFront -> ALB -> EKS.
-    # "Amazon EKS" legitimately appears a second time later, as the
-    # destination of the CI/CD flow section below — only the first 5
-    # matches (the main chain itself) need to be in this exact order.
-    assert lines[0] == "Customer"
-    chain_order = [l for l in lines if l in ("Customer", "React", "CloudFront", "Application Load Balancer", "Amazon EKS")]
-    assert chain_order[:5] == ["Customer", "React", "CloudFront", "Application Load Balancer", "Amazon EKS"]
-
-    # Fan-out from the EKS hub: the hosted workload is the hub's tree child,
-    # and the data services hang off THAT workload with arrow edges (they are
-    # managed services it calls, not things running inside the cluster).
-    assert "└── FastAPI" in diagram
-    assert "├──► Amazon RDS" in diagram
-    assert "├──► Redis" in diagram
-    assert "└──► Amazon SQS" in diagram
-
-    # PostgreSQL is a synonym for the same "database" layer as Amazon RDS —
-    # first-seen (Amazon RDS, which appears earlier in the input list) wins,
-    # so PostgreSQL must not appear as a SEPARATE fan-out branch.
-    assert "PostgreSQL" not in diagram
-
-    # Registry shown separately from the request-flow chain/fan-out.
-    assert "Amazon ECR\n └── Container images" in diagram
-
-    # Supporting infrastructure now gets its OWN section — never force-fit
-    # into the request-flow chain/fan-out above, but not silently dropped
-    # either.
-    assert "GitHub Actions" in diagram and "CI" in diagram and "ArgoCD" in diagram
-    assert "Terraform ──► Infrastructure" in diagram
-    assert "Vault ──► Secrets" in diagram
-    assert "Prometheus, Grafana, CloudWatch ──► Observability" in diagram
-    assert "PagerDuty ──► Alerting" in diagram
+def _tripwise():
+    return build_architecture_graph(TRIPWISE_COMPONENTS, TRIPWISE_SENTENCES, TRIPWISE_ALIASES, "TripWise")
 
 
-def test_no_compute_hub_falls_back_to_flat_chain_instead_of_inventing_a_branch_point():
-    # FastAPI + Redis are named but no orchestration/compute term (Kubernetes,
-    # EKS, Docker, Rancher) is — there's nothing to legitimately fan out
-    # FROM, so this must not fabricate a hub that was never stated.
-    components = ["React", "FastAPI", "Redis"]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
-    assert "├──" not in diagram
-    lines = [l.strip() for l in diagram.splitlines() if l.strip() and l.strip() not in ("│", "▼")]
-    # The workload ends the request chain; Redis is what it calls out to,
-    # not a further hop in the request path.
-    assert lines == ["Customer", "React", "FastAPI", "└──► Redis"]
+def _edges(graph):
+    return {(e["from"], e["label"], e["to"]) for e in graph["edges"]}
 
 
-def test_dependencies_without_a_workload_or_hub_are_listed_not_chained():
-    # Only a database and a queue were recognised. Drawing "MongoDB -> RabbitMQ"
-    # states a data flow nobody described.
-    diagram = build_architecture_flow_diagram(["MongoDB", "RabbitMQ"])
-    assert "▼" not in diagram and "►" not in diagram
-    assert "MongoDB" in diagram and "RabbitMQ" in diagram
+def _ids(graph, key):
+    return [n["id"] for n in graph[key]]
 
 
-def test_workload_on_a_named_platform_calls_out_to_external_services():
-    diagram = build_architecture_flow_diagram(["RabbitMQ", "Go", "OpenShift", "MongoDB", "Twilio"])
-    lines = [l.strip() for l in diagram.split("\n\n")[0].splitlines() if l.strip() not in ("│", "")]
-    assert lines[0] == "OpenShift"
-    assert lines[1] == "└── Go"
-    assert set(lines[2:]) == {"├──► RabbitMQ", "├──► MongoDB", "└──► Twilio"}
+# --------------------------------------------------------------------------
+# Placement
+# --------------------------------------------------------------------------
+
+def test_managed_services_sit_beside_the_platform_and_third_parties_outside_the_cloud():
+    g = _tripwise()
+    assert g["central"]["header"] == "Amazon ECS · Fargate" and g["central"]["label"] == "TripWise"
+    assert _ids(g, "data") == ["dynamodb"]
+    assert _ids(g, "external") == ["stripe", "sendgrid"]
+    assert _ids(g, "delivery") == ["github-actions"]
+    assert _ids(g, "operations") == ["datadog", "pagerduty", "aws-secrets-manager"]
+    assert g["boundary"]["label"] == "AWS"
 
 
-def test_registry_only_renders_without_a_request_flow_chain():
-    diagram = build_architecture_flow_diagram(["Amazon ECR"])
-    assert diagram == "Amazon ECR\n └── Container images"
+def _boxes(svg):
+    rects = [tuple(float(v) for v in m.groups()[:4]) + (m.group(5), "stroke-dasharray" in m.group(0))
+             for m in re.finditer(r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="\d+" '
+                                  r'fill="#[0-9a-f]+" stroke="(#[0-9a-f]+)"[^>]*>', svg)]
+    texts = {m.group(3): (float(m.group(1)), float(m.group(2)))
+             for m in re.finditer(r'<text x="([\d.]+)" y="([\d.]+)"[^>]*>([^<]*)</text>', svg)}
+    return rects, texts
 
 
-def test_supporting_infrastructure_only_still_renders_its_own_sections():
-    # These terms have no request-flow position, but they ARE recognized
-    # supporting-infrastructure layers (iac/cicd/monitoring) — must render
-    # their own flows rather than returning None just because there's no
-    # frontend/compute/data-layer chain to draw.
-    diagram = build_architecture_flow_diagram(["Terraform", "Jenkins", "Prometheus"])
-    assert diagram is not None
-    assert "Customer" not in diagram
-    assert "Terraform ──► Infrastructure" in diagram
-    assert "Prometheus ──► Observability" in diagram
-    assert "Jenkins" in diagram and "CI" in diagram
+def _inside(point, rect):
+    x, y = point
+    rx, ry, rw, rh = rect[:4]
+    return rx <= x <= rx + rw and ry <= y <= ry + rh
 
 
-def test_bare_compute_hub_with_no_chain_or_fanout_is_not_rendered_as_a_floating_node():
-    # Regression test for a real live KT: a transcript naming only
-    # Kubernetes, Terraform, and Jenkins (no frontend/CDN/LB, no fan-out
-    # services/databases) produced a diagram with a standalone "Kubernetes"
-    # line with zero arrows or context, immediately followed by a separate
-    # "Jenkins -> CI -> Kubernetes" CI/CD flow ending at the exact same
-    # node — the same fact rendered twice as if it were two disconnected
-    # pieces of information. A lone node with no relationships conveys
-    # nothing the flat Architecture Knowledge list doesn't already say, so
-    # the main-flow section should be omitted in that case; the CI/CD flow
-    # (and any other supporting section) still renders normally.
-    diagram = build_architecture_flow_diagram(["Kubernetes", "Terraform", "Jenkins"])
-    assert diagram is not None
-    lines = [l.strip() for l in diagram.splitlines() if l.strip()]
-    # "Kubernetes" only legitimately appears as the CI/CD flow's
-    # destination, never as an isolated leading line with no arrow.
-    assert lines[0] != "Kubernetes"
-    assert "Jenkins" in diagram and "CI" in diagram and "Kubernetes" in diagram
-    assert "Terraform ──► Infrastructure" in diagram
+def test_the_drawing_keeps_managed_services_outside_the_compute_box():
+    svg = render_architecture_svg(_tripwise())
+    rects, texts = _boxes(svg)
+    compute = next(r for r in rects if r[4] == "#4f46e5")
+    boundary = next(r for r in rects if r[5])                      # the dashed cloud account
+    assert _inside(texts["TripWise"], compute)
+    assert not _inside(texts["DynamoDB"], compute) and _inside(texts["DynamoDB"], boundary)
+    for third_party in ("Stripe", "SendGrid"):
+        assert not _inside(texts[third_party], boundary)
+    assert "Provisioned with CloudFormation" in texts            # IaC names the account, not a category label
 
 
-def test_dependency_layers_are_visually_distinguished_from_the_hosted_workload():
-    # A compute hub with both a hosted service AND dependencies (database/
-    # cache/queue) used to render all four as identical "|--" tree children
-    # of the same hub, visually implying the database/cache/queue ran INSIDE
-    # the compute node. Only the service is hosted there; the rest are
-    # managed services the workload depends on.
-    #
-    # A "(workload dependencies)" text label was tried first and was not
-    # enough -- a reviewer reading the generated PDF still read them as
-    # contained, because the CONNECTORS said containment. The distinction is
-    # now structural: dependencies hang off the workload, with arrow edges.
-    components = ["FastAPI", "Amazon EKS", "Amazon RDS", "Redis", "Amazon SQS"]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
+# --------------------------------------------------------------------------
+# Connections: only what was said, from whoever said to do it
+# --------------------------------------------------------------------------
 
-    lines = diagram.splitlines()
-    hub_idx = next(i for i, l in enumerate(lines) if "Amazon EKS" in l)
-    hosted_idx = next(i for i, l in enumerate(lines) if "FastAPI" in l)
-    dependency_idx = next(i for i, l in enumerate(lines) if "Amazon RDS" in l)
-
-    assert hub_idx < hosted_idx < dependency_idx
-
-    # The hosted workload keeps a containment connector; the dependencies
-    # get arrows, and sit deeper than the workload.
-    assert "└── FastAPI" in lines[hosted_idx]
-    assert "►" in lines[dependency_idx]
-    hosted_indent = len(lines[hosted_idx]) - len(lines[hosted_idx].lstrip())
-    dep_indent = len(lines[dependency_idx]) - len(lines[dependency_idx].lstrip())
-    assert dep_indent > hosted_indent
+def test_tripwise_connections_are_the_stated_ones_with_their_sentences():
+    g = _tripwise()
+    assert _edges(g) == {
+        ("central", "writes to", "dynamodb"), ("central", "calls", "stripe"), ("central", "calls", "sendgrid"),
+        ("github-actions", "deploys to", "central"), ("datadog", "monitors", "central"),
+        ("aws-secrets-manager", "supplies secrets to", "central"),
+    }
+    rows = {(r["From"], r["Connection"], r["To"]): r["Said in the KT"] for r in describe_connections(g)}
+    assert rows[("TripWise (Amazon ECS · Fargate)", "writes to", "DynamoDB")].startswith("Bookings are written to DynamoDB")
+    assert rows[("CloudFormation", "provisions", "AWS")] == "Infrastructure is defined in CloudFormation."
 
 
-def test_dependency_label_omitted_when_no_hosted_workload_is_named():
-    # No service/app-framework term named (only a database) — there's
-    # nothing to distinguish the dependency FROM, so no label should be
-    # added; this must render exactly as it did before the hosted/
-    # dependency split.
-    components = ["Application Load Balancer", "Amazon EKS", "Amazon RDS"]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
-    assert "(workload dependencies)" not in diagram
-    assert "├── Amazon RDS" in diagram or "└── Amazon RDS" in diagram
+def test_the_source_of_a_flow_is_whoever_the_sentence_says_does_it():
+    g = build_architecture_graph(GCP_COMPONENTS, GCP_SENTENCES, {}, "Fieldcast")
+    edges = _edges(g)
+    assert ("dataflow", "writes to", "bigquery") in edges          # the pipeline writes, not the API
+    assert ("central", "reads from", "bigquery") in edges          # "The query API runs on Cloud Run and reads from"
+    assert ("central", "reads from", "memorystore") in edges
+    assert ("central", "stores data in", "cloud-sql") in edges
+    assert ("central", "archives to", "cloud-storage") in edges
+    assert ("cloud-build", "deploys to", "central") in edges
+    # "Devices publish to Pub/Sub": a device, not the system, so no line.
+    assert not any(e["to"] == "pub-sub" for e in g["edges"])
+    # A monitoring tool and a paging tool named together are not joined.
+    assert not any(e["to"] == "opsgenie" or e["label"] == "alerts via" for e in g["edges"])
+    assert g["boundary"] == {"label": "Google Cloud", "subtitle": "Provisioned with Terraform",
+                             "quote": GCP_SENTENCES[4]}
 
 
-def test_no_recognizable_layer_terms_returns_none():
-    # Nothing here maps to any known layer at all. Must not fabricate an
-    # empty or misleading diagram.
-    assert build_architecture_flow_diagram(["Helm", "SonarQube", "Nexus"]) is None
+def test_purpose_phrases_and_unstated_components():
+    g = build_architecture_graph(
+        ["Azure Kubernetes Service", "Azure SQL", "Azure Service Bus", "Redis", "Azure Blob Storage"],
+        ["Invoices are stored in Azure SQL Database, files go to Blob Storage, and we use Azure Service Bus to queue "
+         "invoice generation jobs.", "Redis is Azure Cache for Redis.", "Redis is used for caching session data."],
+        {"azure blob storage": ["blob storage"]}, "Ledgerline")
+    edges = _edges(g)
+    assert ("central", "writes to", "azure-sql") in edges
+    assert ("central", "writes to", "azure-blob-storage") in edges
+    assert ("central", "publishes to", "azure-service-bus") in edges   # "Service Bus to queue invoice jobs"
+    assert ("central", "caches in", "redis") in edges                 # "Redis is used for caching"
 
 
-def test_empty_components_returns_none():
-    assert build_architecture_flow_diagram([]) is None
-    assert build_architecture_flow_diagram(None) is None
+def test_no_line_is_drawn_without_a_sentence_that_states_it():
+    g = build_architecture_graph(["Amazon EKS", "Amazon RDS", "Redis", "Kafka", "Stripe"], [], {}, None)
+    assert g["edges"] == []
+    assert _ids(g, "data") == ["amazon-rds", "redis", "kafka"] and _ids(g, "external") == ["stripe"]
+    assert g["central"]["label"] == "Application"
 
 
-def test_partial_chain_starts_from_whatever_layers_are_actually_present():
-    # No frontend or CDN named — chain should just start from what IS there.
-    components = ["Application Load Balancer", "Amazon EKS", "Amazon RDS"]
-    diagram = build_architecture_flow_diagram(components)
-    lines = diagram.splitlines()
-    assert lines[0] == "Customer"
-    assert "React" not in diagram
-    assert "CloudFront" not in diagram
-    assert "Application Load Balancer" in diagram
-    assert "├── Amazon RDS" in diagram or "└── Amazon RDS" in diagram
+def test_users_and_the_request_path_only_with_a_customer_facing_entry_point():
+    g = build_architecture_graph(["Route 53", "CloudFront", "Application Load Balancer", "Amazon EKS", "Spring Boot",
+                                  "Aurora PostgreSQL"], [], {}, "Shop")
+    assert [n["label"] for n in g["entry"]] == ["Users", "Route 53", "CloudFront", "Application Load Balancer"]
+    assert g["central"]["caption"] == "Spring Boot"
+    backend = build_architecture_graph(["Google Kubernetes Engine", "BigQuery", "Airflow"], [], {}, None)
+    assert backend["entry"] == []
 
 
-def test_cicd_flow_degrades_gracefully_when_only_partially_named():
-    # Only a CI/CD tool named, no GitOps tool, no registry, no compute hub
-    # — must still draw the short flow it actually has, not nothing.
-    diagram = build_architecture_flow_diagram(["GitHub Actions"])
-    assert diagram is not None
-    assert "GitHub Actions" in diagram
-    assert "CI" in diagram
+def test_the_platform_is_named_by_its_most_specific_product():
+    g = build_architecture_graph(["Kubernetes", "Amazon EKS", "Amazon RDS"], [], {}, None)
+    assert g["central"]["header"] == "Amazon EKS"
+    plain = build_architecture_graph(["Kubernetes", "PostgreSQL"], [], {}, None)
+    assert plain["central"]["header"] == "Kubernetes" and plain["boundary"]["label"] == "Platform"
 
 
-def test_azure_vocabulary_produces_a_full_diagram():
-    components = [
-        "Angular", "Azure Front Door", "Application Gateway",
-        "Azure Kubernetes Service", "Azure SQL", "Azure Service Bus",
-        "Azure Container Registry", "Azure DevOps", "Flux",
-        "Azure Key Vault", "Bicep", "Azure Monitor", "Application Insights",
-        "PagerDuty",
-    ]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
-    lines = diagram.splitlines()
-    # "Azure Kubernetes Service" legitimately appears again as the CI/CD
-    # flow's destination — only the first 5 matches (the main chain) need
-    # to be in this exact order.
-    chain_order = [l for l in lines if l in ("Customer", "Angular", "Azure Front Door", "Application Gateway", "Azure Kubernetes Service")]
-    assert chain_order[:5] == ["Customer", "Angular", "Azure Front Door", "Application Gateway", "Azure Kubernetes Service"]
-    assert "├── Azure SQL" in diagram or "└── Azure SQL" in diagram
-    assert "├── Azure Service Bus" in diagram or "└── Azure Service Bus" in diagram
-    assert "Azure Container Registry\n └── Container images" in diagram
-    assert "Azure DevOps" in diagram and "Flux" in diagram
-    assert "Bicep ──► Infrastructure" in diagram
-    assert "Azure Key Vault ──► Secrets" in diagram
-    assert "Azure Monitor, Application Insights ──► Observability" in diagram
-    assert "PagerDuty ──► Alerting" in diagram
+def test_a_managed_offering_and_its_engine_are_one_component():
+    g = build_architecture_graph(["Amazon EKS", "Kafka", "Amazon MSK", "Amazon RDS", "PostgreSQL"], [], {}, None)
+    assert [n["label"] for n in g["data"]] == ["Amazon RDS", "Kafka (Amazon MSK)"]
 
 
-def test_gcp_vocabulary_produces_a_full_diagram_without_fabricating_a_customer_entry():
-    # Regression test for a real live bug: a GCP data/ML platform transcript
-    # (no frontend/CDN/load-balancer ever mentioned — it's not a
-    # customer-facing web system) produced a diagram that started with
-    # "Customer -> Kubernetes" even though no customer-facing entry point
-    # was ever named, and the GCP-specific vocabulary (Pub/Sub, BigQuery,
-    # GKE, Dataflow, Airflow, Vertex AI, Artifact Registry, Secret Manager,
-    # Cloud Monitoring/Logging) was entirely unrecognized (only GitHub
-    # Actions/Terraform/Kubernetes/Grafana showed up at all).
-    components = [
-        "GitHub Actions", "Terraform", "Google Kubernetes Engine", "Grafana",
-        "ArgoCD", "Artifact Registry", "Secret Manager", "Pub/Sub",
-        "Dataflow", "BigQuery", "Airflow", "Vertex AI", "Cloud Monitoring",
-        "Cloud Logging", "PagerDuty",
-    ]
-    diagram = build_architecture_flow_diagram(components)
-    assert diagram is not None
-
-    # No customer-facing layer (frontend/CDN/load-balancer) was named, so
-    # no "Customer" root should be fabricated.
-    assert "Customer" not in diagram
-
-    assert "Google Kubernetes Engine" in diagram
-    assert "├── BigQuery" in diagram or "└── BigQuery" in diagram
-    assert "├── Pub/Sub" in diagram or "└── Pub/Sub" in diagram
-    assert "Artifact Registry\n └── Container images" in diagram
-    assert "GitHub Actions" in diagram and "ArgoCD" in diagram
-    assert "Terraform ──► Infrastructure" in diagram
-    assert "Secret Manager ──► Secrets" in diagram
-    assert "Grafana, Cloud Monitoring, Cloud Logging ──► Observability" in diagram
-    assert "PagerDuty ──► Alerting" in diagram
-    assert "Airflow ──► Workflow Orchestration" in diagram
-    assert "Vertex AI ──► Machine Learning" in diagram
-    assert "Dataflow ──► Data Processing" in diagram
+def test_nothing_to_draw_returns_none():
+    assert build_architecture_graph([], [], {}, None) is None
+    assert build_architecture_graph(["Kubernetes"], [], {}, None) is None
+    assert build_architecture_graph(["We", "Reviewed"], [], {}, None) is None
 
 
-def test_compute_hub_prefers_specific_branded_name_over_generic_kubernetes():
-    # Regression test: a transcript that names both a specific managed-K8s
-    # product ("Amazon EKS") AND generic "Kubernetes" (very common — e.g.
-    # "Amazon EKS... Kubernetes workloads...") used to label the hub with
-    # whichever term the scan happened to see FIRST, which is order-
-    # dependent and inconsistent run to run. Must always prefer the
-    # specific/branded name when both are present, regardless of order.
-    components_specific_first = ["Amazon EKS", "React", "Kubernetes", "Redis"]
-    components_generic_first = ["Kubernetes", "React", "Amazon EKS", "Redis"]
-    for components in (components_specific_first, components_generic_first):
-        diagram = build_architecture_flow_diagram(components)
-        assert "Amazon EKS" in diagram
-        lines = [l.strip() for l in diagram.splitlines()]
-        assert "Kubernetes" not in lines  # bare "Kubernetes" must not win the hub slot
+# --------------------------------------------------------------------------
+# The SVG itself
+# --------------------------------------------------------------------------
+
+def test_labels_are_escaped_and_the_svg_is_self_contained():
+    g = build_architecture_graph(["Amazon EKS", "DynamoDB"], [], {}, '<script>alert(1)</script>"&')
+    svg = render_architecture_svg(g)
+    assert "<script>" not in svg and "&lt;script&gt;" in svg
+    assert "href" not in svg and "http://www.w3.org/2000/svg" in svg and svg.count("http") == 1
 
 
-def test_customer_entry_only_shown_with_real_evidence_of_a_customer_facing_layer():
-    # A compute hub with backing services but no frontend/CDN/load-balancer
-    # ever named (e.g. an internal service or data platform) must not
-    # imply a customer request path that was never described.
-    diagram = build_architecture_flow_diagram(["Kubernetes", "PostgreSQL", "Redis"])
-    assert diagram is not None
-    assert "Customer" not in diagram
-    assert diagram.splitlines()[0] == "Kubernetes"
-
-
-# ---------------------------------------------------------------------------
-# Hosted workloads vs. managed dependencies.
-#
-# A reviewer reading a real generated PDF read "Azure SQL / Redis / Service
-# Bus" as running INSIDE the AKS cluster, because they were drawn as tree
-# children of the compute hub with the same connectors as the hosted
-# workload. A "(workload dependencies)" text label did not fix it -- the
-# connectors said containment. See REPOSITORY_AUDIT.md §9rr.
-# ---------------------------------------------------------------------------
-
-def test_dependencies_hang_off_the_workload_not_the_compute_hub():
-    diagram = build_architecture_flow_diagram(
-        ["Angular", "Azure Kubernetes Service", ".NET", "Azure SQL", "Redis", "Azure Service Bus"]
-    )
-    lines = diagram.splitlines()
-
-    compute_idx = next(i for i, l in enumerate(lines) if "Azure Kubernetes Service" in l)
-    workload_idx = next(i for i, l in enumerate(lines) if ".NET" in l)
-    sql_idx = next(i for i, l in enumerate(lines) if "Azure SQL" in l)
-
-    # The workload is the compute hub's child; the data services come after it.
-    assert compute_idx < workload_idx < sql_idx
-
-    # Dependencies use an ARROW edge ("calls out to"), not the plain tree
-    # connector that reads as containment.
-    for dependency in ("Azure SQL", "Redis", "Azure Service Bus"):
-        line = next(l for l in lines if dependency in l)
-        assert "►" in line, f"{dependency} should use an arrow edge: {line!r}"
-
-    # ...and they are indented deeper than the workload, so they read as
-    # hanging off it rather than as its siblings.
-    workload_indent = len(lines[workload_idx]) - len(lines[workload_idx].lstrip())
-    dep_indent = len(lines[sql_idx]) - len(lines[sql_idx].lstrip())
-    assert dep_indent > workload_indent
-
-
-def test_dependencies_alone_still_render_as_a_plain_tree():
-    # No hosted workload means there is no relationship to disambiguate, so
-    # the extra indentation and arrows would be noise.
-    diagram = build_architecture_flow_diagram(
-        ["Azure Kubernetes Service", "Azure SQL", "Redis"]
-    )
-    assert "►" not in diagram
+def test_the_tripwise_drawing_matches_its_snapshot():
+    """The layout is deterministic. If a deliberate layout change breaks this,
+    look at the new drawing, then rerun with UPDATE_SNAPSHOTS=1."""
+    svg = render_architecture_svg(_tripwise())
+    assert svg == render_architecture_svg(_tripwise())
+    path = os.path.join(SNAPSHOTS, "architecture_tripwise.svg")
+    if os.getenv("UPDATE_SNAPSHOTS") == "1" or not os.path.exists(path):
+        os.makedirs(SNAPSHOTS, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(svg)
+    with open(path, encoding="utf-8") as fh:
+        assert svg == fh.read()

@@ -1,0 +1,86 @@
+{
+ "g01_tripwise_aws": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g02_ledgerline_azure": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g03_fieldcast_gcp": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g04_meridian_complex": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g05_parcelhub_noisy": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g06_lumen_incomplete": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g07_orbitpay_contradictory": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g08_pinecart_dialogue": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g09_medrelay_onprem": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "g10_ecommerce_long": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h01_quill_onprem_java": {
+  "accuracy": 0.84,
+  "wrong": 4,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h02_harbor_azure_serverless": {
+  "accuracy": 0.833,
+  "wrong": 3,
+  "violations": 0,
+  "false_missing": 1,
+  "false_covered": 0
+ }
+}

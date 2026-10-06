@@ -89,8 +89,12 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:fix\w*|resolv\w*|workaround|restart\w*|renew\w*|rotat\w*|switch\w*|drain\w*|redeploy\w*|scal\w+)\b"),
     ],
     "known_bad_days": [
+        # Sales EVENTS, not a sales team: "Finance and sales operations use
+        # it" marked an incomplete KT's calendar as discussed.
         ("High-traffic periods", ("high_traffic_periods",),
-         r"\b(?:peak|busiest|black\s+friday|sales?|holiday\w*|season\w*|traffic|market\s+open|volatility)\b"),
+         r"\b(?:peak|busiest|black\s+friday|(?:flash|summer|winter|holiday|seasonal|big)\s+sales?|"
+         r"sales?\s+(?:events?|periods?|seasons?|days?|campaigns?)|holiday\w*|season\w*|"
+         r"(?:high|peak)\s+traffic|traffic\s+(?:peaks?|spikes?)|market\s+open|volatility)\b"),
         ("Month-end windows", ("month_end_windows",), r"\bmonth[\s-]end\b|\bend\s+of\s+(?:the\s+)?month\b|\bdays\s+of\s+the\s+month\b"),
         ("Change freezes", ("deployment_blackout_times",),
          r"\b(?:avoid\s+deploying|no\s+(?:changes|deploys?|deployments)|freeze|blackout|never\s+deploy|don't\s+deploy|do\s+not\s+deploy)\b"),

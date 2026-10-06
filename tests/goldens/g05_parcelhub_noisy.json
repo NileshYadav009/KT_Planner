@@ -1,0 +1,132 @@
+{
+ "id": "g05_parcelhub_noisy",
+ "title": "Parcelhub: fillers, false starts, misheard product names, a run-on sentence",
+ "proves": "Fillers do not reach the sections; misheard names are corrected; facts still placed.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Um, okay, so, uh, this is the KT for Parcelhub, the, uh, parcel tracking backend. It's used by, like, our three courier partners.\n\nSo the app, the app runs on Amazon EKS, and we store shipments in, uh, PostgreSQL on Amazon RDS. Tracking events go through Kafka, you know.\n\nFor monitoring we use data dog, and pager duty pages us when, uh, the error rate goes over two percent.\n\nSo one problem we see a lot is Kafka consumer lag after a deploy and the fix is to restart the consumer pods and that usually clears it within a few minutes but if it doesn't then you check the partition count first\n\nUm, never drop the shipments topic, because the partners replay from it.\n\nDeployments are done with Argo CD, uh, every Wednesday. And rollback is just an Argo CD rollback to the last sync.\n\nThe logistics team owns the service. Escalate to Dana Whitfield if it's down for more than ten minutes.\n\nRTO is, uh, two hours. Yeah, two hours.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "parcel tracking backend",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "our three courier partners",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "runs on Amazon EKS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "we store shipments in",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Tracking events go through Kafka",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "pages us when",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Kafka consumer lag after a deploy",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "restart the consumer pods",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "never drop the shipments topic",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "every Wednesday",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "rollback to the last sync",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "The logistics team owns the service",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "logistics team",
+    "service"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Escalate to Dana Whitfield",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "RTO is",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "two hours"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "disaster_recovery",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation"
+ ],
+ "missing": [
+  "security_controls",
+  "cost_optimization"
+ ]
+}

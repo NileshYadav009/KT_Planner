@@ -434,9 +434,20 @@ def semantic_chunk_sentences(
     # sentence. Both the real model and the no-dependency SentenceTransformer
     # fallback above already accept a list and return one embedding per item.
     encodings = model.encode([s.text for s in sentences], convert_to_tensor=True)
+
+    # Two sentences the routing rules send to different sections are
+    # different topics, however similar their wording: "Do not delete the
+    # BigQuery raw dataset" and "VPC Service Controls protect BigQuery" were
+    # merged, and both went to Danger Zones.
+    def _rule_section(text: str) -> Optional[str]:
+        match = match_section_rules(text)
+        return match.section_id if match and match.confidence >= RULE_OVERRIDE_CONFIDENCE else None
+
+    rule_sections = [_rule_section(s.text) for s in sentences]
     chunks: List[Sentence] = []
     current = sentences[0]
     current_emb = encodings[0]
+    current_rules = {rule_sections[0]} - {None}
 
     for idx in range(1, len(sentences)):
         candidate = sentences[idx]
@@ -448,14 +459,18 @@ def semantic_chunk_sentences(
             should_merge = True
         elif len(current.text) < min_merge_length or len(candidate.text) < min_merge_length:
             should_merge = sim >= (similarity_threshold - 0.15)
+        if should_merge and rule_sections[idx] and current_rules and rule_sections[idx] not in current_rules:
+            should_merge = False
 
         if should_merge:
             current = _merge_sentences(current, candidate)
             current_emb = model.encode(current.text, convert_to_tensor=True)
+            current_rules |= {rule_sections[idx]} - {None}
         else:
             chunks.append(current)
             current = candidate
             current_emb = candidate_emb
+            current_rules = {rule_sections[idx]} - {None}
 
     chunks.append(current)
     return chunks

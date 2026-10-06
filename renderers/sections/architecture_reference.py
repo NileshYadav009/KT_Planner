@@ -1,7 +1,8 @@
 from typing import Dict, Any, List
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
-from renderers.blocks.code import build_block as build_code_block
+from renderers.blocks.diagram import build_block as build_diagram_block
+from renderers.blocks.table import build_block as build_table_block
 from renderers.blocks.common import (
     no_coverage_block,
     coverage_paragraphs as shared_coverage_paragraphs,
@@ -52,15 +53,21 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         if fallback:
             blocks.append(build_narrative_block("Architecture Knowledge", fallback))
 
-    # A top-down "mental model" diagram built from the component list's
-    # coarse layer classification (architecture_diagram.py) — only present
-    # when the transcript actually named something resembling a request-flow
-    # position (frontend/cdn/load-balancer/compute/data-layer); never
-    # fabricated to fill in a "typical" architecture the transcript didn't
-    # describe.
-    diagram = section.get("_architecture_diagram")
-    if diagram:
-        blocks.append(build_code_block("High-Level Architecture", diagram))
+    # The architecture picture (architecture_diagram.py): components placed
+    # by what they are, joined only where the KT states the connection, with
+    # each stated connection listed next to the sentence that says it.
+    svg = section.get("_architecture_svg")
+    if svg:
+        blocks.append(build_diagram_block(
+            "High-Level Architecture", svg,
+            "Lines show only connections stated in the KT. A component named without a stated connection has "
+            "no line. Managed services sit outside the compute platform; third-party services sit outside "
+            "the cloud account.",
+        ))
+        connections = section.get("_architecture_connections") or []
+        if connections:
+            blocks.append(build_table_block("Connections stated in the KT",
+                                            ["From", "Connection", "To", "Said in the KT"], connections))
 
     # Architecture Metadata: always render all 3 admin fields explicitly,
     # one row each, with "Not discussed" for anything genuinely never

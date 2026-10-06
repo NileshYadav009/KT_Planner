@@ -1,0 +1,162 @@
+{
+ "id": "g03_fieldcast_gcp",
+ "title": "Fieldcast: Pub/Sub, Dataflow, BigQuery, Cloud Run, VPC-SC",
+ "proves": "No AWS labels; security captured; Disaster Recovery reported Missing when not discussed.",
+ "source": "audit transcript (synthetic)",
+ "transcript": "Okay, let's start. I'm handing over Fieldcast, the telemetry ingestion service for our IoT sensors, around nine hundred million events a day.\nDevices publish to Pub/Sub. A Dataflow job enriches the events and writes them to BigQuery, and raw payloads are archived in Cloud Storage.\nThe query API runs on Cloud Run and reads from BigQuery and a Memorystore cache. Device metadata is in Cloud SQL for Postgres.\nEverything is in Terraform, and Cloud Build deploys to Cloud Run on every merge to main. To roll back, shift traffic to the previous Cloud Run revision.\nWe watch Cloud Monitoring dashboards; the key alert is Pub/Sub oldest unacked message age over ten minutes, which pages through Opsgenie.\nThe common failure is Dataflow falling behind after a schema change; the fix is to drain the job and redeploy with the updated schema.\nDo not delete the BigQuery raw dataset; it is the only copy for the compliance team.\nService accounts use least privilege and VPC Service Controls protect BigQuery.\nThe data platform team owns Dataflow. Ask Tomasz Kowalski for anything about the device firmware.\nStill open: the cost review for BigQuery storage has no owner yet.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Fieldcast, the telemetry ingestion service for our IoT sensors",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "nine hundred million events a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Devices publish to Pub/Sub",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "A Dataflow job enriches the events and writes them to BigQuery",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "raw payloads are archived in Cloud Storage",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "The query API runs on Cloud Run",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Device metadata is in Cloud SQL for Postgres",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Cloud Build deploys to Cloud Run on every merge to main",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "shift traffic to the previous Cloud Run revision",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "We watch Cloud Monitoring dashboards",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "oldest unacked message age over ten minutes",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Dataflow falling behind after a schema change",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "drain the job and redeploy with the updated schema",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Do not delete the BigQuery raw dataset",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "VPC Service Controls protect BigQuery",
+   "in": [
+    "security_controls"
+   ],
+   "not_in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "The data platform team owns Dataflow",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "data platform team",
+    "dataflow"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "Ask Tomasz Kowalski for anything about the device firmware",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "the cost review for BigQuery storage has no owner yet",
+   "in": [
+    "open_responsibilities",
+    "cost_optimization"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation"
+ ],
+ "missing": [
+  "disaster_recovery",
+  "environments"
+ ]
+}

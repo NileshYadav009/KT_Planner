@@ -551,6 +551,12 @@ def clean_transcript(text: str) -> str:
     if not text:
         return text
 
+    # A paragraph break ends a sentence even when nothing else does. Pasted
+    # notes often leave a line without a full stop; joining it to the next
+    # paragraph made "...check the partition count first" and "Never drop
+    # the shipments topic" one sentence, and the prohibition was filed as
+    # part of the failure.
+    text = re.sub(r"(?<=[A-Za-z0-9)\]\"'])[ \t]*(?:\r?\n[ \t]*){2,}", ". ", text)
     normalized = re.sub(r"[\r\n\t]+", " ", text)
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
