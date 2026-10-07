@@ -11,6 +11,7 @@ from .knowledge_builder import (
     verify_document_coverage,
     apply_conflicts,
     attach_conflict_warnings,
+    attach_elsewhere_mentions,
 )
 from .document_dedup import dedupe_rendered_sections
 
@@ -28,4 +29,5 @@ __all__ = [
     "apply_conflicts",
     "attach_conflict_warnings",
     "dedupe_rendered_sections",
+    "attach_elsewhere_mentions",
 ]

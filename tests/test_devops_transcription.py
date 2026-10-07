@@ -253,3 +253,14 @@ def test_brand_casing_corrections_do_not_misfire_on_ordinary_english_phrases():
     corrected, _ = apply_devops_corrections(text)
     assert "customize" in corrected.lower()
     assert "kustomize" not in corrected.lower()
+
+
+def test_two_word_product_names_are_joined_only_where_they_are_the_product():
+    from devops_transcription import clean_transcript
+
+    aws = clean_transcript("Logs go to Amazon open search, and the open search domain has three nodes.")
+    assert aws.count("OpenSearch") == 2
+    assert "open search results" in clean_transcript("Please open search results in a new tab.")
+    gcp = clean_transcript("Events land in Pub/Sub, and the big query tables are partitioned daily.")
+    assert "BigQuery tables" in gcp
+    assert "a big query" in clean_transcript("Running a big query on the reporting database is slow.")

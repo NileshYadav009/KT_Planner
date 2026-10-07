@@ -1,0 +1,60 @@
+# Prometheus alert rules for Continuum (P1-6). Scrape /metrics with
+#   authorization: { credentials: <CONTINUUM_METRICS_TOKEN> }
+# Without Prometheus, CONTINUUM_ALERT_WEBHOOK_URL sends the first two alerts
+# straight from the workers (observability.py).
+groups:
+  - name: continuum
+    rules:
+      - alert: ContinuumKTFailed
+        # A KT failed for a reason other than its input (no speech, not a KT).
+        expr: increase(continuum_jobs_total{status="failed",reason="error"}[15m]) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: "A KT failed in the last 15 minutes"
+          description: "Check the worker logs for the job id; the user was told to resubmit."
+
+      - alert: ContinuumQueueBacklog
+        expr: continuum_queue_oldest_seconds > 900
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "The oldest queued KT has waited over 15 minutes"
+          description: "Add workers (docker compose up --scale worker=N) or check that they are alive."
+
+      - alert: ContinuumNoWorkers
+        expr: continuum_workers == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "No KT worker has checked in for 5 minutes"
+          description: "Submitted KTs are queued and will not run until a worker starts."
+
+      - alert: ContinuumKTFailureRate
+        expr: |
+          sum(increase(continuum_jobs_total{status="failed",reason="error"}[1h]))
+            / clamp_min(sum(increase(continuum_jobs_total[1h])), 1) > 0.1
+        labels:
+          severity: ticket
+        annotations:
+          summary: "More than 10% of KTs failed in the last hour"
+
+      - alert: ContinuumStageFailures
+        # A stage failed but the KT completed with a warning to the reader.
+        expr: sum by (stage) (increase(continuum_stage_failures_total[1h])) > 2
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Stage {{ $labels.stage }} failed more than twice in the last hour"
+
+      - alert: ContinuumLLMFallbackRate
+        expr: |
+          sum(increase(continuum_llm_fallbacks_total[1h]))
+            / clamp_min(sum(increase(continuum_llm_calls_total[1h])), 1) > 0.2
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Over 20% of LLM results were not used (failed calls or unsupported values)"

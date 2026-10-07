@@ -1,0 +1,50 @@
+# The API and the KT workers as separate processes (P1-4), sharing one data
+# volume (the job database, queued uploads, screenshots).
+#
+#   CONTINUUM_SECRET_KEY=... GROQ_API_KEY=... docker compose up --build
+#   docker compose up --scale worker=3      # more KTs at once (about 4 GB each)
+#
+# The API loads no models and only accepts uploads and answers requests, so
+# a heavy KT cannot slow it down. Each worker runs one KT at a time; a worker
+# killed mid-KT (out of memory, redeploy) has its KT retried by another.
+# The database is SQLite: keep the volume on local disk, not NFS, and run
+# everything on one host.
+services:
+  api:
+    build: .
+    image: continuum
+    ports:
+      - "8000:8000"
+    environment:
+      CONTINUUM_WORKERS: "0"
+      CONTINUUM_SECRET_KEY: ${CONTINUUM_SECRET_KEY:?set CONTINUUM_SECRET_KEY}
+    volumes:
+      - continuum-data:/app/data
+    restart: unless-stopped
+
+  worker:
+    image: continuum
+    command: ["python", "worker.py"]
+    depends_on:
+      - api
+    environment:
+      CONTINUUM_WORKER_CONCURRENCY: "1"
+      CONTINUUM_SECRET_KEY: ${CONTINUUM_SECRET_KEY:?set CONTINUUM_SECRET_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    volumes:
+      - continuum-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "job_queue.py", "--worker-alive"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 6g
+    restart: unless-stopped
+
+volumes:
+  continuum-data:

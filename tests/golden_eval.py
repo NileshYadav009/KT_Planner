@@ -20,6 +20,7 @@ Scores, per golden:
     false_missing   discussed sections reported Missing
     false_covered   undiscussed sections reported covered
     repeats         fact sentences printed more than once (P1-10)
+    unsourced       facts shown with no source sentence that states them (P1-2)
 
 Run without an LLM, so results are deterministic and use no quota.
 `python scripts/golden_report.py` prints the table; tests/test_golden_suite.py
@@ -35,8 +36,11 @@ BASELINE_PATH = os.path.join(GOLDEN_DIR, "baseline.json")
 TARGET_ACCURACY = 0.90
 
 _DIGESTS = {"quick_reference", "tribal_knowledge", "kt_coverage"}
-_QUOTING_TITLES = {"Connections stated in the KT"}
-_PLACEHOLDER = re.compile(r"not covered (?:in|during) the kt|flag it for follow", re.IGNORECASE)
+_QUOTING_TITLES = {"Connections stated in the KT", "Mentioned elsewhere in the KT"}
+# Section status lines ("not covered", "mentioned elsewhere") are the same in
+# every section they apply to; they are not facts, so they are not repeats.
+_PLACEHOLDER = re.compile(r"not covered (?:in|during) the kt|flag it for follow|"
+                          r"not discussed as its own topic|confirm the rest with", re.IGNORECASE)
 
 
 def load_goldens() -> List[Dict[str, Any]]:
@@ -108,6 +112,47 @@ def repeated_sentences(texts: Dict[str, List[str]]) -> List[str]:
     return repeats
 
 
+def sourced_units(knowledge_object: Dict[str, Any]) -> List[tuple]:
+    """(unit text, its source sentences) for every fact-bearing unit a reader
+    sees in a real section (P1-2), normalised."""
+    from knowledge.evidence import block_units, source_lookup, unit_sources
+
+    lookup = source_lookup(knowledge_object)
+    units = []
+    for sec in knowledge_object.get("rendered_sections") or []:
+        if sec.get("section_id") in _DIGESTS:
+            continue
+        for block in sec.get("blocks") or []:
+            if _quotes_on_purpose(block):
+                continue
+            for i, text in enumerate(block_units(block) or []):
+                quotes = [norm(lookup[n]["quote"]) for n in unit_sources(block, i) if n in lookup]
+                units.append((norm(text), quotes))
+    return units
+
+
+def unsourced_facts(golden: Dict[str, Any], knowledge_object: Dict[str, Any], facts: List[Dict[str, Any]]) -> List[str]:
+    """Facts the document shows where no unit showing them points to a
+    transcript sentence that states them (P1-2)."""
+    units = sourced_units(knowledge_object)
+    by_id = {f["id"]: f for f in golden["facts"]}
+    missing = []
+    for fact in facts:
+        if fact["status"] == "lost":
+            continue
+        spec = by_id[fact["id"]]
+        needles = [n for n in [norm(spec["quote"])] + [norm(a) for a in spec.get("alt", [])] if n]
+        terms = [norm(t) for t in spec.get("terms", [])]
+
+        def shows(text):
+            return any(n in text for n in needles) or (terms and all(t in text for t in terms))
+
+        showing = [quotes for text, quotes in units if shows(text)]
+        if showing and not any(shows(" ".join(quotes)) for quotes in showing):
+            missing.append(fact["id"])
+    return missing
+
+
 def score(golden: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     ko = result.get("knowledge_object") or {}
     texts = section_texts(ko)
@@ -142,6 +187,8 @@ def score(golden: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "false_covered": [s for s in golden.get("missing", []) if buckets.get(s) not in ("Missing", None)],
         "missing_conflicts": [c for c in golden.get("conflicts", []) if c.lower() not in conflicts.lower()],
         "repeats": repeated_sentences(texts),
+        "unsourced": unsourced_facts(golden, ko, facts),
+        "evidence": ko.get("_evidence_stats") or {},
         "buckets": buckets,
     }
 

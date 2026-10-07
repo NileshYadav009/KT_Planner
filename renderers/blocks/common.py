@@ -64,6 +64,13 @@ NOT_COVERED_MESSAGE = (
     "This section was not covered in the KT session. Flag it for follow-up "
     "with the outgoing owner."
 )
+# In place of NOT_COVERED_MESSAGE when the section's topics came up only
+# under other sections (knowledge_builder.attach_elsewhere_mentions).
+MENTIONED_ELSEWHERE_MESSAGE = (
+    "Not discussed as its own topic in the KT session. Confirm the rest with "
+    "the outgoing owner."
+)
+SECTION_STATUS_MESSAGES = (NOT_COVERED_MESSAGE, MENTIONED_ELSEWHERE_MESSAGE)
 
 
 def no_coverage_block(title: str) -> Dict[str, Any]:

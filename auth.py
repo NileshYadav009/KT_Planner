@@ -392,6 +392,17 @@ def set_user_disabled(tenant_id: str, email: str, disabled: bool, actor: str = "
     audit(tenant_id, actor, "user_disabled" if disabled else "user_enabled", {"email": email.strip().lower()})
 
 
+def find_user(tenant_id: str, email: Optional[str] = None, user_id: Optional[str] = None) -> Optional[dict]:
+    """An active person of the workspace, by email or user id."""
+    if not email and not user_id:
+        return None
+    column, value = ("email", email.strip().lower()) if email else ("user_id", user_id)
+    with _connect() as db:
+        row = db.execute(f"SELECT user_id, email, name, role FROM users WHERE tenant_id = ? AND {column} = ? "
+                         "AND disabled = 0", (tenant_id, value)).fetchone()
+    return {"user_id": row[0], "email": row[1], "name": row[2], "role": row[3]} if row else None
+
+
 def list_users(tenant_id: str) -> list:
     with _connect() as db:
         rows = db.execute("SELECT email, name, role, disabled, last_login, subject IS NOT NULL FROM users "

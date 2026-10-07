@@ -127,7 +127,9 @@ DEVOPS_VOCABULARY = {
     # Its own term (an archive tier), so the fuzzy corrector stops
     # "fixing" it into the one-letter-away "cloud storage".
     "cold storage": ["cold storage"],
-    "bigquery": ["bigquery", "big query"],
+    # Not "big query": "running a big query" is ordinary English.
+    # devops_transcription joins it on a Google Cloud KT only.
+    "bigquery": ["bigquery"],
     "cloud sql": ["cloud sql", "gcp cloud sql"],
     "pub/sub": ["pub/sub", "pub sub", "pubsub"],
     "cloud build": ["cloud build", "gcp cloud build"],

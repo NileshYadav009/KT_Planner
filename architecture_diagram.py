@@ -468,7 +468,10 @@ def build_architecture_graph(
             for pstart, pend, pid in reversed(spots[:idx]):
                 segment = sentence[pend:start]
                 if pid == "central":
-                    source, window = "central", segment
+                    # Only the target's own clause: in "GKE is used for
+                    # workloads, Vertex AI supports ML", "used" is about GKE.
+                    cut = max(segment.rfind(","), segment.rfind(";"))
+                    source, window = "central", (segment[cut + 1:] if cut >= 0 else segment)
                     break
                 if node_layer.get(pid) in _ACTOR_LAYERS and not _CLAUSE_BREAK_RE.search(segment) \
                         and _label_for(layer, segment, ""):
@@ -791,12 +794,14 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                 target_y = box_y + box_h
                 c.path([(start_x, lane_top), (start_x, channel), (target_x, channel), (target_x, target_y + 2)],
                        dashed=True)
-                # Delivery's label to the right of its line, operations' to the
-                # left, so neither runs off the canvas.
+                # Each label beside its own lane's riser, below the shared
+                # channel: delivery's to the right, operations' to the left,
+                # so the two never meet (at the top they overlapped).
+                label_y = (channel + lane_top) / 2 + 4
                 if style == "delivery":
-                    c.label(target_x + 6, (channel + target_y) / 2 + 3, " · ".join(stated), anchor="start")
+                    c.label(start_x + 6, label_y, " · ".join(stated), anchor="start")
                 else:
-                    c.label(target_x - 6, (channel + target_y) / 2 + 3, " · ".join(stated), anchor="end")
+                    c.label(start_x - 6, label_y, " · ".join(stated), anchor="end")
         bottom = max(heights)
 
     height = bottom + 14

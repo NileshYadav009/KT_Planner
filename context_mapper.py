@@ -461,6 +461,10 @@ def semantic_chunk_sentences(
             should_merge = sim >= (similarity_threshold - 0.15)
         if should_merge and rule_sections[idx] and current_rules and rule_sections[idx] not in current_rules:
             should_merge = False
+        # An opener or closer ("Let's start.", "That concludes the KT.") is
+        # dropped before mapping; merged into a neighbour it would be kept.
+        if should_merge and (_GREETING_ONLY_RE.match(candidate.text or "") or _GREETING_ONLY_RE.match(current.text or "")):
+            should_merge = False
 
         if should_merge:
             current = _merge_sentences(current, candidate)

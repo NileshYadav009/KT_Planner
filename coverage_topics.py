@@ -26,9 +26,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("Business criticality and impact",
          ("business_criticality", "business_impact", "worst_case", "what_breaks", "business_dependency", "critical_time"),
          r"\b(?:critical|if\s+(?:it|the\s+\w+)\s+(?:is|goes)\s+down|unavailable|outage|depend\w*|revenue|cannot|can't)\b"),
+        # Counts ("50,000 orders"), data sizes ("3TB of data") and rates
+        # ("... per day").
         ("Volume", ("orders_per_day",),
          r"\b(?:\d[\d,.]*|thousand|million|billion|hundred)\s+(?:\w+\s+)?(?:orders|events|requests|transactions|"
-         r"messages|alerts|users|travell?ers|bookings|invoices|calls|businesses)\b"),
+         r"messages|alerts|users|travell?ers|bookings|invoices|calls|businesses|readings|records|jobs|files)\b"
+         r"|\b\d[\d,.]*\s*(?:tb|gb|pb|terabytes?|gigabytes?|petabytes?)\b"
+         r"|\b(?:processes|handles|serves|ingests|receives)\b[^.]*\b(?:per|a|each|every)\s+(?:second|minute|hour|day|month)\b"),
         ("Technology stack", ("key_technologies",), None),
     ],
     "architecture_reference": [
@@ -52,7 +56,8 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "disaster_recovery": [
         ("RTO", ("rto_metric",), r"\brto\b|\brecovery\s+time\b"),
         ("RPO", ("rpo_metric",), r"\brpo\b|\brecovery\s+point\b"),
-        ("Backups", ("rpo_steps",), r"\bbackups?\b|\bsnapshots?\b|\bpoint[\s-]in[\s-]time\b"),
+        ("Backups", ("rpo_steps",),
+         r"\bbackups?\b|\bback(?:ed|s)?\s+up\b|\bsnapshots?\b|\bpoint[\s-]in[\s-]time\b|\bretain\w*\b|\bretention\b"),
         ("Failover / standby", ("rto_steps",), r"\b(?:failover|standby|replica\w*|geo-?replicat\w*)\b"),
         ("DR testing", ("dr_testing_frequency",),
          r"\b(?:test\w*\s+(?:the\s+)?(?:failover|restores?|recovery|dr)|(?:failover|restore|recovery|dr)\s+(?:test|drill)\w*)\b"),
@@ -67,7 +72,7 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "day1_survival_checklist": [
         ("Access and tools to request", ("required_access",), r"\b(?:access|permissions?|accounts?|vpn|sso|onboard\w*)\b"),
         ("Safe first actions", ("first_safe_actions",),
-         r"\b(?:shadow\w*|read\s+the\s+runbooks?|read-only|observe|first\s+(?:week|day)|start\s+by)\b"),
+         r"\b(?:shadow\w*|read\s+the\s+runbooks?|read-only|observe|first\s+(?:week|day)|start\s+by|review\w*)\b"),
         ("Actions to avoid at first", ("actions_not_to_perform",),
          r"\b(?:don't|do\s+not|never|avoid)\b[^.]*\b(?:first|initially|until|yet)\b"),
     ],
@@ -84,8 +89,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:roll\s?back|redeploy|revert)\w*\b[^.]*\b(?:minutes?|hours?|takes|approv\w*)\b"),
         ("Repository and pipeline links", ("repo_link", "pipeline_link"), r"https?://|\bwww\."),
     ],
+    # Failures named without a fix are half the knowledge, not none of it:
+    # a KT listing three failures with no fixes was reported Missing.
     "common_failures": [
-        ("Known failures with fixes", (),
+        ("Known failures", (),
+         r"\b(?:problem|issue|failure|fail(?:s|ed|ing)?|error|outage|incident|backlog|lag|throttl\w*|timeout|crash\w*|"
+         r"exhaust\w*|leak\w*|stuck|down)\b"),
+        ("Fixes or workarounds", (),
          r"\b(?:fix\w*|resolv\w*|workaround|restart\w*|renew\w*|rotat\w*|switch\w*|drain\w*|redeploy\w*|scal\w+)\b"),
     ],
     "known_bad_days": [
@@ -100,7 +110,8 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:avoid\s+deploying|no\s+(?:changes|deploys?|deployments)|freeze|blackout|never\s+deploy|don't\s+deploy|do\s+not\s+deploy)\b"),
     ],
     "danger_zones": [
-        ("Never-do rules", (), r"\b(?:never|do\s+not|don't|must\s+not|avoid)\b"),
+        ("Never-do rules", (),
+         r"\b(?:never|do\s+not|don't|must\s+not|avoid|danger\w*|careful|risky|do\s+not\s+touch|sensitive)\b"),
     ],
     "ownership_escalation": [
         ("Owning teams", ("application_ownership", "infrastructure_ownership"), r"\bowns?\b|\bresponsible\s+for\b"),

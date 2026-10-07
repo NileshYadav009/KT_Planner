@@ -62,7 +62,28 @@ def test_every_job_route_requires_a_key(client, method, path, body):
 
 def test_public_routes_stay_public(client):
     assert client.get("/schema").status_code == 200
-    assert client.get("/healthz").status_code in (200, 503)
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/readyz").status_code in (200, 503)
+
+
+def test_liveness_stays_up_while_readiness_says_what_is_missing(client, monkeypatch):
+    """P1-5: /healthz is liveness (always 200 while the process serves), /readyz
+    is readiness and names each failing check, so a container is not
+    restarted just because models are still loading."""
+    import pipeline
+
+    monkeypatch.setattr(pipeline, "MODEL", None)
+    assert client.get("/healthz").json() == {"status": "ok", "ready": False}
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json()["checks"]["models_loaded"] is False
+    assert resp.json()["checks"]["database_writable"] is True
+
+    monkeypatch.setattr(pipeline, "MODEL", object())
+    monkeypatch.setattr(pipeline, "MAPPER_PIPELINE", object())
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    resp = client.get("/readyz")
+    assert resp.status_code == 200 and resp.json()["ready"] is True
 
 
 def test_a_tenant_cannot_see_another_tenants_job(client, tenants):

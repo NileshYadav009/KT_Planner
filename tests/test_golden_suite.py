@@ -67,6 +67,14 @@ def test_nothing_is_lost_or_repeated(scores, golden_id):
     assert scores[golden_id]["repeats"] == []
 
 
+@pytest.mark.parametrize("golden_id", IDS)
+def test_every_fact_shown_points_to_the_sentence_that_states_it(scores, golden_id):
+    """P1-2: a reviewer can check any fact against what was said."""
+    assert scores[golden_id]["unsourced"] == [], [
+        (f["id"], f["quote"]) for f in scores[golden_id]["facts"] if f["id"] in scores[golden_id]["unsourced"]]
+    assert scores[golden_id]["evidence"].get("stated", 0) > 0
+
+
 def test_contradictions_are_flagged(scores):
     for golden in GOLDENS:
         if golden.get("conflicts"):

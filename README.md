@@ -147,32 +147,36 @@ Contains legacy or moved documents that are not required for the current setup. 
 ## Setup and run
 
 1. Create and activate a Python virtual environment.
-2. Install dependencies:
+2. Install dependencies (the lock pins every version the tests ran with):
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.lock
 ```
 
-3. Start the server:
+3. Start the server (it also runs one KT worker thread):
 
 ```powershell
 uvicorn main:app --reload
 ```
 
-4. Open the web UI from `static/index.html` or use the available API routes.
+4. Open http://localhost:8000/ and sign in.
+
+For the container image, separate worker processes, health checks, metrics,
+alerts, and the review and sign-off workflow, see
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Quick commands
 
-- Run the pipeline tests:
+- Run the tests (no LLM calls are made with the LLM keys unset):
 
 ```powershell
-python test_pipeline.py
+python -m pytest
 ```
 
-- Validate output with the helper script:
+- Score the golden KTs (where each annotated fact landed):
 
 ```powershell
-python check_kt.py
+python scripts/golden_report.py
 ```
 
 ## Notes

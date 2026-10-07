@@ -636,6 +636,44 @@
     }
     .doc-block:last-child{margin-bottom:0}
     .doc-block-title{font-size:12.5px;font-weight:700;margin-bottom:7px;color:var(--text)}
+    /* Evidence per fact (P1-2): the transcript sentence behind each fact. */
+    .src-chip{display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:0 6px;height:17px;border-radius:9px;
+      border:1px solid var(--border);background:var(--bg);color:var(--text3);font-size:10.5px;
+      font-variant-numeric:tabular-nums;cursor:pointer;vertical-align:1px;white-space:nowrap}
+    .src-chip:hover,.src-chip:focus-visible{color:var(--blue);border-color:var(--blue);outline:none}
+    /* Reviewer edits, versions and sign-off (P1-1, P1-3). */
+    .doc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+    .doc-version{font-size:12px;color:var(--text3);margin-right:auto}
+    .doc-unit.u-deleted{text-decoration:line-through;opacity:.55}
+    .doc-unit.u-edited,.doc-unit.u-added{background:rgba(37,99,235,.07)}
+    .doc-unit.u-moved{opacity:.7}
+    .rev-chip{display:inline-block;margin-left:6px;padding:0 6px;border-radius:9px;font-size:10.5px;
+      border:1px solid var(--border);color:var(--text3);white-space:nowrap}
+    .rev-chip.rev-ok{color:#15803d;border-color:#86efac}
+    .unit-tools{display:inline-flex;gap:4px;margin-left:8px;vertical-align:1px}
+    .unit-tools button,.sec-add{font-size:10.5px;padding:1px 7px;border-radius:6px;border:1px solid var(--border);
+      background:var(--bg);color:var(--text2);cursor:pointer}
+    .unit-tools button:hover,.sec-add:hover{border-color:var(--blue);color:var(--blue)}
+    .unit-editor{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+    .unit-editor textarea,.unit-editor input,.unit-editor select{width:100%;font:inherit;font-size:12.5px;padding:6px 8px;
+      border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}
+    .unit-editor .row{display:flex;gap:6px}
+    .doc-history{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px}
+    .doc-history li{display:flex;gap:8px;align-items:center;padding:3px 0}
+    .doc-history li span{flex:1}
+    .signoff-panel{margin-top:14px;border-top:1px solid var(--border);padding-top:12px;font-size:12.5px}
+    .signoff-panel h4{font-size:13px;margin:0 0 8px}
+    .signoff-panel .so-status{margin-bottom:8px;color:var(--text2)}
+    .signoff-panel .so-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;margin-bottom:8px}
+    .signoff-panel input,.signoff-panel select{font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid var(--border);
+      border-radius:6px;background:var(--surface);color:var(--text);width:100%}
+    .signoff-panel .so-gap{border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin-bottom:6px}
+    .signoff-panel .so-gap .row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+    .signoff-panel .so-gap .row > *{flex:1 1 140px}
+    .src-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)}
+    .src-bar audio{height:30px;max-width:100%;flex:1 1 260px}
+    .src-quote{margin:0 0 10px;padding:8px 10px;border-left:3px solid var(--blue);background:var(--bg);
+      font-size:12.5px;color:var(--text2)}
     .doc-block p{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:6px}
     .doc-block p:last-child{margin-bottom:0}
     .doc-block ul,.doc-block ol{margin:0 0 0 18px}
@@ -1160,7 +1198,7 @@
             <div class="progress-track"><div class="progress-bar" id="bar"></div></div>
             <span class="progress-label" id="progressText">0%</span>
           </div>
-          <p style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
+          <p id="progressHint" style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
             Transcribing and classifying — this may take a few minutes for long recordings.
           </p>
         </div>
@@ -1248,9 +1286,28 @@
         </div>
       </div>
       <div class="card-body" style="padding:12px">
+        <div class="doc-toolbar" id="docToolbar" hidden>
+          <span class="doc-version" id="docVersion"></span>
+          <button class="btn btn-ghost btn-sm" id="docEditBtn" type="button">Edit document</button>
+          <button class="btn btn-ghost btn-sm" id="docHistoryBtn" type="button">History</button>
+          <span id="docEditActions" hidden>
+            <button class="btn btn-primary btn-sm" id="docSaveBtn" type="button">Save changes</button>
+            <button class="btn btn-ghost btn-sm" id="docCancelBtn" type="button">Cancel</button>
+          </span>
+        </div>
+        <div class="doc-history" id="docHistory" hidden></div>
+        <div class="src-bar" id="sourceBar" hidden>
+          <span id="sourceBarText">Click a time beside a fact to hear where it was said.</span>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+            Attach recording<input type="file" id="attachRecording" accept="audio/*,video/*" hidden/>
+          </label>
+          <audio id="sourcePlayer" controls preload="none" hidden></audio>
+        </div>
+        <blockquote class="src-quote" id="sourceQuote" hidden></blockquote>
         <div id="renderedDocument">
           <p class="empty-state" style="padding:6px">No rendered document available yet.</p>
         </div>
+        <div class="signoff-panel" id="signoffPanel" hidden></div>
       </div>
     </div>
 
@@ -1333,19 +1390,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           Apply results to form
         </button>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <select id="exportFormat" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px">
-            <option value="json">JSON</option>
-            <option value="html">HTML</option>
-            <option value="markdown">Markdown</option>
-            <option value="pdf">PDF (Print)</option>
-          </select>
-          <button id="downloadJson" class="btn btn-ghost" style="justify-content:center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          </button>
-        </div>
         <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
-          Export the current schema view in JSON, HTML, Markdown, or PDF format.
+          The PDF is built from the document saved on the server: edits saved in the document appear in it,
+          and earlier versions stay available under History. The schema form is a read-only view.
         </p>
       </div>
     </div>
@@ -1427,6 +1474,8 @@ window.fetch = async (input, init = {}) => {
    not create or correct them; the server enforces this, the UI just says so. */
 function applyRolePermissions(me){
   const perms = new Set(me.permissions || []);
+  DOC.me = me;
+  DOC.canEdit = perms.has('kt:correct');
   if(!perms.has('kt:create')){
     const btn = document.getElementById('upload');
     if(btn){ btn.disabled = true; btn.title = 'Your role can view KTs but not create them'; btn.dataset.roleLocked = '1'; }
@@ -1586,6 +1635,8 @@ function sectionTitle(id){
 
 /* ── Progress ──────────────────────────────────────────────── */
 function setProgress(p){ bar.style.width=p+'%'; progressText.textContent=p+'%'; }
+const PROGRESS_HINT = 'Transcribing and classifying — this may take a few minutes for long recordings.';
+function setProgressHint(text){ document.getElementById('progressHint').textContent = text || PROGRESS_HINT; }
 
 /* ── Toast ─────────────────────────────────────────────────── */
 const toastsEl=document.getElementById('toasts');
@@ -1831,47 +1882,182 @@ function renderCoverage(cov){
   }
 }
 
-function renderKnowledgeDocument(knowledge){
+/* Evidence per fact (P1-2). Each fact-bearing unit of a block has the ids of
+   its transcript sentences in block.sources (same order as the units); the
+   sentences themselves are in knowledge.sources. A chip shows when it was
+   said; clicking it shows the sentence and, if the recording is available
+   in this browser, plays it from there. The recording never goes back to
+   the server: it is the file just uploaded, or one attached here. */
+let SOURCE_LOOKUP = {};
+let SOURCE_TIMED = false;
+let localRecordingUrl = null;
+function formatSourceTime(seconds){
+  if(seconds == null) return '';
+  const t = Math.floor(seconds), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+function sourceChips(block, i){
+  const ids = (Array.isArray(block.sources) && Array.isArray(block.sources[i])) ? block.sources[i] : [];
+  return ids.map(id => {
+    const src = SOURCE_LOOKUP[id];
+    if(!src) return '';
+    const when = formatSourceTime(src.start);
+    return `<button type="button" class="src-chip" data-src="${Number(id)}" title="${escapeHtml('\u201c' + src.quote + '\u201d')}"`
+      + ` aria-label="Source ${Number(id)}${when ? ' at ' + when : ''}">${when ? '&#9654; ' + when : 'source ' + Number(id)}</button>`;
+  }).join('');
+}
+function useLocalRecording(file){
+  if(!file) return;
+  if(localRecordingUrl) URL.revokeObjectURL(localRecordingUrl);
+  localRecordingUrl = URL.createObjectURL(file);
+  const player = document.getElementById('sourcePlayer');
+  player.src = localRecordingUrl;
+  player.hidden = false;
+}
+document.getElementById('attachRecording').addEventListener('change', e => {
+  useLocalRecording(e.target.files[0]);
+  showToast('Recording attached: click a time to play from there');
+});
+document.getElementById('renderedDocument').addEventListener('click', e => {
+  const chip = e.target.closest('.src-chip');
+  if(!chip) return;
+  const src = SOURCE_LOOKUP[chip.dataset.src];
+  if(!src) return;
+  const when = formatSourceTime(src.start);
+  const quote = document.getElementById('sourceQuote');
+  quote.textContent = `${when ? when + '  ' : ''}\u201c${src.quote}\u201d`;
+  quote.hidden = false;
+  const player = document.getElementById('sourcePlayer');
+  if(src.start != null && localRecordingUrl){
+    player.currentTime = Math.max(0, src.start - 1);
+    player.play().catch(() => {});
+  } else if(src.start != null){
+    showToast('Attach the recording to play it from ' + when);
+  }
+});
+
+/* The document is the server's copy (P1-1). In edit mode each unit (a
+   paragraph, item, warning or table row) can be approved, edited, deleted or
+   moved, and lines can be added; the changes are sent as one save against
+   the version on screen, which becomes the next version. */
+const DOC = {jobId: null, version: 1, knowledge: null, editing: false, pending: [], canEdit: false, me: null,
+             signoff: null};
+
+function sameUnit(e, sec, blk, unit){ return e.section === sec && e.block === blk && e.unit === unit; }
+function pendingChange(sec, blk, unit){ return DOC.pending.find(e => e.op !== 'approve' && e.op !== 'add' && sameUnit(e, sec, blk, unit)); }
+function pendingApproved(sec, blk, unit){ return DOC.pending.some(e => e.op === 'approve' && sameUnit(e, sec, blk, unit)); }
+function sectionTitleOf(id){
+  const sec = ((DOC.knowledge && DOC.knowledge.rendered_sections) || []).find(s => s.section_id === id);
+  return sec ? (sec.section_title || id) : id;
+}
+function signoffStarted(){ return !!(DOC.signoff && DOC.signoff.status && DOC.signoff.status !== 'draft'); }
+function documentLocked(){ return !!(DOC.signoff && DOC.signoff.status === 'signed'); }
+
+function renderKnowledgeDocument(knowledge, meta){
   const container=document.getElementById('renderedDocument');
   container.innerHTML='';
+  DOC.knowledge = knowledge || null;
+  if(meta){
+    if(meta.document_version) DOC.version = meta.document_version;
+    if(meta.signoff !== undefined) DOC.signoff = meta.signoff;
+  }
+  SOURCE_LOOKUP = {};
+  ((knowledge && knowledge.sources) || []).forEach(src => { SOURCE_LOOKUP[src.id] = src; });
+  SOURCE_TIMED = Object.values(SOURCE_LOOKUP).some(src => src.start != null);
+  document.getElementById('sourceBar').hidden = !SOURCE_TIMED;
+  document.getElementById('sourceQuote').hidden = true;
   if(!knowledge || !Array.isArray(knowledge.rendered_sections) || knowledge.rendered_sections.length===0){
     container.innerHTML='<p class="empty-state" style="padding:6px">No rendered document available yet.</p>';
+    document.getElementById('docToolbar').hidden = true;
     return;
   }
+  renderDocToolbar();
 
   knowledge.rendered_sections.forEach(section=>{
     const sectionWrap=document.createElement('div'); sectionWrap.className='doc-section';
     const heading=document.createElement('h3'); heading.textContent=section.section_title||section.section_id||'Section';
     sectionWrap.appendChild(heading);
-    (section.blocks||[]).forEach(block=>{
+    const readonly = section.section_id === 'signoff' && signoffStarted();
+    (section.blocks||[]).forEach((block, b)=>{
       const blockEl=document.createElement('div'); blockEl.className='doc-block';
-      blockEl.innerHTML = renderBlockHtml(block);
+      blockEl.innerHTML = renderBlockHtml(block, {sec: section.section_id, blk: b, readonly});
       sectionWrap.appendChild(blockEl);
     });
+    // Lines added in this edit session, not saved yet.
+    DOC.pending.forEach((e, idx) => {
+      if(e.op !== 'add' || e.section !== section.section_id) return;
+      const added = document.createElement('p'); added.className = 'doc-unit u-added';
+      added.innerHTML = `${renderInlineText(e.text)} <span class="unit-tools"><button type="button" data-act="unadd" data-idx="${idx}">Remove</button></span>`;
+      sectionWrap.appendChild(added);
+    });
+    if(DOC.editing && !readonly){
+      const add = document.createElement('div');
+      add.innerHTML = `<button type="button" class="sec-add" data-act="add" data-sec="${escapeHtml(section.section_id)}">+ Add a line</button>`;
+      sectionWrap.appendChild(add);
+    }
     container.appendChild(sectionWrap);
   });
 }
 
-function renderBlockHtml(block){
+function unitAttrs(ctx, i){
+  const cls = ['doc-unit'];
+  const change = pendingChange(ctx.sec, ctx.blk, i);
+  if(change) cls.push(change.op === 'delete' ? 'u-deleted' : change.op === 'move' ? 'u-moved' : 'u-edited');
+  return ` class="${cls.join(' ')}" data-sec="${escapeHtml(ctx.sec)}" data-blk="${ctx.blk}" data-unit="${i}"`;
+}
+function unitText(ctx, i, original){
+  const change = pendingChange(ctx.sec, ctx.blk, i);
+  return (change && change.op === 'replace' && typeof change.text === 'string') ? change.text : original;
+}
+function rowValue(ctx, i, row, col){
+  const change = pendingChange(ctx.sec, ctx.blk, i);
+  return (change && change.op === 'replace' && change.cells && col in change.cells) ? change.cells[col] : row[col];
+}
+function unitExtras(block, ctx, i){
+  let html = sourceChips(block, i);
+  const review = Array.isArray(block.review) ? block.review[i] : null;
+  if(review && review.state && review.state !== 'approved') html += `<span class="rev-chip">${escapeHtml(review.state)}</span>`;
+  if(pendingApproved(ctx.sec, ctx.blk, i) || (review && review.state === 'approved')) html += '<span class="rev-chip rev-ok">&#10003; approved</span>';
+  const change = pendingChange(ctx.sec, ctx.blk, i);
+  if(change && change.op === 'move') html += `<span class="rev-chip">moving to ${escapeHtml(sectionTitleOf(change.to_section))}</span>`;
+  if(DOC.editing && !ctx.readonly && ctx.sec){
+    const rows = !!block.rows || !!block.entries;
+    html += `<span class="unit-tools">`
+      + `<button type="button" data-act="approve">Approve</button>`
+      + `<button type="button" data-act="edit">Edit</button>`
+      + (rows ? '' : `<button type="button" data-act="move">Move</button>`)
+      + `<button type="button" data-act="delete">${change && change.op === 'delete' ? 'Keep' : 'Delete'}</button></span>`;
+  }
+  return html;
+}
+
+function renderBlockHtml(block, ctx){
+  ctx = ctx || {sec: '', blk: 0, readonly: true};
   if(!block || !block.type) return '<p>Invalid block.</p>';
   const title = fallback => `<div class="doc-block-title">${escapeHtml(String(block.title||fallback))}</div>`;
+  const x = i => unitExtras(block, ctx, i);
+  const a = i => unitAttrs(ctx, i);
+  const t = (i, v) => unitText(ctx, i, v);
   switch(block.type){
     case 'NarrativeBlock':
-      return `${title('Narrative')}${(block.paragraphs||[]).map(p=>`<p>${safeMarked(marked.parseInline(escapeHtml(String(p||''))))}</p>`).join('')}`;
+      return `${title('Narrative')}${(block.paragraphs||[]).map((p,i)=>`<p${a(i)}>${safeMarked(marked.parseInline(escapeHtml(String(t(i,p)||''))))}${x(i)}</p>`).join('')}`;
     case 'ChecklistBlock':
-      return `${title('Checklist')}<ul>${(block.items||[]).map(item=>`<li>${renderInlineText(item)}</li>`).join('')}</ul>`;
+      return `${title('Checklist')}<ul>${(block.items||[]).map((item,i)=>`<li${a(i)}>${renderInlineText(t(i,item))}${x(i)}</li>`).join('')}</ul>`;
     case 'WarningBlock':
-      return `${title('Warning')}<div class="doc-warning">${(block.warnings||[]).map(w=>`<p>${renderInlineText(w)}</p>`).join('')}</div>`;
+      return `${title('Warning')}<div class="doc-warning">${(block.warnings||[]).map((w,i)=>`<p${a(i)}>${renderInlineText(t(i,w))}${x(i)}</p>`).join('')}</div>`;
     case 'TechnologyGrid':
-      return `${title('Technology')}<div class="doc-grid">${(block.rows||[]).map(row=>`<div class="doc-grid-row"><span>${renderInlineText(row.label)}</span><strong>${renderInlineText(row.value)}</strong></div>`).join('')}</div>`;
+      return `${title('Technology')}<div class="doc-grid">${(block.rows||[]).map((row,i)=>`<div class="doc-grid-row"${a(i)}><span>${renderInlineText(rowValue(ctx,i,row,'label'))}</span><strong>${renderInlineText(rowValue(ctx,i,row,'value'))}${x(i)}</strong></div>`).join('')}</div>`;
     case 'DeploymentTimeline':
-      return `${title('Timeline')}<ol>${(block.entries||[]).map(entry=>`<li><strong>${renderInlineText(entry.label)}:</strong> ${renderInlineText(entry.description)}</li>`).join('')}</ol>`;
+      return `${title('Timeline')}<ol>${(block.entries||[]).map((entry,i)=>`<li${a(i)}><strong>${renderInlineText(rowValue(ctx,i,entry,'label'))}:</strong> ${renderInlineText(rowValue(ctx,i,entry,'description'))}${x(i)}</li>`).join('')}</ol>`;
     case 'OwnershipTable':
-      return `${title('Ownership')}<table class="doc-table"><thead><tr><th>Responsibility</th><th>Owner</th></tr></thead><tbody>${(block.rows||[]).map(row=>`<tr><td>${renderInlineText(row.role||'')}</td><td>${renderInlineText(row.team||'')}</td></tr>`).join('')}</tbody></table>`;
-    case 'DecisionTable':
-      return `${title('Decision Table')}<table class="doc-table"><thead><tr>${(block.columns||[]).map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map(row=>`<tr>${(block.columns||[]).map(col=>renderTableCell(row[col])).join('')}</tr>`).join('')}</tbody></table>`;
+      return `${title('Ownership')}<table class="doc-table"><thead><tr><th>Responsibility</th><th>Owner</th></tr></thead><tbody>${(block.rows||[]).map((row,i)=>`<tr${a(i)}><td>${renderInlineText(rowValue(ctx,i,row,'role')||'')}</td><td>${renderInlineText(rowValue(ctx,i,row,'team')||'')}${x(i)}</td></tr>`).join('')}</tbody></table>`;
+    case 'DecisionTable': {
+      const cols = block.columns||[];
+      return `${title('Decision Table')}<table class="doc-table"><thead><tr>${cols.map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map((row,i)=>`<tr${a(i)}>${cols.map((col,c)=>renderTableCell(rowValue(ctx,i,row,col), c===cols.length-1 ? x(i) : '')).join('')}</tr>`).join('')}</tbody></table>`;
+    }
     case 'TroubleshootingBlock':
-      return `${title('Troubleshooting')}<ol>${(block.steps||[]).map(step=>`<li>${renderInlineText(step)}</li>`).join('')}</ol>`;
+      return `${title('Troubleshooting')}<ol>${(block.steps||[]).map((step,i)=>`<li${a(i)}>${renderInlineText(t(i,step))}${x(i)}</li>`).join('')}</ol>`;
     case 'CodeBlock':
       return `${title('Code')}<pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
     case 'DiagramBlock': {
@@ -1885,6 +2071,238 @@ function renderBlockHtml(block){
       return `${title(block.type)}<p>${renderInlineText(block.description||'')}</p>`;
   }
 }
+
+/* ── Edit mode ─────────────────────────────────────────────── */
+function renderDocToolbar(){
+  const bar = document.getElementById('docToolbar');
+  bar.hidden = !DOC.jobId;
+  const locked = documentLocked();
+  document.getElementById('docVersion').textContent =
+    `Version ${DOC.version}` + (locked ? ' · signed and locked' : '') + (DOC.editing ? ` · ${DOC.pending.length} unsaved change(s)` : '');
+  const editBtn = document.getElementById('docEditBtn');
+  editBtn.hidden = DOC.editing || !DOC.canEdit || locked;
+  document.getElementById('docEditActions').hidden = !DOC.editing;
+}
+function rerenderDocument(){ renderKnowledgeDocument(DOC.knowledge); }
+function unitBlock(sec, blk){
+  const section = (DOC.knowledge.rendered_sections || []).find(s => s.section_id === sec);
+  return section ? (section.blocks || [])[blk] : null;
+}
+function setPending(change){
+  DOC.pending = DOC.pending.filter(e => !(e.op !== 'approve' && e.op !== 'add' && sameUnit(e, change.section, change.block, change.unit)));
+  DOC.pending.push(change);
+}
+
+document.getElementById('docEditBtn').addEventListener('click', () => {
+  DOC.editing = true; DOC.pending = []; rerenderDocument();
+});
+document.getElementById('docCancelBtn').addEventListener('click', () => {
+  if(DOC.pending.length && !confirm('Discard your unsaved changes?')) return;
+  DOC.editing = false; DOC.pending = []; rerenderDocument();
+});
+document.getElementById('docSaveBtn').addEventListener('click', async () => {
+  if(!DOC.pending.length){ showToast('No changes to save'); return; }
+  const btn = document.getElementById('docSaveBtn'); btn.disabled = true;
+  try{
+    const resp = await fetch(`/documents/${encodeURIComponent(DOC.jobId)}/edits`, {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({base_version: DOC.version, edits: DOC.pending})});
+    const body = await resp.json().catch(() => ({}));
+    if(!resp.ok){ showToast(body.detail || `Save failed (${resp.status})`, 8000, 'error'); return; }
+    DOC.editing = false; DOC.pending = [];
+    renderKnowledgeDocument(body.knowledge_object, body);
+    showToast(`Saved as version ${body.version}: ${body.summary}`);
+    loadSignoff();
+  }catch(err){ showToast('Save failed: ' + err, 6000, 'error'); }
+  finally{ btn.disabled = false; }
+});
+
+document.getElementById('renderedDocument').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if(!btn || !DOC.editing) return;
+  const act = btn.dataset.act;
+  if(act === 'unadd'){ DOC.pending.splice(Number(btn.dataset.idx), 1); rerenderDocument(); return; }
+  if(act === 'add'){ openAddEditor(btn); return; }
+  const unitEl = btn.closest('.doc-unit');
+  if(!unitEl) return;
+  const sec = unitEl.dataset.sec, blk = Number(unitEl.dataset.blk), unit = Number(unitEl.dataset.unit);
+  const addr = {section: sec, block: blk, unit};
+  if(act === 'approve'){
+    const had = pendingApproved(sec, blk, unit);
+    DOC.pending = DOC.pending.filter(x => !(x.op === 'approve' && sameUnit(x, sec, blk, unit)));
+    if(!had) DOC.pending.push(Object.assign({op: 'approve'}, addr));
+    rerenderDocument();
+  } else if(act === 'delete'){
+    const current = pendingChange(sec, blk, unit);
+    if(current && current.op === 'delete') DOC.pending = DOC.pending.filter(x => x !== current);
+    else setPending(Object.assign({op: 'delete'}, addr));
+    rerenderDocument();
+  } else if(act === 'edit'){
+    openUnitEditor(unitEl, addr);
+  } else if(act === 'move'){
+    openMoveEditor(unitEl, addr);
+  }
+});
+
+function editorShell(target, inner, onApply){
+  const box = document.createElement('div'); box.className = 'unit-editor';
+  box.innerHTML = inner + '<div class="row"><button type="button" class="btn btn-primary btn-sm" data-ed="ok">Apply</button>'
+    + '<button type="button" class="btn btn-ghost btn-sm" data-ed="cancel">Cancel</button></div>';
+  target.insertAdjacentElement('afterend', box);
+  box.querySelector('[data-ed="cancel"]').addEventListener('click', () => box.remove());
+  box.querySelector('[data-ed="ok"]').addEventListener('click', () => { if(onApply(box) !== false){ box.remove(); rerenderDocument(); } });
+  const first = box.querySelector('textarea,input,select'); if(first) first.focus();
+  return box;
+}
+function openUnitEditor(unitEl, addr){
+  const block = unitBlock(addr.section, addr.block);
+  if(!block) return;
+  const rowKey = block.rows ? 'rows' : (block.entries ? 'entries' : null);
+  if(rowKey){
+    const row = block[rowKey][addr.unit] || {};
+    const cols = block.columns || Object.keys(row).filter(k => typeof row[k] === 'string');
+    const inner = cols.map(c => `<label>${escapeHtml(c)}<input data-col="${escapeHtml(c)}" value="${escapeHtml(String(rowValue({sec: addr.section, blk: addr.block}, addr.unit, row, c) || ''))}"/></label>`).join('');
+    editorShell(unitEl, inner, box => {
+      const cells = {};
+      box.querySelectorAll('input[data-col]').forEach(inp => { cells[inp.dataset.col] = inp.value.trim(); });
+      setPending(Object.assign({op: 'replace', cells}, addr));
+    });
+  } else {
+    const key = {NarrativeBlock: 'paragraphs', ChecklistBlock: 'items', WarningBlock: 'warnings', TroubleshootingBlock: 'steps'}[block.type];
+    const original = (block[key] || [])[addr.unit] || '';
+    editorShell(unitEl, `<textarea rows="3">${escapeHtml(unitText({sec: addr.section, blk: addr.block}, addr.unit, original))}</textarea>`, box => {
+      const text = box.querySelector('textarea').value.trim();
+      if(!text){ showToast('Text cannot be empty: use Delete instead'); return false; }
+      setPending(Object.assign({op: 'replace', text}, addr));
+    });
+  }
+}
+function openMoveEditor(unitEl, addr){
+  const options = (DOC.knowledge.rendered_sections || [])
+    .filter(s => s.section_id !== addr.section && s.section_id !== 'signoff')
+    .map(s => `<option value="${escapeHtml(s.section_id)}">${escapeHtml(s.section_title || s.section_id)}</option>`).join('');
+  editorShell(unitEl, `<select>${options}</select>`, box => {
+    setPending(Object.assign({op: 'move', to_section: box.querySelector('select').value}, addr));
+  });
+}
+function openAddEditor(btn){
+  editorShell(btn, '<textarea rows="2" placeholder="What the KT session said, or what the reviewer adds"></textarea>', box => {
+    const text = box.querySelector('textarea').value.trim();
+    if(!text) return false;
+    DOC.pending.push({op: 'add', section: btn.dataset.sec, text});
+  });
+}
+
+/* ── History ─────────────────────────────────────────────── */
+document.getElementById('docHistoryBtn').addEventListener('click', async () => {
+  const panel = document.getElementById('docHistory');
+  if(!panel.hidden){ panel.hidden = true; return; }
+  try{
+    const resp = await fetch(`/documents/${encodeURIComponent(DOC.jobId)}/versions`);
+    if(!resp.ok){ showToast('Could not load the history'); return; }
+    const data = await resp.json();
+    panel.innerHTML = '<ol style="margin:0;padding-left:0;list-style:none">' + data.versions.slice().reverse().map(v =>
+      `<li><strong>v${v.version}</strong><span>${escapeHtml(v.summary || '')} · ${escapeHtml(v.author || '')}`
+      + `${v.created_at ? ' · ' + escapeHtml(new Date(v.created_at * 1000).toLocaleString()) : ''}`
+      + `${v.version === data.current ? ' · current' : ''}</span>`
+      + `<button type="button" class="btn btn-ghost btn-sm" data-version="${v.version}">PDF</button></li>`).join('') + '</ol>';
+    panel.hidden = false;
+  }catch(err){ showToast('Could not load the history'); }
+});
+document.getElementById('docHistory').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-version]');
+  if(btn) downloadKtPdf(DOC.jobId, '', Number(btn.dataset.version));
+});
+
+/* ── Sign-off (P1-3) ─────────────────────────────────────── */
+const SIGNOFF_ROLES = {giver: 'KT giver', receiver: 'KT receiver', approver: 'Approver'};
+async function loadSignoff(){
+  if(!DOC.jobId) return;
+  try{
+    const resp = await fetch(`/signoff/${encodeURIComponent(DOC.jobId)}`);
+    if(!resp.ok) return;
+    renderSignoff(await resp.json());
+  }catch(e){}
+}
+function renderSignoff(st){
+  DOC.signoff = st;
+  renderDocToolbar();
+  const panel = document.getElementById('signoffPanel');
+  panel.hidden = false;
+  const fmt = ts => ts ? new Date(ts * 1000).toLocaleString() : '';
+  let html = '<h4>Sign-off</h4>';
+  if(st.status === 'draft'){
+    html += '<div class="so-status">Sign-off has not started. Name the outgoing owner, the incoming owner and the approver; each acknowledges the document once every knowledge gap is closed or accepted as a risk.</div>';
+    if(DOC.canEdit){
+      html += '<div class="so-grid">' + Object.entries(SIGNOFF_ROLES).map(([r, label]) =>
+        `<label>${label}<input type="email" data-role="${r}" placeholder="name@company.com"/></label>`).join('') + '</div>'
+        + '<button type="button" class="btn btn-primary btn-sm" data-so="start">Start sign-off</button>';
+    }
+    panel.innerHTML = html;
+    return;
+  }
+  const acks = st.acknowledgements || {};
+  html += st.status === 'signed'
+    ? `<div class="so-status"><strong>Signed</strong>: version ${st.signed_version}, ${escapeHtml(fmt(st.signed_at))}. This version is locked.</div>`
+    : `<div class="so-status">In review, document version ${st.current_version}. ${st.open_gaps ? `<strong>${st.open_gaps} knowledge gap(s) open.</strong>` : 'No open gaps.'}</div>`;
+  html += '<ul style="margin:0 0 8px;padding-left:16px">' + Object.entries(SIGNOFF_ROLES).map(([r, label]) => {
+    const person = (st.participants || {})[r] || {};
+    const ack = acks[r];
+    return `<li>${label}: ${escapeHtml(person.name || person.email || '')} — ${ack ? `acknowledged version ${ack.version}, ${escapeHtml(fmt(ack.at))}` : 'not yet acknowledged'}</li>`;
+  }).join('') + '</ul>';
+  const canResolve = st.status === 'in_review' && ((st.my_roles || []).length || (DOC.me && DOC.me.role === 'admin'));
+  (st.gaps || []).forEach(g => {
+    html += `<div class="so-gap"><div>${renderInlineText(g.text)}</div>`;
+    if(g.resolution){
+      html += `<div style="color:var(--text3);margin-top:4px">${g.resolution === 'closed' ? 'Closed' : 'Accepted as a risk'} by ${escapeHtml(g.by || '')}: ${escapeHtml(g.note || '')}</div>`;
+    } else if(canResolve){
+      html += `<div class="row"><select data-gap-res="${escapeHtml(g.id)}"><option value="closed">Closed</option><option value="accepted_risk">Accept as a risk</option></select>`
+        + `<input data-gap-note="${escapeHtml(g.id)}" placeholder="How it was closed, or why the risk is accepted"/>`
+        + `<button type="button" class="btn btn-ghost btn-sm" data-so="gap" data-gap="${escapeHtml(g.id)}">Save</button></div>`;
+    } else {
+      html += '<div style="color:var(--text3);margin-top:4px">Open</div>';
+    }
+    html += '</div>';
+  });
+  (st.can_acknowledge || []).forEach(r => {
+    html += `<button type="button" class="btn btn-primary btn-sm" data-so="ack" data-role="${r}" ${st.open_gaps ? 'disabled title="Resolve every gap first"' : ''}>Acknowledge version ${st.current_version} as ${SIGNOFF_ROLES[r]}</button> `;
+  });
+  panel.innerHTML = html;
+}
+async function signoffPost(path, body){
+  const resp = await fetch(`/signoff/${encodeURIComponent(DOC.jobId)}${path}`, {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const data = await resp.json().catch(() => ({}));
+  if(!resp.ok){ showToast(data.detail || `Sign-off failed (${resp.status})`, 8000, 'error'); return null; }
+  renderSignoff(data);
+  refreshDocumentView();
+  return data;
+}
+async function refreshDocumentView(){
+  try{
+    const resp = await fetch(`/status/${encodeURIComponent(DOC.jobId)}`);
+    if(resp.ok){ const data = await resp.json(); renderKnowledgeDocument(data.knowledge_object || {}, data); }
+  }catch(e){}
+}
+document.getElementById('signoffPanel').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-so]');
+  if(!btn) return;
+  const panel = document.getElementById('signoffPanel');
+  if(btn.dataset.so === 'start'){
+    const body = {};
+    panel.querySelectorAll('input[data-role]').forEach(inp => { body[inp.dataset.role] = inp.value.trim(); });
+    const data = await signoffPost('/start', body);
+    if(data) showToast('Sign-off started');
+  } else if(btn.dataset.so === 'gap'){
+    const id = btn.dataset.gap;
+    const resolution = panel.querySelector(`[data-gap-res="${CSS.escape(id)}"]`).value;
+    const note = panel.querySelector(`[data-gap-note="${CSS.escape(id)}"]`).value.trim();
+    if(!note){ showToast('Add a note: how it was closed, or why the risk is accepted'); return; }
+    await signoffPost(`/gaps/${encodeURIComponent(id)}`, {resolution, note});
+  } else if(btn.dataset.so === 'ack'){
+    const data = await signoffPost('/acknowledge', {role: btn.dataset.role, version: DOC.version});
+    if(data) showToast(data.status === 'signed' ? 'Signed: this version is now locked' : 'Acknowledged');
+  }
+});
 
 // A link from OCR'd screen content: only http(s), always escaped, opens in a new tab.
 function safeLink(url){
@@ -1972,10 +2390,10 @@ function renderInlineText(value){
 }
 
 const NOT_COVERED_CELL = 'Not covered during KT';
-function renderTableCell(value){
+function renderTableCell(value, extra){
   const str = value==null ? '' : String(value);
-  if (str.trim()) return `<td>${renderInlineText(str)}</td>`;
-  return `<td class="cell-not-covered">${NOT_COVERED_CELL}</td>`;
+  if (str.trim()) return `<td>${renderInlineText(str)}${extra||''}</td>`;
+  return `<td class="cell-not-covered">${NOT_COVERED_CELL}${extra||''}</td>`;
 }
 
 function populateCoverBlock(data){
@@ -2019,8 +2437,15 @@ function pollJobStatus(jobId){
       if(!resp.ok){ fail('Status check failed'); return; }
       failures = 0;
       const data=await resp.json();
-      if(data.status==='processing'){
+      if(data.status==='queued'){
+        // Waiting for a free worker (P1-4): say so, rather than a stuck bar.
+        const ahead = data.queue_position || 0;
+        setProgress(8);
+        setProgressHint(ahead ? `Queued: ${ahead} KT${ahead===1?'':'s'} ahead of this one. It starts automatically.`
+                              : 'Queued: starting shortly.');
+      } else if(data.status==='processing'){
         // Server progress runs 0-100; keep the bar short of 100 until done.
+        setProgressHint();
         setProgress(Math.max(10, Math.min(95, data.progress||0)));
       } else if(data.status==='completed' || data.status==='completed_with_warnings'){
         setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
@@ -2043,7 +2468,9 @@ function pollJobStatus(jobId){
           }
         }catch(err){ console.error('Dynamic schema load error', err); }
 
-        renderKnowledgeDocument(data.knowledge_object || {});
+        DOC.jobId = jobId; DOC.editing = false; DOC.pending = [];
+        renderKnowledgeDocument(data.knowledge_object || {}, data);
+        loadSignoff();
       } else if(data.status==='failed'){
         showToast('Processing failed: '+(data.error||'Unknown error'));
         loadHistory();
@@ -2054,6 +2481,20 @@ function pollJobStatus(jobId){
 }
 
 /* ── Upload ─────────────────────────────────────────────────── */
+/* Idempotency-Key (P1-4): if a submission's response never arrives (a
+   network drop after the server accepted it), submitting the same input
+   again reuses the key and gets the same KT back instead of a second one.
+   A new key is used once any response arrives, so a deliberate re-run of
+   the same input is a new KT. */
+let pendingSubmit = null;
+function submissionKey(identity){
+  if(!pendingSubmit || pendingSubmit.identity !== identity){
+    const key = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+              : Date.now() + '-' + Math.random().toString(16).slice(2);
+    pendingSubmit = {identity, key};
+  }
+  return pendingSubmit.key;
+}
 uploadBtn.addEventListener('click',async()=>{
   let request;
   if(inputMode === 'transcript'){
@@ -2061,19 +2502,23 @@ uploadBtn.addEventListener('click',async()=>{
     if(!text){ showToast('Paste a transcript first'); transcriptInput.focus(); return; }
     request = fetch('/kt-from-transcript',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json', 'Idempotency-Key': submissionKey('text:' + text)},
       body:JSON.stringify({transcript:text}),
     });
   } else {
     const f=fileInput.files[0];
     if(!f){ showToast('Choose a file first'); return; }
+    useLocalRecording(f);          // sources play from this file, in the browser (P1-2)
     const fd=new FormData(); fd.append('file',f);
-    request = fetch('/upload',{method:'POST',body:fd});
+    request = fetch('/upload',{method:'POST',body:fd,
+      headers:{'Idempotency-Key': submissionKey(['file', f.name, f.size, f.lastModified].join(':'))}});
   }
+  setProgressHint();
   progressWrap.style.display='block'; setProgress(5);
   uploadBtn.disabled = true;
   try{
     const resp=await request;
+    pendingSubmit = null;           // the server answered: the next submission is a new one
     if(!resp.ok){
       const t = await resp.text();
       let msg = t;
@@ -2085,14 +2530,16 @@ uploadBtn.addEventListener('click',async()=>{
     const data=await resp.json();
     currentJobId=data.job_id;
     try{ localStorage.setItem('kt-last-job', currentJobId); }catch(e){}
-    if(data.status==='processing'){
+    if(data.duplicate){ showToast('Already submitted: showing that KT'); }
+    if(data.status==='processing' || data.status==='queued'){
       transcriptEl.textContent='Processing…';
       coverageEl.innerHTML='<p class="empty-state" style="padding:6px">Processing — please wait…</p>';
       aiSummaryEl.innerHTML='<p class="empty-state">Waiting for analysis results…</p>';
-      sessionJob.textContent=currentJobId.slice(0,14)+'…';
-      pollJobStatus(currentJobId);
-      loadHistory();
     }
+    // A duplicate may already be finished; polling shows it in any state.
+    sessionJob.textContent=currentJobId.slice(0,14)+'…';
+    pollJobStatus(currentJobId);
+    loadHistory();
   }catch(err){ showToast('Error: '+err); setProgress(0); progressWrap.style.display='none'; }
   finally{
     // Re-enabled once the job is accepted; polling reports the rest. This
@@ -2120,6 +2567,7 @@ uploadBtn.addEventListener('click',async()=>{
 const HISTORY_STATUS = {
   completed: ['Completed', 'st-ok'],
   completed_with_warnings: ['Needs review', 'st-warn'],
+  queued: ['Queued', 'st-run'],
   processing: ['Processing', 'st-run'],
   failed: ['Failed', 'st-fail'],
 };
@@ -2153,7 +2601,7 @@ async function loadHistory(){
   }
   jobs.forEach(job => {
     const [label, cls] = HISTORY_STATUS[job.status] || [job.status || 'Unknown', 'st-run'];
-    const title = job.title || (job.status === 'processing' ? 'New KT' : 'Untitled KT');
+    const title = job.title || ((job.status === 'processing' || job.status === 'queued') ? 'New KT' : 'Untitled KT');
     const done = job.status === 'completed' || job.status === 'completed_with_warnings';
     const li = document.createElement('li');
     li.className = 'history-item' + (job.job_id === currentJobId ? ' active' : '');
@@ -2388,104 +2836,7 @@ document.getElementById('applyJob').addEventListener('click',async()=>{
   showToast('Form populated ✓');
 });
 
-/* ── Export schema ─────────────────────────────────────────── */
-function collectFormData(){
-  if(!SCHEMA){ return null; }
-  const out={template_name:'PROJECT KT & HANDOVER DOCUMENT',sections:[]};
-  for(const sec of SCHEMA){
-    const entry={id:sec.id,title:sec.title,fields:{}};
-    document.querySelectorAll(`[data-section="${sec.id}"]`).forEach(el=>{
-      const fid=el.dataset.field; if(!fid) return;
-      if(el.tagName==='INPUT'&&el.type==='text') entry.fields[fid]=el.value;
-      else if(el.tagName==='INPUT'&&el.type==='checkbox') entry.fields[fid]=el.checked;
-      else if(el.tagName==='SELECT'&&el.multiple) entry.fields[fid]=Array.from(el.selectedOptions).map(o=>o.value);
-      else if(el.tagName==='SELECT') entry.fields[fid]=el.value;
-      else if(el.tagName==='TBODY'){
-        const rows=[];
-        for(const tr of Array.from(el.children)){ const cols=Array.from(tr.children).map(td=>{ const inp=td.querySelector('input'); if(!inp) return ''; return inp.type==='checkbox'?inp.checked:inp.value; }); rows.push(cols); }
-        entry.fields[fid]=rows;
-      }
-    });
-    out.sections.push(entry);
-  }
-  return out;
-}
-
-function downloadBlob(filename, content, mime){
-  const blob=new Blob([content],{type:mime});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
-}
-
-function createMarkdownExport(data){
-  return data.sections.map(sec=>{
-    const lines=[`## ${sec.title || sec.id}`];
-    Object.entries(sec.fields||{}).forEach(([key,val])=>{
-      const rendered=Array.isArray(val)?val.map(row=>`  - ${row.join(' | ')}`).join('\n'):(typeof val==='boolean'?String(val):String(val));
-      lines.push(`- **${key}**: ${rendered}`);
-    });
-    return lines.join('\n');
-  }).join('\n\n');
-}
-
-function createHtmlExport(data){
-  const sections=data.sections.map(sec=>{
-    const rows=Object.entries(sec.fields||{}).map(([key,val])=>{
-      const rendered=Array.isArray(val)?val.map(row=>`<li>${row.join(' | ')}</li>`).join(''):(typeof val==='boolean'?String(val):String(val));
-      return `<tr><th>${key}</th><td>${rendered}</td></tr>`;
-    }).join('');
-    return `<section><h2>${sec.title || sec.id}</h2><table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table></section>`;
-  }).join('');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${data.template_name}</title><style>body{font-family:Inter,Arial,sans-serif;padding:24px;color:#111}table{width:100%;border-collapse:collapse;margin-bottom:16px}th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}th{background:#f5f5f5;width:180px}</style></head><body><h1>${data.template_name}</h1>${sections}</body></html>`;
-}
-
-function exportSchema(format){
-  const data=collectFormData();
-  if(!data){ showToast('Schema not loaded'); return; }
-  const stamp=new Date().toISOString().slice(0,10);
-  if(format==='json'){
-    downloadBlob(`kt_schema_${stamp}.json`, JSON.stringify(data,null,2), 'application/json');
-    showToast('Downloaded JSON');
-    return;
-  }
-  if(format==='html'){
-    downloadBlob(`kt_schema_${stamp}.html`, createHtmlExport(data), 'text/html;charset=utf-8');
-    showToast('Downloaded HTML');
-    return;
-  }
-  if(format==='markdown'){
-    downloadBlob(`kt_schema_${stamp}.md`, createMarkdownExport(data), 'text/markdown;charset=utf-8');
-    showToast('Downloaded Markdown');
-    return;
-  }
-  if(format==='pdf'){
-    const html=createHtmlExport(data);
-    const win=window.open('', '_blank', 'width=900,height=1100');
-    if(!win){ showToast('Popup blocked — allow popups to print PDF'); return; }
-    win.document.write(html);
-    win.document.close();
-    setTimeout(()=>{ win.focus(); win.print(); showToast('Print dialog opened for PDF'); }, 400);
-  }
-}
-
-function createRenderedDocumentPrintHtml(){
-  const content = document.getElementById('renderedDocument')?.innerHTML || '<p>No rendered document available.</p>';
-  const title = 'PROJECT KT & HANDOVER DOCUMENT';
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Inter,Arial,sans-serif;padding:24px;color:#111}h1{font-size:24px;margin-bottom:16px}h2{font-size:18px;margin:20px 0 10px}h3{font-size:16px;margin:16px 0 8px}p,li{font-size:13px;line-height:1.5}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left;vertical-align:top}ul,ol{margin:10px 0 10px 18px}</style></head><body><h1>${title}</h1>${content}</body></html>`;
-}
-
-function openRenderedDocumentPrintPreview(){
-  const html = createRenderedDocumentPrintHtml();
-  const win = window.open('', '_blank', 'width=900,height=1100');
-  if(!win){ showToast('Popup blocked — allow popups to print PDF'); return false; }
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(()=>{ win.print(); }, 400);
-  return true;
-}
-
-async function downloadKtPdf(jobId = currentJobId, title = ''){
+async function downloadKtPdf(jobId = currentJobId, title = '', version = null){
   if(!jobId){ showToast('No active job to export'); return; }
 
   try{
@@ -2500,7 +2851,7 @@ async function downloadKtPdf(jobId = currentJobId, title = ''){
       return;
     }
 
-    const resp = await fetch(`/export/pdf/${jobId}`);
+    const resp = await fetch(`/export/pdf/${jobId}` + (version ? `?version=${Number(version)}` : ''));
     if(!resp.ok){
       const contentType = resp.headers.get('content-type') || '';
       let details = '';
@@ -2515,17 +2866,9 @@ async function downloadKtPdf(jobId = currentJobId, title = ''){
         details = await resp.text().catch(()=>'<unable to read error body>');
       }
       console.error('KT PDF download failed', resp.status, details);
-      const msg = details || `HTTP ${resp.status}`;
-      const shouldFallback = resp.status === 503 || msg.toLowerCase().includes('weasyprint') || msg.toLowerCase().includes('404');
-      // The print-preview fallback shows the KT open on screen, so only for that one.
-      if(shouldFallback && jobId === currentJobId){
-        const fallback = openRenderedDocumentPrintPreview();
-        if(fallback){
-          showToast('Fallback: opened rendered KT document for print/PDF');
-        }
-      } else {
-        showToast(`KT PDF export failed: ${msg}`);
-      }
+      // No browser-side fallback: a print of the page would differ from
+      // the document (P1-1). The server's PDF is the only export.
+      showToast(`KT PDF export failed: ${details || `HTTP ${resp.status}`}`, 8000, 'error');
       return;
     }
 
@@ -2535,21 +2878,15 @@ async function downloadKtPdf(jobId = currentJobId, title = ''){
     const a = document.createElement('a');
     a.href = url;
     const slug = (title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    a.download = slug ? `kt_${slug}.pdf` : `kt_${stamp}.pdf`;
+    a.download = (slug ? `kt_${slug}` : `kt_${stamp}`) + (version ? `_v${Number(version)}` : '') + '.pdf';
     a.click();
     URL.revokeObjectURL(url);
     showToast('Downloaded KT PDF');
   }catch(err){
     console.error('KT PDF download failed', err);
     showToast('KT PDF download failed: ' + (err.message || err));
-    openRenderedDocumentPrintPreview();
   }
 }
-
-document.getElementById('downloadJson').addEventListener('click',()=>{
-  const format=document.getElementById('exportFormat').value;
-  exportSchema(format);
-});
 
 document.getElementById('downloadPdfBtn').addEventListener('click',()=>downloadKtPdf());
 

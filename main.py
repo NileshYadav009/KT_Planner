@@ -9,7 +9,13 @@ logger = logging.getLogger(__name__)
 
 from api import router
 import media_guard
+import observability
 import pipeline
+import worker
+
+# Structured logs and error tracking (P1-6; see observability.py).
+observability.configure_logging()
+observability.init_error_tracking()
 
 app = FastAPI()
 
@@ -19,9 +25,27 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in ALLOWED_ORIGINS],
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Continuum-CSRF"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Continuum-CSRF", "Idempotency-Key"],
 )
 
+
+
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    """Every log line written while serving a request carries its id, which
+    is returned as X-Request-ID (or taken from the proxy's, if it sent one)."""
+    import re
+    import uuid
+
+    supplied = request.headers.get("X-Request-ID", "")
+    rid = supplied if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", supplied) else uuid.uuid4().hex[:16]
+    token = observability.REQUEST_ID.set(rid)
+    try:
+        response = await call_next(request)
+    finally:
+        observability.REQUEST_ID.reset(token)
+    response.headers["X-Request-ID"] = rid
+    return response
 
 
 @app.middleware("http")
@@ -53,4 +77,18 @@ def load_models():
     expired = pipeline.apply_retention()
     if expired:
         logger.info("Retention: deleted %d job(s) older than CONTINUUM_RETENTION_DAYS", expired)
-    pipeline.load_models()
+    # KTs run on workers (worker.py). With CONTINUUM_WORKERS=0 they run in
+    # separate worker processes and this process needs no models at all.
+    threads = worker.configured_threads()
+    if threads:
+        pipeline.load_models()
+        app.state.worker = worker.Worker(threads).start()
+
+
+@app.on_event("shutdown")
+def stop_worker():
+    """Stop claiming new KTs. A KT still running is picked up again by the
+    next worker once its lease runs out (job_queue.py)."""
+    running = getattr(app.state, "worker", None)
+    if running is not None:
+        running.stop(timeout=5)

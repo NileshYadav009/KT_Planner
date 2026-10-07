@@ -165,6 +165,46 @@ def _render_image_block(block: dict) -> str:
     return "".join(parts)
 
 
+def _refs(block: dict, position: int) -> str:
+    """Superscript links to the Sources list for one unit of a block (P1-2)."""
+    refs = block.get("sources") or []
+    ids = refs[position] if position < len(refs) and isinstance(refs[position], list) else []
+    if not ids:
+        return ""
+    links = ",".join(f"<a href=\"#src-{int(i)}\">{int(i)}</a>" for i in ids)
+    return f"<sup class=\"src-ref\">{links}</sup>"
+
+
+def _with_refs(paragraph_html: str, refs: str) -> str:
+    """Put the reference inside the paragraph's last <p>, after its text."""
+    if not refs:
+        return paragraph_html
+    cut = paragraph_html.rfind("</p>")
+    return paragraph_html[:cut] + refs + paragraph_html[cut:] if cut >= 0 else paragraph_html + refs
+
+
+def render_sources_appendix(sources: list) -> str:
+    """The numbered transcript sentences the document's facts point to."""
+    from knowledge.evidence import format_time
+
+    if not sources:
+        return ""
+    timed = any(s.get("start") is not None for s in sources)
+    items = []
+    for src in sources:
+        n = int(src["id"])
+        when = format_time(src.get("start"))
+        items.append(f"<li id=\"src-{n}\"><span class=\"src-n\">{n}</span>"
+                     + (f"<span class=\"src-t\">{when}</span>" if when else "")
+                     + f"<span class=\"src-q\">\u201c{html_escape(src.get('quote', ''))}\u201d</span></li>")
+    intro = ("Each fact in this document is followed by the number of the transcript sentence it comes from"
+             + (", with the time it was said in the recording. " if timed else ". ")
+             + "Values marked inferred were not stated in the session and have no source.")
+    return ("<section class=\"section-block sources-section\" id=\"sources\">"
+            "<h2 class=\"section-title\"><span class=\"section-number\">&#167;</span>Sources</h2>"
+            f"<p class=\"sources-intro\">{intro}</p><ol class=\"sources-list\">{''.join(items)}</ol></section>")
+
+
 def render_section_blocks(rendered_sections: list) -> str:
     html = []
     for idx, section in enumerate(rendered_sections, start=1):
@@ -188,37 +228,38 @@ def render_section_blocks(rendered_sections: list) -> str:
             if raw_block_title.strip().lower() != raw_section_title.strip().lower():
                 html.append(f"<h3 class=\"block-title\">{html_escape(raw_block_title)}</h3>")
             if block_type == "NarrativeBlock":
-                for p in block.get("paragraphs", []):
-                    html.append(f"<div class=\"narrative-para\">{_render_paragraph_text(p)}</div>")
+                for i, p in enumerate(block.get("paragraphs", [])):
+                    html.append(f"<div class=\"narrative-para\">{_with_refs(_render_paragraph_text(p), _refs(block, i))}</div>")
             elif block_type == "ChecklistBlock":
                 html.append("<ul>")
-                for item in block.get("items", []):
-                    html.append(f"<li>{_render_inline_text(item)}</li>")
+                for i, item in enumerate(block.get("items", [])):
+                    html.append(f"<li>{_render_inline_text(item)}{_refs(block, i)}</li>")
                 html.append("</ul>")
             elif block_type == "WarningBlock":
-                for warning in block.get("warnings", []):
-                    html.append(f"<p><strong>{_render_inline_text(warning)}</strong></p>")
+                for i, warning in enumerate(block.get("warnings", [])):
+                    html.append(f"<p><strong>{_render_inline_text(warning)}</strong>{_refs(block, i)}</p>")
             elif block_type == "TechnologyGrid":
                 html.append("<div class=\"table-wrapper\"><table class=\"kv-table\">")
-                for row in block.get("rows", []):
+                for i, row in enumerate(block.get("rows", [])):
                     html.append(
                         f"<tr><td>{_render_inline_text(row.get('label',''))}</td>"
-                        f"<td>{_render_inline_text(row.get('value',''))}</td></tr>"
+                        f"<td>{_render_inline_text(row.get('value',''))}{_refs(block, i)}</td></tr>"
                     )
                 html.append("</table></div>")
             elif block_type == "DeploymentTimeline":
                 html.append("<ol>")
-                for entry in block.get("entries", []):
+                for i, entry in enumerate(block.get("entries", [])):
                     html.append(
-                        f"<li><strong>{_render_inline_text(entry.get('label',''))}</strong>: {_render_inline_text(entry.get('description',''))}</li>"
+                        f"<li><strong>{_render_inline_text(entry.get('label',''))}</strong>: "
+                        f"{_render_inline_text(entry.get('description',''))}{_refs(block, i)}</li>"
                     )
                 html.append("</ol>")
             elif block_type == "OwnershipTable":
                 html.append("<div class=\"table-wrapper\"><table class=\"kv-table\">")
-                for row in block.get("rows", []):
+                for i, row in enumerate(block.get("rows", [])):
                     html.append(
                         f"<tr><td>{_render_inline_text(row.get('role',''))}</td>"
-                        f"<td>{_render_inline_text(row.get('team',''))}</td></tr>"
+                        f"<td>{_render_inline_text(row.get('team',''))}{_refs(block, i)}</td></tr>"
                     )
                 html.append("</table></div>")
             elif block_type == "DecisionTable":
@@ -228,20 +269,21 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for col in columns:
                     html.append(f"<th>{html_escape(col)}</th>")
                 html.append("</tr></thead><tbody>")
-                for row in block.get("rows", []):
+                for i, row in enumerate(block.get("rows", [])):
                     html.append("<tr>")
-                    for col in columns:
+                    for c, col in enumerate(columns):
+                        refs = _refs(block, i) if c == len(columns) - 1 else ""
                         cell_value = row.get(col, "")
                         if isinstance(cell_value, str) and cell_value.strip():
-                            html.append(f"<td>{_render_inline_text(cell_value)}</td>")
+                            html.append(f"<td>{_render_inline_text(cell_value)}{refs}</td>")
                         else:
-                            html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}</td>")
+                            html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}{refs}</td>")
                     html.append("</tr>")
                 html.append("</tbody></table></div>")
             elif block_type == "TroubleshootingBlock":
                 html.append("<ol>")
-                for step in block.get("steps", []):
-                    html.append(f"<li>{_render_inline_text(step)}</li>")
+                for i, step in enumerate(block.get("steps", [])):
+                    html.append(f"<li>{_render_inline_text(step)}{_refs(block, i)}</li>")
                 html.append("</ol>")
             elif block_type == "CodeBlock":
                 html.append(
@@ -267,14 +309,18 @@ def load_template_environment():
 
 
 def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
-                    warnings: list = None, notices: list = None) -> str:
+                    warnings: list = None, notices: list = None, sources: list = None) -> str:
     """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
     degraded document never looks like a complete one; `notices` are
-    informational (e.g. built without an LLM)."""
+    informational (e.g. built without an LLM). `sources` are the transcript
+    sentences the facts point to (knowledge/evidence.py), listed at the end."""
     env = load_template_environment()
     template = env.get_template("kt_document.html")
     toc_sections = build_toc_sections(rendered_sections)
     content_html = render_section_blocks(rendered_sections)
+    if sources:
+        content_html += "\n" + render_sources_appendix(sources)
+        toc_sections.append({"title": "Sources", "anchor": "sources"})
     css_path = os.path.join(os.path.dirname(__file__), "pdf", "templates", "kt_document.css")
     style_css = ""
     if os.path.exists(css_path):
@@ -568,3 +614,48 @@ def build_rendered_sections(knowledge_object: dict) -> list:
             }],
         })
     return rendered_sections
+
+
+def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
+    """The KT document for a finished job as PDF bytes. `created` is when
+    the KT was submitted (its date on the cover). Synchronous: call it from a
+    worker or a thread pool, never on the event loop."""
+    from datetime import datetime
+
+    knowledge_object = job.get("knowledge_object", {}) or {}
+    title = knowledge_object.get("system_name") or job.get("title") or "KT Document"
+    # The date the KT was created, not the date this copy was downloaded:
+    # an older KT reopened from the Past KTs list keeps its own date.
+    date_str = (datetime.fromtimestamp(created) if created else datetime.now()).strftime("%d %B %Y")
+    rendered_sections = knowledge_object.get("rendered_sections")
+
+    if not isinstance(rendered_sections, list) or not rendered_sections:
+        coverage = job.get("coverage", {}) or {}
+        rendered_sections = []
+        for sec_id, sec_info in coverage.items():
+            rendered_sections.append({
+                "section_id": sec_id,
+                "section_title": sec_info.get("title", sec_id),
+                "blocks": [{
+                    "type": "NarrativeBlock",
+                    "title": sec_info.get("title", sec_id),
+                    # Plain text: the renderer escapes and formats it.
+                    "paragraphs": [item for item in sec_info.get("content", []) if isinstance(item, str)],
+                }]
+            })
+
+    # The Sign-off section is the recorded sign-off once one has started (P1-3).
+    import signoff
+    rendered_sections = signoff.apply_to_document(rendered_sections, job, int(job.get("document_version") or 1))
+
+    html_doc = render_pdf_html(
+        title=title,
+        job_id=job_id,
+        rendered_sections=rendered_sections,
+        coverage=job.get("coverage", {}),
+        date_str=date_str,
+        warnings=job.get("warnings"),
+        notices=job.get("notices"),
+        sources=knowledge_object.get("sources"),
+    )
+    return html_to_pdf_bytes(html_doc)

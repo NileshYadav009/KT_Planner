@@ -295,6 +295,37 @@ PHRASE_CORRECTIONS = {
     # as "trevi" -> "Trivy" below.
     r"graphana\b": "Grafana",
     r"pager[\s-]?duty": "PagerDuty",
+    # Product names said in lowercase show in the document as written
+    # ("cloud storage", "Cloud monitoring", "Artifact registry"). Casing
+    # only; the words are unchanged.
+    r"\bcloud\s+storage\b": "Cloud Storage",
+    r"\bcloud\s+monitoring\b": "Cloud Monitoring",
+    r"\bcloud\s+logging\b": "Cloud Logging",
+    r"\bcloud\s+run\b": "Cloud Run",
+    r"\bcloud\s+build\b": "Cloud Build",
+    r"\bcloud\s+sql\b": "Cloud SQL",
+    r"\bcloud\s+functions\b": "Cloud Functions",
+    r"\bartifact\s+registry\b": "Artifact Registry",
+    r"\bsecret\s+manager\b": "Secret Manager",
+    r"\bsecrets\s+manager\b": "Secrets Manager",
+    # One word only: "a big query" is ordinary English. The two-word form is
+    # joined in clean_transcript on a Google Cloud KT only.
+    r"\bbigquery\b": "BigQuery",
+    r"\bvertex\s+ai\b": "Vertex AI",
+    r"\bkey\s+vault\b": "Key Vault",
+    r"\bservice\s+bus\b": "Service Bus",
+    r"\bcosmos\s*db\b": "Cosmos DB",
+    r"\bapplication\s+insights\b": "Application Insights",
+    r"\bcloud\s*watch\b": "CloudWatch",
+    r"\bcloud\s*front\b": "CloudFront",
+    r"\bdynamo\s*db\b": "DynamoDB",
+    r"\bpostgre\s*sql\b": "PostgreSQL",
+    r"\bmongo\s*db\b": "MongoDB",
+    r"\brabbit\s*mq\b": "RabbitMQ",
+    # "open search results" is ordinary English: two words are the product
+    # only after Amazon/AWS or before what an OpenSearch deployment has.
+    (r"\bopensearch\b|(?<=\bamazon\s)open\s+search\b|(?<=\baws\s)open\s+search\b"
+     r"|\bopen\s+search(?=\s+(?:service|serverless|clusters?|domains?|dashboards?|index|indices|nodes?)\b)"): "OpenSearch",
     # "certificate XBerry"/"certificate x berry" is Whisper mishearing
     # "certificate expiry" — confirmed in two live Azure Banking KTs, where
     # a Common Failures row rendered as the literal nonsense phrase
@@ -566,9 +597,28 @@ def clean_transcript(text: str) -> str:
     normalized = remove_repeated_phrases(normalized)
     normalized, _ = apply_devops_corrections(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
+    # On a Google Cloud KT, "data flow" is the Dataflow service; elsewhere it
+    # is an ordinary phrase ("the data flow diagram") and stays as said.
+    if _GCP_CONTEXT_RE.search(normalized):
+        normalized = re.sub(r"\bdata\s+flow\b(?!\s+diagram)", "Dataflow", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bbig\s+query\b", "BigQuery", normalized, flags=re.IGNORECASE)
+    # Capitalised connectives in the middle of a sentence ("And Airflow
+    # handles...", "Can affect", "Before proceeding") are dictation
+    # artifacts; they were copied into the document as said.
+    normalized = _MIDSENTENCE_CAPITAL_RE.sub(lambda m: m.group(1) + m.group(2).lower(), normalized)
     normalized = re.sub(r"(\.\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), normalized)
     normalized = re.sub(r"^([a-z])", lambda m: m.group(1).upper(), normalized)
     return normalized
+
+
+_GCP_CONTEXT_RE = re.compile(r"\b(?:GCP|Google\s+Cloud|BigQuery|Pub/Sub|Vertex\s+AI|GKE|Cloud\s+Run)\b", re.IGNORECASE)
+# A connective or auxiliary capitalised after a lowercase word or a comma,
+# followed by a lowercase word or a name: "..., And Airflow", "data schema
+# Can affect", "owner Before proceeding". Words that also start names
+# (May, Will, Bill...) are not listed.
+_MIDSENTENCE_CAPITAL_RE = re.compile(
+    r"((?:[a-z0-9,;]|[a-z]\))\s+)(And|Or|But|Can|Could|Should|Would|Before|After|Then|When|While|Because|Also|"
+    r"Which|That|With|Without|For|From|Into|Of|On|In|To|The|Is|Are|Was|Were|Query|Queries)(?=\s+\w)")
 
 # ============================================================================
 # Context-Based Corrections

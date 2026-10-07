@@ -291,6 +291,40 @@ _NAME_LEADING_FILLER_WORDS = {
 }
 
 
+_SMALL_TITLE_WORDS = frozenset({"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"})
+_KNOWN_ACRONYMS = frozenset({"ai", "api", "aws", "b2b", "b2c", "cd", "ci", "crm", "erp", "etl", "gcp", "hr", "iot", "it",
+                             "kt", "ml", "sql", "sre", "ui", "ux"})
+
+
+def smart_title(name: str, source_text: str = "") -> str:
+    """Title case for a system name that keeps how the speaker wrote each
+    word: acronyms stay upper case ("GCP Data and Machine Learning", not
+    "Gcp Data And Machine Learning"), a word with its own casing ("MedRelay")
+    is kept, and small words stay lower case after the first word."""
+    spoken = {w.lower(): w for w in re.findall(r"[A-Za-z0-9][\w-]*", source_text or "")
+              if len(w) >= 2 and (w.isupper() or any(c.isupper() for c in w[1:]))}
+    out = []
+    for i, word in enumerate(name.split()):
+        low = word.lower()
+        if low in spoken:
+            out.append(spoken[low])
+        elif any(c.isupper() for c in word[1:]):
+            out.append(word)
+        elif low in _KNOWN_ACRONYMS:
+            out.append(low.upper() if low != "iot" else "IoT")
+        elif i and low in _SMALL_TITLE_WORDS:
+            out.append(low)
+        else:
+            out.append("-".join(part[:1].upper() + part[1:] for part in word.split("-")))
+    return " ".join(out)
+
+
+# A statement about access or tools, for a list of access to request.
+_ACCESS_LINE_RE = re.compile(
+    r"\b(?:access|permissions?|accounts?|roles?|credentials?|log\s*in|login|vpn|sso|groups?|rotation|console|"
+    r"repos?|repositor(?:y|ies)|admin|licen[cs]es?|tokens?|keys?)\b", re.IGNORECASE)
+
+
 def _trim_name_capture(name: str) -> str:
     words = name.split()
     while words and words[0].lower() in _NAME_LEADING_FILLER_WORDS:
@@ -872,7 +906,7 @@ def _extract_by_pattern(
         if direct_match:
             name = _trim_name_capture(direct_match.group(1).strip())
             if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
-                return name.title()
+                return smart_title(name, section_text)
 
         # "This KT is for MedRelay, the lab results notification service" —
         # a proper name in apposition, so no descriptor word follows it
@@ -913,7 +947,7 @@ def _extract_by_pattern(
             # Reject a capture that's only structural/stop words — a real
             # system name has at least one substantive word.
             if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
-                return name.title()
+                return smart_title(name, section_text)
 
     if "escalation" in field_id or "chain" in field_id:
         # Use robust 3-stage extraction for escalation chains
@@ -989,7 +1023,11 @@ def _extract_by_pattern(
                     if len(items) >= 3:
                         expanded.extend(items)
                         continue
-                expanded.append(line)
+                # A single statement is a row only when it is about access
+                # or tools: "Review the affected workflow and logs before
+                # making changes" was listed under Required access.
+                if _ACCESS_LINE_RE.search(line):
+                    expanded.append(line)
             return "\n".join(expanded[:20])
 
         # The FIRST catch-all table in a section is the section's own list

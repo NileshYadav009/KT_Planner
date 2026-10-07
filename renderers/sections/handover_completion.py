@@ -37,7 +37,9 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
             checklist.append(f"{label}: Not covered during KT")
             continue
         any_check_captured = True
-        checklist.append(f"{label}: {'Confirmed' if value else 'Not confirmed'}")
+        # What was said in the session, not a confirmation: the incoming
+        # owner confirms by acknowledging the document in Sign-off (P1-3).
+        checklist.append(f"{label}: {'stated as done' if value else 'stated as not done'} in the KT session")
 
     paragraphs: List[str] = []
     kt_status = fields.get("kt_status", {}).get("value")
@@ -54,9 +56,15 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
                 "individually addressed in this session."
             )
 
+    if any_check_captured:
+        paragraphs.append(
+            "These are statements made during the KT session, not a confirmation. The incoming owner "
+            "confirms readiness by acknowledging this document in Sign-off."
+        )
+
     blocks = []
     if any_check_captured or kt_status:
-        blocks.append(build_checklist_block("Handover completion checklist", checklist))
+        blocks.append(build_checklist_block("Handover readiness as stated in the session", checklist))
     if paragraphs:
         blocks.append(build_narrative_block(title, paragraphs))
 

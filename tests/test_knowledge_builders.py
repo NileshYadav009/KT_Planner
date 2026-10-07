@@ -898,7 +898,8 @@ def test_build_knowledge_object_system_name_fallback_trims_leading_verb_filler()
         }
     }
     ko = build_knowledge_object("job1", coverage, [], {})
-    assert ko["system_name"] == "Cloud Nat Order Processing"
+    # The acronym keeps the speaker's casing ("Cloud NAT", not "Cloud Nat").
+    assert ko["system_name"] == "Cloud NAT Order Processing"
 
 
 def test_build_knowledge_object_recovers_real_label_and_type_from_schema():
@@ -1237,6 +1238,8 @@ def test_closing_remarks_need_a_session_noun_not_just_the_verb():
 
     assert _is_session_pleasantry("That concludes the handover.")
     assert _is_session_pleasantry("This wraps up the knowledge transfer session.")
+    # Naming what was handed over is a closer too (the GCP KT's last line).
+    assert _is_session_pleasantry("That concludes the GCP data and machine learning platform.")
     # Same verb, applied to a procedure rather than the session.
     assert not _is_session_pleasantry("That concludes the rollback procedure.")
 

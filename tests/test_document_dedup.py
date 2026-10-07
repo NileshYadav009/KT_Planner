@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from knowledge.document_dedup import WHERE_COLUMN, dedupe_rendered_sections, excerpt
+from knowledge.knowledge_builder import MENTIONED_ELSEWHERE_TITLE
 
 
 def _narrative(*paragraphs, title="Notes"):
@@ -141,7 +142,10 @@ def test_excerpt():
 # --------------------------------------------------------------------------
 
 _EXEMPT_BLOCKS = ("WarningBlock", "ImageBlock", "DiagramBlock")
-_PLACEHOLDER = re.compile(r"not covered (?:in|during) the kt|flag it for follow", re.IGNORECASE)
+# Section status lines ("not covered", "mentioned elsewhere") read the same
+# in every section they apply to; they are not facts.
+_PLACEHOLDER = re.compile(r"not covered (?:in|during) the kt|flag it for follow|"
+                          r"not discussed as its own topic|confirm the rest with", re.IGNORECASE)
 
 
 def _repeated_sentences(result):
@@ -150,7 +154,10 @@ def _repeated_sentences(result):
         if sec["section_id"] in ("quick_reference", "kt_coverage"):
             continue
         for block in sec.get("blocks", []):
-            if block.get("type") in _EXEMPT_BLOCKS or block.get("title") == "Connections stated in the KT":
+            # Blocks that quote on purpose: the connections evidence, and the
+            # pointers from a "not covered" section to where its topics came up.
+            if block.get("type") in _EXEMPT_BLOCKS or block.get("title") in ("Connections stated in the KT",
+                                                                              MENTIONED_ELSEWHERE_TITLE):
                 continue
             # What a reader sees: a table's displayed columns only, less the
             # digest's "Where it is" pointer (a section name, not a fact).

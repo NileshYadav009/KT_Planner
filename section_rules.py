@@ -460,6 +460,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bthe\s+fix\s+(?:is|was)\b",
             # The instruction that follows a symptom: "Renew it in Key Vault and restart the worker."
             r"^(?:then\s+)?(?:renew|restart)\s+(?:it|the|them)\b",
+            # A triage step: "For Kubernetes issues, check GKE and ArgoCD." It
+            # filled Deployment's pre-deployment checks.
+            r"^(?:\W*(?:and|so|also)\s+)?for\s+(?:[\w/-]+\s+){0,3}(?:issues?|problems?|failures?|incidents?|errors?|"
+            r"outages?),?\s+(?:first\s+)?(?:check|look\s+at|start\s+with|verify|inspect)\b",
         ],
         0.955,
     ),
@@ -498,6 +502,19 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"^(?!\s*(?:we|you|they|i)\b)(?:\W*[\w-]+\s+){1,6}?(?:use|uses|rely\s+on|relies\s+on)\s+it\s+(?:to|for)\b",
         ],
         0.95,
+    ),
+    (
+        # How much the system handles: "This platform processes approximately
+        # 3TB of data per day" went to Disaster Recovery ("per day" reads like
+        # a backup schedule).
+        "system_overview",
+        [
+            r"\b(?:processes|handles|serves|receives|ingests|settles|sends|takes|supports)\b[^.;]{0,40}?"
+            r"\b(?:\d[\d.,]*\s*(?:k|m|tb|gb|pb|million|thousand|billion)?|one|two|three|four|five|six|seven|eight|"
+            r"nine|ten|twenty|thirty|forty|fifty|hundred|thousand|million|billion)\b[^.;]{0,40}?"
+            r"\b(?:per|a|an|each|every)\s+(?:second|minute|hour|day|week|month|year)\b",
+        ],
+        0.955,
     ),
     (
         "disaster_recovery",
@@ -635,6 +652,16 @@ _GREETING_WORD = (
 _CLOSING_ONLY = (
     r"(?:that'?s|that\s+is)\s+(?:all|it|everything)(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|"
     r"from\s+(?:me|my\s+side)))?(?:\s+today)?"
+    # "That concludes the GCP data platform." ends the session; it is not a
+    # statement that the handover is complete (the LLM inferred "Complete"
+    # from it). Only when what concludes is the session or the thing handed
+    # over: "That concludes the rollback procedure." is a fact. One that
+    # states readiness is kept.
+    r"|(?:so\s+)?(?:that|this)\s+(?:concludes|wraps\s+up|ends)\s+"
+    r"(?![^.?!]*\b(?:complete|ready|signed|sign-?off|accept\w*|confirm\w*|checklist|criteria)\b)"
+    r"(?:(?:the|our|my|this|today'?s)\s+)?(?:[\w/&'\-]+\s+){0,8}?"
+    r"(?:session|kt|handover|hand-?off|walk-?through|overview|knowledge\s+transfer|presentation|call|meeting|demo|"
+    r"platform|system|application|service|stack)(?:\s+(?:for\s+)?today)?"
 )
 _GREETING_ONLY_RE = re.compile(
     r"^\W*(?:" + _GREETING_WORD + r"(?:[\s,!.]+" + _GREETING_WORD + r")*|" + _CLOSING_ONLY + r")\W*$",

@@ -73,7 +73,12 @@ async def save_upload(upload) -> str:
     """Stream a FastAPI UploadFile to a temporary file, refusing it once it
     passes the size limit. Returns the path; the caller deletes it."""
     limit = max_upload_bytes()
-    fd, path = tempfile.mkstemp(suffix=".upload")
+    # CONTINUUM_UPLOAD_DIR must be shared with the worker processes when
+    # they run separately (docker-compose.yml puts it on the data volume).
+    upload_dir = os.getenv("CONTINUUM_UPLOAD_DIR") or None
+    if upload_dir:
+        os.makedirs(upload_dir, exist_ok=True)
+    fd, path = tempfile.mkstemp(suffix=".upload", dir=upload_dir)
     written = 0
     try:
         with os.fdopen(fd, "wb") as out:

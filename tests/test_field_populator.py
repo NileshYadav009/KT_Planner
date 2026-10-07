@@ -395,7 +395,8 @@ def test_system_name_extracts_compound_handover_for_phrasing():
     # words between the trigger and the real name — a single optional
     # "the" wasn't enough, so this used to match nothing at all.
     text = "Good morning, this is the handover for the CorePay payments processing platform."
-    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Corepay Payments Processing"
+    # The speaker's own casing of the name is kept ("CorePay", not "Corepay").
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "CorePay Payments Processing"
 
 
 def test_system_name_does_not_false_positive_on_unrelated_for_the_x_sentence():
@@ -469,7 +470,10 @@ def test_required_access_table_does_not_split_a_real_non_enumerated_sentence():
     # list must survive intact, not get mangled by the enumeration splitter.
     text = "If you are unsure about an ongoing production activity, contact platform engineering before proceeding."
     value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
-    assert value.split("\n") == [text]
+    # Not shredded, and not listed as access at all: it is not about access.
+    assert value == ""
+    access = "You need the admin role in the payments account, granted by the platform team."
+    assert _extract_by_pattern(REQUIRED_ACCESS_FIELD, access).split("\n") == [access]
 
 
 def test_required_access_table_without_declared_rows_keeps_old_behavior():
@@ -521,11 +525,9 @@ def test_required_access_table_does_not_shred_a_non_enumerated_troubleshooting_s
     # "check GKE", "ArgoCD". Must now stay as a single, unsplit item.
     text = "For Kubernetes issues, check GKE and ArgoCD."
     value = _extract_by_pattern(REQUIRED_ACCESS_FIELD, text)
-    lines = value.split("\n")
-    # Preserved verbatim (including the trailing period), same as the
-    # no-split precedent above -- the fix's job is only to stop it being
-    # shredded into bogus fragments, not to reformat it.
-    assert lines == [text]
+    # Neither shredded into fragments nor listed whole: a troubleshooting tip
+    # is not an access requirement (it stays in its own section).
+    assert value == ""
 
 
 def test_extract_rto_rpo_captures_an_explicit_sentence_with_no_llm_involved():

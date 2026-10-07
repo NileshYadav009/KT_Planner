@@ -83,3 +83,19 @@ def test_feedback_corrections_are_persisted():
     stored = pipeline.JOB_STORE.get("fb-0001")
     assert stored["human_feedback"][0]["corrected_classification"] == "danger_zones"
     pipeline.JOB_STORE.delete("fb-0001")
+
+
+def test_a_database_with_the_first_stored_pdf_table_still_exports(tmp_path):
+    """The stored-PDF table first had a rendered_at column; a database from
+    then made every download fail with "no such column: job_version"."""
+    import sqlite3
+
+    path = str(tmp_path / "old.sqlite")
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE documents (job_id TEXT PRIMARY KEY, pdf BLOB NOT NULL, rendered_at REAL NOT NULL)")
+        db.execute("INSERT INTO documents VALUES ('old-0001', x'25504446', 1.0)")
+    store = JobStore(path)
+    version = store.put("old-0001", {"status": "completed"})
+    assert store.current_document("old-0001") is None             # the old cache is gone, not misread
+    store.save_document("old-0001", b"%PDF new", version)
+    assert store.current_document("old-0001") == b"%PDF new"

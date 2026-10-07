@@ -26,9 +26,10 @@ body {
   background: var(--color-background);
 }
 
+/* The cover and contents each take a page. The body does not force one
+   after it, or the footer note would land alone on a blank last page. */
 .cover-page,
-.toc-page,
-.document-body {
+.toc-page {
   page-break-after: always;
 }
 
@@ -316,4 +317,44 @@ code {
   margin-top: 0.8rem;
   font-size: 9pt;
   color: #6b7280;
+}
+
+/* Evidence per fact (P1-2): a superscript source number after each fact,
+   linking to the numbered transcript sentence in the Sources list. */
+.src-ref {
+  font-size: 6.5pt;
+  line-height: 0;
+  margin-left: 1.5pt;
+  color: #6b7280;
+}
+.src-ref a {
+  color: #6b7280;
+  text-decoration: none;
+}
+.sources-intro {
+  font-size: 9pt;
+  color: #4b5563;
+}
+.sources-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 8.5pt;
+}
+.sources-list li {
+  padding: 2.5pt 0;
+  border-bottom: 0.5pt solid #e5e7eb;
+  break-inside: avoid;
+}
+.sources-list .src-n {
+  display: inline-block;
+  min-width: 22pt;
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+.sources-list .src-t {
+  display: inline-block;
+  min-width: 34pt;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
 }

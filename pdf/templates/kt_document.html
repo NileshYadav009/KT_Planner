@@ -40,9 +40,7 @@
   <div class="document-body">
     {{ content_html | safe }}
   </div>
-
-  <footer class="document-footer">
-    Continuum KT Planner · Generated on {{ date_str }} · Job {{ job_id[:8].upper() }}
-  </footer>
+  {# The date and job id are on the cover. A closing note here landed alone
+     on a blank last page whenever the content filled the page before it. #}
 </body>
 </html>

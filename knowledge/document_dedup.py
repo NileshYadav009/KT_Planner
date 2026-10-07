@@ -26,13 +26,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 EXEMPT_SECTIONS = frozenset({"quick_reference", "kt_coverage"})
 DIGEST_SECTIONS = frozenset({"tribal_knowledge"})
 _QUOTING_BLOCK_TYPES = frozenset({"ImageBlock", "DiagramBlock", "CodeBlock"})
-_QUOTING_BLOCK_TITLES = frozenset({"Connections stated in the KT"})
+_QUOTING_BLOCK_TITLES = frozenset({"Connections stated in the KT", "Mentioned elsewhere in the KT"})
 # Conflict warnings quote two statements from their section; Danger Zones'
 # own warning block is that section's content, not a quote.
 _QUOTING_WARNING_PREFIX = "Possible conflict"
 WHERE_COLUMN = "Where it is"
 
 _MIN_WORDS = 5
+_MIN_EXACT_WORDS = 3
 _NEAR_RATIO = 0.9
 _SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=\S)|\n+")
 _WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
@@ -53,11 +54,18 @@ def _split(text: str) -> List[str]:
 
 
 class _Facts:
-    """Sentences already shown, and where."""
+    """Sentences already shown, and where.
+
+    Three ways a sentence is already shown: the same words anywhere (any
+    length from _MIN_EXACT_WORDS: "Terraform manages infrastructure." twice
+    in one block); nearly the same words both ways anywhere; or, within the
+    same section, every content word already in one earlier sentence ("The
+    danger zones are X, Y and Z" after "Danger zones include X, Y and Z
+    outside ArgoCD"), which is a restatement, not a new fact."""
 
     def __init__(self):
         self._exact: Dict[str, str] = {}
-        self._entries: List[Tuple[Set[str], frozenset, frozenset, str]] = []
+        self._entries: List[Tuple[Set[str], frozenset, frozenset, str, Optional[str]]] = []
 
     @staticmethod
     def _profile(sentence: str):
@@ -67,27 +75,47 @@ class _Facts:
         content = {w for w in words if w not in _STOP}
         return words, numbers, negations, content
 
-    def home_of(self, sentence: str) -> Optional[str]:
+    def home_of(self, sentence: str, section: Optional[str] = None) -> Optional[str]:
         words, numbers, negations, content = self._profile(sentence)
-        if len(words) < _MIN_WORDS or _BOILERPLATE_RE.search(sentence):
+        if len(words) < _MIN_EXACT_WORDS or _BOILERPLATE_RE.search(sentence):
             return None
         exact = self._exact.get(" ".join(words))
         if exact:
             return exact
-        for other, other_numbers, other_negations, home in self._entries:
-            if numbers != other_numbers or negations != other_negations or not content or not other:
+        for other, other_numbers, other_negations, home, other_section in self._entries:
+            if negations != other_negations or not content or not other:
                 continue
             shared = len(content & other)
-            if shared / len(content) >= _NEAR_RATIO and shared / len(other) >= _NEAR_RATIO:
+            if (len(words) >= _MIN_WORDS and numbers == other_numbers
+                    and shared / len(content) >= _NEAR_RATIO and shared / len(other) >= _NEAR_RATIO):
+                return home
+            if (section is not None and other_section == section and len(content) >= 3
+                    and content <= other and numbers <= other_numbers):
                 return home
         return None
 
-    def add(self, sentence: str, home: str) -> None:
+    def add(self, sentence: str, home: str, section: Optional[str] = None) -> None:
         words, numbers, negations, content = self._profile(sentence)
-        if len(words) < _MIN_WORDS or _BOILERPLATE_RE.search(sentence):
+        if len(words) < _MIN_EXACT_WORDS or _BOILERPLATE_RE.search(sentence):
             return
         self._exact.setdefault(" ".join(words), home)
-        self._entries.append((content, numbers, negations, home))
+        self._entries.append((content, numbers, negations, home, section))
+
+
+def _restates(text: str, earlier: List[tuple]) -> bool:
+    """True when a list item repeats an earlier item of the same section word
+    for word, or restates it: all its content words already there, with no
+    new number or negation."""
+    words, numbers, negations, content = _Facts._profile(text)
+    if not words or _BOILERPLATE_RE.search(text):
+        return False
+    for other_words, other_numbers, other_negations, other_content in earlier:
+        if words == other_words:
+            return True
+        if (len(content) >= 3 and content <= other_content and numbers <= other_numbers
+                and negations == other_negations):
+            return True
+    return False
 
 
 def _texts(value: Any) -> List[str]:
@@ -139,16 +167,36 @@ def dedupe_rendered_sections(rendered_sections: List[Dict[str, Any]]) -> Dict[st
             continue
         home = section.get("section_title") or sid or "another section"
         kept_blocks, emptied_by = [], None
+        list_items_seen: List[tuple] = []
         for block in section.get("blocks") or []:
             kind = block.get("type")
             if _quotes_on_purpose(block):
                 kept_blocks.append(block)
                 continue
             if kind != "NarrativeBlock":
+                # Lists are never cut, except an item that repeats or restates
+                # an earlier item of the same section ("Review the logs before
+                # making changes" under both Required access and First-day
+                # actions; a danger-zone list said twice in other words).
+                emptied = False
+                for list_key in ("items", "warnings"):
+                    if not isinstance(block.get(list_key), list):
+                        continue
+                    kept_items = []
+                    for item in block[list_key]:
+                        if _restates(str(item), list_items_seen):
+                            stats["removed"] += 1
+                            continue
+                        list_items_seen.append(_Facts._profile(str(item)))
+                        kept_items.append(item)
+                    block[list_key] = kept_items
+                    emptied = emptied or not kept_items
+                if emptied:
+                    continue
                 for text in _texts(block):
                     for sentence in _split(text):
-                        if not facts.home_of(sentence):
-                            facts.add(sentence, home)
+                        if not facts.home_of(sentence, sid):
+                            facts.add(sentence, home, sid)
                 kept_blocks.append(block)
                 continue
             paragraphs = []
@@ -158,12 +206,12 @@ def dedupe_rendered_sections(rendered_sections: List[Dict[str, Any]]) -> Dict[st
                     continue
                 repeats = []
                 for sentence in _split(paragraph):
-                    earlier = facts.home_of(sentence)
+                    earlier = facts.home_of(sentence, sid)
                     if earlier:
                         repeats.append(sentence)
                         emptied_by = emptied_by or earlier
                     else:
-                        facts.add(sentence, home)
+                        facts.add(sentence, home, sid)
                 if repeats:
                     stats["removed"] += len(repeats)
                     paragraph = _without(paragraph, repeats)

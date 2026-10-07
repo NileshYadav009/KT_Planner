@@ -77,6 +77,8 @@ def test_paste_route_refuses_and_explains(monkeypatch):
     assert "needs at least" in resp.json()["detail"]
     forced = client.post("/kt-from-transcript", json={"transcript": "Hello everyone, thanks for joining.", "force": True})
     assert forced.status_code == 200
+    from worker import Worker
+    Worker(worker_id="test-gate").drain(forced.json()["job_id"])         # a worker picks it up (P1-4)
     assert queued and queued[0]["warnings"]          # the reasons still reach the document
 
 

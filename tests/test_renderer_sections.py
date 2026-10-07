@@ -547,8 +547,11 @@ def test_handover_completion_no_caveat_when_checks_are_actually_confirmed():
     assert "does not by itself confirm" not in joined
 
     checklist = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")
-    assert "Replacement can deploy safely: Confirmed" in checklist["items"]
-    assert "Understands rollback: Confirmed" in checklist["items"]
+    # The giver saying so is not a confirmation (P1-3): that is Sign-off.
+    assert "Replacement can deploy safely: stated as done in the KT session" in checklist["items"]
+    assert "Understands rollback: stated as done in the KT session" in checklist["items"]
+    assert not any("Confirmed" in item for item in checklist["items"])
+    assert "confirms readiness by acknowledging this document in Sign-off" in joined
     assert "Knows danger zones: Not covered during KT" in checklist["items"]
 
 

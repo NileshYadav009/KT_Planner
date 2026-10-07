@@ -31,10 +31,10 @@ def main(argv) -> int:
         return correct, total
 
     correct, total = tally(scores)
-    print(f"{'golden':32} {'accuracy':>8} {'wrong':>6} {'lost':>5} {'viol':>5} {'f.miss':>6} {'f.cov':>6} {'rep':>4}")
+    print(f"{'golden':32} {'accuracy':>8} {'wrong':>6} {'lost':>5} {'viol':>5} {'f.miss':>6} {'f.cov':>6} {'rep':>4} {'unsrc':>6}")
     for s in scores:
         print(f"{s['id']:32} {s['accuracy']:>8.0%} {len(s['wrong']):>6} {len(s['lost']):>5} {len(s['violations']):>5} "
-              f"{len(s['false_missing']):>6} {len(s['false_covered']):>6} {len(s['repeats']):>4}")
+              f"{len(s['false_missing']):>6} {len(s['false_covered']):>6} {len(s['repeats']):>4} {len(s['unsourced']):>6}")
     print(f"{'ALL':32} {correct / total:>8.0%}   ({correct} of {total} facts; target {golden_eval.TARGET_ACCURACY:.0%})")
     # The rules were tuned on the non-holdout goldens, so only the holdouts
     # say how well mapping does on a KT it has not seen.
@@ -45,11 +45,11 @@ def main(argv) -> int:
             print(f"  {label:30} {c / t:>8.0%}   ({c} of {t} facts)")
     for s in scores:
         problems = [f for f in s["facts"] if f["status"] != "correct" or f["violations"]]
-        if problems or s["false_missing"] or s["false_covered"] or s["missing_conflicts"] or s["repeats"]:
+        if problems or s["false_missing"] or s["false_covered"] or s["missing_conflicts"] or s["repeats"] or s["unsourced"]:
             print(f"\n{s['id']}")
             for f in problems:
                 print(f"  {f['id']} {f['status']:7} expected {f['expected']} found {f['found_in']}  « {f['quote']}")
-            for key in ("false_missing", "false_covered", "missing_conflicts", "repeats"):
+            for key in ("false_missing", "false_covered", "missing_conflicts", "repeats", "unsourced"):
                 if s[key]:
                     print(f"  {key}: {s[key]}")
     if "--update-baseline" in argv:

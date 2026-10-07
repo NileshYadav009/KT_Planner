@@ -140,6 +140,8 @@ def test_recordings_over_the_length_limit_are_refused(client, media, monkeypatch
 def test_real_recordings_are_accepted_with_their_probed_format(client, media, kind, expected):
     resp = _upload(client, media[kind])
     assert resp.status_code == 200, resp.text
+    from worker import Worker
+    Worker(worker_id="test-upload").drain(resp.json()["job_id"])        # a worker picks it up (P1-4)
     (args, kwargs), = client.queued
     assert kwargs["media_format"] == expected
     os.unlink(args[1])                                   # the saved upload (the stubbed task would delete it)

@@ -90,6 +90,7 @@ def test_new_spoken_variants_are_corrected(spoken, expected):
     "Please open search results in a new tab.",
     "We update the status page during incidents.",
     "There is an open cost question for finance.",
+    "Running a big query on the reporting database is slow.",
 ])
 def test_ordinary_phrases_are_not_rewritten(sentence):
     from devops_transcription import clean_transcript

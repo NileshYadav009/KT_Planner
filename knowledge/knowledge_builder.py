@@ -5,8 +5,8 @@ from .entities import build_entities
 from .evidence import build_evidence
 from .facts import build_facts
 from .relationships import build_relationships
-from section_rules import is_tribal_knowledge
-from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture
+from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
+from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, smart_title
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
 from dialogue import is_gap_statement, is_field_candidate
@@ -101,6 +101,11 @@ def _is_session_pleasantry(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
+    # The classifier's own opener/closer test: "That concludes the GCP data
+    # platform." was dropped from the sections, then put back under
+    # Additional Notes by the completeness check.
+    if _GREETING_ONLY_RE.match(stripped):
+        return True
     if not (_PLEASANTRY_RE.search(stripped) or _is_closing_remark(stripped)):
         return False
     return not _has_content_signal(stripped)
@@ -171,23 +176,24 @@ def _infer_system_name(
     coverage: Dict[str, Any],
     populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
-    if populated_fields:
-        sys_field = (populated_fields.get("system_overview", {}) or {}).get("system_name", {})
-        val = sys_field.get("value")
-        if isinstance(val, str) and val.strip():
-            # A name the speaker cased themselves ("MedRelay", "CorePay")
-            # keeps that casing; .title() turned it into "Medrelay".
-            stripped = val.strip()
-            has_own_casing = any(ch.isupper() for word in stripped.split() for ch in word[1:])
-            normalized = stripped if has_own_casing else stripped.title()
-            if len(normalized.split()) <= 6:
-                return normalized
-
     overview = coverage.get("system_overview", {})
     content_list = overview.get("content", [])
     if isinstance(content_list, str):
         content_list = [content_list]
     combined = " ".join(str(c) for c in content_list)
+
+    if populated_fields:
+        sys_field = (populated_fields.get("system_overview", {}) or {}).get("system_name", {})
+        val = sys_field.get("value")
+        if isinstance(val, str) and val.strip():
+            # A name the speaker cased themselves ("MedRelay", "CorePay")
+            # keeps that casing, and so do acronyms ("GCP Data and Machine
+            # Learning"); .title() made "Medrelay" and "Gcp Data And ...".
+            stripped = val.strip()
+            has_own_casing = any(ch.isupper() for word in stripped.split() for ch in word[1:])
+            normalized = stripped if has_own_casing else smart_title(stripped, combined)
+            if len(normalized.split()) <= 6:
+                return normalized
     # re.search (not finditer) used to take the leftmost match unconditionally
     # — since "the system"/"the platform" is an extremely common phrase, the
     # non-greedy capture frequently landed on a bare stopword ("The") instead
@@ -200,7 +206,7 @@ def _infer_system_name(
     ):
         name = _trim_name_capture(match.group(1).strip())
         if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
-            return name.title()
+            return smart_title(name, combined)
     return "KT Document"
 
 
@@ -950,7 +956,16 @@ def _drop_subsumed_components(components: List[str]) -> List[str]:
                 break
         if not subsumed:
             kept.append(comp)
+    # Bare "Kubernetes" (or "K8s") next to a managed Kubernetes product is
+    # that product, not a second platform ("Google Kubernetes Engine,
+    # Kubernetes" in the component list).
+    if any(c.lower() in _MANAGED_KUBERNETES for c in kept):
+        kept = [c for c in kept if c.lower() not in ("kubernetes", "k8s")]
     return kept
+
+
+_MANAGED_KUBERNETES = frozenset({"amazon eks", "eks", "azure kubernetes service", "aks", "google kubernetes engine",
+                                 "gke", "openshift", "rancher"})
 
 
 def _canonicalize_component_term(term: str) -> str:
@@ -1313,6 +1328,19 @@ def append_coverage_matrix_section(
     def other_texts_for(section_id):
         return [(sid, t) for sid, t in all_texts if sid != section_id]
 
+    mentioned_elsewhere: Dict[str, List[Dict[str, str]]] = {}
+
+    def elsewhere_quote(section_id, topic_label):
+        """(section, sentence) for the most direct statement of the topic
+        elsewhere: the shortest matching sentence ("Secret Manager handles
+        secrets" over a long day-one list that also names Secret Manager)."""
+        from coverage_topics import _COMPILED as topic_patterns
+        rx = next((r for label, _, r in topic_patterns.get(section_id, []) if label == topic_label), None)
+        if rx is None:
+            return None
+        hits = [(len(t), sid, t) for sid, t in all_texts if sid != section_id and rx.search(t)]
+        return min(hits)[1:] if hits else None
+
     for section in dynamic_schema:
         section_id = section.get("id")
         title = section.get("title") or section_id
@@ -1349,6 +1377,18 @@ def append_coverage_matrix_section(
         structured = cov.get("_structured") if isinstance(cov.get("_structured"), dict) else {}
         own_texts = [t for t in texts if is_field_candidate(t)]
         topic_states = assess_topics(section_id, field_objects, own_texts, other_texts_for(section_id), structured)
+        if topic_states and not own_texts:
+            # A section the session never discussed as such, though one of its
+            # topics came up elsewhere ("Secret Manager handles secrets" under
+            # Deployment): keep the sentence so the empty section can point to it.
+            for label, state, where in topic_states:
+                if state == "elsewhere" and where:
+                    found = elsewhere_quote(section_id, label)
+                    if found:
+                        found_sid, quote = found
+                        mentioned_elsewhere.setdefault(section_id, []).append(
+                            {"topic": label, "section_id": found_sid,
+                             "section_title": titles.get(found_sid, found_sid), "quote": quote})
 
         if section_id in AFTER_REVIEW_SECTIONS:
             # Sign-off happens when the document is reviewed, not in the
@@ -1374,9 +1414,14 @@ def append_coverage_matrix_section(
                 assessment = "Not covered in the KT session."
                 gaps.append(title)
             else:
-                bucket = "Strong" if not missing else ("Partial" if covered else "Missing")
+                # A section with its own statements is at least Partial, even
+                # when none of its expected topics matched: Danger Zones that
+                # listed four danger zones was reported Missing.
+                bucket = "Strong" if not missing else ("Partial" if covered or own_texts else "Missing")
                 if not missing:
                     assessment = "Covered" if total == 1 else f"All {total} topics covered"
+                elif not covered and own_texts:
+                    assessment = f"{len(own_texts)} statement(s) captured, but not the expected topics"
                 else:
                     assessment = f"{len(covered)} of {total} topics covered"
                 if elsewhere:
@@ -1462,7 +1507,32 @@ def append_coverage_matrix_section(
     summary = knowledge_object.setdefault("summary", {})
     summary["section_count"] = summary.get("section_count", len(sections) - 1) + 1
     summary["covered_sections"] = summary.get("covered_sections", 0) + 1
+    knowledge_object["_mentioned_elsewhere"] = mentioned_elsewhere
     return knowledge_object
+
+
+MENTIONED_ELSEWHERE_TITLE = "Mentioned elsewhere in the KT"
+
+
+def attach_elsewhere_mentions(rendered_sections: List[Dict[str, Any]], knowledge_object: Dict[str, Any]) -> None:
+    """A section that would only say "not covered" points to what the session
+    did say about its topics under another section ("Secrets management,
+    under Deployment: 'Secret Manager handles secrets.'"), so the reader
+    sees the coverage matrix's "covered elsewhere" in the section itself.
+    Run after duplicate removal: these are quotes, not a second home."""
+    from renderers.blocks.common import MENTIONED_ELSEWHERE_MESSAGE, NOT_COVERED_MESSAGE
+
+    mentions = knowledge_object.get("_mentioned_elsewhere") or {}
+    for section in rendered_sections or []:
+        items = mentions.get(section.get("section_id"))
+        blocks = section.get("blocks") or []
+        only_not_covered = blocks and all(
+            b.get("type") == "NarrativeBlock" and b.get("paragraphs") == [NOT_COVERED_MESSAGE] for b in blocks)
+        if not items or not only_not_covered:
+            continue
+        lines = [f"{m['topic']}, under {m['section_title']}: “{_short_quote(m['quote'])}”" for m in items]
+        blocks[0]["paragraphs"] = [MENTIONED_ELSEWHERE_MESSAGE]
+        blocks.append({"type": "ChecklistBlock", "title": MENTIONED_ELSEWHERE_TITLE, "items": lines})
 
 
 QUICK_REFERENCE_SECTION_ID = "quick_reference"
@@ -1538,6 +1608,20 @@ _FAILURE_INTRO_RE = re.compile(
     r"(?:problem|issue|failure(?:\s+mode)?|error|incident|gotcha|outage)s?\s+"
     r"(?:is|was|we\s+(?:see|hit|get)(?:\s+is)?|that\s+(?:comes\s+up|happens)\s+is)\s+"
     r"(?P<what>.+?)\s*(?:[;,]\s*(?P<rest>.+))?$", re.IGNORECASE)
+# The subject-first form: "Airflow DAG failure is another common issue",
+# "Schema change is another important failure scenario because ...".
+_FAILURE_NAMED_RE = re.compile(
+    r"^(?P<what>.+?)\s+(?:is|was|are)\s+(?:another|a|an|one|the|our)\s+"
+    r"(?:(?:most|other|common|known|recurring|frequent|important|big|main|typical|classic|nasty)\s+)*"
+    r"(?:production\s+)?(?:problem|issue|failure(?:\s+(?:mode|scenario|case))?|gotcha|incident)s?\b"
+    r"(?:[,;]?\s*(?:because|since|as|and)\s+(?P<rest>.+))?$", re.IGNORECASE)
+# A "what" that is only the failure words themselves ("another common issue").
+_FAILURE_WORD_ONLY_RE = re.compile(
+    r"^(?:another|a|an|one|the)?\s*(?:(?:most|other|common|known|recurring|important)\s+)*"
+    r"(?:problem|issue|failure|scenario)s?$", re.IGNORECASE)
+_NOT_A_FAILURE_RE = re.compile(r"\b(?:non-?issue|not\s+(?:an?\s+)?(?:issue|problem)|no\s+problem)\b", re.IGNORECASE)
+_FAILURE_WORD_RE = re.compile(r"\b(?:problem|issue|failure|outage|incident|backlog|lag|throttl\w*|crash\w*)\b",
+                              re.IGNORECASE)
 # "There was a major outage last year caused by …"
 _PAST_INCIDENT_RE = re.compile(
     r"^there\s+(?:was|were|has\s+been|have\s+been)\s+(?:(?:a|an|one)\s+)?"
@@ -1567,13 +1651,19 @@ def _qr_sentences(section: Optional[Dict[str, Any]], skip=None) -> List[str]:
     if isinstance(content, str):
         content = [content]
     out: List[str] = []
-    for item in content:
-        for sentence in _QR_SENTENCE_RE.split(str(item).strip()):
+    # A polished bullet list ("- Danger zones include ...\n- The danger
+    # zones are ...") is split into its items, without the bullet marks.
+    for item in split_bullet_blob([str(c) for c in content if str(c).strip()]) or []:
+        item = _QR_BULLET_RE.sub("", str(item).strip())
+        for sentence in _QR_SENTENCE_RE.split(item):
             sentence = sentence.strip()
             if sentence and not sentence.endswith("?") and not is_gap_statement(sentence) \
                     and not (skip and skip(sentence)):
                 out.append(sentence)
     return out
+
+
+_QR_BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
 
 
 def _qr_key(text: str) -> str:
@@ -1601,29 +1691,49 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
         pairs = []
         for item in structured:
             if isinstance(item, dict) and str(item.get("symptom") or "").strip():
-                pairs.append((str(item["symptom"]).strip(), str(item.get("fix") or "").strip() or _NO_FIX_STATED))
+                fix = str(item.get("fix") or "").strip()
+                check = str(item.get("first_checks") or "").strip()
+                if not fix and check:
+                    # What the KT did say: where to look first.
+                    fix = f"First check: {check.rstrip('.')}. No fix was stated in the KT; ask the outgoing owner."
+                pairs.append((str(item["symptom"]).strip(), fix or _NO_FIX_STATED))
         return pairs[:_QR_MAX_FAILURES]
 
     items: List[Dict[str, Any]] = []
     for sentence in _qr_sentences(section, skip):
         bare = _QR_LEAD_RE.sub("", sentence).rstrip(".")
-        intro = _FAILURE_INTRO_RE.match(bare)
+        if _NOT_A_FAILURE_RE.search(bare):
+            continue                      # "Another non-issue is ...": said not to be a problem
+        named = _FAILURE_NAMED_RE.match(bare)
+        intro = None if named else _FAILURE_INTRO_RE.match(bare)
+        if intro and _FAILURE_WORD_ONLY_RE.match(intro.group("what")):
+            intro = None                  # "X is another common issue" read backwards
         past = _PAST_INCIDENT_RE.match(bare)
         runbook = _RUNBOOK_RE.match(bare)
-        if intro:
+        if named:
+            # Its "because ..." is why it matters, not what to do about it.
+            items.append({"what": named.group("what"), "parts": []})
+        elif intro:
             items.append({"what": intro.group("what"), "parts": [intro.group("rest")] if intro.group("rest") else []})
         elif past:
             items.append({"what": past.group("what"), "parts": []})
         elif runbook and not (items and not items[-1]["parts"]):
             items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
-        elif items:
+        elif items and not (_FAILURE_WORD_RE.search(bare) and not _FIX_CUE_RE.search(bare)):
+            # A sentence that brings up another problem is not this one's fix.
             items[-1]["parts"].append(sentence)
         elif _FIX_CUE_RE.search(sentence):
             items.append({"what": None, "parts": [sentence]})
     pairs = []
     for item in items:
         action = " ".join(_clause(p).rstrip(".") + "." for p in item["parts"] if p and p.strip())
-        situation = _tidy(item["what"].rstrip(".")) if item["what"] else "Known failure"
+        if item["what"]:
+            situation = _tidy(item["what"].rstrip("."))
+        elif re.match(r"^(?:check|start\s+with|look\s+at|first|for\s+[^,]{2,60},\s*(?:first\s+)?check)\b", action,
+                      re.IGNORECASE):
+            situation = "Where to look first"     # triage steps, not a named failure
+        else:
+            situation = "Known failure"
         pairs.append((situation, action or _NO_FIX_STATED))
     return pairs[:_QR_MAX_FAILURES]
 
@@ -1658,6 +1768,7 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     """
     rows: List[Dict[str, str]] = []
     used: set = set()
+    used_words: List[set] = []
     real_sections = [s for s in knowledge_object.get("sections") or [] if s.get("id") not in _QR_SKIP_SECTIONS]
 
     # What the session corrected or contradicted (apply_conflicts, P0-5) is
@@ -1682,9 +1793,18 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
         if not text:
             return
         key = re.sub(r"\W+", " ", _tidy(text).lower()).strip()
-        if key in used:
+        words = set(_content_words(text))
+        if _NO_FIX_STATED.split(".")[0].lower() in key:
+            # Each unfixed failure keeps its own row: the text is the same.
+            key = f"{situation.lower()} | {key}"
+            words = set(_content_words(f"{situation} {text}"))
+        # The same statement said twice in different words ("Danger zones
+        # include X, Y, Z outside ArgoCD" / "The danger zones are X, Y, Z")
+        # is one row.
+        if key in used or (len(words) >= 4 and any(words <= other for other in used_words)):
             return
         used.add(key)
+        used_words.append(words)
         rows.append({"Situation": situation, "What to do": _tidy(text), "Source": title_of(section, fallback_title)})
 
     def first_matching(section, pattern, limit=2) -> Optional[str]:

@@ -42,13 +42,17 @@ from knowledge import (
     apply_conflicts,
     attach_conflict_warnings,
     dedupe_rendered_sections,
+    attach_elsewhere_mentions,
 )
+from knowledge.evidence import attach_evidence, transcript_sentences
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
 import contextvars
 import media_guard
 import screen_capture
+from job_queue import TaskQueue
+from observability import FAILURE_ERROR, FAILURE_INPUT, checkpoint
 from job_store import JobStore, PersistentJobs
 from auth import tenant_llm_policy
 from llm.tenant_context import CURRENT_TENANT, LLM_POLICY
@@ -56,7 +60,7 @@ from redaction import redact_secrets
 
 # Screenshots captured from shared screens, one folder per job (gitignored).
 KT_ASSETS_DIR = os.getenv("KT_ASSETS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "kt_assets"))
-from pdf_rendering import build_rendered_sections
+from pdf_rendering import build_job_pdf, build_rendered_sections
 from quality_score import compute_quality_score
 from renderers.sections import validate_renderer_registry
 from schema_generator import generate_dynamic_schema
@@ -77,6 +81,8 @@ MAPPER_PIPELINE = None
 # persisted to SQLite (job_store.py) so a restart loses nothing.
 JOB_STORE = JobStore()
 JOB_QUEUE = PersistentJobs(JOB_STORE)
+# Submitted KTs waiting for or running on a worker (job_queue.py, worker.py).
+TASKS = TaskQueue(JOB_STORE)
 JOB_LOCK = Lock()
 # A finished job whose document can be exported. completed_with_warnings means
 # stages failed or LLM calls fell back; the warnings are shown to the reader.
@@ -93,6 +99,17 @@ def delete_job_data(job_id: str) -> bool:
         return True
     except KeyError:
         return False
+
+
+def render_and_store_document(job_id: str) -> bytes:
+    """Render a finished KT's PDF and store it, so downloads are reads (P1-4).
+    The stored copy is tied to the job version it was rendered from: the
+    version is read first, so a change made during rendering makes it stale."""
+    version = JOB_STORE.updated_at(job_id)
+    job = JOB_QUEUE[job_id]
+    pdf = build_job_pdf(job_id, job, JOB_STORE.created_at(job_id))
+    JOB_STORE.save_document(job_id, pdf, version)
+    return pdf
 
 
 def apply_retention() -> int:
@@ -142,6 +159,11 @@ class DocumentAssemblyError(RuntimeError):
     """A stage without which no usable document exists failed."""
 
 
+class InputRejected(ValueError):
+    """What was submitted cannot make a KT document (empty, no speech, not
+    a KT). The job fails with this message; it is not a system error."""
+
+
 def _stage_failed(stage_errors: list, stage: str, exc: Exception, notice: Optional[str] = None,
                   *, fatal: bool = False) -> None:
     """Record a failed pipeline stage instead of only logging it.
@@ -173,7 +195,8 @@ def _job_warnings(stage_errors: list, usage: dict, upstream: Optional[List[str]]
 
 
 def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None,
-                    screen: Optional[dict] = None, warnings: Optional[List[str]] = None) -> dict:
+                    screen: Optional[dict] = None, warnings: Optional[List[str]] = None,
+                    time_offset: float = 0.0) -> dict:
     """Run classification through rendering for an already-transcribed, already-cleaned
     transcript, and store the result in JOB_QUEUE.
 
@@ -211,6 +234,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             redacted += n
             clean_segments.append(dict(seg, text=text) if isinstance(seg, dict) else seg)
         segments = clean_segments
+    # Whisper's segments carry the time each sentence was said; a pasted
+    # transcript has none. `time_offset` is the leading silence trimmed off
+    # before transcription, so source times match the original recording.
+    timed_segments = segments
     try:
         if segments is None:
             segments = [{
@@ -229,6 +256,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             raise RuntimeError("Context mapping pipeline not initialized")
 
         kt = MAPPER_PIPELINE.process(job_id, transcript, segments)
+        checkpoint("Classification")
 
         coverage = {}
         missing_required = kt.missing_required_sections or []
@@ -304,6 +332,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as e:
             _stage_failed(stage_errors, "Text polishing", e, "Text polishing failed; sections show the speaker's original sentences.")
             polished_sections = {}
+        checkpoint("Polishing")
 
         # Extract structured data for sections with structured prompts. Each
         # section's extraction is an independent LLM call (its own prompt,
@@ -380,6 +409,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             _stage_failed(stage_errors, "Dynamic schema", exc, None)
             dynamic_schema = SCHEMA
 
+        checkpoint("Structured extraction")
         try:
             # Reuse the classification stage's own embedding model
             # (BAAI/bge-large-en-v1.5 — a materially stronger model than the
@@ -482,6 +512,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                     entry["source_chunk_index"] = idx
                 dr_fields[field_id] = entry
 
+        checkpoint("Field population")
         try:
             knowledge_object = build_knowledge_object(
                 job_id=job_id,
@@ -575,11 +606,14 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             _stage_failed(stage_errors, "Quick reference", exc, "The quick reference page could not be built.")
 
+        checkpoint("Document assembly")
         try:
             knowledge_object["rendered_sections"] = build_rendered_sections(knowledge_object)
             attach_conflict_warnings(knowledge_object["rendered_sections"], knowledge_object)
         except Exception as exc:
             _stage_failed(stage_errors, "Document rendering", exc, fatal=True)
+
+        checkpoint("Rendering")
 
         # One home per fact: a sentence already shown is not printed again,
         # and the Tribal Knowledge digest points to where it is (P1-10).
@@ -587,6 +621,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             knowledge_object["_dedup"] = dedupe_rendered_sections(knowledge_object["rendered_sections"])
         except Exception as exc:
             _stage_failed(stage_errors, "Duplicate removal", exc, None)
+        try:
+            attach_elsewhere_mentions(knowledge_object["rendered_sections"], knowledge_object)
+        except Exception as exc:
+            _stage_failed(stage_errors, "Cross-section pointers", exc, None)
 
         # Dashboards and links shown on the shared screen (screen_capture.py),
         # placed in the section that was being discussed at the time.
@@ -613,6 +651,16 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             )
         except Exception as exc:
             _stage_failed(stage_errors, "Completeness check", exc, "The completeness check did not run, so some transcript sentences may be missing from this document.")
+
+        # Evidence per fact (P1-2): each fact in the document points to the
+        # transcript sentences it came from, and when they were said.
+        try:
+            attach_evidence(knowledge_object, transcript_sentences(transcript, timed_segments, time_offset))
+        except Exception as exc:
+            _stage_failed(stage_errors, "Source links", exc,
+                          "Facts could not be linked to the transcript sentences they came from.")
+
+        checkpoint("Post-processing")
 
         # Non-fatal structural validation (schema/field-id consistency,
         # expected shapes/ranges) — see validation.py. Never blocks the
@@ -657,12 +705,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             _stage_failed(stage_errors, "Vocabulary learning", exc, None)
 
+        checkpoint("Validation and scoring")
         progress = int(round(kt.overall_coverage_percent or 0))
         transcript = kt.transcript
 
-        with JOB_LOCK:
-            if job_id in JOB_QUEUE:
-                JOB_QUEUE[job_id]["progress"] = 60
+        JOB_QUEUE.set_progress(job_id, 60)
 
         # Dashboards and links captured from the shared screen (empty for a
         # pasted transcript or an audio-only upload).
@@ -670,9 +717,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         screen_view = screen_capture.ui_payload(screen_assets, job_id, section_titles)
         screenshots = screen_view["screenshots"]
 
-        with JOB_LOCK:
-            if job_id in JOB_QUEUE:
-                JOB_QUEUE[job_id]["progress"] = 85
+        JOB_QUEUE.set_progress(job_id, 85)
 
         field_analysis = {
             sec_id: {
@@ -775,17 +820,21 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
     recording. The route has already checked it (media_guard.probe)."""
     try:
         if os.path.getsize(input_path) == 0:
-            raise ValueError("Uploaded file is empty.")
+            raise InputRejected("Uploaded file is empty.")
 
         try:
             audio_to_use = _extract_audio(input_path, media_format)
         except media_guard.MediaRejected as exc:
-            raise ValueError(exc.message) from exc
+            raise InputRejected(exc.message) from exc
 
         # Trim only leading/trailing silence to speed up transcription.
+        time_offset = 0.0
         try:
             trimmed_path = f"{input_path}.trimmed.wav"
             if trim_leading_trailing_silence(audio_to_use, trimmed_path):
+                # Transcript times now start after the cut silence; sources
+                # add it back so they point into the original recording.
+                time_offset = screen_capture.leading_silence_seconds(audio_to_use)
                 audio_to_use = trimmed_path
         except Exception:
             # If trimming fails, continue with original audio
@@ -805,6 +854,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
             # 27% faster. Continuous speech transcribes identically.
             "vad_filter": WHISPER_VAD_FILTER,
         }
+        checkpoint("Audio extraction")
         segments, info = MODEL.transcribe(audio_to_use, **transcribe_kwargs)
         segments = list(segments)
 
@@ -835,12 +885,11 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
         transcript = result.get("text", "")
 
         # update progress after transcription
-        with JOB_LOCK:
-            if job_id in JOB_QUEUE:
-                JOB_QUEUE[job_id]["progress"] = 30
+        JOB_QUEUE.set_progress(job_id, 30)
 
+        checkpoint("Transcription")
         if not transcript:
-            raise ValueError("No speech detected in the uploaded file.")
+            raise InputRejected("No speech detected in the uploaded file.")
 
         # Refuse recordings that cannot produce a KT document (an empty
         # meeting, a few pleasantries, a stand-up uploaded by mistake); carry
@@ -848,7 +897,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
         upstream_warnings: List[str] = []
         gate = assess_transcript(transcript, source="audio")
         if gate["verdict"] == "reject":
-            raise ValueError("The recording does not contain enough KT content to build a document. "
+            raise InputRejected("The recording does not contain enough KT content to build a document. "
                              + " ".join(gate["reasons"]))
         if gate["verdict"] == "warn":
             upstream_warnings.extend(gate["reasons"])
@@ -860,9 +909,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
         screen = None
         if screen_capture.enabled():
             try:
-                with JOB_LOCK:
-                    if job_id in JOB_QUEUE:
-                        JOB_QUEUE[job_id]["progress"] = 35
+                JOB_QUEUE.set_progress(job_id, 35)
                 offset = screen_capture.leading_silence_seconds(input_path)
                 screen = screen_capture.analyze_screen_shares(
                     input_path, result.get('segments', []), os.path.join(KT_ASSETS_DIR, job_id),
@@ -873,12 +920,20 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
                 logger.warning("Screen capture failed: %s", exc, exc_info=True)
                 upstream_warnings.append("Screen capture failed; dashboards and links shown on screen were not captured.")
 
-        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen, warnings=upstream_warnings)
+        if screen is not None:
+            checkpoint("Screen capture")
+        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen, warnings=upstream_warnings,
+                        time_offset=time_offset)
     except Exception as e:
+        if not isinstance(e, InputRejected):
+            logger.exception("Upload processing failed for %s", job_id)
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {
                 "status": "failed",
-                "error": str(e)
+                "error": str(e),
+                # What was uploaded cannot make a KT: the user is told why,
+                # and nobody is paged (observability.alert_on_run).
+                "failure": FAILURE_INPUT if isinstance(e, InputRejected) else FAILURE_ERROR,
             }
     finally:
         if input_path and os.path.exists(input_path):
