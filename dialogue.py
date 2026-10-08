@@ -88,6 +88,70 @@ def states_something_before_gap(text: str) -> bool:
     return len(head.split()) >= 4 and not is_gap_statement(head) and not _HEDGE_RE.search(head)
 
 
+# Session framing, not knowledge: a greeting in front of a sentence, and a
+# sentence that only announces what is being handed over. The document's
+# title already names the system, yet "Hi everyone, today I will be handing
+# over the AWS e-commerce platform." was printed as System Overview content.
+_GREETING_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+(?:everyone|everybody|all|team|folks|guys|there|all\s+of\s+you))?"
+    r"|(?:thanks|thank\s+you)(?:\s+(?:everyone|all|team|folks))?\s+for\s+(?:joining|coming|being\s+here|"
+    r"jumping\s+on|making\s+(?:the\s+)?time)(?:\s+today)?"
+    r"|welcome(?:\s+(?:everyone|all|team|back))?)\s*[,.!:;—-]+\s*",
+    re.IGNORECASE,
+)
+# "Today I'm handing over X", "This KT is for X", "I'll walk you through X".
+_ANNOUNCEMENT_RE = re.compile(
+    r"^\W*(?:(?:so|okay|ok|alright|right|well|now|and|um|uh)\W+)*"
+    r"(?:(?:today|now|in\s+this\s+(?:session|call|kt)|this\s+(?:morning|afternoon))\s*,?\s+)?"
+    r"(?:(?:i|we)(?:'m|'re|\s+am|\s+are|'ll|\s+will|'d\s+like\s+to|\s+would\s+like\s+to|\s+want\s+to|"
+    r"(?:'m|'re|\s+am|\s+are)\s+going\s+to)?\s+(?:be\s+)?"
+    r"(?:hand(?:ing)?\s+over|walk(?:ing)?\s+(?:you\s+)?through|tak(?:e|ing)\s+you\s+through|present(?:ing)?|"
+    r"cover(?:ing)?|talk(?:ing)?\s+(?:you\s+)?(?:about|through))"
+    r"|let\s+me\s+(?:hand\s+over|walk\s+you\s+through|take\s+you\s+through|talk\s+about)"
+    r"|(?:this|today'?s|the)\s+(?:kt|session|handover|hand-?over|knowledge\s+transfer|call|walkthrough)\s+"
+    r"(?:is\s+(?:for|about|on)|covers|will\s+cover)"
+    r"|this\s+is\s+the\s+(?:kt|handover|hand-?over|knowledge\s+transfer|walkthrough)\s+(?:for|of|on))\s+"
+    r"(?P<what>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+_WELCOME_RE = re.compile(
+    r"^\W*welcome\s+to\s+(?:the\s+|our\s+)?(?P<what>[^,;:()—]+?)\s+"
+    r"(?:kt|handover|hand-?over|knowledge\s+transfer|session|walkthrough)(?:\s+session)?\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+# What follows the announcement is only a name when it is short and says
+# nothing more: "TripWise, the booking backend behind our app" (a comma) and
+# "the payments platform that runs on EKS" (a clause) describe the system.
+_CLAUSE_RE = re.compile(r"\b(?:which|that|who|whose|where|when|because|so|but|and\s+(?:it|we|they|this))\b",
+                        re.IGNORECASE)
+
+
+def strip_greeting(text: str) -> str:
+    """The sentence without a greeting in front ("Hi everyone, today ..." ->
+    "Today ..."). A sentence that is only a greeting is returned unchanged:
+    the classifier already drops those."""
+    out = text or ""
+    for _ in range(3):              # "Hey, thanks for jumping on, ..."
+        match = _GREETING_PREFIX_RE.match(out)
+        rest = out[match.end():] if match else ""
+        if not match or not rest.strip():
+            break
+        out = rest[:1].upper() + rest[1:]
+    return out
+
+
+def is_handover_announcement(text: str) -> bool:
+    """True when the sentence only announces what is being handed over (its
+    name, which the document's title already gives) and states nothing else."""
+    sentence = strip_greeting(text or "").strip()
+    match = _ANNOUNCEMENT_RE.match(sentence) or _WELCOME_RE.match(sentence)
+    if not match:
+        return False
+    what = match.group("what")
+    return 0 < len(re.findall(r"[\w./&+-]+", what)) <= 8 and not _CLAUSE_RE.search(what)
+
+
 def is_field_candidate(text: str) -> bool:
     """A sentence that may fill a document field: not a bare question and
     not a statement that the thing is missing."""

@@ -9,7 +9,7 @@ from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, smart_title
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import is_gap_statement, is_field_candidate, states_something_before_gap
+from dialogue import is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
 
 
@@ -105,6 +105,11 @@ def _is_session_pleasantry(text: str) -> bool:
     # platform." was dropped from the sections, then put back under
     # Additional Notes by the completeness check.
     if _GREETING_ONLY_RE.match(stripped):
+        return True
+    # "Hi everyone, today I will be handing over the AWS e-commerce platform."
+    # names a technology, so the content test below kept it; it only says
+    # what the document's title already does.
+    if is_handover_announcement(stripped):
         return True
     if not (_PLEASANTRY_RE.search(stripped) or _is_closing_remark(stripped)):
         return False

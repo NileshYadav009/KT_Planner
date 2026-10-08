@@ -6,13 +6,6 @@
  "transcript": "Hi everyone, today I will be handing over the GCP data and machine learning platform. This platform processes approximately 3TB of data per day. Pub/Sub is used for event ingestion and messaging. Dataflow is used for data processing. BigQuery is used for analytical workloads, and cloud storage is used for raw and other data. GKE is used for Kubernetes workloads, Vertex AI supports machine learning, And Airflow handles workflow orchestration. Terraform manages infrastructure. GitHub Actions handles CI, ArgoCD handles GitOps deployment, Artifact registry stores images, And Secret Manager handles secrets. Cloud monitoring and cloud logging provide monitoring and logging. Grafana provides dashboards, and PagerDuty is used for alerting. When investigating an incident, first identify the failing layer. Check Pub/Sub for incoming event problems, data flow for processing issues, BigQuery for analytical workload problems, or unexpected query behavior, And Airflow when workflows or DAGs fail. For Kubernetes issues, check GKE and ArgoCD. One common production problem is Pub/Sub backlog. Another non-issue is unexpected BigQuery query cost. Airflow DAG failure is another common issue. Review the affected workflow and logs before making changes. Schema change is another important failure scenario because changes to an expected data schema Can affect downstream processing. For disaster recovery, Terraform is used to recreate infrastructure. Pub/Sub, data flow, BigQuery, Airflow, and Vertex AI are included in recovery. Raw data is retained for 90 days. Airflow metadata is backed up daily, and DR testing is performed every six months. The rto is four hours, and the rpo is one hour. Danger zones include raw event deletion, BigQuery retention, and partitioning, Pub/Sub retention, and manual GKE changes outside ArgoCD. Deployment uses GitHub Actions, artifact repository, and ArgoCD. GitHub Actions handles CI, images are stored in artifact repository, And ArgoCD deploys workloads into GKE. For monitoring, start with cloud monitoring and cloud logging, then check Grafana. Investigate PagerDuty alerts using monitoring evidence before making changes. For new team members, review Pub/Sub, data flow, BigQuery, GKE, Airflow, Vertex AI, Terraform, ArgoCD, Secret Manager, and PagerDuty. Remember the main failure scenarios, Pub/Sub backlog, unexpected BigQuery Query cost, Airflow DAG failures, and schema changes. The danger zones are raw event deletion, BigQuery retention, and partitioning, Pub/Sub retention, and manual GKE changes. If you are unsure about a production change, contact the platform owner Before proceeding. That concludes the GCP data and machine learning platform.",
  "facts": [
   {
-   "id": "F01",
-   "quote": "handing over the GCP data and machine learning platform",
-   "in": [
-    "system_overview"
-   ]
-  },
-  {
    "id": "F02",
    "quote": "This platform processes approximately 3TB of data per day",
    "in": [
@@ -216,5 +209,6 @@
  "missing": [
   "known_bad_days",
   "cost_optimization"
- ]
+ ],
+ "notes": "8 Oct: the opening \"Hi everyone, today I will be handing over the GCP data and machine learning platform.\" is no longer printed (it only repeats the title), so it is no longer a fact to place."
 }

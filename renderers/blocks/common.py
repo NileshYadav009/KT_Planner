@@ -35,6 +35,20 @@ def split_bullet_blob(items: List[str]) -> List[str]:
     return out
 
 
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
+
+
+def without_session_framing(text: str) -> str:
+    """The paragraph without the KT session's own framing: a greeting in
+    front of a sentence ("Hi everyone, today ...") and a sentence that only
+    announces what is being handed over, which the document's title already
+    says. Everything else is kept word for word."""
+    from dialogue import is_handover_announcement, strip_greeting
+
+    kept = [strip_greeting(s) for s in _SENTENCE_SPLIT_RE.split(text or "") if s.strip()]
+    return " ".join(s for s in kept if not is_handover_announcement(s)).strip()
+
+
 def coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     """A section's coverage_content as clean, de-duplicated paragraphs.
 
@@ -53,6 +67,9 @@ def coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     out: List[str] = []
     seen = set()
     for text in split_bullet_blob(items):
+        text = without_session_framing(text)
+        if not text:
+            continue
         key = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
         if key and key not in seen:
             seen.add(key)
