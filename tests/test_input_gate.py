@@ -96,3 +96,47 @@ def test_upload_of_a_non_kt_recording_fails_with_the_reason(tmp_path, monkeypatc
     job = pipeline.JOB_QUEUE.pop("gate-upload-0001")
     assert job["status"] == "failed"
     assert "enough KT content" in job["error"]
+
+
+# --------------------------------------------------------------------------
+# Language (P2-7): Whisper is told the KT is English; anything else is flagged
+# --------------------------------------------------------------------------
+
+GERMAN = ("Das System läuft auf AKS in Westeuropa. Die Datenbank ist Azure SQL und die Backups laufen jede Nacht. "
+          "Wenn die Warteschlange voll ist, muss man den Worker neu starten. Das Plattformteam ist verantwortlich, "
+          "und die Eskalation geht an Frau Becker. Bitte niemals die Produktionsdatenbank manuell ändern.")
+HINGLISH = ("Humara system AKS par chalta hai. Database Azure SQL hai aur backup har raat hota hai. Agar queue full "
+            "ho jaye toh worker ko restart karna padta hai. Platform team iska owner hai aur escalation Becker ji ko "
+            "jata hai. Production database ko kabhi manually change mat karna.")
+
+
+@pytest.mark.parametrize("text", [GERMAN, HINGLISH], ids=["german", "mixed-hindi-english"])
+def test_a_kt_in_another_language_is_flagged(text):
+    gate = assess_transcript(text)
+    assert any("does not read as English" in r for r in gate["reasons"])
+
+
+def test_english_kts_are_not_flagged():
+    from golden_eval import load_goldens
+    from input_gate import language_warning
+
+    assert language_warning(KT) is None
+    assert [g["id"] for g in load_goldens() if language_warning(g["transcript"])] == []
+
+
+def test_a_recording_in_another_language_gets_a_warning(tmp_path, monkeypatch):
+    import wave
+
+    import pipeline
+
+    path = str(tmp_path / "speech.wav")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 16000 * 90)
+    heard = iter([("en", 0.97), ("hi", 0.91), ("hi", 0.88)])
+    monkeypatch.setattr(pipeline, "MODEL", SimpleNamespace(detect_language=lambda audio, **k: (*next(heard), [])))
+    assert "Hindi" in pipeline.spoken_language_warning(path)
+    monkeypatch.setattr(pipeline, "MODEL", SimpleNamespace(detect_language=lambda audio, **k: ("en", 0.99, [])))
+    assert pipeline.spoken_language_warning(path) is None

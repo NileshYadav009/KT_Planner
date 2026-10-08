@@ -31,9 +31,12 @@ from devops_transcription import clean_transcript
 from input_gate import assess_transcript
 from job_queue import valid_idempotency_key
 from kt_schema_loader import SCHEMA
+import markdown_export
+import observability
 import media_guard
 import pdf_rendering
 import pipeline
+import sessions
 import sso
 
 router = APIRouter()
@@ -154,6 +157,40 @@ async def export_pdf(job_id: str, version: Optional[int] = None, principal: Prin
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}.pdf\""},
     )
+
+
+async def _export_job(job_id: str, version: Optional[int], principal: Principal) -> dict:
+    """The finished job to export, or the saved snapshot of an earlier version."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+    if job.get("status") not in pipeline.COMPLETED_STATUSES:
+        raise HTTPException(status_code=404, detail="Job not found or not completed")
+    current = document_model.current_version(job)
+    if version is None or version == current:
+        return job
+    snap = await run_in_threadpool(document_model.version_snapshot, pipeline, job_id, job, version)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="No such version")
+    return {"knowledge_object": snap, "warnings": job.get("warnings"), "document_version": version,
+            "notices": [f"Version {version} of {current}: superseded by a later version."]}
+
+
+@router.get("/export/markdown/{job_id}")
+async def export_markdown(job_id: str, version: Optional[int] = None, principal: Principal = Depends(require_principal)):
+    """The document as Markdown for Confluence, Notion or a repository (P2-2)."""
+    job = await _export_job(job_id, version, principal)
+    text = await run_in_threadpool(markdown_export.job_markdown, job_id, job, pipeline.JOB_STORE.created_at(job_id))
+    suffix = f"_v{version}" if version is not None else ""
+    return Response(content=text, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}{suffix}.md\""})
+
+
+@router.get("/export/gaps/{job_id}")
+async def export_gaps(job_id: str, principal: Principal = Depends(require_principal)):
+    """The KT's knowledge gaps as CSV, one ticket per row for Jira's CSV import (P2-2)."""
+    job = await _export_job(job_id, None, principal)
+    return Response(content=markdown_export.gaps_csv(job_id, job), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}_gaps.csv\""})
 
 
 @router.get("/kt-assets/{job_id}/{name}")
@@ -280,6 +317,85 @@ async def kt_from_transcript(payload: dict, request: Request,
     return _queued_response(job_id, "Transcript queued for processing. Poll /status/{job_id} for results.")
 
 
+# --------------------------------------------------------------------------
+# Follow-up sessions of a KT (P2-1, sessions.py)
+# --------------------------------------------------------------------------
+
+def _session_view(job: dict) -> dict:
+    listed = [{"n": s["n"], "kind": s.get("kind"), "added_at": s.get("added_at"), "added_by": s.get("added_by"),
+               "words": len(str(s.get("transcript") or "").split())} for s in sessions.sessions_of(job)]
+    return {"sessions": listed, "agenda": sessions.agenda(job), "pending": bool(job.get("session_pending")),
+            "error": job.get("session_error"), "changes": job.get("session_changes")}
+
+
+@router.get("/kt/{job_id}/sessions")
+async def kt_sessions(job_id: str, principal: Principal = Depends(require_principal)):
+    """The KT's sessions and the agenda for the next one (its open knowledge gaps)."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+    return _session_view(job)
+
+
+def _queue_session(job_id: str, principal: Principal, payload: dict) -> dict:
+    """Mark the KT as taking a session and queue it; a worker rebuilds the document."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        try:
+            sessions.check_can_add(job)
+        except sessions.SessionError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+        try:
+            pipeline.TASKS.enqueue(job_id, "session", dict(payload, added_by=principal.key_label))
+        except ValueError:
+            raise HTTPException(status_code=409, detail="This KT is still being processed")
+        job["session_pending"] = True
+        job.pop("session_error", None)
+        pipeline.JOB_QUEUE[job_id] = job
+    audit(principal.tenant_id, principal.key_label, "kt_session_added",
+          {"job_id": job_id, "session": len(sessions.sessions_of(job)) + 1,
+           "kind": "audio" if payload.get("input_path") else "paste"})
+    return _session_view(job)
+
+
+@router.post("/kt/{job_id}/sessions")
+async def add_kt_session(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:create"))):
+    """Add a pasted follow-up session to a finished KT."""
+    transcript = payload.get("transcript", "")
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
+    cleaned = clean_transcript(transcript)
+    gate = assess_transcript(cleaned, source="paste")
+    if gate["verdict"] == "reject" and not payload.get("force"):
+        raise HTTPException(status_code=422, detail=" ".join(gate["reasons"]))
+    return _queue_session(job_id, principal, {
+        "transcript": cleaned, "warnings": gate["reasons"] if gate["verdict"] != "ok" else []})
+
+
+@router.post("/kt/{job_id}/sessions/upload")
+async def add_kt_session_recording(job_id: str, file: UploadFile,
+                                   principal: Principal = Depends(require_permission("kt:create"))):
+    """Add a recorded follow-up session to a finished KT (same checks as /upload)."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+    try:
+        sessions.check_can_add(job)
+    except sessions.SessionError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    input_path = None
+    try:
+        input_path = await media_guard.save_upload(file)
+        media = await run_in_threadpool(media_guard.probe, input_path)
+        return _queue_session(job_id, principal, {"input_path": input_path, "media_format": media["format"]})
+    except Exception as e:
+        if input_path and os.path.exists(input_path):
+            os.unlink(input_path)
+        if isinstance(e, HTTPException):
+            raise
+        if isinstance(e, media_guard.MediaRejected):
+            raise HTTPException(status_code=e.status, detail=e.message)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/jobs")
 async def list_jobs(limit: int = 50, principal: Principal = Depends(require_principal)):
     """The caller's KT jobs, newest first (persisted across restarts)."""
@@ -288,6 +404,14 @@ async def list_jobs(limit: int = 50, principal: Principal = Depends(require_prin
         job["can_delete"] = can_delete_job(job, principal)
         job.pop("created_by_id", None)
     return {"jobs": jobs}
+
+
+@router.get("/search")
+async def search_kts(q: str = "", limit: int = 20, principal: Principal = Depends(require_principal)):
+    """Finished KTs in the caller's workspace whose document mentions every
+    word of `q`, best match first, with a snippet (P2-4)."""
+    results = await run_in_threadpool(pipeline.JOB_STORE.search, principal.tenant_id, q[:200], max(1, min(limit, 50)))
+    return {"query": q, "results": results}
 
 
 @router.delete("/jobs/{job_id}")
@@ -396,7 +520,19 @@ async def start_signoff(job_id: str, payload: dict, principal: Principal = Depen
     audit(principal.tenant_id, principal.key_label, "kt_signoff_started",
           {"job_id": job_id, "participants": {r: p["email"] for r, p in state["participants"].items()},
            "gaps": len(state["gaps"])})
+    await _notify_review(job_id, job, f"Sign-off started for {_kt_name(job)}: "
+                         + ", ".join(f"{r} {p['email']}" for r, p in state["participants"].items())
+                         + f"; {len(state['gaps'])} knowledge gap(s) to resolve first.")
     return _signoff_response(job_id, job, principal)
+
+
+def _kt_name(job: dict) -> str:
+    return str((job.get("knowledge_object") or {}).get("system_name") or job.get("title") or "a KT")
+
+
+async def _notify_review(job_id: str, job: dict, text: str) -> None:
+    """Post a sign-off step to the team's channel (P2-2), off the event loop."""
+    await run_in_threadpool(observability.notify_review, text, job_id=job_id, kt=_kt_name(job))
 
 
 @router.post("/signoff/{job_id}/gaps/{gap_id}")
@@ -425,6 +561,9 @@ async def acknowledge_signoff(job_id: str, payload: dict, principal: Principal =
     state = signoff.state(job)
     audit(principal.tenant_id, principal.key_label, "kt_signoff_acknowledged",
           {"job_id": job_id, "role": role, "version": payload.get("version")})
+    await _notify_review(job_id, job, (
+        f"{_kt_name(job)} is signed off at version {state['signed_version']}." if signed else
+        f"{principal.key_label} acknowledged {_kt_name(job)} version {payload.get('version')} as the {role}."))
     if signed:
         audit(principal.tenant_id, principal.key_label, "kt_signed", {
             "job_id": job_id, "version": state["signed_version"],
@@ -456,6 +595,11 @@ def _with_signoff_view(job: dict) -> dict:
         job["knowledge_object"] = dict(ko, rendered_sections=signoff.apply_to_document(
             ko["rendered_sections"], job, version))
         job["document_version"] = version
+    # Whisper's segments and each session's own transcript are kept for
+    # rebuilding the document (P2-1); the page needs only the session list.
+    job.pop("segments", None)
+    if job.get("sessions"):
+        job["sessions"] = _session_view(job)["sessions"]
     return job
 
 

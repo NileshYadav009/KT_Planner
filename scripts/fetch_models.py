@@ -12,6 +12,8 @@ change because a model was updated upstream.
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # repo id -> commit. Update deliberately, then re-run the golden suite.
 MODELS = {
     "BAAI/bge-large-en-v1.5": "d4aa6901d3a41ba39fb536a557fa166f842b0e09",          # section classifier
@@ -35,6 +37,12 @@ def fetch() -> None:
         with open(os.path.join(refs, "main"), "w", encoding="ascii") as fh:
             fh.write(revision)
         print(f"{repo}@{revision[:10]} -> {path}")
+    # Speaker diarisation (P1-7): two ONNX files from sherpa-onnx's releases,
+    # checked against pinned SHA-256 sums.
+    import diarization
+
+    for name, path in diarization.fetch().items():
+        print(f"diarisation {name} -> {path}")
     try:
         from rapidocr import RapidOCR
 
@@ -61,6 +69,12 @@ def verify() -> int:
         GLiNER.from_pretrained("urchade/gliner_multi")
     except ImportError:
         pass
+    import diarization
+
+    if not diarization.available():
+        print("speaker diarisation models missing: run scripts/fetch_models.py")
+        return 1
+    diarization._diarizer()
     print("all models load offline")
     return 0
 

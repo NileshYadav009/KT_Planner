@@ -33,6 +33,7 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu "$(grep '^torch
 
 # Models at pinned revisions, then verified to load with the network off.
 COPY scripts/fetch_models.py scripts/fetch_models.py
+COPY diarization.py diarization.py
 RUN python scripts/fetch_models.py && python scripts/fetch_models.py --verify
 
 COPY . .

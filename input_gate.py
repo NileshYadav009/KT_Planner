@@ -13,7 +13,7 @@ Verdicts:
   ok     - nothing to report.
 """
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 MIN_WORDS = 30
 MIN_FACT_SENTENCES = 3
@@ -49,6 +49,31 @@ _PLEASANTRY = re.compile(
     r"okay|ok|so|right|alright|um+|uh+|yeah|great|cool|any questions|let'?s (get )?start\w*)\b[\s,.!?]*",
     re.IGNORECASE,
 )
+
+
+# Language (P2-7). English prose is about a third function words; a KT in
+# another language, or mixed with one ("humara deployment ArgoCD se hota
+# hai"), keeps the English product names but few of these.
+_ENGLISH_FUNCTION_WORDS = frozenset(
+    "the and to of is in it we a an for on that with this are be you our if at from by not have has as or "
+    "when then so they there was will can but all it's its into after before which what".split()
+)
+MIN_ENGLISH_SHARE = 0.12
+MIN_WORDS_FOR_LANGUAGE_CHECK = 40
+MAX_NON_LATIN_SHARE = 0.3
+
+
+def language_warning(text: str) -> Optional[str]:
+    """A reason to warn when the text does not read as English, else None.
+    Continuum maps English KTs; other languages come out wrong or empty."""
+    letters = [ch for ch in text or "" if ch.isalpha()]
+    non_latin = sum(1 for ch in letters if ord(ch) > 0x24F) / max(1, len(letters))
+    words = [w.lower() for w in _WORD_RE.findall(text or "")]
+    english = sum(1 for w in words if w in _ENGLISH_FUNCTION_WORDS) / max(1, len(words))
+    if non_latin > MAX_NON_LATIN_SHARE or (len(words) >= MIN_WORDS_FOR_LANGUAGE_CHECK and english < MIN_ENGLISH_SHARE):
+        return ("The transcript does not read as English (or mixes in another language). Continuum maps English "
+                "KTs, so sections may be wrong or missing; review every section.")
+    return None
 
 
 def _sentences(text: str) -> List[str]:
@@ -115,6 +140,10 @@ def assess_transcript(text: str, *, source: str = "paste") -> Dict:
             f"Only {len(fact_sentences)} sentences carry operational content, so most sections will read "
             f"'not covered'. Plan a follow-up session."
         )
+    language = language_warning(text)
+    if language:
+        # With a rejection it explains why; otherwise the reader is warned.
+        (reject if reject else warn).insert(0, language)
 
     verdict = "reject" if reject else ("warn" if warn else "ok")
     return {"verdict": verdict, "reasons": reject or warn, "metrics": metrics}

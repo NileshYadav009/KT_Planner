@@ -1,0 +1,277 @@
+{
+ "id": "h07_payslip_azure_teams",
+ "holdout": true,
+ "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind, aggregate only; no rule was changed for it. With the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Payslip: Azure App Service payroll portal, pasted Teams transcript with names",
+ "proves": "Speaker-name prefixes and short question/answer turns.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Sam: Okay, recording's on. Jordan, can you start with what Payslip actually is?\n\nJordan: Sure. Payslip is the internal payroll portal. About six thousand employees log in to see their payslips and tax forms, and HR runs the monthly payroll export from it.\n\nSam: And where does it live?\n\nJordan: It's an ASP.NET app on Azure App Service, behind Azure Front Door. The data is in Azure SQL, and the PDFs are in Blob Storage. Everything is defined in Bicep.\n\nSam: How do releases go out?\n\nJordan: Azure DevOps. A pull request into main runs the build, it deploys to test automatically, and production needs an approval from the HR systems lead. We deploy into a staging slot and swap it, so rolling back is just swapping the slots again.\n\nSam: What do you watch?\n\nJordan: Application Insights for the app and Azure Monitor alerts for the database. The main alert is the failed-login rate, because that usually means the identity integration broke.\n\nSam: What breaks?\n\nJordan: Two things. On payroll day the App Service plan hits a hundred percent CPU; scale it out to four instances before the export starts. And the custom domain certificate on Front Door has expired twice, which takes the whole portal offline until someone renews it.\n\nSam: Backups and DR?\n\nJordan: Azure SQL has an auto-failover group to UK West. The RTO we agreed with HR is one hour. Blob Storage is geo-redundant.\n\nSam: Anything I must not do?\n\nJordan: Don't edit the failover group settings by hand, and never run a migration directly against the production database, it has to go through the pipeline.\n\nSam: Busy dates?\n\nJordan: The twenty-fifth of every month is payroll day, and nothing gets deployed in the three days before it.\n\nSam: Environments?\n\nJordan: Dev, test and prod. Test has anonymised copies of last quarter's payslips.\n\nSam: Security?\n\nJordan: Secrets are in Key Vault, people get access through Entra ID groups, and the SQL server is only reachable through a private endpoint.\n\nSam: Who owns it?\n\nJordan: The HR systems team owns Payslip. Out of hours, the managed service desk takes the first call and escalates to Lena Fischer.\n\nSam: Costs?\n\nJordan: The dev App Service plan is scaled down every evening.\n\nSam: Anything unfinished?\n\nJordan: The upgrade from dot NET 6 to dot NET 8 hasn't been started and has no owner.\n\nSam: And for me, starting out?\n\nJordan: Get added to the Payslip-Admins group first. In your first month, do one production release with me watching.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Payslip is the internal payroll portal",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "About six thousand employees log in to see their payslips and tax forms",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "HR runs the monthly payroll export from it",
+   "in": [
+    "system_overview",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "It's an ASP.NET app on Azure App Service, behind Azure Front Door",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The data is in Azure SQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the PDFs are in Blob Storage",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Everything is defined in Bicep",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "A pull request into main runs the build, it deploys to test automatically",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "production needs an approval from the HR systems lead",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "We deploy into a staging slot and swap it",
+   "in": [
+    "deployment_and_rollback",
+    "environments"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Application Insights for the app and Azure Monitor alerts for the database",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "The main alert is the failed-login rate",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "On payroll day the App Service plan hits a hundred percent CPU",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "scale it out to four instances before the export starts",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "the custom domain certificate on Front Door has expired twice",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Azure SQL has an auto-failover group to UK West",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "The RTO we agreed with HR is one hour",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "one hour"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Blob Storage is geo-redundant",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Don't edit the failover group settings by hand",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "never run a migration directly against the production database",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "The twenty-fifth of every month is payroll day",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "nothing gets deployed in the three days before it",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Dev, test and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Test has anonymised copies of last quarter's payslips",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Secrets are in Key Vault",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "people get access through Entra ID groups",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "the SQL server is only reachable through a private endpoint",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The HR systems team owns Payslip",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "hr systems team",
+    "payslip"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the managed service desk takes the first call and escalates to Lena Fischer",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "The dev App Service plan is scaled down every evening",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "hasn't been started and has no owner",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Get added to the Payslip-Admins group first",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "do one production release with me watching",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

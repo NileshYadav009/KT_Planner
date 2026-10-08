@@ -99,3 +99,39 @@ def test_a_database_with_the_first_stored_pdf_table_still_exports(tmp_path):
     assert store.current_document("old-0001") is None             # the old cache is gone, not misread
     store.save_document("old-0001", b"%PDF new", version)
     assert store.current_document("old-0001") == b"%PDF new"
+
+
+# --------------------------------------------------------------------------
+# P2-4: search across KTs
+# --------------------------------------------------------------------------
+
+def _kt(name, *sentences, status="completed", tenant="acme"):
+    return {"status": status, "tenant_id": tenant, "knowledge_object": {"system_name": name, "rendered_sections": [
+        {"section_title": "Common Failures", "blocks": [{"type": "NarrativeBlock", "title": "Failures",
+                                                         "paragraphs": list(sentences)}]}]}}
+
+
+def test_search_finds_finished_kts_of_the_workspace_only(store):
+    store.put("s-1", _kt("Harbor", "Cosmos DB throttles when the vans reconnect."))
+    store.put("s-2", _kt("Draft", "Cosmos DB is mentioned here too.", status="processing"))
+    store.put("s-3", _kt("Elsewhere", "Cosmos DB throttles there as well.", tenant="globex"))
+    found = store.search("acme", "cosmos throttl")          # the last word as a prefix: search as you type
+    assert [r["job_id"] for r in found] == ["s-1"]
+    assert "\u0002Cosmos\u0003" in found[0]["snippet"]
+    assert store.search("acme", '"; DROP TABLE jobs; --') == [] and store.search("acme", "  ") == []
+
+
+def test_an_edited_document_is_searched_as_edited_and_a_deleted_one_is_gone(store):
+    store.put("s-1", _kt("Harbor", "Cosmos DB throttles."))
+    store.put("s-1", _kt("Harbor", "Service Bus dead letters pile up."))
+    assert store.search("acme", "cosmos") == [] and [r["job_id"] for r in store.search("acme", "dead letters")] == ["s-1"]
+    store.delete("s-1")
+    assert store.search("acme", "dead letters") == []
+
+
+def test_kts_finished_before_search_existed_are_found(store):
+    store.put("s-1", _kt("Harbor", "Cosmos DB throttles."))
+    with store._connect() as db:
+        db.execute("DELETE FROM kt_search")                  # as if indexed before P2-4
+    reopened = JobStore(store.path)
+    assert [r["job_id"] for r in reopened.search("acme", "cosmos")] == ["s-1"]

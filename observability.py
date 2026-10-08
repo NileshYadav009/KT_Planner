@@ -16,6 +16,8 @@ Alerts    CONTINUUM_ALERT_WEBHOOK_URL receives {"text": ...} (Slack and Teams
           incoming webhooks accept it) when a KT fails for a reason other
           than its input, and when the oldest queued KT has waited longer
           than CONTINUUM_ALERT_QUEUE_AGE_SECONDS (default 900).
+Review    CONTINUUM_REVIEW_WEBHOOK_URL receives the same shape when a
+          sign-off starts, someone acknowledges, and the KT is signed.
 Errors    SENTRY_DSN sends exceptions to Sentry, with no request bodies, no
           local variables and no personal data.
 
@@ -288,9 +290,8 @@ def prometheus_text(runs: List[Dict[str, Any]], queue: Dict[str, Any]) -> str:
 # Alerts
 # --------------------------------------------------------------------------
 
-def send_alert(text: str, **fields: Any) -> bool:
-    """POST {"text": ..., ...} to CONTINUUM_ALERT_WEBHOOK_URL. Never raises."""
-    url = os.getenv("CONTINUUM_ALERT_WEBHOOK_URL")
+def _post_webhook(env_var: str, text: str, fields: Dict[str, Any]) -> bool:
+    url = os.getenv(env_var)
     if not url:
         return False
     body = json.dumps(dict(fields, text=text), default=str).encode("utf-8")
@@ -299,8 +300,20 @@ def send_alert(text: str, **fields: Any) -> bool:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 (operator-configured URL)
             return 200 <= resp.status < 300
     except Exception as exc:
-        logger.warning("Alert webhook failed: %s", exc)
+        logger.warning("Webhook %s failed: %s", env_var, exc)
         return False
+
+
+def send_alert(text: str, **fields: Any) -> bool:
+    """POST {"text": ..., ...} to CONTINUUM_ALERT_WEBHOOK_URL. Never raises."""
+    return _post_webhook("CONTINUUM_ALERT_WEBHOOK_URL", text, fields)
+
+
+def notify_review(text: str, **fields: Any) -> bool:
+    """Tell the team's channel about a sign-off step (P2-2): POST {"text": ...}
+    to CONTINUUM_REVIEW_WEBHOOK_URL (a Slack or Teams incoming webhook).
+    Never raises; unset sends nothing."""
+    return _post_webhook("CONTINUUM_REVIEW_WEBHOOK_URL", text, fields)
 
 
 def alert_on_run(run: Dict[str, Any], error: Optional[str]) -> bool:

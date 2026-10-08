@@ -104,6 +104,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r".{0,80}\b(?:escalat\w*|owns?|responsible|contact|involve)\b",
             r"\b(?:escalat\w*|owns?|responsible|contact)\b.{0,80}"
             r"\b(?:on-?call\s+engineer|head\s+of\s+engineering|platform\s+engineering\s+manager|engineering\s+director)\b",
+            # Who to go to: "Day-to-day questions go to Omar Haddad", "for
+            # anything with invoices, contact the finance systems lead".
+            r"\b(?:questions?|issues?|requests?|queries)\s+(?:about\s+[^.;]{1,30}?\s+)?(?:go(?:es)?|should\s+go|are\s+routed)\s+to\b",
+            r"\b(?:contact|reach\s+out\s+to|call)\s+(?:the\s+)?(?:[\w-]+\s+){0,4}?"
+            r"(?:lead|manager|owner|team|squad|service\s+desk|help\s*desk|dba|architect)\b",
         ],
         0.97,
     ),
@@ -404,6 +409,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bunowned\b",
             r"\b(?:open|outstanding|pending|unresolved)\s+(?:items?|tasks?|actions?|work|issues?|questions?)\b",
             r"\bnot\s+yet\s+(?:been\s+)?(?:assigned|resolved|completed|done|migrated|fixed)\b",
+            # "The move to MySQL 8.0 still needs doing, and no one has picked it up."
+            r"\bstill\s+needs?\s+(?:doing|to\s+be\s+(?:done|finished|completed))\b",
+            r"\b(?:no\s*one|nobody)\s+(?:has\s+)?(?:picked\s+(?:it|this|that)\s+up|owns\s+(?:it|this|that))\b",
+            r"\bnot\s+assigned\s+to\s+anyone\b",
         ],
         0.975,
     ),
@@ -444,6 +453,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         [
             r"^(?:\W*(?:and|but|also|so|please|be\s+careful)\b[\s,:]*)*(?:never|do\s+not|don'?t)\s+"
             r"(?!worry\b|hesitate\b|forget\b|mind\b)[a-z]+",
+            # The same prohibition after a lead-in: "Watch out for the
+            # nightly batch at 2 AM: do not restart Tomcat while it runs."
+            r"[:;]\s*(?:please\s+)?(?:never|do\s+not|don'?t)\s+(?!worry\b|hesitate\b|forget\b|mind\b|panic\b)[a-z]+",
         ],
         0.955,
     ),
@@ -458,6 +470,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\b(?:one|another|the|a)\s+(?:(?:most|second|third|other|big|main|recurring|common|known|frequent|"
             r"typical)\s+){1,3}(?:production\s+)?(?:problem|issue|failure)s?\s+(?:is|was|we\s+(?:see|hit))\b",
             r"\bthe\s+fix\s+(?:is|was)\b",
+            # The fix stated by its effect: "Restarting the scanner app fixes
+            # it", "adding a second instance sorts it out".
+            r"\b(?:fixes|fixed|sorts|sorted|clears|cleared|solves|solved|resolves|resolved|cures)\s+it(?:\s+out)?\b",
             # The instruction that follows a symptom: "Renew it in Key Vault and restart the worker."
             r"^(?:then\s+)?(?:renew|restart)\s+(?:it|the|them)\b",
             # A triage step: "For Kubernetes issues, check GKE and ArgoCD." It
@@ -531,10 +546,27 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bleast\s+privilege\b",
             r"\bservice\s+controls\b",
             r"\bsecrets?\s+(?:live|lives|are\s+kept|are\s+stored)\s+in\b",
-            r"\b(?:production\s+)?access\s+goes\s+through\b",
+            r"\b(?:production\s+|console\s+)?access\s+(?:goes|is)\s+(?:through|via)\b",
             r"\bhardware\s+(?:security\s+)?keys?\b",
         ],
         0.95,
+    ),
+    (
+        # Security controls named as such: "everything sits behind the
+        # corporate firewall", "the VM uses a managed identity". Below the
+        # day-one checklist (0.95), whose access lists name the same things.
+        "security_controls",
+        [
+            r"\bfirewalls?\b",
+            r"\bmanaged\s+identit(?:y|ies)\b",
+            r"\bservice\s+principals?\b",
+            r"\bencrypt(?:ed|ion|s)?\b",
+            r"\bprivate\s+(?:endpoints?|link)\b",
+            r"\bnetwork\s+polic(?:y|ies)\b",
+            r"\biam\s+(?:roles?|polic(?:y|ies))\b",
+            r"\brbac\b",
+        ],
+        0.945,
     ),
 ]
 
@@ -906,18 +938,59 @@ ENTITY_TYPE_SECTION_AFFINITY: Dict[str, Tuple[str, float]] = {
 }
 
 
-def entity_affinity_boost(section_id: str, entities: Optional[Dict[str, List[str]]]) -> Tuple[float, Optional[str]]:
+_OBSERVABILITY_NOUN = re.compile(
+    r"\b(?:alert\w*|alarms?|dashboards?|metrics?|monitor\w*|observability|tracing|traces?|apm|slos?|slis?|uptime)\b",
+    re.IGNORECASE,
+)
+_MONITORING_TOOLS: Optional[re.Pattern] = None
+
+
+def _is_monitoring_entity(value: str) -> bool:
+    """GLiNER's "monitoring" label is loose: it tagged the vans' "readings"
+    and "Oracle archive logs" (database redo logs), and its 0.10 boost then
+    outweighed the 0.01-0.07 margins between sections, so a failure and its
+    fix were filed under Monitoring. Only a monitoring or alerting tool from
+    the component catalog, or an observability noun, counts."""
+    global _MONITORING_TOOLS
+    if _MONITORING_TOOLS is None:
+        from architecture_diagram import _LAYER_TERMS
+
+        names = sorted({n for layer in ("monitoring", "alerting") for n in _LAYER_TERMS.get(layer, [])},
+                       key=len, reverse=True)
+        _MONITORING_TOOLS = re.compile(r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b", re.IGNORECASE)
+    return bool(_OBSERVABILITY_NOUN.search(value) or _MONITORING_TOOLS.search(value))
+
+
+# A person or team named in a sentence says nothing about ownership unless
+# the sentence is about owning, contacting or escalating: "Pickers use
+# handheld scanners that talk to it all day" was filed under Ownership on
+# the "owner" entity "Pickers".
+_OWNERSHIP_LANGUAGE = re.compile(
+    r"\b(?:own\w*|responsib\w*|escalat\w*|contact\w*|on-?call|page[sd]?|paging|call|ask|reach|"
+    r"lead|manager|team|squad|questions?|support)\b",
+    re.IGNORECASE,
+)
+
+
+def entity_affinity_boost(section_id: str, entities: Optional[Dict[str, List[str]]],
+                          text: Optional[str] = None) -> Tuple[float, Optional[str]]:
     """Return (boost, note) if extracted entities support classifying this
     sentence into `section_id`, else (0.0, None).
 
     `entities` is the dict EntityExtractor.get_context_entities() returns,
-    e.g. {"monitoring": ["PagerDuty"], "owner": ["Platform Team"]}.
+    e.g. {"monitoring": ["PagerDuty"], "owner": ["Platform Team"]}. With the
+    sentence `text`, an owner or escalation entity counts only when the
+    sentence talks about ownership.
     """
     if not entities:
         return 0.0, None
 
     for entity_type, values in entities.items():
         affinity = ENTITY_TYPE_SECTION_AFFINITY.get(entity_type)
+        if entity_type == "monitoring":
+            values = [v for v in values or [] if _is_monitoring_entity(str(v))]
+        if entity_type in ("owner", "escalation") and text is not None and not _OWNERSHIP_LANGUAGE.search(text):
+            values = []
         if affinity and affinity[0] == section_id and values:
             return affinity[1], f"{entity_type}:{values[0]}"
 

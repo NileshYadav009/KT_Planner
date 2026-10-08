@@ -209,6 +209,13 @@ MIN_PER_WORD_SIMILARITY = 0.82
 # metrics (e.g. "rabbitmq"/"rabbit"=0.75, "graphana"/"grafana"=0.75).
 MIN_PER_WORD_LEVENSHTEIN = 0.6
 
+# Each word can pass on its own while the phrase as a whole is a different
+# phrase: "log hours" passes word by word against "long horn" (0.75 and 0.60)
+# and a timesheet KT's "consultants log hours in it" became "consultants
+# longhorn in it". A real garble is close as a whole too ("rabid mq" against
+# "rabbit mq" is 0.78; "log hours" against "long horn" is 0.67).
+MIN_PHRASE_LEVENSHTEIN = 0.72
+
 # ============================================================================
 # Phrase-Level Corrections
 # ============================================================================
@@ -801,7 +808,7 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
                     and levenshtein_similarity(w.lower(), tw) >= MIN_PER_WORD_LEVENSHTEIN
                     for w, tw in zip(ngram_words, target_words)
                 )
-                if not per_word_ok:
+                if not per_word_ok or levenshtein_similarity(phrase, target) < MIN_PHRASE_LEVENSHTEIN:
                     continue
                 best_score = score
                 best_term = target

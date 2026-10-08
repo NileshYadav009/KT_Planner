@@ -12,6 +12,7 @@ list / delete) is what a Postgres implementation would provide later.
 """
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -96,9 +97,41 @@ CREATE TABLE IF NOT EXISTS documents (
     pdf          BLOB NOT NULL,
     job_version  REAL NOT NULL
 );
+-- P2-4: search across KTs. The current document of each finished KT
+-- (reviewer edits included), refreshed whenever the job is saved.
+CREATE VIRTUAL TABLE IF NOT EXISTS kt_search USING fts5(
+    job_id UNINDEXED, title, body, tokenize = 'porter unicode61'
+);
 """
 # Rows that belong to a job and go when it goes.
-_JOB_TABLES = ("tasks", "idempotency_keys", "documents", "document_versions")
+_JOB_TABLES = ("tasks", "idempotency_keys", "documents", "document_versions", "kt_search")
+_SEARCHABLE = ("completed", "completed_with_warnings")
+# Snippet highlight markers; the UI turns them into <mark> after escaping.
+SNIPPET_START, SNIPPET_END = "\u0002", "\u0003"
+
+
+def document_text(knowledge_object: Dict[str, Any]) -> str:
+    """Every heading and statement of a rendered KT document, as plain text."""
+    parts: List[str] = []
+    for section in knowledge_object.get("rendered_sections") or []:
+        parts.append(str(section.get("section_title") or ""))
+        for block in section.get("blocks") or []:
+            parts.append(str(block.get("title") or ""))
+            for key in ("paragraphs", "items", "warnings", "steps"):
+                parts.extend(str(v) for v in block.get(key) or [] if isinstance(v, str))
+            for row in (block.get("rows") or []) + (block.get("entries") or []):
+                if isinstance(row, dict):
+                    parts.extend(str(v) for v in row.values() if isinstance(v, str))
+    return "\n".join(p for p in parts if p.strip())
+
+
+def search_query(text: str) -> Optional[str]:
+    """User words as an FTS5 query: every word must appear, the last one as
+    a prefix (search as you type). None when there is nothing to search for."""
+    words = re.findall(r"\w+", text or "")[:12]
+    if not words:
+        return None
+    return " ".join(f'"{w}"' for w in words[:-1]) + (" " if len(words) > 1 else "") + f'"{words[-1]}"*'
 
 
 class JobStore:
@@ -163,7 +196,47 @@ class JobStore:
                 (job_id, job.get("tenant_id") or "local", job.get("status", "processing"), title, now, now,
                  job.get("error"), self._pack(job), job.get("created_by_id")),
             )
+            self._index(db, job_id, job)
         return now
+
+    @staticmethod
+    def _index(db: sqlite3.Connection, job_id: str, job: Dict[str, Any]) -> None:
+        db.execute("DELETE FROM kt_search WHERE job_id = ?", (job_id,))
+        if job.get("status") in _SEARCHABLE:
+            ko = job.get("knowledge_object") or {}
+            db.execute("INSERT INTO kt_search (job_id, title, body) VALUES (?, ?, ?)",
+                       (job_id, str(ko.get("system_name") or job.get("title") or ""), document_text(ko)))
+
+    def search(self, tenant_id: Optional[str], text: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Finished KTs whose document mentions every word of `text`, best
+        match first, each with a snippet around the match (P2-4)."""
+        query = search_query(text)
+        if not query:
+            return []
+        self._backfill_search()
+        sql = ("SELECT k.job_id, j.title, j.status, j.created_at, snippet(kt_search, 2, ?, ?, '…', 16) "
+               "FROM kt_search k JOIN jobs j ON j.job_id = k.job_id WHERE kt_search MATCH ?")
+        args: list = [SNIPPET_START, SNIPPET_END, query]
+        if tenant_id is not None:
+            sql += " AND j.tenant_id = ?"
+            args.append(tenant_id)
+        sql += " ORDER BY rank LIMIT ?"
+        args.append(int(limit))
+        with self._connect() as db:
+            rows = db.execute(sql, args).fetchall()
+        return [{"job_id": r[0], "title": r[1], "status": r[2], "created_at": r[3], "snippet": r[4]} for r in rows]
+
+    def _backfill_search(self) -> None:
+        """Index KTs that finished before search existed (once per store)."""
+        if getattr(self, "_search_backfilled", False):
+            return
+        with self._lock, self._connect() as db:
+            missing = db.execute(
+                "SELECT job_id, payload FROM jobs WHERE status IN (?, ?) "
+                "AND job_id NOT IN (SELECT job_id FROM kt_search)", _SEARCHABLE).fetchall()
+            for job_id, payload in missing:
+                self._index(db, job_id, self._unpack(payload))
+        self._search_backfilled = True
 
     def updated_at(self, job_id: str) -> Optional[float]:
         """The job's version: changes on every write, from any process."""

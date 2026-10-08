@@ -7,11 +7,12 @@ Populate KT fields from coverage content using pattern, semantic, and LLM passes
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from devops_transcription import apply_devops_corrections
 from llm.usage import record_skip as record_llm_skip
 from llm.usage import record_rejected as record_llm_rejected
+from llm.batching import llm_batch_calls_enabled
 from grounding import ungrounded, looks_malformed
 from dialogue import is_field_candidate
 from component_catalog import ToolMatcher
@@ -959,7 +960,13 @@ def _extract_by_pattern(
         return ownership_dict.get(field_id)
 
     if "oncall_tool" in field_id or "oncall" in field_id:
-        oncall_pattern = re.compile(r"\b(PagerDuty|OpsGenie|VictorOps|Splunk\s+On-Call)\b", re.IGNORECASE)
+        # Any paging tool the component catalog knows (incident.io, Grafana
+        # OnCall, Rootly, ...), not only the first three ever seen.
+        from architecture_diagram import _LAYER_TERMS
+
+        names = sorted({"splunk on-call", *_LAYER_TERMS.get("alerting", [])}, key=len, reverse=True)
+        oncall_pattern = re.compile(r"\b(" + "|".join(r"\s+".join(map(re.escape, n.split())) for n in names) + r")\b",
+                                    re.IGNORECASE)
         match = oncall_pattern.search(section_text)
         if match:
             return match.group(1)
@@ -1223,6 +1230,14 @@ def _is_name_field(field: Dict[str, Any]) -> bool:
     return field_id.endswith(("_name", "_owner")) or field_id == "name" or "name" in label_words
 
 
+def _is_tool_field(field: Dict[str, Any]) -> bool:
+    """A field that names a tool ("On-call tool"). Like a name, it comes from
+    a pattern or the LLM, never from the most similar sentence: a KT that
+    said only "the alert goes to the on-call phone" had its whole Monitoring
+    paragraph printed again as the on-call tool."""
+    return str(field.get("id") or "").lower().endswith("_tool")
+
+
 # Optional measurement hook: called as (field, candidates, scores, best_idx)
 # for every embedding-scored field. None in normal operation. Exists so the
 # threshold/evidence rules above can be re-calibrated against real
@@ -1469,6 +1484,9 @@ def populate_fields(
         result[section_id] = {}
         shared_used_lines: Set[str] = set()
         shared_captured: List[str] = []
+        # LLM_BATCH_CALLS: the section's gap-fills in one call, after every
+        # field has had its pattern and semantic pass (P1-12).
+        deferred: Optional[List[Dict[str, Any]]] = [] if llm_provider and llm_batch_calls_enabled() else None
         # Two phases: every non-table field first, then tables (see
         # _populate_fields_recursive's `phase`). The used-line set and the
         # captured-values list are shared across both, so a table cannot
@@ -1489,7 +1507,11 @@ def populate_fields(
                 already_captured=shared_captured,
                 dynamic_field_fallback_sentences=all_sentence_texts,
                 phase=phase,
+                deferred=deferred,
             )
+        if deferred:
+            _fill_deferred_gaps(deferred, section_id, section_title, section_text, llm_provider,
+                                shared_captured, all_sentence_texts, embedding_model)
 
     if isinstance(result.get("first_30_day_ownership"), dict):
         _redistribute_weeks(result["first_30_day_ownership"])
@@ -1562,6 +1584,133 @@ def find_source_sentence_index(value: Any, raw_sentence_texts: List[str]) -> Opt
     return None
 
 
+def _accept_llm_value(val: str, basis: str, field: Dict[str, Any], section_id: str,
+                      section_text: str) -> Optional[Tuple[str, str]]:
+    """(value, source) for an LLM gap-fill answer that survives every check,
+    else None. Shared by the one-field and the batched gap-fill."""
+    field_id = field.get("id")
+    field_type = field.get("type", "text")
+    field_label = field.get("label", field_id)
+    val = (val or "").strip()
+    if val:
+        # The model paraphrases/rewrites rather than quoting
+        # verbatim, and can introduce its own typo on a known
+        # tool/product name in the process (observed on a real
+        # transcript: "Security scanning is performed using
+        # Trivy." -> field value "Trivi for security scanning").
+        # Run the same known-terms correction real transcript
+        # text gets, so a value that drifts away from a canonical
+        # spelling the glossary already knows gets pulled back.
+        val, _ = apply_devops_corrections(val)
+    basis = (basis or "INFERRED").strip().upper()
+    if val and field_type in ("single_select", "boolean") and _only_stated_as_condition(val, section_text):
+        # "Handover is complete once you have done one supervised
+        # release" states a criterion; the model answered KT
+        # status "Complete" from it.
+        val = ""
+    if val and val.upper() != "NOT_MENTIONED":
+        # The model's own EXPLICIT/INFERRED line is not evidence.
+        # Every specific in the value (number, name, product,
+        # region, channel) must be in the text it was given, or
+        # be one of the field's own options; chatter and JSON
+        # fragments are not values at all.
+        allowed = " ".join([section_text, field_label, str(field.get("description", "")),
+                            " ".join(map(str, field.get("options") or []))])
+        missing = [] if looks_malformed(val) else ungrounded(val, allowed)
+        if looks_malformed(val) or missing:
+            logger.warning("Discarded LLM value for %s.%s (%s): %r", section_id, field_id,
+                           "malformed" if looks_malformed(val) else f"not in transcript: {missing}", val[:200])
+            record_llm_rejected("field_fill", f"{section_id}.{field_id}: {val[:120]}")
+            val = ""
+    if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
+        # The gap-fill prompt forbids inventing ungrounded values,
+        # so a returned value is always an extraction — but only
+        # tag it "llm" (which knowledge_builder marks as
+        # *(inferred...)* in the rendered doc) when the model
+        # itself says it had to reason beyond what's literally
+        # stated. A directly-stated-but-paraphrased fact (e.g.
+        # "most business critical system" -> "High") is grounded,
+        # not inferred.
+        return val, ("llm" if basis.startswith("INFER") else "llm_explicit")
+    return None
+
+
+def _build_llm_batch_gap_fill_prompt(section_title: str, fields: List[Dict[str, Any]], available_text: str,
+                                     already_captured: List[str]) -> str:
+    """Every gap of one section in one prompt (P1-12), with the same rules
+    the one-field prompt gives each field."""
+    entries = []
+    for number, field in enumerate(fields, start=1):
+        label = field.get("label", field.get("id", ""))
+        entry = f"{number}. {label}: {field.get('description', '')}"
+        if field.get("options"):
+            entry += f" Valid options: {', '.join(map(str, field['options']))}."
+        structural = {"url": "an actual URL (http:// or https://)", "date": "an actual calendar date or timestamp",
+                      "boolean": "an explicit yes/no or clearly confirmed/denied statement"}.get(field.get("type"))
+        if structural:
+            entry += (f" Requires {structural} literally present in the transcript; a mention of a related "
+                      f"tool or place does not count.")
+        entries.append(entry)
+    captured = "\n".join(f"- {item}" for item in already_captured if item)
+    return (
+        f"You are filling the empty fields of one Knowledge Transfer document section.\n\n"
+        f"Section: {section_title}\n\nFields:\n" + "\n".join(entries) + "\n\n"
+        + (f"Already captured for other fields in this section (do not repeat these as values of the fields "
+           f"above unless the transcript says they apply to that field too):\n{captured}\n\n" if captured else "")
+        + f"Available transcript content:\n{available_text}\n\n"
+        "Rules:\n"
+        "- For each field, extract or normalize the value the transcript states for THAT field (even in "
+        "different words). A fact about a different, similar item (another environment, entity or team) is "
+        "not that field's value.\n"
+        "- If nothing relevant to a field is present, its value is exactly NOT_MENTIONED.\n"
+        "- Do NOT invent information that has no basis in the transcript above.\n"
+        "- Spell every tool, product, and proper noun EXACTLY as it appears in the transcript above.\n"
+        "- If the relevant sentence states more than one fact about the field, include all of them.\n\n"
+        "Respond with exactly one line per field, in order, and nothing else:\n"
+        "<number>. <value or NOT_MENTIONED> | <EXPLICIT if the transcript directly states it, "
+        "INFERRED if you had to reason beyond what it says>"
+    )
+
+
+_BATCH_ANSWER_RE = re.compile(r"^\W*(\d+)\s*[.):\-]\s*(.*?)\s*(?:\|\s*(EXPLICIT|INFERRED)\w*)?\s*$", re.IGNORECASE)
+
+
+def _fill_deferred_gaps(deferred: List[Dict[str, Any]], section_id: str, section_title: str, section_text: str,
+                        llm_provider, already_captured: List[str],
+                        dynamic_field_fallback_sentences: List[str], embedding_model) -> None:
+    """The gap-fills _populate_fields_recursive deferred, LLM_GAP_FILL_BATCH_SIZE
+    fields per call; the same checks and the same dynamic-field fallback
+    as the one-field path."""
+    size = max(1, int(os.getenv("LLM_GAP_FILL_BATCH_SIZE", "12")))
+    for start in range(0, len(deferred), size):
+        chunk = deferred[start:start + size]
+        answers: Dict[int, Tuple[str, str]] = {}
+        try:
+            prompt = _build_llm_batch_gap_fill_prompt(section_title, [d["field"] for d in chunk],
+                                                      section_text[:1500], already_captured)
+            raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=96 * len(chunk) + 32)
+            for line in str(raw or "").splitlines():
+                m = _BATCH_ANSWER_RE.match(line.strip())
+                if m:
+                    answers.setdefault(int(m.group(1)), (m.group(2), m.group(3) or "INFERRED"))
+        except Exception as exc:
+            logger.warning("Batched LLM field fill failed for %s: %s", section_id, exc)
+        for number, item in enumerate(chunk, start=1):
+            field, output = item["field"], item["output"]
+            field_id, field_label = field.get("id"), field.get("label", field.get("id"))
+            value, basis = answers.get(number, ("", ""))
+            accepted = _accept_llm_value(value, basis, field, section_id, section_text)
+            if accepted:
+                output[field_id] = item["emit"](accepted[0], 0.75, accepted[1])
+                already_captured.append(f"{field_label}: {accepted[0]}")
+                continue
+            if (field.get("dynamic") and field.get("type", "text") == "text" and dynamic_field_fallback_sentences and not _is_tool_field(field)):
+                fallback = _extract_by_semantic(field, dynamic_field_fallback_sentences, embedding_model)
+                if fallback is not None:
+                    output[field_id] = {"value": fallback, "confidence": 0.65, "source": "semantic"}
+                    already_captured.append(f"{field_label}: {fallback}")
+
+
 def _populate_fields_recursive(
     fields: List[Dict[str, Any]],
     section_id: str,
@@ -1576,12 +1725,14 @@ def _populate_fields_recursive(
     already_captured: Optional[List[str]] = None,
     dynamic_field_fallback_sentences: Optional[List[str]] = None,
     phase: Optional[str] = None,
+    deferred: Optional[List[Dict[str, Any]]] = None,
 ):
     """`phase` "fields" populates every non-table field (recursing into
     groups), "tables" only the table fields; None does both in one pass.
     populate_fields() runs the two phases in that order so a specific field
     claims its sentence before any catch-all table takes "every remaining
-    line" -- including tables nested inside groups."""
+    line" -- including tables nested inside groups. `deferred` (a list)
+    collects the LLM gap-fills for one batched call instead of making them."""
     raw_sentence_texts = raw_sentence_texts or []
     used_line_keys = used_line_keys if used_line_keys is not None else set()
     dynamic_field_fallback_sentences = dynamic_field_fallback_sentences or []
@@ -1659,6 +1810,7 @@ def _populate_fields_recursive(
                 already_captured=already_captured,
                 dynamic_field_fallback_sentences=dynamic_field_fallback_sentences,
                 phase=phase,
+                deferred=deferred,
             )
             continue
 
@@ -1693,7 +1845,7 @@ def _populate_fields_recursive(
         # that filled Incoming owner with the opening greeting and Outgoing
         # owner with "The outgoing owner has therefore not marked the handover
         # as fully closed." Names come from patterns or the LLM only.
-        if field_type == "text" and sentences and not _is_name_field(field):
+        if field_type == "text" and sentences and not _is_name_field(field) and not _is_tool_field(field):
             own_word = identity_words.get(field_id) if use_identity_filter else None
             other_words = (
                 [w for fid, w in identity_words.items() if fid != field_id and w]
@@ -1719,6 +1871,13 @@ def _populate_fields_recursive(
             # and tells the model to answer NOT_MENTIONED otherwise. With no
             # candidate in the text that answer is already known.
             record_llm_skip("field_fill", f"no literal {field_type} in section")
+        elif llm_provider and section_text.strip() and field_type != "table" and deferred is not None:
+            # Batched (LLM_BATCH_CALLS): asked with the section's other gaps
+            # in one call once every field has had its pattern and semantic
+            # pass (_fill_deferred_gaps); placeholder until then.
+            output[field_id] = {"value": "", "confidence": 0.0, "source": "unfilled"}
+            deferred.append({"field": field, "output": output, "emit": _emit})
+            continue
         elif llm_provider and section_text.strip() and field_type != "table":
             try:
                 prompt = _build_llm_gap_fill_prompt(
@@ -1729,47 +1888,10 @@ def _populate_fields_recursive(
                 )
                 raw = llm_provider.generate(prompt, temperature=0.1, max_output_tokens=128)
                 lines = [ln.strip() for ln in raw.splitlines() if ln.strip()] if isinstance(raw, str) else []
-                val = lines[0] if lines else ""
-                if val:
-                    # The model paraphrases/rewrites rather than quoting
-                    # verbatim, and can introduce its own typo on a known
-                    # tool/product name in the process (observed on a real
-                    # transcript: "Security scanning is performed using
-                    # Trivy." -> field value "Trivi for security scanning").
-                    # Run the same known-terms correction real transcript
-                    # text gets, so a value that drifts away from a canonical
-                    # spelling the glossary already knows gets pulled back.
-                    val, _ = apply_devops_corrections(val)
-                basis = lines[1].upper() if len(lines) > 1 else "INFERRED"
-                if val and field_type in ("single_select", "boolean") and _only_stated_as_condition(val, section_text):
-                    # "Handover is complete once you have done one supervised
-                    # release" states a criterion; the model answered KT
-                    # status "Complete" from it.
-                    val = ""
-                if val and val.upper() != "NOT_MENTIONED":
-                    # The model's own EXPLICIT/INFERRED line is not evidence.
-                    # Every specific in the value (number, name, product,
-                    # region, channel) must be in the text it was given, or
-                    # be one of the field's own options; chatter and JSON
-                    # fragments are not values at all.
-                    allowed = " ".join([section_text, field_label, str(field.get("description", "")),
-                                        " ".join(map(str, field.get("options") or []))])
-                    missing = [] if looks_malformed(val) else ungrounded(val, allowed)
-                    if looks_malformed(val) or missing:
-                        logger.warning("Discarded LLM value for %s.%s (%s): %r", section_id, field_id,
-                                       "malformed" if looks_malformed(val) else f"not in transcript: {missing}", val[:200])
-                        record_llm_rejected("field_fill", f"{section_id}.{field_id}: {val[:120]}")
-                        val = ""
-                if val and val.upper() != "NOT_MENTIONED" and len(val) < 500:
-                    # The gap-fill prompt forbids inventing ungrounded values,
-                    # so a returned value is always an extraction — but only
-                    # tag it "llm" (which knowledge_builder marks as
-                    # *(inferred...)* in the rendered doc) when the model
-                    # itself says it had to reason beyond what's literally
-                    # stated. A directly-stated-but-paraphrased fact (e.g.
-                    # "most business critical system" -> "High") is grounded,
-                    # not inferred.
-                    source = "llm" if basis.startswith("INFER") else "llm_explicit"
+                accepted = _accept_llm_value(lines[0] if lines else "", lines[1] if len(lines) > 1 else "",
+                                             field, section_id, section_text)
+                if accepted:
+                    val, source = accepted
                     output[field_id] = _emit(val, 0.75, source)
                     already_captured.append(f"{field_label}: {val}")
                     continue
@@ -1782,7 +1904,7 @@ def _populate_fields_recursive(
         # field's existence might have been classified into a different
         # section entirely. Retry pattern + semantic extraction against every
         # section's sentences combined, not just this one.
-        if field.get("dynamic") and field_type == "text" and dynamic_field_fallback_sentences:
+        if field.get("dynamic") and field_type == "text" and dynamic_field_fallback_sentences and not _is_tool_field(field):
             # (The cross-section PATTERN pass already ran above, before the
             # in-section semantic pass.)
             value = _extract_by_semantic(field, dynamic_field_fallback_sentences, embedding_model)

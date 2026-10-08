@@ -1,0 +1,53 @@
+{
+ "about": "Synthetic two-speaker KT (Windows text-to-speech: one male voice handing over, one female voice asking). Turn times are exact; made by the P1-7 diarisation work.",
+ "turns": [
+  {
+   "start": 0.0,
+   "end": 8.235,
+   "speaker": "giver",
+   "text": "Thanks for joining. Today I am handing over Beacon, the parcel tracking service that customers and couriers use."
+  },
+  {
+   "start": 8.706,
+   "end": 11.781,
+   "speaker": "receiver",
+   "text": "Great. Where does it run?"
+  },
+  {
+   "start": 12.317,
+   "end": 19.907,
+   "speaker": "giver",
+   "text": "It runs on Azure Kubernetes Service in North Europe. The tracking API is written in dot net and stores events in Azure SQL."
+  },
+  {
+   "start": 20.257,
+   "end": 26.407,
+   "speaker": "giver",
+   "text": "Courier scans arrive through Event Hubs, and a worker writes them into the database."
+  },
+  {
+   "start": 27.162,
+   "end": 29.967,
+   "speaker": "receiver",
+   "text": "And how do you deploy changes?"
+  },
+  {
+   "start": 30.446,
+   "end": 39.261,
+   "speaker": "giver",
+   "text": "Azure DevOps builds the container and Helm deploys it. To roll back, we redeploy the previous Helm release."
+  },
+  {
+   "start": 39.766,
+   "end": 41.036,
+   "speaker": "receiver",
+   "text": "Okay."
+  },
+  {
+   "start": 41.588,
+   "end": 50.953,
+   "speaker": "giver",
+   "text": "Monitoring is Azure Monitor with Application Insights. The key alert is the scan backlog going over ten thousand messages."
+  }
+ ]
+}

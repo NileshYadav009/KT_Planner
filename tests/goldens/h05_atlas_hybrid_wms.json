@@ -1,0 +1,267 @@
+{
+ "id": "h05_atlas_hybrid_wms",
+ "holdout": false,
+ "notes": "Written as a blind holdout on 7 Oct and scored once, aggregate only, after the section-example fix (83%; 86% once the ownership rows were annotated with terms, as the other goldens' are). Its misses then drove the second set of general fixes, so it is part of the tuning set now; h06-h08 measure unseen KTs.",
+ "title": "Atlas: hybrid on-premises and Azure warehouse system, noisy dialogue",
+ "proves": "Fillers, rhetorical questions, Windows/MSI releases, a DR plan that was never tested.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Right, so, um, Atlas is the warehouse management system for the two distribution centres in Leeds and Bristol. Pickers use handheld scanners that talk to it all day.\n\nIt's hybrid, you know. The core app runs on four Windows servers in our own data centre with SQL Server 2019 underneath. Orders come in from the web shop through Azure Service Bus, and a small integration service on an Azure VM pulls them off the queue and pushes them into Atlas.\n\nSo how do we release? Azure DevOps builds the MSI and a release pipeline installs it on the servers one at a time behind the load balancer. If a release goes bad, we reinstall the previous MSI, it's kept in the drop folder.\n\nWhat do we monitor with? Zabbix for the servers, and there's a Service Bus dead letter alert in Azure Monitor. If the dead letter count goes above zero someone needs to look the same day.\n\nThe classic failure is scanners losing their session after the Wi-Fi drops and pickers getting logged out. Restarting the scanner app fixes it, you don't need to touch the server. The other one is order messages going to the dead letter queue because of a bad SKU, and you resubmit them from Service Bus Explorer once the SKU is fixed.\n\nBackups: SQL Server full backup every night and log backups every fifteen minutes, copied to Azure Blob storage. Do we have a DR site? No, um, not really, the plan is to rebuild the servers from the VM templates, and that's never been tested.\n\nPlease don't reindex the big tables during shift hours, the scanners time out. And never restart the integration VM during the evening dispatch window.\n\nPeak is November and December, and the evening dispatch between six and nine is the busiest hour every day.\n\nSecurity, uh, everything sits behind the corporate firewall, and the integration VM uses a managed identity for Service Bus.\n\nIs there a test environment? Yes, one UAT server with last month's data.\n\nThe warehouse systems team owns Atlas. Out of hours call the service desk, they page whoever is on call, and the escalation manager is Tom Briggs.\n\nBudget-wise, we were asked to reserve the Azure VM for three years, but that hasn't been approved yet.\n\nOpen items, the scanner firmware upgrade is planned for next quarter and it's not assigned to anyone.\n\nFor the first couple of weeks shadow the morning shift support, and you need a domain admin account and VPN.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the warehouse management system for the two distribution centres in Leeds and Bristol",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Pickers use handheld scanners that talk to it all day",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "The core app runs on four Windows servers in our own data centre",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "SQL Server 2019 underneath",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Orders come in from the web shop through Azure Service Bus",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "a small integration service on an Azure VM pulls them off the queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Azure DevOps builds the MSI",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "a release pipeline installs it on the servers one at a time behind the load balancer",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "we reinstall the previous MSI",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Zabbix for the servers",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "there's a Service Bus dead letter alert in Azure Monitor",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "scanners losing their session after the Wi-Fi drops",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Restarting the scanner app fixes it",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "order messages going to the dead letter queue because of a bad SKU",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "you resubmit them from Service Bus Explorer once the SKU is fixed",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "SQL Server full backup every night and log backups every fifteen minutes",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "copied to Azure Blob storage",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "the plan is to rebuild the servers from the VM templates",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "don't reindex the big tables during shift hours",
+   "in": [
+    "danger_zones",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "never restart the integration VM during the evening dispatch window",
+   "in": [
+    "danger_zones",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Peak is November and December",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "the evening dispatch between six and nine is the busiest hour every day",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "everything sits behind the corporate firewall",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the integration VM uses a managed identity for Service Bus",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "one UAT server with last month's data",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "The warehouse systems team owns Atlas",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "warehouse systems team",
+    "atlas"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Out of hours call the service desk",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the escalation manager is Tom Briggs",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "we were asked to reserve the Azure VM for three years",
+   "in": [
+    "cost_optimization",
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "the scanner firmware upgrade is planned for next quarter",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "shadow the morning shift support",
+   "in": [
+    "first_30_day_ownership",
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "you need a domain admin account and VPN",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

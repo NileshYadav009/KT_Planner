@@ -1,0 +1,271 @@
+{
+ "id": "h08_quarry_onprem_vmware",
+ "holdout": true,
+ "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind, aggregate only; no rule was changed for it. With the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Quarry: on-premises VMware, PostgreSQL/Patroni, rambling monologue",
+ "proves": "Fillers, self-corrections, on-premises operations without cloud names.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "So, um, Quarry. Quarry is the quoting engine the sales team uses for industrial customers, it works out prices and lead times for about two thousand quotes a week.\n\nIt all runs in our own data centre on VMware. The application is a set of Java services on RHEL virtual machines behind HAProxy, and the database is PostgreSQL, three nodes managed by Patroni. Sorry, I should say the price lists come in from SAP every night through an SFTP drop.\n\nChanges go through GitLab CI, and Ansible playbooks push the new build to the VMs, one node at a time. To undo a release, you run the same playbook with the previous version number.\n\nNagios watches the hosts, and there are Grafana dashboards for quote latency. Nagios emails the ops mailbox, and the quote latency alert goes to the on-call phone.\n\nMost common problem, the SAP price file arriving late or half written, and then quotes come out with old prices. Check the file size against yesterday's, and if it's short, ask the SAP team to resend it before you rerun the import. Every few months Patroni fails over on its own after a network blip, which is fine, but HAProxy sometimes keeps sending writes to the old leader, so reload HAProxy.\n\nVeeam backs up the VMs every night, and PostgreSQL ships its WAL to the second data centre, so we lose at most a few minutes of quotes. We test a restore every quarter.\n\nDon't ever restart all three Postgres nodes at once. And don't run the import script by hand during working hours, it locks the price tables.\n\nThe end of the financial year in March is when sales push hardest, so we freeze changes for the last two weeks of March.\n\nWe have a test environment that mirrors production on smaller VMs.\n\nNetwork access is through the corporate VPN and the admin accounts are in CyberArk.\n\nThe sales systems team owns Quarry, and the DBA team looks after Postgres. If you're stuck, Marta Kowalski is the person to call.\n\nLicences, um, we pay for VMware per socket, so we keep Quarry on the existing hosts rather than adding new ones.\n\nThere's one open thing: the SFTP drop is supposed to move to an API, and that's not been scheduled.\n\nFor your first week, get a CyberArk account and the VPN set up, and shadow the Monday import.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Quarry is the quoting engine the sales team uses for industrial customers",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "about two thousand quotes a week",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "It all runs in our own data centre on VMware",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "a set of Java services on RHEL virtual machines behind HAProxy",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "the database is PostgreSQL, three nodes managed by Patroni",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the price lists come in from SAP every night through an SFTP drop",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Changes go through GitLab CI",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Ansible playbooks push the new build to the VMs, one node at a time",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "run the same playbook with the previous version number",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Nagios watches the hosts",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Grafana dashboards for quote latency",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "the quote latency alert goes to the on-call phone",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "the SAP price file arriving late or half written",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "ask the SAP team to resend it before you rerun the import",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "HAProxy sometimes keeps sending writes to the old leader",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "so reload HAProxy",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "Veeam backs up the VMs every night",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "PostgreSQL ships its WAL to the second data centre",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "We test a restore every quarter",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Don't ever restart all three Postgres nodes at once",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "don't run the import script by hand during working hours",
+   "in": [
+    "danger_zones",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "The end of the financial year in March is when sales push hardest",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "we freeze changes for the last two weeks of March",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "a test environment that mirrors production on smaller VMs",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Network access is through the corporate VPN",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "the admin accounts are in CyberArk",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The sales systems team owns Quarry",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "sales systems team",
+    "quarry"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the DBA team looks after Postgres",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Marta Kowalski is the person to call",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "we keep Quarry on the existing hosts rather than adding new ones",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "the SFTP drop is supposed to move to an API",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "get a CyberArk account and the VPN set up",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "shadow the Monday import",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist"
+ ],
+ "missing": []
+}

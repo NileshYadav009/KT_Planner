@@ -40,6 +40,7 @@ google-genai>=2.7.0
 rapidfuzz>=3.9.0          # Fuzzy matching for transcript cleanup (same scores as textdistance, compiled)
 json-repair>=0.30.0       # Recovers slightly malformed JSON from the LLM structured-extraction step
 rapidocr>=3.0            # OCR for screen-share capture (screen_capture.py); runs on onnxruntime, CPU only
+sherpa-onnx>=1.13.8       # Speaker diarisation (diarization.py), local ONNX models, CPU only
 
 # Imported directly by the code (were only present as other packages' dependencies)
 Jinja2>=3.1               # PDF HTML template (pdf_rendering.py)

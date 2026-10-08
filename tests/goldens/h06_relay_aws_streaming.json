@@ -1,0 +1,277 @@
+{
+ "id": "h06_relay_aws_streaming",
+ "holdout": true,
+ "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind, aggregate only; no rule was changed for it. With the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Relay: AWS streaming data platform (MSK, Flink, Snowflake), formal",
+ "proves": "Data-platform vocabulary, several facts per sentence, RPO and RTO stated separately.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "This session covers Relay, the event pipeline that feeds the finance and marketing analytics. It ingests roughly forty million events a day from the web shop, the mobile apps and the payment gateway.\n\nThe producers publish to Amazon MSK, which is managed Kafka, and a set of Flink jobs running on EKS enrich the events and write them to Snowflake. Nightly batch loads are orchestrated by Airflow on MWAA, and the transformations inside Snowflake are dbt models. Raw events are also archived to S3 for a year.\n\nCode for the Flink jobs and the DAGs is in GitLab. A merge to main triggers the GitLab pipeline, which builds the Flink job image and deploys it to EKS with a savepoint, so the job resumes where it stopped. If a new job version misbehaves, we restore the previous image from its last savepoint.\n\nWe monitor with Prometheus and Grafana. The alert that matters is consumer lag on the enrichment group; above five hundred thousand messages it pages through PagerDuty.\n\nThe failure you will see is consumer lag climbing when a partner sends a bulk backfill. Pause the backfill consumer first, then raise the Flink parallelism until the lag drops. The other regular one is an Airflow DAG failing on schema drift after the app team adds a field; update the schema in the registry and clear the failed task.\n\nMSK topics are replicated to us-west-2 with MirrorMaker, and Snowflake time travel keeps seven days of history. Our RPO is five minutes, and the RTO for analytics is one business day.\n\nNever delete a topic in the production cluster, and do not change the partition count of the orders topic, the downstream ordering depends on it.\n\nQuarter-end is the critical period, finance reconciles from Relay in the first three working days after it, so no releases then.\n\nThere are two MSK clusters, dev and prod, and no staging. Dev gets synthetic events from a generator.\n\nAccess to Snowflake uses roles granted through Okta groups, and all data at rest is encrypted with KMS keys.\n\nThe data platform team owns Relay, and the escalation point is Sana Malik.\n\nSnowflake warehouses auto-suspend after sixty seconds idle, which keeps the bill down.\n\nStill open: the move from MirrorMaker 1 to MirrorMaker 2, and nobody owns it yet.\n\nOn day one ask for the DATA_ENG role in Snowflake and read the runbook in Confluence. By week four you should be on the Airflow on-call.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the event pipeline that feeds the finance and marketing analytics",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "It ingests roughly forty million events a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "The producers publish to Amazon MSK",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Flink jobs running on EKS enrich the events and write them to Snowflake",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Nightly batch loads are orchestrated by Airflow on MWAA",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the transformations inside Snowflake are dbt models",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Raw events are also archived to S3 for a year",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "A merge to main triggers the GitLab pipeline",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "deploys it to EKS with a savepoint",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "we restore the previous image from its last savepoint",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "We monitor with Prometheus and Grafana",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "consumer lag on the enrichment group",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "consumer lag climbing when a partner sends a bulk backfill",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Pause the backfill consumer first, then raise the Flink parallelism",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "an Airflow DAG failing on schema drift",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "update the schema in the registry and clear the failed task",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "MSK topics are replicated to us-west-2 with MirrorMaker",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Snowflake time travel keeps seven days of history",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Our RPO is five minutes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "five minutes"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the RTO for analytics is one business day",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "one business day"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Never delete a topic in the production cluster",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "do not change the partition count of the orders topic",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Quarter-end is the critical period",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "There are two MSK clusters, dev and prod, and no staging",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Dev gets synthetic events from a generator",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Access to Snowflake uses roles granted through Okta groups",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "all data at rest is encrypted with KMS keys",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The data platform team owns Relay",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "data platform team",
+    "relay"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the escalation point is Sana Malik",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Snowflake warehouses auto-suspend after sixty seconds idle",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "the move from MirrorMaker 1 to MirrorMaker 2",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "ask for the DATA_ENG role in Snowflake",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "By week four you should be on the Airflow on-call",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

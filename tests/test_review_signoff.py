@@ -255,3 +255,53 @@ def test_participants_must_be_three_people_of_the_workspace(team):
     stranger = client.post(f"/signoff/{job_id}/start", headers=people["giver"]["h"], json={
         "giver": people["giver"]["email"], "receiver": "nobody@elsewhere.example", "approver": people["approver"]["email"]})
     assert stranger.status_code == 400 and "not an active person" in stranger.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# P2-2 Exports and review notifications
+# --------------------------------------------------------------------------
+
+def test_the_document_downloads_as_markdown_with_edits_and_sources(team):
+    client, job_id, _, people = team
+    assert _edit(client, job_id, people["giver"], 1, {"op": "replace", "section": "danger_zones", "block": 0,
+                                                     "unit": 0, "text": "Never delete bookings by hand, ever."}
+                 ).status_code == 200
+    resp = client.get(f"/export/markdown/{job_id}", headers=people["receiver"]["h"])
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/markdown")
+    text = resp.text
+    assert text.startswith("# TripWise") and "## 2. Danger Zones" in text
+    assert "> **Warning:** Never delete bookings by hand, ever." in text           # the edit, not the original
+    assert "| Bookings | Platform team |" in text and "Datadog monitors the booking API. [1]" in text
+    assert "## Sources" in text and "1. 00:12 “Datadog monitors the booking API.”" in text
+    first = client.get(f"/export/markdown/{job_id}?version=1", headers=people["receiver"]["h"]).text
+    assert "Never delete bookings by hand." in first and "ever." not in first
+
+
+def test_a_sign_off_step_is_posted_to_the_team_channel(team, monkeypatch):
+    import http.server
+    import json
+    import threading
+
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("CONTINUUM_REVIEW_WEBHOOK_URL", f"http://127.0.0.1:{server.server_port}/hook")
+    try:
+        client, job_id, _, people = team
+        _start(client, job_id, people)
+        assert _ack(client, job_id, people, "receiver", 1).status_code == 409        # blocked: nothing posted
+    finally:
+        server.shutdown()
+    note, = received
+    assert note["job_id"] == job_id and note["text"].startswith("Sign-off started for TripWise")
+    assert people["approver"]["email"] in note["text"] and "2 knowledge gap(s)" in note["text"]

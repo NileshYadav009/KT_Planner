@@ -48,8 +48,16 @@ _NEGATIVE_ANSWER_RE = re.compile(r"\?\s*(?:no|nope|not\s+really|not\s+yet|none|n
 
 
 def is_question(text: str) -> bool:
+    """A bare question. A question merged with its answer ("Is there a test
+    environment? Yes, one UAT server with last month's data.") is not one:
+    read as a question, Environments was reported Missing."""
     text = (text or "").strip()
-    return text.endswith("?") or bool(_QUESTION_START_RE.match(text) and len(text.split()) <= 14 and "?" in text)
+    if text.endswith("?"):
+        return True
+    if not (_QUESTION_START_RE.match(text) and len(text.split()) <= 14 and "?" in text):
+        return False
+    answer = text.rsplit("?", 1)[1]
+    return len(re.findall(r"[A-Za-z0-9]+", answer)) < 3
 
 
 def is_gap_statement(text: str) -> bool:
@@ -59,10 +67,31 @@ def is_gap_statement(text: str) -> bool:
     return bool(_NEGATIVE_ANSWER_RE.search(text) or any(rx.search(text) for rx in _GAP_RES))
 
 
+# "Cosmos has continuous backup turned on, but we have never tried a restore"
+# states a control that is in place, then a gap in it. Read as a gap alone,
+# Disaster Recovery was reported Missing although the backup was stated.
+_CONTRAST_RE = re.compile(r"(?:[,;]\s*|\s+)(?:but|however|though|although)\b", re.IGNORECASE)
+# "Is it backed up? I think so, but I have never checked" states nothing.
+_HEDGE_RE = re.compile(r"\b(?:i\s+think|i\s+believe|i\s+guess|probably|maybe|perhaps|supposedly|should\s+be)\b",
+                       re.IGNORECASE)
+
+
+def states_something_before_gap(text: str) -> bool:
+    """True when the gap is only in a contrasting clause ("..., but we have
+    never tested it") and the clause before it states something on its own:
+    for a question and its answer, the answer's own words, unhedged."""
+    text = text or ""
+    match = _CONTRAST_RE.search(text)
+    if not match:
+        return False
+    head = text[:match.start()].split("?")[-1]
+    return len(head.split()) >= 4 and not is_gap_statement(head) and not _HEDGE_RE.search(head)
+
+
 def is_field_candidate(text: str) -> bool:
     """A sentence that may fill a document field: not a bare question and
     not a statement that the thing is missing."""
-    return not (is_question(text) or is_gap_statement(text))
+    return not (is_question(text) or (is_gap_statement(text) and not states_something_before_gap(text)))
 
 
 def merge_question_answers(sentences: List[T], text_of: Callable[[T], str],

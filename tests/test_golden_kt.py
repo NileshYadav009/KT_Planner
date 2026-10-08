@@ -225,6 +225,31 @@ def test_golden_kt_pipeline_produces_a_valid_pdf(golden_pipeline):
     assert pdf_bytes.startswith(b"%PDF")
 
 
+def test_every_pdf_page_has_body_text_and_titles_read_the_same_way(golden_pipeline):
+    """P2-6: a trailing page held only the footer, empty items printed a lone
+    bullet, and schema titles were ALL CAPS beside Title Case ones."""
+    import io
+    import re
+
+    from pypdf import PdfReader
+    from pdf_rendering import render_pdf_html
+    from weasyprint import HTML
+
+    result = golden_pipeline.run_kt_pipeline("golden-test-job-pages", clean_transcript(TRANSCRIPT))
+    sections = result["knowledge_object"]["rendered_sections"]
+    sections[0]["blocks"].append({"type": "ChecklistBlock", "title": "Checks", "items": ["Real item", "", "  "]})
+    html_doc = render_pdf_html(title="Order Processing", job_id="golden-test-job-pages", rendered_sections=sections,
+                               coverage=result["coverage"], date_str="07 October 2026")
+    assert "<li></li>" not in html_doc and "<li>  </li>" not in html_doc
+    pdf = PdfReader(io.BytesIO(HTML(string=html_doc, base_url=os.path.dirname(os.path.dirname(__file__))).write_pdf()))
+    for number, page in enumerate(pdf.pages, start=1):
+        body = re.sub(r"Page \d+ of \d+", "", page.extract_text() or "").strip()
+        assert len(body) > 40, f"page {number} has no body text: {body!r}"
+    titles = [s["section_title"] for s in sections if re.search(r"[a-z]", s["section_title"] or "")]
+    shouting = [s["section_title"] for s in sections if not re.search(r"[a-z]", s["section_title"] or "")]
+    assert titles and not shouting, shouting
+
+
 def test_run_kt_pipeline_reuses_classification_embedding_model(golden_pipeline, monkeypatch):
     # Regression guard: field_populator.py's semantic field-matching used to
     # load a second, separate, materially weaker embedding model

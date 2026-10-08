@@ -1,0 +1,272 @@
+{
+ "id": "h03_ember_aws_eks",
+ "holdout": false,
+ "notes": "Written as a blind holdout on 7 Oct and scored once, aggregate only, after the section-example fix (83%; 86% once the ownership rows were annotated with terms, as the other goldens' are). Its misses then drove the second set of general fixes, so it is part of the tuning set now; h06-h08 measure unseen KTs.",
+ "title": "Ember: AWS EKS loyalty service, conversational with inline questions",
+ "proves": "Questions asked inline without speaker labels, RTO/RPO in one sentence, time phrases in non-DR sections.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Okay, let's get going. This is the handover for Ember, the loyalty points service. Shoppers earn and spend points through it at checkout, about two million transactions a day.\n\nEmber runs on Amazon EKS in us-east-1. The points API is a Go service, and it stores balances in Aurora PostgreSQL. Redemption requests go through an SQS queue so checkout never waits on us, and ElastiCache Redis holds the balance cache.\n\nSo how do releases work? We merge to main, GitHub Actions builds the image, and Argo CD syncs it to the cluster. To roll back you revert the commit and Argo CD puts the old version back within a few minutes.\n\nMonitoring is Datadog. The alert you will see most is queue age on the redemption queue, it pages when the oldest message is older than ten minutes.\n\nWhat usually breaks? The partner airline API gets slow and the redemption queue backs up. When that happens, check the partner status page first, then scale the redemption workers to six replicas. The other one is the points API getting OOMKilled during the nightly expiry job, we raised its memory limit twice already.\n\nAurora takes automated snapshots, and they are copied to us-west-2. Our RTO is two hours and the RPO is fifteen minutes. We did a failover drill in March and it took ninety minutes.\n\nNever run terraform apply from your laptop against prod, always go through the pipeline. And don't flush the Redis cache during the day, every balance lookup then hits Aurora at once.\n\nSecrets are in AWS Secrets Manager and the pods get them through IRSA. Console access is through AWS SSO with MFA.\n\nThe busiest time is the week before Christmas, and there is a change freeze from the fifteenth of December.\n\nWe have dev, staging and prod accounts, and staging has a copy of prod data with emails scrambled.\n\nThe loyalty squad owns Ember. If it's down at night, page the on-call through PagerDuty, and escalate to Priya Nair, the engineering manager.\n\nWe pay for a three-year savings plan on the EKS nodes, and dev scales to zero at weekends.\n\nOne thing still open: the migration from the old SOAP partner API to the REST one is half done and nobody owns it after I leave.\n\nIn your first week get Datadog and AWS SSO access, and by the end of the month you should handle the on-call rotation alone.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the loyalty points service",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "about two million transactions a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Ember runs on Amazon EKS in us-east-1",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "it stores balances in Aurora PostgreSQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Redemption requests go through an SQS queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "ElastiCache Redis holds the balance cache",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "GitHub Actions builds the image, and ArgoCD syncs it to the cluster",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "To rollback you revert the commit",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Monitoring is Datadog",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "it pages when the oldest message is older than ten minutes",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "The partner airline API gets slow and the redemption queue backs up",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "scale the redemption workers to six replicas",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "the points API getting OOMKilled during the nightly expiry job",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Aurora takes automated snapshots, and they are copied to us-west-2",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Our RTO is two hours",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "two hours"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "the RPO is fifteen minutes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "fifteen minutes"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "We did a failover drill in March and it took ninety minutes",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Never run terraform apply from your laptop against prod",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "don't flush the Redis cache during the day",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Secrets are in AWS Secrets Manager and the pods get them through IRSA",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Console access is through AWS SSO with MFA",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "The busiest time is the week before Christmas",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "there is a change freeze from the fifteenth of December",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "We have dev, staging and prod accounts",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "staging has a copy of prod data with emails scrambled",
+   "in": [
+    "environments",
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "The loyalty squad owns Ember",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "loyalty squad",
+    "ember"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "escalate to Priya Nair",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "a three-year savings plan on the EKS nodes",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "dev scales to zero at weekends",
+   "in": [
+    "cost_optimization",
+    "environments"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "the migration from the old SOAP partner API to the REST one is half done",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "get Datadog and AWS SSO access",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "by the end of the month you should handle the on-call rotation alone",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

@@ -65,6 +65,16 @@ def test_providers_not_corrupted_into_process_by_prefix_bias():
     assert corrections == []
 
 
+def test_ordinary_phrase_close_to_a_term_word_by_word_is_left_alone():
+    # "log hours" passes the per-word checks against "long horn" but is a
+    # different phrase; it was rewritten to "longhorn" (a storage product).
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "Around four hundred consultants log hours in it every week."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert corrected == text
+    assert corrections == []
+
+
 def test_genuine_multiword_fuzzy_corrections_still_work():
     # Guards against the Levenshtein guard being too strict and blocking
     # real corrections it wasn't meant to touch. Now lands on the canonical

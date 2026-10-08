@@ -9,7 +9,7 @@ from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, smart_title
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import is_gap_statement, is_field_candidate
+from dialogue import is_gap_statement, is_field_candidate, states_something_before_gap
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
 
 
@@ -1367,7 +1367,8 @@ def append_coverage_matrix_section(
         # to say so is Missing, with the speaker's words as the reason.
         texts = [s.get("text", "") for s in (cov.get("sentences") or []) if isinstance(s, dict)]
         stated_gaps = [t for t in texts if is_gap_statement(t)]
-        only_stated_gaps = bool(texts) and len(stated_gaps) == len(texts)
+        only_stated_gaps = bool(texts) and len(stated_gaps) == len(texts) and \
+            not any(states_something_before_gap(t) for t in stated_gaps)
         if only_stated_gaps:
             bucket = "Missing"
 

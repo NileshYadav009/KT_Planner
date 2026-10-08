@@ -15,10 +15,12 @@ from llm.tenant_context import LLMDisabledForTenant, llm_allowed
 # each call without changing any call site's signature.
 _CALL_SITES = {
     "_verify_classification_with_llm": "classification_check",
+    "_verify_batch_with_llm": "classification_check",
     "_try_llm_repair": "sentence_repair",
     "_polish_one": "section_polish",
     "_extract_structured_section": "structured_extraction",
     "_populate_fields_recursive": "field_fill",
+    "_fill_deferred_gaps": "field_fill",
 }
 
 

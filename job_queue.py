@@ -57,10 +57,20 @@ class TaskQueue:
     # -- submitting ---------------------------------------------------------
 
     def enqueue(self, job_id: str, kind: str, payload: Dict[str, Any]) -> None:
+        """Queue a task for the job. A job whose last task finished can take
+        another (a follow-up session, P2-1); one still queued or running
+        cannot (ValueError)."""
         db = self._connect()
         try:
-            db.execute("INSERT INTO tasks (job_id, kind, payload, state, enqueued_at) VALUES (?, ?, ?, 'queued', ?)",
-                       (job_id, kind, json.dumps(payload), time.time()))
+            changed = db.execute(
+                """INSERT INTO tasks (job_id, kind, payload, state, enqueued_at) VALUES (?, ?, ?, 'queued', ?)
+                   ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, payload = excluded.payload,
+                       state = 'queued', attempts = 0, enqueued_at = excluded.enqueued_at, started_at = NULL,
+                       finished_at = NULL, lease_until = NULL, worker_id = NULL, error = NULL
+                   WHERE tasks.state IN ('done', 'failed')""",
+                (job_id, kind, json.dumps(payload), time.time())).rowcount
+            if not changed:
+                raise ValueError(f"job {job_id} already has a task queued or running")
         finally:
             db.close()
 

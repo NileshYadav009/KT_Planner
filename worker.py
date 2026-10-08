@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 
 import observability
 import pipeline
+import sessions
 from job_queue import LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,8 @@ def _run(task: Dict[str, Any], worker_id: str) -> Optional[str]:
             pipeline.process_upload_task(job_id, input_path, f"{input_path}.mp3", media_format=payload.get("media_format"))
         elif kind == "transcript":
             pipeline.run_kt_pipeline(job_id, payload["transcript"], warnings=payload.get("warnings") or [])
+        elif kind == "session":
+            sessions.add_session(job_id, payload)         # a follow-up session of a finished KT (P2-1)
         else:
             raise ValueError(f"unknown task kind {kind!r}")
     except Exception as exc:     # the pipeline records its own failures; this is anything else

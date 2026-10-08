@@ -233,6 +233,10 @@
     .history-refresh:hover{color:var(--blue);background:var(--bg)}
     .history-refresh svg{width:13px;height:13px}
     .history-list{list-style:none;margin:0;padding:0 8px;display:grid;gap:2px}
+    .history-search{width:calc(100% - 20px);margin:2px 10px 8px;padding:6px 9px;font-size:12px;border:1px solid var(--border);
+      border-radius:8px;background:var(--surface);color:var(--text)}
+    .history-snippet{font-size:11px;color:var(--text3);line-height:1.4;white-space:normal}
+    .history-snippet mark{background:var(--blue-dim);color:var(--text);padding:0 1px;border-radius:2px}
     .history-empty{font-size:12px;color:var(--text3);line-height:1.5;padding:4px 10px}
     .history-item{display:flex;align-items:center;gap:4px;border-radius:8px;padding-right:4px}
     .history-item:hover,.history-item:focus-within{background:var(--bg)}
@@ -1111,6 +1115,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
       </div>
+      <input type="search" id="historySearch" class="history-search" placeholder="Search KTs…" aria-label="Search past KTs" autocomplete="off">
       <ul class="history-list" id="historyList"><li class="history-empty">Loading…</li></ul>
     </div>
 
@@ -1209,7 +1214,7 @@
             <div class="mt-value" id="summaryCoverage">—</div>
           </div>
           <div class="metric-tile t-green">
-            <div class="mt-label">Quality</div>
+            <div class="mt-label">KT completeness</div>
             <div class="mt-value" id="summaryConfidence">—</div>
           </div>
           <div class="metric-tile t-amber">
@@ -1386,6 +1391,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           Download KT PDF
         </button>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button id="downloadMdBtn" class="btn btn-ghost" style="flex:1" title="For Confluence, Notion or a repository">Markdown</button>
+          <button id="downloadGapsBtn" class="btn btn-ghost" style="flex:1" title="Knowledge gaps as CSV, one ticket per row (Jira import)">Gaps CSV</button>
+        </div>
         <button id="applyJob" class="btn btn-ghost btn-block" style="margin-bottom:8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           Apply results to form
@@ -1394,6 +1403,25 @@
           The PDF is built from the document saved on the server: edits saved in the document appear in it,
           and earlier versions stay available under History. The schema form is a read-only view.
         </p>
+      </div>
+    </div>
+
+    <!-- KT sessions (P2-1): a KT built from several sessions -->
+    <div class="rp-card" id="sessionsCard" hidden>
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <span class="rp-card-title">Sessions</span>
+      </div>
+      <div class="rp-card-body">
+        <p id="sessionsSummary" style="font-size:12px;color:var(--text2);margin:0 0 8px"></p>
+        <div id="sessionsAgenda" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+        <textarea id="sessionText" rows="4" placeholder="Paste the next session's transcript…"
+          style="width:100%;font-size:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:6px 8px;box-sizing:border-box"></textarea>
+        <input type="file" id="sessionFile" accept="audio/*,video/*" style="font-size:11px;margin:6px 0;max-width:100%">
+        <button id="addSessionBtn" class="btn btn-ghost btn-block">Add session</button>
+        <p id="sessionsStatus" style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5"></p>
       </div>
     </div>
 
@@ -1703,12 +1731,19 @@ function renderSummary(data){
   summaryCoverage.textContent=`${covered+weak}/${total}`;
   summaryWeak.textContent=weak;
   summaryMissing.textContent=data.missing_required?.length??missing;
-  // The job result never carried overall_coverage_percent, so this tile
-  // always read "—". Show the document quality score the pipeline computes.
-  const q = data.quality_score || {};
-  summaryConfidence.textContent = (typeof q.overall_score === 'number')
-    ? `${q.grade || ''} ${Math.round(q.overall_score)}`.trim()
-    : '—';
+  // What the KT covered, from the KT Coverage table (P2-5). A letter grade
+  // ("Quality D 66.8") read as the product grading the customer's own KT.
+  const covSection = ((data.knowledge_object || {}).sections || []).find(s => s.id === 'kt_coverage');
+  const covRows = ((covSection && covSection._coverage_rows) || []).filter(r => r.Coverage !== 'After review');
+  if(covRows.length){
+    const done = covRows.filter(r => r.Coverage === 'Strong' || r.Coverage === 'Partial').length;
+    const followUp = covRows.filter(r => r.Coverage !== 'Strong').length;
+    summaryConfidence.textContent = `${done} of ${covRows.length}`;
+    summaryConfidence.title = `${done} of ${covRows.length} topics covered, ${followUp} to follow up`;
+  } else {
+    summaryConfidence.textContent = '—';
+    summaryConfidence.title = '';
+  }
   const shownId = data.job_id || currentJobId;
   sessionJob.textContent = shownId ? (shownId.slice(0,14)+'…') : '—';
   sessionCoverage.textContent=pct+'%';
@@ -1903,8 +1938,11 @@ function sourceChips(block, i){
     const src = SOURCE_LOOKUP[id];
     if(!src) return '';
     const when = formatSourceTime(src.start);
-    return `<button type="button" class="src-chip" data-src="${Number(id)}" title="${escapeHtml('\u201c' + src.quote + '\u201d')}"`
-      + ` aria-label="Source ${Number(id)}${when ? ' at ' + when : ''}">${when ? '&#9654; ' + when : 'source ' + Number(id)}</button>`;
+    const who = src.speaker ? src.speaker + ': ' : '';
+    const sess = src.session ? `S${Number(src.session)} ` : '';      // a KT built from several sessions (P2-1)
+    return `<button type="button" class="src-chip" data-src="${Number(id)}" title="${escapeHtml(sess + who + '\u201c' + src.quote + '\u201d')}"`
+      + ` aria-label="Source ${Number(id)}${sess ? ' from session ' + Number(src.session) : ''}${when ? ' at ' + when : ''}">`
+      + `${escapeHtml(sess)}${when ? '&#9654; ' + when : (sess ? '' : 'source ' + Number(id))}</button>`;
   }).join('');
 }
 function useLocalRecording(file){
@@ -1926,7 +1964,7 @@ document.getElementById('renderedDocument').addEventListener('click', e => {
   if(!src) return;
   const when = formatSourceTime(src.start);
   const quote = document.getElementById('sourceQuote');
-  quote.textContent = `${when ? when + '  ' : ''}\u201c${src.quote}\u201d`;
+  quote.textContent = `${src.session ? 'Session ' + Number(src.session) + '  ' : ''}${when ? when + '  ' : ''}${src.speaker ? src.speaker + ': ' : ''}\u201c${src.quote}\u201d`;
   quote.hidden = false;
   const player = document.getElementById('sourcePlayer');
   if(src.start != null && localRecordingUrl){
@@ -2039,11 +2077,13 @@ function renderBlockHtml(block, ctx){
   const x = i => unitExtras(block, ctx, i);
   const a = i => unitAttrs(ctx, i);
   const t = (i, v) => unitText(ctx, i, v);
+  // An empty item printed a lone bullet; in edit mode it stays so it can be deleted.
+  const shown = v => (DOC.editing && !ctx.readonly) || String(v == null ? '' : v).trim() !== '';
   switch(block.type){
     case 'NarrativeBlock':
       return `${title('Narrative')}${(block.paragraphs||[]).map((p,i)=>`<p${a(i)}>${safeMarked(marked.parseInline(escapeHtml(String(t(i,p)||''))))}${x(i)}</p>`).join('')}`;
     case 'ChecklistBlock':
-      return `${title('Checklist')}<ul>${(block.items||[]).map((item,i)=>`<li${a(i)}>${renderInlineText(t(i,item))}${x(i)}</li>`).join('')}</ul>`;
+      return `${title('Checklist')}<ul>${(block.items||[]).map((item,i)=>shown(t(i,item)) ? `<li${a(i)}>${renderInlineText(t(i,item))}${x(i)}</li>` : '').join('')}</ul>`;
     case 'WarningBlock':
       return `${title('Warning')}<div class="doc-warning">${(block.warnings||[]).map((w,i)=>`<p${a(i)}>${renderInlineText(t(i,w))}${x(i)}</p>`).join('')}</div>`;
     case 'TechnologyGrid':
@@ -2057,7 +2097,7 @@ function renderBlockHtml(block, ctx){
       return `${title('Decision Table')}<table class="doc-table"><thead><tr>${cols.map(col=>`<th>${escapeHtml(col)}</th>`).join('')}</tr></thead><tbody>${(block.rows||[]).map((row,i)=>`<tr${a(i)}>${cols.map((col,c)=>renderTableCell(rowValue(ctx,i,row,col), c===cols.length-1 ? x(i) : '')).join('')}</tr>`).join('')}</tbody></table>`;
     }
     case 'TroubleshootingBlock':
-      return `${title('Troubleshooting')}<ol>${(block.steps||[]).map((step,i)=>`<li${a(i)}>${renderInlineText(t(i,step))}${x(i)}</li>`).join('')}</ol>`;
+      return `${title('Troubleshooting')}<ol>${(block.steps||[]).map((step,i)=>shown(t(i,step)) ? `<li${a(i)}>${renderInlineText(t(i,step))}${x(i)}</li>` : '').join('')}</ol>`;
     case 'CodeBlock':
       return `${title('Code')}<pre class="doc-code"><code>${escapeHtml(block.code||'')}</code></pre>`;
     case 'DiagramBlock': {
@@ -2451,6 +2491,7 @@ function pollJobStatus(jobId){
         setProgress(100); clearInterval(pollInterval); progressWrap.style.display='none';
         renderSummary(data);
         renderJobWarnings(data);
+        loadSessions(jobId);
         loadHistory();
         transcriptEl.textContent=data.transcript||'(none)';
         renderCoverage(data.coverage||{});
@@ -2629,6 +2670,8 @@ function openHistoryJob(jobId){
   progressWrap.style.display = 'block';
   pollJobStatus(jobId);
   document.querySelectorAll('.history-item').forEach(li => li.classList.remove('active'));
+  const search = document.getElementById('historySearch');
+  if(search) search.value = '';
   loadHistory();
   document.getElementById('pageTop')?.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -2653,6 +2696,38 @@ async function deleteHistoryJob(jobId, title){
 
 document.getElementById('historyRefresh')?.addEventListener('click', loadHistory);
 loadHistory();
+
+/* Search across KTs (P2-4, GET /search): matches replace the list while
+   there is a query; clearing it brings the list back. */
+let historySearchTimer = null;
+async function searchHistory(query){
+  const list = document.getElementById('historyList');
+  let results = [];
+  try{
+    const resp = await fetch('/search?q=' + encodeURIComponent(query));
+    if(!resp.ok) return;
+    results = (await resp.json()).results || [];
+  }catch(e){ return; }
+  if(document.getElementById('historySearch').value.trim() !== query) return;   // a newer query is on its way
+  list.innerHTML = results.length ? '' : '<li class="history-empty">No KT mentions that.</li>';
+  results.forEach(r => {
+    const snippet = escapeHtml(r.snippet || '').replace(/\u0002/g, '<mark>').replace(/\u0003/g, '</mark>');
+    const li = document.createElement('li');
+    li.className = 'history-item' + (r.job_id === currentJobId ? ' active' : '');
+    li.innerHTML = `<button class="history-open" type="button" title="Open this KT">
+        <span class="history-title">${escapeHtml(r.title || 'Untitled KT')}</span>
+        <span class="history-snippet">${snippet}</span>
+        <span class="history-meta"><span>${escapeHtml(historyDate(r.created_at))}</span></span>
+      </button>`;
+    li.querySelector('.history-open').addEventListener('click', () => openHistoryJob(r.job_id));
+    list.appendChild(li);
+  });
+}
+document.getElementById('historySearch')?.addEventListener('input', e => {
+  clearTimeout(historySearchTimer);
+  const query = e.target.value.trim();
+  historySearchTimer = setTimeout(() => query.length >= 2 ? searchHistory(query) : loadHistory(), 250);
+});
 
 /* ── Edit modal ─────────────────────────────────────────────── */
 let editState={sentenceIndex:null,sentenceObj:null};
@@ -2889,6 +2964,105 @@ async function downloadKtPdf(jobId = currentJobId, title = '', version = null){
 }
 
 document.getElementById('downloadPdfBtn').addEventListener('click',()=>downloadKtPdf());
+
+/* Markdown for Confluence/Notion and the gaps as a tracker CSV (P2-2): the
+   same server document the PDF is built from. */
+async function downloadKtFile(kind){
+  const jobId = currentJobId;
+  if(!jobId){ showToast('No active job to export'); return; }
+  const route = kind === 'gaps' ? `/export/gaps/${jobId}` : `/export/markdown/${jobId}`;
+  try{
+    const resp = await fetch(route);
+    if(!resp.ok){
+      let details = '';
+      try{ const body = await resp.json(); details = body.detail || ''; }catch(e){}
+      showToast(`Export failed: ${details || `HTTP ${resp.status}`}`, 8000, 'error');
+      return;
+    }
+    const url = URL.createObjectURL(await resp.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kt_${jobId.slice(0,8)}` + (kind === 'gaps' ? '_gaps.csv' : '.md');
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(kind === 'gaps' ? 'Downloaded the knowledge gaps (CSV)' : 'Downloaded the KT as Markdown');
+  }catch(err){
+    showToast('Export failed: ' + (err.message || err), 8000, 'error');
+  }
+}
+/* Sessions (P2-1): add a follow-up session to a finished KT. The worker
+   rebuilds the document from every session as its next version; the
+   knowledge gaps left are the agenda for the next session. */
+let sessionsTimer = null;
+let sessionsPendingFor = null;
+async function loadSessions(jobId = currentJobId){
+  const card = document.getElementById('sessionsCard');
+  if(!card || !jobId) return;
+  let view;
+  try{
+    const resp = await fetch(`/kt/${encodeURIComponent(jobId)}/sessions`);
+    if(!resp.ok){ card.hidden = true; return; }
+    view = await resp.json();
+  }catch(e){ return; }
+  if(jobId !== currentJobId) return;
+  card.hidden = false;
+  const list = view.sessions || [];
+  document.getElementById('sessionsSummary').textContent = list.length === 1
+    ? 'Built from 1 session.'
+    : `Built from ${list.length} sessions: ` + list.map(s => `S${s.n} (${s.kind === 'audio' ? 'recording' : 'transcript'}, ${s.words} words)`).join(', ') + '.';
+  const topics = (view.agenda && view.agenda.topics) || [];
+  document.getElementById('sessionsAgenda').innerHTML = topics.length
+    ? `<strong>Cover in session ${Number(view.agenda.next_session)}:</strong><ul style="margin:4px 0 0 16px;padding:0">`
+      + topics.map(t => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>'
+    : 'No knowledge gaps left.';
+  const status = document.getElementById('sessionsStatus');
+  document.getElementById('addSessionBtn').disabled = !!view.pending;
+  clearTimeout(sessionsTimer);
+  if(view.pending){
+    status.textContent = `Session ${list.length + 1} is being added; the document updates when it is done.`;
+    sessionsPendingFor = jobId;
+    sessionsTimer = setTimeout(() => loadSessions(jobId), 4000);
+    return;
+  }
+  status.textContent = view.error || '';
+  if(sessionsPendingFor === jobId){          // the session just finished: show the rebuilt document
+    sessionsPendingFor = null;
+    const closed = (view.changes && view.changes.closed_gaps) || [];
+    if(!view.error) showToast(`Session ${list.length} added` + (closed.length ? `: it closed ${closed.length} gap(s)` : ''));
+    pollJobStatus(jobId);
+  }
+}
+
+document.getElementById('addSessionBtn')?.addEventListener('click', async () => {
+  const jobId = currentJobId;
+  if(!jobId){ showToast('Open a KT first'); return; }
+  const text = document.getElementById('sessionText').value.trim();
+  const file = document.getElementById('sessionFile').files[0];
+  if(!text && !file){ showToast('Paste a transcript or choose a recording'); return; }
+  let resp;
+  try{
+    if(file){
+      const form = new FormData();
+      form.append('file', file);
+      resp = await fetch(`/kt/${encodeURIComponent(jobId)}/sessions/upload`, {method: 'POST', body: form});
+    } else {
+      resp = await fetch(`/kt/${encodeURIComponent(jobId)}/sessions`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({transcript: text})});
+    }
+  }catch(e){ showToast('Could not add the session', 6000, 'error'); return; }
+  if(!resp.ok){
+    const detail = (await resp.json().catch(() => ({}))).detail;
+    showToast(detail || `Could not add the session (HTTP ${resp.status})`, 8000, 'error');
+    return;
+  }
+  document.getElementById('sessionText').value = '';
+  document.getElementById('sessionFile').value = '';
+  showToast('Session queued: the document is rebuilt from every session');
+  loadSessions(jobId);
+});
+
+document.getElementById('downloadMdBtn').addEventListener('click',()=>downloadKtFile('markdown'));
+document.getElementById('downloadGapsBtn').addEventListener('click',()=>downloadKtFile('gaps'));
 
 loadSchema();
 </script>

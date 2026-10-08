@@ -1,12 +1,15 @@
 """P1-11: the golden KT suite (tests/goldens, scored by tests/golden_eval.py).
 
-Twelve annotated transcripts, 211 facts, each with the section(s) it belongs
-in: AWS, Azure, GCP, a complex multi-team platform, a noisy recording, an
-incomplete KT, contradictions, receiver dialogue, an on-premises platform and
-a long loosely ordered KT (the tuning set, which the routing rules were
-improved against), plus two holdouts written afterwards and never tuned for
-(an on-premises Java system and a conversational Azure serverless KT). The
-pipeline runs without an LLM, so the scores are deterministic.
+Nineteen annotated transcripts, 429 facts, each with the section(s) it
+belongs in. The tuning set (g01-g11, h01-h05) is what the routing rules and
+the classifier's labelled examples (section_examples.json) were improved
+against: AWS, Azure, GCP, a complex multi-team platform, a noisy recording,
+an incomplete KT, contradictions, receiver dialogue, on-premises platforms, a
+long loosely ordered KT and conversational serverless KTs. The holdouts
+(h06-h08: a streaming data platform, a pasted Teams transcript with speaker
+names, an on-premises monologue) were written after the last fixes and scored
+blind; they alone measure accuracy on unseen KTs. The pipeline runs without
+an LLM, so the scores are deterministic.
 
 A change fails here if any golden places fewer facts correctly, puts a fact
 somewhere it must never be, reports a discussed section Missing or an
@@ -81,10 +84,12 @@ def test_contradictions_are_flagged(scores):
             assert scores[golden["id"]]["missing_conflicts"] == [], golden["id"]
 
 
-@pytest.mark.xfail(reason="Accuracy on unseen KTs is 84% (target 90%); see scripts/golden_report.py", strict=False)
+@pytest.mark.xfail(reason="Accuracy on unseen KTs is 89.9% (89 of 99 holdout facts; target 90%); see "
+                          "scripts/golden_report.py", strict=False)
 def test_unseen_kts_meet_the_accuracy_target(scores):
     """Only the holdouts measure accuracy on a KT the rules were not tuned
-    on; the tuning set is expected to stay at 100%."""
+    on. Blind rounds so far: 84% (h01-h02), 83% (h03-h05; 86% once their
+    ownership rows were annotated), 89.9% (h06-h08, 89 of 99 facts)."""
     holdouts = [s for s in scores.values() if s["holdout"]]
     total = sum(len(s["facts"]) for s in holdouts)
     correct = sum(sum(f["status"] == "correct" for f in s["facts"]) for s in holdouts)

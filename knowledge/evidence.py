@@ -147,8 +147,8 @@ def transcript_sentences(transcript: str, segments: Optional[Sequence[Dict[str, 
                          offset: float = 0.0) -> List[Dict[str, Any]]:
     """The transcript as sentences, each with the time it starts and ends in
     the recording (`segments` are Whisper's; `offset` is leading silence cut
-    before transcription). Without segments (a pasted transcript) the times
-    are None."""
+    before transcription) and, when the recording was diarised (P1-7), who
+    said it. Without segments (a pasted transcript) the times are None."""
     if segments:
         text, spans = "", []
         for seg in segments:
@@ -157,17 +157,30 @@ def transcript_sentences(transcript: str, segments: Optional[Sequence[Dict[str, 
                 continue
             if text:
                 text += " "
-            spans.append((len(text), len(text) + len(part), seg.get("start"), seg.get("end")))
+            # A pasted session in a multi-session KT (P2-1) is one "untimed"
+            # segment: it has a session but no times.
+            untimed = bool(seg.get("untimed"))
+            spans.append((len(text), len(text) + len(part), None if untimed else seg.get("start"),
+                          None if untimed else seg.get("end"), seg.get("speaker"), seg.get("session")))
             text += part
     else:
         text, spans = str(transcript or ""), []
 
     def time_at(pos: int, edge: int) -> Optional[float]:
-        for start, end, t0, t1 in spans:
+        for start, end, t0, t1, _, _ in spans:
             if start <= pos < end or (pos == end and edge == 1):
                 value = t0 if edge == 0 else t1
                 return None if value is None else round(float(value) + offset, 2)
         return None
+
+    def most_of(begin: int, end: int, index: int) -> Any:
+        """The speaker (or session) of most of the sentence's characters."""
+        chars: Dict[Any, int] = {}
+        for span in spans:
+            shared = min(end, span[1]) - max(begin, span[0])
+            if span[index] and shared > 0:
+                chars[span[index]] = chars.get(span[index], 0) + shared
+        return max(chars, key=chars.get) if chars else None
 
     sentences, pos = [], 0
     for part in _SENTENCE_SPLIT.split(text):
@@ -176,7 +189,12 @@ def transcript_sentences(transcript: str, segments: Optional[Sequence[Dict[str, 
         quote = part.strip()
         if len(_content_keys(quote)) < 1:
             continue
-        sentences.append({"quote": quote, "start": time_at(begin, 0), "end": time_at(pos, 1) if spans else None})
+        sentence = {"quote": quote, "start": time_at(begin, 0), "end": time_at(pos, 1) if spans else None}
+        for key, index in (("speaker", 4), ("session", 5)):
+            value = most_of(begin, pos, index)
+            if value:
+                sentence[key] = value
+        sentences.append(sentence)
     return sentences
 
 
@@ -364,7 +382,8 @@ def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, 
                 refs.append(sorted(numbering.setdefault(i, len(numbering) + 1) for i in found))
             block["sources"] = refs
     knowledge_object["sources"] = [
-        dict(id=source_id, quote=_short(sentences[i]["quote"]), start=sentences[i]["start"], end=sentences[i]["end"])
+        dict(id=source_id, quote=_short(sentences[i]["quote"]), start=sentences[i]["start"], end=sentences[i]["end"],
+             **{key: sentences[i][key] for key in ("speaker", "session") if sentences[i].get(key)})
         for i, source_id in sorted(numbering.items(), key=lambda kv: kv[1])
     ]
     knowledge_object["_evidence_stats"] = stats

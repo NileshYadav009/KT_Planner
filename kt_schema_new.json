@@ -44,7 +44,7 @@
   "sections": [
     {
       "id": "system_overview",
-      "title": "SYSTEM OVERVIEW",
+      "title": "System Overview",
       "required": true,
       "sub_topics": [
         "system name",
@@ -189,7 +189,7 @@
     },
     {
       "id": "environments",
-      "title": "ENVIRONMENTS",
+      "title": "Environments",
       "required": false,
       "sub_topics": [
         "production characteristics",
@@ -227,7 +227,7 @@
     },
     {
       "id": "monitoring_observability",
-      "title": "MONITORING & OBSERVABILITY",
+      "title": "Monitoring & Observability",
       "required": true,
       "sub_topics": [
         "dashboards",
@@ -259,7 +259,7 @@
     },
     {
       "id": "disaster_recovery",
-      "title": "DISASTER RECOVERY",
+      "title": "Disaster Recovery",
       "required": true,
       "sub_topics": [
         "backup",
@@ -285,7 +285,7 @@
     },
     {
       "id": "security_controls",
-      "title": "SECURITY",
+      "title": "Security",
       "required": true,
       "sub_topics": [
         "security scanning",
@@ -308,7 +308,7 @@
     },
     {
       "id": "cost_optimization",
-      "title": "COST OPTIMIZATION",
+      "title": "Cost Optimization",
       "tier": "conditional",
       "required": false,
       "sub_topics": [
@@ -329,7 +329,7 @@
     },
     {
       "id": "day1_survival_checklist",
-      "title": "DAY-1 SURVIVAL CHECKLIST",
+      "title": "Day-1 Survival Checklist",
       "required": true,
       "sub_topics": [
         "required access",
@@ -397,7 +397,7 @@
     },
     {
       "id": "deployment_and_rollback",
-      "title": "DEPLOYMENT & ROLLBACK",
+      "title": "Deployment & Rollback",
       "required": true,
       "sub_topics": [
         "normal deployment process",
@@ -460,7 +460,7 @@
     },
     {
       "id": "common_failures",
-      "title": "COMMON FAILURES & FIXES",
+      "title": "Common Failures & Fixes",
       "required": true,
       "sub_topics": [
         "issue symptom",
@@ -490,7 +490,7 @@
     },
     {
       "id": "known_bad_days",
-      "title": "OPERATIONAL CALENDAR",
+      "title": "Operational Calendar",
       "required": true,
       "sub_topics": [
         "high traffic periods",
@@ -515,7 +515,7 @@
     },
     {
       "id": "danger_zones",
-      "title": "DANGER ZONES (DO NOT TOUCH)",
+      "title": "Danger Zones (Do Not Touch)",
       "required": true,
       "sub_topics": [
         "area or action",
@@ -543,7 +543,7 @@
     },
     {
       "id": "ownership_escalation",
-      "title": "OWNERSHIP & ESCALATION",
+      "title": "Ownership & Escalation",
       "required": true,
       "sub_topics": [
         "component or area",
@@ -573,7 +573,7 @@
     },
     {
       "id": "first_30_day_ownership",
-      "title": "FIRST 30-DAY OWNERSHIP PLAN",
+      "title": "First 30-Day Ownership Plan",
       "tier": "conditional",
       "required": true,
       "sub_topics": [
@@ -604,7 +604,7 @@
     },
     {
       "id": "open_responsibilities",
-      "title": "OPEN RESPONSIBILITIES & TRANSITION PLAN",
+      "title": "Open Responsibilities & Transition Plan",
       "required": true,
       "sub_topics": [
         "rules",
@@ -683,7 +683,7 @@
     },
     {
       "id": "handover_completion",
-      "title": "HANDOVER COMPLETION CHECK",
+      "title": "Handover Completion Check",
       "tier": "conditional",
       "required": true,
       "sub_topics": [

@@ -21,12 +21,12 @@ from typing import List, Optional
 
 import ffmpeg
 import torch
-from faster_whisper import WhisperModel
+from faster_whisper import BatchedInferencePipeline, WhisperModel
 
 from ai import map_analysis_to_fields, polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript
-from input_gate import assess_transcript
+from input_gate import assess_transcript, language_warning
 from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
 from knowledge import (
     build_knowledge_object,
@@ -49,6 +49,7 @@ from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 from llm.usage import LLMUsageTracker, start_tracking, stop_tracking
 import contextvars
+import diarization
 import media_guard
 import screen_capture
 from job_queue import TaskQueue
@@ -74,6 +75,12 @@ DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 DEFAULT_WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 DEFAULT_WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "2"))
 WHISPER_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").strip().lower() not in ("0", "false", "no", "off")
+# faster-whisper's batched pipeline (P2-3): Silero VAD chunks transcribed in
+# batches. On three test recordings (scripts/asr_benchmark.py) it took 0.44 s
+# per second of audio instead of 0.74, with 4.4% word errors instead of 6.3%.
+WHISPER_BATCHED = os.getenv("WHISPER_BATCHED", "1").strip().lower() not in ("0", "false", "no", "off")
+WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
+_BATCHED_MODEL = None
 
 MODEL = None
 MAPPER_PIPELINE = None
@@ -196,7 +203,8 @@ def _job_warnings(stage_errors: list, usage: dict, upstream: Optional[List[str]]
 
 def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None,
                     screen: Optional[dict] = None, warnings: Optional[List[str]] = None,
-                    time_offset: float = 0.0) -> dict:
+                    time_offset: float = 0.0, speakers: Optional[dict] = None,
+                    notices: Optional[List[str]] = None) -> dict:
     """Run classification through rendering for an already-transcribed, already-cleaned
     transcript, and store the result in JOB_QUEUE.
 
@@ -731,6 +739,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         result = {
             "status": "completed",
             "transcript": transcript,
+            # Kept so a follow-up session can rebuild the document with this
+            # session's times (P2-1); None for a pasted transcript.
+            "segments": timed_segments,
+            "time_offset": time_offset,
             "coverage": coverage,
             "knowledge_object": knowledge_object,
             "mapped_fields": mapped_fields,
@@ -739,6 +751,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "screenshots": screenshots,
             "screen_links": screen_view["links"],
             "screen_capture": (screen or {}).get("stats"),
+            "speakers": speakers,
             "dynamic_schema": dynamic_schema,
             "populated_fields": populated_fields,
             "validation_warnings": validation_warnings,
@@ -770,6 +783,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             result["notices"].append("Generated without an LLM: rules and local models only.")
         if redacted:
             result["notices"].append(f"{redacted} credential(s) found in the transcript were redacted before processing.")
+        speaker_line = diarization.speaker_notice(speakers)
+        if speaker_line:
+            result["notices"].append(speaker_line)
+        result["notices"].extend(notices or [])
         rejected = int(result["llm_usage"].get("rejected") or 0)
         if rejected:
             result["notices"].append(
@@ -809,6 +826,60 @@ def trim_leading_trailing_silence(input_path: str, output_path: str) -> bool:
     return os.path.exists(output_path) and os.path.getsize(output_path) > 0
 
 
+_LANGUAGE_NAMES = {
+    "hi": "Hindi", "de": "German", "fr": "French", "es": "Spanish", "pt": "Portuguese", "it": "Italian",
+    "nl": "Dutch", "pl": "Polish", "ru": "Russian", "uk": "Ukrainian", "tr": "Turkish", "ar": "Arabic",
+    "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "ta": "Tamil", "te": "Telugu", "mr": "Marathi",
+    "bn": "Bengali", "gu": "Gujarati", "kn": "Kannada", "ml": "Malayalam", "ur": "Urdu", "sv": "Swedish",
+    "da": "Danish", "no": "Norwegian", "fi": "Finnish", "cs": "Czech", "ro": "Romanian", "hu": "Hungarian",
+    "el": "Greek", "he": "Hebrew", "id": "Indonesian", "vi": "Vietnamese", "th": "Thai",
+}
+_LANGUAGE_WINDOW_SECONDS = 30
+_LANGUAGE_MIN_PROBABILITY = 0.7
+
+
+def spoken_language_warning(audio_path: str) -> Optional[str]:
+    """Whisper is told the recording is English (P2-7). Ask it which language
+    it hears at the start, middle and end (30 s each) and warn when any part
+    is clearly another language. Never fails a KT: on any error, no warning."""
+    try:
+        import wave
+
+        import numpy as np
+
+        with wave.open(audio_path) as w:
+            rate, frames = w.getframerate(), w.getnframes()
+            window = min(frames, _LANGUAGE_WINDOW_SECONDS * rate)
+            heard = {}
+            for start in sorted({0, max(0, frames // 2 - window // 2), max(0, frames - window)}):
+                w.setpos(start)
+                audio = np.frombuffer(w.readframes(window), dtype=np.int16).astype(np.float32) / 32768.0
+                language, probability, _ = MODEL.detect_language(audio, vad_filter=True)
+                if language != "en" and probability >= _LANGUAGE_MIN_PROBABILITY:
+                    heard[language] = max(heard.get(language, 0.0), probability)
+    except Exception as exc:
+        logger.info("Spoken language check skipped: %s", exc)
+        return None
+    if not heard:
+        return None
+    names = ", ".join(_LANGUAGE_NAMES.get(code, code) for code in sorted(heard, key=heard.get, reverse=True))
+    return (f"Parts of the recording sound like {names}, not English. Continuum transcribes and maps English "
+            f"KTs, so sections may be wrong or missing; review every section.")
+
+
+def _transcribe(audio_path: str, **kwargs):
+    """Whisper on one recording: batched when WHISPER_BATCHED (the default)."""
+    global _BATCHED_MODEL
+    if WHISPER_BATCHED and isinstance(MODEL, WhisperModel):
+        if _BATCHED_MODEL is None or _BATCHED_MODEL.model is not MODEL:
+            _BATCHED_MODEL = BatchedInferencePipeline(model=MODEL)
+        # Timestamps on: without them a segment is a whole 30 s speech chunk,
+        # too coarse for source times and speaker labels.
+        return _BATCHED_MODEL.transcribe(audio_path, batch_size=WHISPER_BATCH_SIZE, without_timestamps=False,
+                                         **kwargs)
+    return MODEL.transcribe(audio_path, **kwargs)
+
+
 def _extract_audio(input_path: str, media_format: Optional[str]) -> str:
     """The upload's audio as 16 kHz mono WAV. Only this file, which ffmpeg
     wrote, reaches the Whisper decoder; the upload itself never does."""
@@ -819,111 +890,9 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
     """Background task for transcription and classification from an uploaded
     recording. The route has already checked it (media_guard.probe)."""
     try:
-        if os.path.getsize(input_path) == 0:
-            raise InputRejected("Uploaded file is empty.")
-
-        try:
-            audio_to_use = _extract_audio(input_path, media_format)
-        except media_guard.MediaRejected as exc:
-            raise InputRejected(exc.message) from exc
-
-        # Trim only leading/trailing silence to speed up transcription.
-        time_offset = 0.0
-        try:
-            trimmed_path = f"{input_path}.trimmed.wav"
-            if trim_leading_trailing_silence(audio_to_use, trimmed_path):
-                # Transcript times now start after the cut silence; sources
-                # add it back so they point into the original recording.
-                time_offset = screen_capture.leading_silence_seconds(audio_to_use)
-                audio_to_use = trimmed_path
-        except Exception:
-            # If trimming fails, continue with original audio
-            pass
-
-        # Transcribe using faster-whisper with faster settings by default.
-        # On CPU we prefer the small model, while GPU can use medium when configured.
-        transcribe_kwargs = {
-            "language": "en",
-            "beam_size": DEFAULT_WHISPER_BEAM_SIZE,
-            "task": "transcribe",
-            # Skip non-speech (faster-whisper's built-in Silero VAD). On a
-            # real KT recording with meeting pauses, Whisper without it
-            # filled the silences with text nobody said (an invented
-            # "deployment window is outside peak business hours" and a
-            # "rollback time" repetition loop); with it, no invented text and
-            # 27% faster. Continuous speech transcribes identically.
-            "vad_filter": WHISPER_VAD_FILTER,
-        }
-        checkpoint("Audio extraction")
-        segments, info = MODEL.transcribe(audio_to_use, **transcribe_kwargs)
-        segments = list(segments)
-
-        # Clean each segment once and build the joined transcript from cleaned parts
-        cleaned_segments = []
-        raw_parts = []
-        for s in segments:
-            cleaned_text, _ = redact_secrets(clean_transcript(s.text))
-            raw_parts.append(cleaned_text)
-            cleaned_segments.append({
-                "id": s.id,
-                "seek": s.seek,
-                "start": s.start,
-                "end": s.end,
-                "text": cleaned_text,
-                "avg_logprob": getattr(s, "avg_logprob", None),
-                "compression_ratio": getattr(s, "compression_ratio", None),
-                "no_speech_prob": getattr(s, "no_speech_prob", None)
-            })
-
-        raw_text = " ".join(raw_parts).strip()
-
-        result = {
-            "text": raw_text,
-            "segments": cleaned_segments,
-            "language": info.language if info else "en"
-        }
-        transcript = result.get("text", "")
-
-        # update progress after transcription
-        JOB_QUEUE.set_progress(job_id, 30)
-
-        checkpoint("Transcription")
-        if not transcript:
-            raise InputRejected("No speech detected in the uploaded file.")
-
-        # Refuse recordings that cannot produce a KT document (an empty
-        # meeting, a few pleasantries, a stand-up uploaded by mistake); carry
-        # softer findings to the document as warnings.
-        upstream_warnings: List[str] = []
-        gate = assess_transcript(transcript, source="audio")
-        if gate["verdict"] == "reject":
-            raise InputRejected("The recording does not contain enough KT content to build a document. "
-                             + " ".join(gate["reasons"]))
-        if gate["verdict"] == "warn":
-            upstream_warnings.extend(gate["reasons"])
-
-        # A recorded meeting with a screen share: capture the dashboards and
-        # links that were shown and discussed (screen_capture.py). Runs here
-        # because the uploaded file is deleted when this task ends. Never
-        # fails the KT: on any error the document is built without captures.
-        screen = None
-        if screen_capture.enabled():
-            try:
-                JOB_QUEUE.set_progress(job_id, 35)
-                offset = screen_capture.leading_silence_seconds(input_path)
-                screen = screen_capture.analyze_screen_shares(
-                    input_path, result.get('segments', []), os.path.join(KT_ASSETS_DIR, job_id),
-                    transcript_offset=offset,
-                )
-                screen["transcript_offset"] = offset
-            except Exception as exc:
-                logger.warning("Screen capture failed: %s", exc, exc_info=True)
-                upstream_warnings.append("Screen capture failed; dashboards and links shown on screen were not captured.")
-
-        if screen is not None:
-            checkpoint("Screen capture")
-        run_kt_pipeline(job_id, transcript, result.get('segments', []), screen=screen, warnings=upstream_warnings,
-                        time_offset=time_offset)
+        rec = transcribe_recording(job_id, input_path, media_format)
+        run_kt_pipeline(job_id, rec["transcript"], rec["segments"], screen=rec["screen"], warnings=rec["warnings"],
+                        time_offset=rec["time_offset"], speakers=rec["speakers"], notices=rec["notices"])
     except Exception as e:
         if not isinstance(e, InputRejected):
             logger.exception("Upload processing failed for %s", job_id)
@@ -936,14 +905,142 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
                 "failure": FAILURE_INPUT if isinstance(e, InputRejected) else FAILURE_ERROR,
             }
     finally:
-        if input_path and os.path.exists(input_path):
-            os.unlink(input_path)
-        # Clean up any extracted audio files
-        # remove any temporary audio files we created
-        candidates = [f"{input_path}.wav", f"{input_path}.mp3", f"{input_path}.trimmed.wav"]
-        for audio_file in candidates:
-            if os.path.exists(audio_file):
-                try:
-                    os.unlink(audio_file)
-                except:
-                    pass
+        remove_upload(input_path)
+
+
+def remove_upload(input_path: str) -> None:
+    """The upload and every audio file made from it."""
+    for path in (input_path, f"{input_path}.wav", f"{input_path}.mp3", f"{input_path}.trimmed.wav"):
+        if path and os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def transcribe_recording(job_id: str, input_path: str, media_format: Optional[str] = None,
+                         capture_screen: bool = True) -> dict:
+    """Transcribe an uploaded recording (and diarise it, check its language
+    and capture its screen shares): {"transcript", "segments", "time_offset",
+    "speakers", "notices", "warnings", "screen"}. Raises InputRejected when it
+    cannot make a KT. Shared by a new KT and a KT's follow-up session (P2-1)."""
+    if os.path.getsize(input_path) == 0:
+        raise InputRejected("Uploaded file is empty.")
+
+    try:
+        audio_to_use = _extract_audio(input_path, media_format)
+    except media_guard.MediaRejected as exc:
+        raise InputRejected(exc.message) from exc
+
+    # Trim only leading/trailing silence to speed up transcription.
+    time_offset = 0.0
+    try:
+        trimmed_path = f"{input_path}.trimmed.wav"
+        if trim_leading_trailing_silence(audio_to_use, trimmed_path):
+            # Transcript times now start after the cut silence; sources
+            # add it back so they point into the original recording.
+            time_offset = screen_capture.leading_silence_seconds(audio_to_use)
+            audio_to_use = trimmed_path
+    except Exception:
+        # If trimming fails, continue with original audio
+        pass
+
+    # Transcribe using faster-whisper with faster settings by default.
+    # On CPU we prefer the small model, while GPU can use medium when configured.
+    transcribe_kwargs = {
+        "language": "en",
+        "beam_size": DEFAULT_WHISPER_BEAM_SIZE,
+        "task": "transcribe",
+        # Skip non-speech (faster-whisper's built-in Silero VAD). On a
+        # real KT recording with meeting pauses, Whisper without it
+        # filled the silences with text nobody said (an invented
+        # "deployment window is outside peak business hours" and a
+        # "rollback time" repetition loop); with it, no invented text and
+        # 27% faster. Continuous speech transcribes identically.
+        "vad_filter": WHISPER_VAD_FILTER,
+    }
+    checkpoint("Audio extraction")
+    language_note = spoken_language_warning(audio_to_use)
+    segments, info = _transcribe(audio_to_use, **transcribe_kwargs)
+    segments = list(segments)
+
+    # Clean each segment once and build the joined transcript from cleaned parts
+    cleaned_segments = []
+    raw_parts = []
+    for s in segments:
+        cleaned_text, _ = redact_secrets(clean_transcript(s.text))
+        raw_parts.append(cleaned_text)
+        cleaned_segments.append({
+            "id": s.id,
+            "seek": s.seek,
+            "start": s.start,
+            "end": s.end,
+            "text": cleaned_text,
+            "avg_logprob": getattr(s, "avg_logprob", None),
+            "compression_ratio": getattr(s, "compression_ratio", None),
+            "no_speech_prob": getattr(s, "no_speech_prob", None)
+        })
+
+    raw_text = " ".join(raw_parts).strip()
+
+    # Who said each segment (P1-7), from the same audio Whisper heard so
+    # the times line up. Optional: without the models, or on any error,
+    # the KT is built without speakers.
+    speakers = None
+    notices: List[str] = []
+    try:
+        speakers = diarization.label_segments(audio_to_use, cleaned_segments)
+        if speakers is not None:
+            checkpoint("Speaker diarisation")
+    except Exception as exc:
+        logger.warning("Speaker diarisation failed: %s", exc, exc_info=True)
+        notices.append("Speakers could not be told apart in this recording, so sources show no speaker.")
+
+    result = {
+        "text": raw_text,
+        "segments": cleaned_segments,
+        "language": info.language if info else "en"
+    }
+    transcript = result.get("text", "")
+
+    # update progress after transcription
+    JOB_QUEUE.set_progress(job_id, 30)
+
+    checkpoint("Transcription")
+    if not transcript:
+        raise InputRejected("No speech detected in the uploaded file.")
+
+    # Refuse recordings that cannot produce a KT document (an empty
+    # meeting, a few pleasantries, a stand-up uploaded by mistake); carry
+    # softer findings to the document as warnings.
+    upstream_warnings: List[str] = [language_note] if language_note else []
+    gate = assess_transcript(transcript, source="audio")
+    if gate["verdict"] == "reject":
+        raise InputRejected("The recording does not contain enough KT content to build a document. "
+                         + " ".join(gate["reasons"]))
+    if gate["verdict"] == "warn":
+        # The recording's own language check already said it; one warning is enough.
+        upstream_warnings.extend(r for r in gate["reasons"] if not (language_note and r == language_warning(transcript)))
+
+    # A recorded meeting with a screen share: capture the dashboards and
+    # links that were shown and discussed (screen_capture.py). Runs here
+    # because the uploaded file is deleted when this task ends. Never
+    # fails the KT: on any error the document is built without captures.
+    screen = None
+    if capture_screen and screen_capture.enabled():
+        try:
+            JOB_QUEUE.set_progress(job_id, 35)
+            offset = screen_capture.leading_silence_seconds(input_path)
+            screen = screen_capture.analyze_screen_shares(
+                input_path, result.get('segments', []), os.path.join(KT_ASSETS_DIR, job_id),
+                transcript_offset=offset,
+            )
+            screen["transcript_offset"] = offset
+        except Exception as exc:
+            logger.warning("Screen capture failed: %s", exc, exc_info=True)
+            upstream_warnings.append("Screen capture failed; dashboards and links shown on screen were not captured.")
+
+    if screen is not None:
+        checkpoint("Screen capture")
+    return {"transcript": transcript, "segments": result.get("segments", []), "time_offset": time_offset,
+            "speakers": speakers, "notices": notices, "warnings": upstream_warnings, "screen": screen}

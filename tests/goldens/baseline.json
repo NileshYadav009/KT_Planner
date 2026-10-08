@@ -77,15 +77,57 @@
   "false_covered": 0
  },
  "h01_quill_onprem_java": {
-  "accuracy": 0.84,
-  "wrong": 4,
+  "accuracy": 0.96,
+  "wrong": 1,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0
  },
  "h02_harbor_azure_serverless": {
-  "accuracy": 0.833,
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h03_ember_aws_eks": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h04_tally_gcp_serverless": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 1,
+  "false_covered": 0
+ },
+ "h05_atlas_hybrid_wms": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h06_relay_aws_streaming": {
+  "accuracy": 0.909,
   "wrong": 3,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h07_payslip_azure_teams": {
+  "accuracy": 0.848,
+  "wrong": 5,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h08_quarry_onprem_vmware": {
+  "accuracy": 0.939,
+  "wrong": 2,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0

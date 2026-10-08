@@ -23,6 +23,18 @@ To move a model to a new revision, change its commit in
 `scripts/fetch_models.py`, then run the golden suite
 (`python scripts/golden_report.py`).
 
+Speaker diarisation (`diarization.py`) uses two ONNX files from the
+sherpa-onnx releases, pinned by SHA-256 in `diarization.MODELS` and fetched
+by the same script: pyannote segmentation-3.0 (MIT, CNRS) and WeSpeaker
+ResNet34 trained on VoxCeleb (CC BY 4.0, WeNet community; credit it where
+you list third-party components). They run locally; no token or hosted
+service is involved and the audio does not leave the machine.
+
+The section classifier also compares each sentence with labelled examples
+(`section_examples.json`). It is generated from the synthetic, non-holdout
+goldens; after changing those, run `python scripts/build_section_examples.py`
+(the tests fail while it is out of date).
+
 CI (`.github/workflows/ci.yml`) runs the tests from the lock, checks that the
 lock matches `requirements.txt`, builds the image, and checks that the
 container becomes ready with networking switched off.
@@ -75,6 +87,13 @@ local disk (not NFS).
 | `CONTINUUM_ALERT_WEBHOOK_URL` | unset | Slack/Teams-style webhook for alerts. |
 | `CONTINUUM_ALERT_QUEUE_AGE_SECONDS` | `900` | Alert when the oldest queued KT has waited this long. |
 | `SENTRY_DSN` | unset | Send errors to Sentry (no request bodies, local variables or personal data). |
+| `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
+| `LLM_BATCH_CALLS` | `0` | `1` batches classification checks and field gap-fills (see Submitting KTs). |
+| `WHISPER_BATCHED` | `1` | `0` transcribes segment by segment instead of in batches (about twice as slow on CPU). |
+| `WHISPER_BATCH_SIZE` | `8` | Speech chunks transcribed together when batched. |
+| `CONTINUUM_DIARIZATION` | `1` | `0` skips speaker diarisation (sources then show no speaker). |
+| `CONTINUUM_DIARIZATION_DIR` | `$HF_HOME/continuum-diarization` | Where the diarisation models are. |
+| `CONTINUUM_DIARIZATION_THRESHOLD` | `0.6` | How alike two voices must be to count as one speaker. |
 
 ## Submitting KTs
 
@@ -88,6 +107,31 @@ for you.
 When a KT finishes, the worker renders its PDF and stores it, so a download is
 a read. A document changed after that (an edit, a sign-off step) is rendered
 again on the next download.
+
+**Follow-up sessions.** `POST /kt/{job_id}/sessions` (a pasted transcript) or
+`POST /kt/{job_id}/sessions/upload` (a recording) adds a session to a
+finished KT. A worker rebuilds the document from every session as the next
+version; sources name their session (`S2 · 03:15`). `GET /kt/{job_id}/sessions`
+lists the sessions and the agenda for the next one (the knowledge gaps left).
+A signed KT takes no more sessions; a failed rebuild leaves the KT as it was
+and shows the reason. Reviewer edits to the previous version are not carried
+onto the rebuilt document; that version stays in History.
+
+**Exports and search.** `GET /export/markdown/{job_id}` (any `?version=`) for
+Confluence, Notion or a repository; `GET /export/gaps/{job_id}` is a CSV of the
+knowledge gaps that Jira imports as one ticket per row. `GET /search?q=`
+searches the finished KTs of the caller's workspace.
+
+**Speakers and language.** Recordings are diarised when the models are
+present (sources say who said each sentence) and checked for language:
+parts that are clearly not English, and pasted text that does not read as
+English, put a warning on the document.
+
+**LLM calls.** `LLM_BATCH_CALLS=1` asks the classification checks
+(`LLM_VERIFY_BATCH_SIZE`, default 15 per call) and each section's field
+gap-fills (`LLM_GAP_FILL_BATCH_SIZE`, default 12) in batches: about 70% fewer
+calls for the same document with a deterministic test model. It is off until
+real LLM runs confirm the answers match one call each.
 
 ## Watching it
 

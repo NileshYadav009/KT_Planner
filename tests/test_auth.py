@@ -48,6 +48,9 @@ def _job(pipeline, job_id, tenant_id):
     ("get", "/status/any-job-0001", None),
     ("get", "/schema/any-job-0001", None),
     ("get", "/export/pdf/any-job-0001", None),
+    ("get", "/export/markdown/any-job-0001", None),
+    ("get", "/export/gaps/any-job-0001", None),
+    ("get", "/search?q=x", None),
     ("get", "/jobs", None),
     ("post", "/kt-from-transcript", {"transcript": "x"}),
     ("post", "/feedback", {"job_id": "x", "sentence_id": 0, "corrected_classification": "danger_zones"}),
@@ -93,12 +96,16 @@ def test_a_tenant_cannot_see_another_tenants_job(client, tenants):
     _job(pipeline, "auth-job-0001", a)
     try:
         assert client.get("/status/auth-job-0001", headers=_h(key_a)).status_code == 200
-        for path in ("/status/auth-job-0001", "/schema/auth-job-0001", "/export/pdf/auth-job-0001"):
+        for path in ("/status/auth-job-0001", "/schema/auth-job-0001", "/export/pdf/auth-job-0001",
+                     "/export/markdown/auth-job-0001", "/export/gaps/auth-job-0001"):
             resp = client.get(path, headers=_h(key_b))
             assert resp.status_code == 404 and "SECRET TRANSCRIPT" not in resp.text
         resp = client.post("/feedback", headers=_h(key_b),
                            json={"job_id": "auth-job-0001", "sentence_id": 0, "corrected_classification": "danger_zones"})
         assert resp.status_code == 404
+        found_b = client.get("/search?q=x", headers=_h(key_b)).json()["results"]
+        found_a = client.get("/search?q=x", headers=_h(key_a)).json()["results"]
+        assert found_b == [] and [r["job_id"] for r in found_a] == ["auth-job-0001"]
         listed_b = [j["job_id"] for j in client.get("/jobs", headers=_h(key_b)).json()["jobs"]]
         listed_a = [j["job_id"] for j in client.get("/jobs", headers=_h(key_a)).json()["jobs"]]
         assert "auth-job-0001" in listed_a and "auth-job-0001" not in listed_b
@@ -175,6 +182,8 @@ def test_the_app_page_shows_sign_in_until_signed_in(client, tenants):
     assert "httponly" in cookie and "samesite=lax" in cookie
     app = client.get("/")
     assert 'id="themeToggle"' in app.text                      # the real app, now
+    # P2-5: what the KT covered, not a letter grade of the customer's KT.
+    assert "KT completeness" in app.text and "q.grade" not in app.text
     assert client.get("/me").json()["workspace"] == "Acme"
     assert client.get("/jobs").status_code == 200
 

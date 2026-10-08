@@ -190,15 +190,22 @@ def render_sources_appendix(sources: list) -> str:
     if not sources:
         return ""
     timed = any(s.get("start") is not None for s in sources)
+    attributed = any(s.get("speaker") for s in sources)
     items = []
     for src in sources:
         n = int(src["id"])
         when = format_time(src.get("start"))
+        if src.get("session"):      # a KT built from several sessions (P2-1)
+            when = f"S{int(src['session'])}" + (f" · {when}" if when else "")
+        who = str(src.get("speaker") or "")
         items.append(f"<li id=\"src-{n}\"><span class=\"src-n\">{n}</span>"
                      + (f"<span class=\"src-t\">{when}</span>" if when else "")
+                     + (f"<span class=\"src-s\">{html_escape(who)}</span>" if who else "")
                      + f"<span class=\"src-q\">\u201c{html_escape(src.get('quote', ''))}\u201d</span></li>")
+    said = ("the time it was said in the recording and who said it" if timed and attributed
+            else "the time it was said in the recording" if timed else "who said it" if attributed else "")
     intro = ("Each fact in this document is followed by the number of the transcript sentence it comes from"
-             + (", with the time it was said in the recording. " if timed else ". ")
+             + (f", with {said}. " if said else ". ")
              + "Values marked inferred were not stated in the session and have no source.")
     return ("<section class=\"section-block sources-section\" id=\"sources\">"
             "<h2 class=\"section-title\"><span class=\"section-number\">&#167;</span>Sources</h2>"
@@ -233,7 +240,8 @@ def render_section_blocks(rendered_sections: list) -> str:
             elif block_type == "ChecklistBlock":
                 html.append("<ul>")
                 for i, item in enumerate(block.get("items", [])):
-                    html.append(f"<li>{_render_inline_text(item)}{_refs(block, i)}</li>")
+                    if str(item or "").strip():   # an empty item printed a lone bullet
+                        html.append(f"<li>{_render_inline_text(item)}{_refs(block, i)}</li>")
                 html.append("</ul>")
             elif block_type == "WarningBlock":
                 for i, warning in enumerate(block.get("warnings", [])):
@@ -283,7 +291,8 @@ def render_section_blocks(rendered_sections: list) -> str:
             elif block_type == "TroubleshootingBlock":
                 html.append("<ol>")
                 for i, step in enumerate(block.get("steps", [])):
-                    html.append(f"<li>{_render_inline_text(step)}{_refs(block, i)}</li>")
+                    if str(step or "").strip():
+                        html.append(f"<li>{_render_inline_text(step)}{_refs(block, i)}</li>")
                 html.append("</ol>")
             elif block_type == "CodeBlock":
                 html.append(

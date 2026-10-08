@@ -1,7 +1,7 @@
 {
  "id": "h02_harbor_azure_serverless",
- "holdout": true,
- "notes": "Written after the rules were tuned on the other goldens and scored once; no rule was changed for it. Its score is the suite's measure of accuracy on unseen KTs.",
+ "holdout": false,
+ "notes": "Written as a holdout after the rules were tuned on g01-g10 and scored at 84%. On 7 Oct its misses drove the section-example fix (scripts/build_section_examples.py), so it is part of the tuning set now; h03-h05 measure unseen KTs.",
  "title": "Harbor: conversational Azure serverless KT (IoT Hub, Functions, Cosmos DB)",
  "proves": "Casual phrasing and serverless architecture place correctly.",
  "source": "written for this suite (synthetic)",

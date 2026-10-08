@@ -39,6 +39,7 @@ from section_rules import (
     RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE,
 )
 from llm.usage import record_skip as record_llm_skip
+from llm.batching import llm_batch_calls_enabled
 
 # Detect if sentence_transformers package is installed but avoid importing it at module import time.
 # Use the installed package when available; env var can override real embeddings usage.
@@ -676,6 +677,67 @@ class ClassifiedSentence:
             self.is_inferred = False
     
 
+_SECTION_EXAMPLES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "section_examples.json")
+# How much a section's similarity comes from its labelled examples rather
+# than its title and hints, and how many of the closest examples count.
+# Chosen by leave-one-golden-out on the tuning goldens' sentences that no
+# routing rule decides: 83% -> 91% (k=2, half and half; all examples or
+# k=1 did worse).
+SECTION_EXAMPLE_WEIGHT = 0.5
+SECTION_EXAMPLE_TOP_K = 2
+
+
+def load_section_examples(path: str = _SECTION_EXAMPLES_PATH) -> Dict[str, List[str]]:
+    """Labelled example statements per section (scripts/build_section_examples.py).
+    Missing or unreadable: no examples, and sections score as before."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            sections = json.load(fh).get("sections") or {}
+        return {sid: [str(t) for t in texts if str(t).strip()] for sid, texts in sections.items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _is_borderline(primary: "Classification", secondary: List["Classification"], similarity_threshold: float) -> bool:
+    """A pick worth an LLM check: a close second, or a weak first."""
+    return bool(
+        (secondary and (primary.confidence - secondary[0].confidence) < 0.05)
+        or primary.confidence < (similarity_threshold * 1.3)
+    )
+
+
+def _check_rule_decided(rule_decided: bool) -> bool:
+    """Whether to ask about a sentence a routing rule decides anyway
+    (LLM_VERIFY_RULE_DECIDED: shadow asks and counts it, skip does not)."""
+    if not rule_decided:
+        return True
+    mode = os.getenv("LLM_VERIFY_RULE_DECIDED", "shadow").strip().lower()
+    if mode == "skip":
+        record_llm_skip("classification_check", "decided by a routing rule")
+        return False
+    if mode == "shadow":
+        record_llm_skip("classification_check", "decided by a routing rule", shadow=True)
+    return True
+
+
+def _apply_verified(primary: "Classification", secondary: List["Classification"], verified_id: Optional[str]):
+    """Make the LLM's pick the primary when it chose another of the offered candidates."""
+    verify_candidates = [primary] + secondary[:2]
+    if not verified_id or verified_id == primary.section_id:
+        return primary, secondary, None
+    match = next((c for c in verify_candidates if c.section_id == verified_id), None)
+    if not match:
+        return primary, secondary, None
+    old_primary = primary
+    new_secondary = [c for c in verify_candidates if c is not match and c is not old_primary]
+    new_secondary.insert(0, old_primary)
+    note = (
+        f"LLM verification: chose {match.section_id} over "
+        f"{old_primary.section_id} (borderline: {match.confidence:.2f} vs {old_primary.confidence:.2f})"
+    )
+    return match, new_secondary, note
+
+
 class ContextClassifier:
     """
     STAGE 3: Semantic classification against KT schema.
@@ -723,6 +785,8 @@ class ContextClassifier:
         self.similarity_threshold = similarity_threshold
         self.section_embeddings = {}
         self.section_metadata = {}
+        self._example_embeddings = None  # labelled section examples, set by index_schema
+        self._example_sections: List[str] = []
         self._section_hints = {}  # Initialize for keyword matching
         
         # Initialize cross-encoder for reranking if available
@@ -776,7 +840,46 @@ class ContextClassifier:
                 "required": sec.get("required", False),
                 "description": description
             }
-    
+        self._index_section_examples()
+
+    def _index_section_examples(self, examples: Optional[Dict[str, List[str]]] = None) -> None:
+        """A title and a few hint words say little about what a section's
+        statements sound like: every section scored 0.45-0.60 against a
+        sentence, so a time phrase ("for an hour", "overnight") pulled a fix
+        or a cost note into Disaster Recovery. Real statements filed under
+        each section (section_examples.json) separate them much better."""
+        self._example_embeddings = None
+        self._example_sections: List[str] = []
+        examples = load_section_examples() if examples is None else examples
+        texts = []
+        for sec_id, sec_texts in examples.items():
+            if sec_id in self.section_embeddings:
+                texts.extend(sec_texts)
+                self._example_sections.extend([sec_id] * len(sec_texts))
+        if not texts:
+            return
+        try:
+            self._example_embeddings = self._encode_texts(texts)
+        except Exception as e:
+            logger.warning("Section examples not indexed (%s); scoring on titles and hints only", e)
+            self._example_embeddings = None
+            self._example_sections = []
+
+    def _example_similarities(self, sent_embedding) -> Dict[str, float]:
+        """Per section, the mean similarity of its SECTION_EXAMPLE_TOP_K
+        closest examples to the sentence."""
+        if self._example_embeddings is None or sent_embedding is None:
+            return {}
+        try:
+            sims = [float(v) for v in util.cos_sim(sent_embedding, self._example_embeddings)[0]]
+        except Exception:
+            return {}
+        by_section: Dict[str, List[float]] = defaultdict(list)
+        for sec_id, sim in zip(self._example_sections, sims):
+            by_section[sec_id].append(sim)
+        return {sec_id: sum(sorted(v, reverse=True)[:SECTION_EXAMPLE_TOP_K]) / min(len(v), SECTION_EXAMPLE_TOP_K)
+                for sec_id, v in by_section.items()}
+
     def classify_sentence(
         self,
         sentence: Sentence,
@@ -919,39 +1022,78 @@ class ContextClassifier:
         """
         if not primary or not self.llm_fallback_fn:
             return primary, secondary, None
-
-        is_borderline = (
-            (secondary and (primary.confidence - secondary[0].confidence) < 0.05)
-            or primary.confidence < (self.similarity_threshold * 1.3)
-        )
-        if not is_borderline:
+        if not _is_borderline(primary, secondary, self.similarity_threshold) or not _check_rule_decided(rule_decided):
             return primary, secondary, None
-
-        if rule_decided:
-            mode = os.getenv("LLM_VERIFY_RULE_DECIDED", "shadow").strip().lower()
-            if mode == "skip":
-                record_llm_skip("classification_check", "decided by a routing rule")
-                return primary, secondary, None
-            if mode == "shadow":
-                record_llm_skip("classification_check", "decided by a routing rule", shadow=True)
 
         verify_candidates = [primary] + secondary[:2]
         verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates, context_text)
-        if not verified_id or verified_id == primary.section_id:
-            return primary, secondary, None
+        return _apply_verified(primary, secondary, verified_id)
 
-        match = next((c for c in verify_candidates if c.section_id == verified_id), None)
-        if not match:
-            return primary, secondary, None
+    def verify_in_batches(
+        self, items: List[Tuple[str, Optional[Classification], List[Classification], str, bool]]
+    ) -> List[Tuple[Optional[Classification], List[Classification], Optional[str]]]:
+        """The borderline checks of a whole transcript, LLM_VERIFY_BATCH_SIZE
+        sentences per call (P1-12). Each item is (sentence, primary,
+        secondary, context, rule_decided), and each check gets the same
+        sentence, candidates and context _maybe_verify_with_llm would give it;
+        only the number of round trips changes. One call per sentence was 88
+        of 140 calls on a 1,260-word KT."""
+        results = [(primary, secondary, None) for _, primary, secondary, _, _ in items]
+        if not self.llm_fallback_fn:
+            return results
+        pending = [
+            (index, text, [primary] + secondary[:2], context)
+            for index, (text, primary, secondary, context, rule_decided) in enumerate(items)
+            if primary and _is_borderline(primary, secondary, self.similarity_threshold) and _check_rule_decided(rule_decided)
+        ]
+        size = max(1, int(os.getenv("LLM_VERIFY_BATCH_SIZE", "15")))
+        for start in range(0, len(pending), size):
+            chunk = pending[start:start + size]
+            answers = self._verify_batch_with_llm([(text, candidates, context) for _, text, candidates, context in chunk])
+            for (index, _, _, _), verified_id in zip(chunk, answers):
+                _, primary, secondary, _, _ = items[index]
+                results[index] = _apply_verified(primary, secondary, verified_id)
+        return results
 
-        old_primary = primary
-        new_secondary = [c for c in verify_candidates if c is not match and c is not old_primary]
-        new_secondary.insert(0, old_primary)
-        note = (
-            f"LLM verification: chose {match.section_id} over "
-            f"{old_primary.section_id} (borderline: {match.confidence:.2f} vs {old_primary.confidence:.2f})"
+    def _verify_batch_with_llm(self, checks: List[Tuple[str, List[Classification], str]]) -> List[Optional[str]]:
+        """One call for several borderline sentences, each choosing among its
+        own candidates. Same rules as _verify_classification_with_llm: an
+        answer outside a sentence's candidates, a missing line or a failed
+        call keeps the classifier's pick."""
+        entries = []
+        for number, (text, candidates, context) in enumerate(checks, start=1):
+            entry = f"{number}. Sentence: \"{text[:300]}\"\n"
+            trimmed = (context or "").strip()
+            if trimmed and trimmed != text.strip():
+                entry += f"   Context (for reference only): \"{trimmed[:500]}\"\n"
+            entry += "   Candidates: " + "; ".join(f"{c.section_id} ({c.section_title})" for c in candidates)
+            entries.append(entry)
+        prompt = (
+            "You are verifying knowledge-transfer sentences' section assignments.\n\n"
+            + "\n\n".join(entries)
+            + "\n\nRules:\n"
+            "- For each numbered sentence, choose the best section id from ITS OWN candidates, or NONE if none fit.\n"
+            "- Classify only the sentence itself; its context is there to understand it.\n"
+            "- Do NOT invent a section id that isn't listed for that sentence.\n"
+            "- Answer with exactly one line per sentence, in order, as <number>: <section id or NONE>. "
+            "No explanations.\n\n"
+            "Answers:"
         )
-        return match, new_secondary, note
+        try:
+            raw = self.llm_fallback_fn(prompt, temperature=0.1, max_output_tokens=16 * len(checks) + 16)
+        except Exception as e:
+            logger.warning("Batched classification check failed: %s", e)
+            return [None] * len(checks)
+        picked: Dict[int, str] = {}
+        for line in str(raw or "").splitlines():
+            m = re.match(r"^\W*(\d+)\s*[:.)\-]\s*[`\"']?([A-Za-z0-9_]+)", line.strip())
+            if m:
+                picked.setdefault(int(m.group(1)), m.group(2).lower())
+        answers: List[Optional[str]] = []
+        for number, (_, candidates, _) in enumerate(checks, start=1):
+            answer = picked.get(number)
+            answers.append(next((c.section_id for c in candidates if c.section_id.lower() == answer), None))
+        return answers
 
     def _verify_classification_with_llm(
         self, sentence_text: str, candidates: List[Classification], context_text: str = ""
@@ -1029,9 +1171,13 @@ class ContextClassifier:
 
         classifications = []
         sent_text_lower = (sentence.text or "").lower()
+        example_sims = self._example_similarities(sent_embedding)
 
         for sec_id, sec_embedding in self.section_embeddings.items():
             base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
+            example_sim = example_sims.get(sec_id)
+            if example_sim is not None:
+                base_sim = (1 - SECTION_EXAMPLE_WEIGHT) * base_sim + SECTION_EXAMPLE_WEIGHT * example_sim
 
             context_sim = 0.0
             if context_embedding is not None:
@@ -1063,10 +1209,12 @@ class ContextClassifier:
                 if specialized:
                     overview_penalty = 0.25
 
-            entity_boost, entity_note = entity_affinity_boost(sec_id, extracted_entities)
+            entity_boost, entity_note = entity_affinity_boost(sec_id, extracted_entities, sentence.text)
 
             combined = float(alpha * base_sim + beta * context_sim + keyword_boost + entity_boost - overview_penalty)
             reason = f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}"
+            if example_sim is not None:
+                reason += f", Examples={example_sim:.3f}"
             if entity_boost:
                 reason += f", Entities=+{entity_boost:.2f}({entity_note})"
             reason += f", Combined={combined:.3f}"
@@ -2419,11 +2567,10 @@ class ContextMappingPipeline:
                     logger.warning(f"Cross-encoder batch reranking failed: {e}. Using embedding scores only.")
                     batch_cross_scores = []
 
-        classified_sentences = []
+        prepared = []
         for i, s in enumerate(sentences):
             classifications = sentence_candidates[i]
             rule_match = sentence_rule_matches[i]
-            extracted_entities = extracted_entities_cache[i]
             top_candidates = classifications[:5]
             if batch_cross_scores is not None and len(batch_cross_scores) > 0:
                 start_idx = batch_offsets[i]
@@ -2458,9 +2605,28 @@ class ContextMappingPipeline:
                 _GREETING_ONLY_RE.match(s.text or "")
                 or (rule_match is not None and getattr(rule_match, "confidence", 0) >= RULE_OVERRIDE_CONFIDENCE)
             )
-            primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(
-                s.text, primary, secondary, context_text=context_texts[i], rule_decided=rule_decided
-            )
+            prepared.append((classifications, primary, secondary, rule_decided))
+
+        # With LLM_BATCH_CALLS=1 the borderline checks go out in batches
+        # (P1-12) instead of one call per sentence. Off until LLM runs on the
+        # golden set show the same placements.
+        verdicts = None
+        if llm_batch_calls_enabled() and self.classifier.llm_fallback_fn:
+            verdicts = self.classifier.verify_in_batches([
+                (s.text, prepared[i][1], prepared[i][2], context_texts[i], prepared[i][3])
+                for i, s in enumerate(sentences)
+            ])
+
+        classified_sentences = []
+        for i, s in enumerate(sentences):
+            classifications, primary, secondary, rule_decided = prepared[i]
+            extracted_entities = extracted_entities_cache[i]
+            if verdicts is not None:
+                primary, secondary, verification_note = verdicts[i]
+            else:
+                primary, secondary, verification_note = self.classifier._maybe_verify_with_llm(
+                    s.text, primary, secondary, context_text=context_texts[i], rule_decided=rule_decided
+                )
             is_unassigned = primary is None
             explanation = ""
             alternatives = []

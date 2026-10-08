@@ -812,3 +812,20 @@ def test_business_criticality_is_derived_and_says_so():
     assert "derived" in overview["business_criticality"]["value"].lower()
     assert overview["impact_if_down"]["what_breaks"]["value"]
     assert overview["impact_if_down"]["who_affected"]["value"]
+
+
+def test_a_tool_field_names_a_tool_or_stays_empty():
+    """The on-call tool came out as a whole Monitoring paragraph when the KT
+    named no paging tool ("the alert goes to the on-call phone")."""
+    schema = [{"id": "ownership_escalation", "title": "Ownership & Escalation", "fields": [
+        {"id": "oncall_tool", "label": "On-Call Tool & Schedule", "type": "text", "dynamic": True,
+         "description": "PagerDuty service name, rotation schedule, escalation policy"}]}]
+
+    def run(*sentences):
+        content = {"ownership_escalation": {"sentences": [{"text": t, "start": 0, "end": 1} for t in sentences]}}
+        return populate_fields(schema, {"ownership_escalation": {"content": []}}, llm_provider=None,
+                               embedding_model=None, section_content=content)["ownership_escalation"]["oncall_tool"]
+
+    phone = run("Nagios emails the ops mailbox, and the quote latency alert goes to the on-call phone.")
+    assert phone["source"] == "unfilled"
+    assert run("Pages go out through incident.io to whoever is on call.")["value"].lower() == "incident.io"

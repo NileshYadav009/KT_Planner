@@ -85,9 +85,9 @@ def test_no_question_or_stated_gap_appears_as_a_table_value(dialogue_result):
 def test_negated_topics_are_reported_as_stated_gaps(dialogue_result):
     rows = {r["Domain"]: r for sec in dialogue_result["knowledge_object"]["sections"] if sec["id"] == "kt_coverage"
             for r in sec["_coverage_rows"]}
-    dr = rows["DISASTER RECOVERY"]
+    dr = rows["Disaster Recovery"]
     assert dr["Coverage"] == "Missing" and "stated as not in place" in dr["Assessment"]
-    assert rows["ENVIRONMENTS"]["Coverage"] == "Missing"
+    assert rows["Environments"]["Coverage"] == "Missing"
 
 
 def test_answers_keep_their_topic_and_the_intro_is_the_overview(dialogue_result):
