@@ -64,6 +64,32 @@ def test_vpc_is_not_labelled_amazon_on_other_clouds(sentence, expected):
         assert "Amazon VPC" not in names
 
 
+@pytest.mark.parametrize("sentence,expected", [
+    ("Access to BigQuery is granted with IAM roles on the project.", "IAM"),
+    ("Cloud IAM controls who can deploy to Cloud Run.", "Google Cloud IAM"),
+    ("The Lambda functions use AWS IAM roles scoped per function.", "AWS IAM"),
+])
+def test_iam_is_not_labelled_aws_on_other_clouds(sentence, expected):
+    import component_catalog as cc
+    from field_populator import PATTERN_EXTRACTORS
+
+    names = [cc.display_name(t) or t for t in PATTERN_EXTRACTORS["tools"].findall(sentence)]
+    assert expected in names
+    if expected != "AWS IAM":
+        assert "AWS IAM" not in names
+
+
+@pytest.mark.parametrize("sentence,expected", [
+    ("We keep the exports in blob storage on GCS.", ["blob storage", "Google Cloud Storage"]),
+    ("Invoices are written to Blob Storage.", ["Azure Blob Storage"]),
+])
+def test_generic_storage_is_not_labelled_azure(sentence, expected):
+    from field_populator import PATTERN_EXTRACTORS
+    from knowledge.knowledge_builder import _canonicalize_component_term
+
+    assert [_canonicalize_component_term(t) for t in PATTERN_EXTRACTORS["tools"].findall(sentence)] == expected
+
+
 def test_cache_layer_row_lists_only_caches():
     from renderers.sections.system_overview import render
 

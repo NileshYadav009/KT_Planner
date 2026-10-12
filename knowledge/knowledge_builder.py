@@ -251,6 +251,29 @@ def _apply_evidence_marker(value: Any, source: str) -> Any:
     return value
 
 
+def _without_session_framing(field: Dict[str, Any]) -> Dict[str, Any]:
+    """A field filled with a whole spoken sentence keeps what it says, not
+    how the session was opened: "Business volume" showed "Hi team, today I'm
+    handing over our AWS e-commerce platform, which processes around 40,000
+    orders daily." A value that only announces the handover is no value."""
+    from dialogue import without_session_framing
+
+    def clean(value):
+        if isinstance(value, str) and len(value.split()) >= 4:
+            return without_session_framing(value)
+        if isinstance(value, list):
+            return [v for v in (clean(item) for item in value) if v not in ("", None)]
+        return value
+
+    value = field.get("value")
+    cleaned = clean(value)
+    if cleaned == value:
+        return field
+    if cleaned in ("", []):
+        return dict(field, value="", confidence=0.0, source="unfilled")
+    return dict(field, value=cleaned)
+
+
 def build_knowledge_object(
     job_id: str,
     coverage: Dict[str, Any],
@@ -280,6 +303,7 @@ def build_knowledge_object(
         # because most renderers hardcode their own display labels instead
         # of trusting knowledge_object["sections"][x]["fields"][id]["label"].
         schema_fields_by_id = _flatten_schema_fields(section.get("fields"))
+        raw_fields = {fid: _without_session_framing(field) for fid, field in raw_fields.items()}
         field_objects = {fid: {
             "id": fid,
             "label": (schema_fields_by_id.get(fid) or {}).get("label", fid),
@@ -974,6 +998,10 @@ _MANAGED_KUBERNETES = frozenset({"amazon eks", "eks", "azure kubernetes service"
 
 
 def _canonicalize_component_term(term: str) -> str:
+    # "blob storage" in lower case is the generic phrase (objects in a GCS
+    # bucket were shown as Azure Blob Storage); the product is capitalised.
+    if term.strip() == "blob storage":
+        return term.strip()
     alias = _CANONICAL_TERM_ALIASES.get(term.strip().lower())
     if alias:
         return alias

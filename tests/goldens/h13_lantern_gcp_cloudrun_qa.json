@@ -1,0 +1,257 @@
+{
+ "id": "h13_lantern_gcp_cloudrun_qa",
+ "holdout": true,
+ "notes": "Written on 12 Oct before the fourth round of mapping fixes and scored blind once, aggregate only (82% with the other two holdouts, 78 of 95 facts). No rule has been tuned on it: with the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Lantern: GCP Cloud Run attribution service, questions in full sentences",
+ "proves": "A receiver asking full questions; data platform on BigQuery and Dataflow.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Maya: So, can you start by telling me what Lantern does?\n\nTom: Lantern is the marketing attribution service. It takes the ad clicks and the web orders and works out which campaign gets credit for each sale, and the marketing team looks at the results every morning.\n\nMaya: What's it made of?\n\nTom: There's a collector API on Cloud Run that receives the click events and writes them to BigQuery. A Dataflow job joins them with the orders every hour, and the dashboards are in Looker Studio. The campaign settings live in a small Firestore database.\n\nMaya: How do changes get out?\n\nTom: We use Cloud Build. When a pull request is merged, Cloud Build builds the container and deploys a new Cloud Run revision, and traffic moves over gradually. If the new revision is broken, you send all the traffic back to the previous revision in the console.\n\nMaya: How do you know when something's wrong?\n\nTom: Cloud Monitoring has an uptime check on the collector, and there's a log-based alert when the Dataflow job fails. Both go to the marketing-tech Slack channel and to Opsgenie.\n\nMaya: What tends to break?\n\nTom: The ad platform changes its click format without warning, and then the collector rejects the events. You update the schema mapping in the config repo and replay the rejected events from the dead-letter bucket. The other one is BigQuery slot contention on Monday mornings when the analysts all run their reports, which makes the hourly job late. It catches up on its own, so just tell marketing.\n\nMaya: Is the data backed up?\n\nTom: BigQuery keeps seven days of time travel, and the raw events are exported to Cloud Storage every night. We've never needed to restore, to be honest.\n\nMaya: Anything I should stay away from?\n\nTom: Never delete the raw events table, the attribution model is retrained from it. Also, don't change the attribution window without the marketing director's approval.\n\nMaya: Are there times to avoid?\n\nTom: Black Friday week and the January sale, marketing watches the numbers hourly then.\n\nMaya: What environments are there?\n\nTom: Just a staging project and production.\n\nMaya: And access?\n\nTom: Everything uses Workload Identity, and the BigQuery datasets are restricted to the marketing-analytics group.\n\nMaya: Who owns this?\n\nTom: The marketing technology team owns Lantern. If it's urgent, page through Opsgenie; otherwise ask Dev Sharma, the team lead.\n\nMaya: Anything about cost?\n\nTom: BigQuery is the main cost, so the hourly job only reads the last two days of partitions.\n\nMaya: Is anything half finished?\n\nTom: The move from Looker Studio to Looker hasn't been started, and nobody owns it.\n\nMaya: What should I do first?\n\nTom: Get added to the marketing-analytics group and get Opsgenie set up. In the first month, handle one schema change on your own.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Lantern is the marketing attribution service",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "works out which campaign gets credit for each sale",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the marketing team looks at the results every morning",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "a collector API on Cloud Run that receives the click events and writes them to BigQuery",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "A Dataflow job joins them with the orders every hour",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the dashboards are in Looker Studio",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "The campaign settings live in a small Firestore database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Cloud Build builds the container and deploys a new Cloud Run revision",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "traffic moves over gradually",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "you send all the traffic back to the previous revision in the console",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Cloud Monitoring has an uptime check on the collector",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "a log-based alert when the Dataflow job fails",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Both go to the marketing-tech Slack channel and to Opsgenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "The ad platform changes its click format without warning",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "replay the rejected events from the dead-letter bucket",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "BigQuery slot contention on Monday mornings",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "It catches up on its own, so just tell marketing",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "BigQuery keeps seven days of time travel",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "the raw events are exported to Cloud Storage every night",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Never delete the raw events table",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "don't change the attribution window without the marketing director's approval",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Black Friday week and the January sale",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Just a staging project and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Everything uses Workload Identity",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the BigQuery datasets are restricted to the marketing-analytics group",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "The marketing technology team owns Lantern",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "marketing technology team",
+    "lantern"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "ask Dev Sharma, the team lead",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the hourly job only reads the last two days of partitions",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "The move from Looker Studio to Looker hasn't been started, and nobody owns it",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Get added to the marketing-analytics group and get Opsgenie set up",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "handle one schema change on your own",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

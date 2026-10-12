@@ -1,0 +1,250 @@
+{
+ "id": "h12_ledgersweep_onprem_batch",
+ "holdout": true,
+ "notes": "Written on 12 Oct before the fourth round of mapping fixes and scored blind once, aggregate only (82% with the other two holdouts, 78 of 95 facts). No rule has been tuned on it: with the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Ledger Sweep: on-premises Spring Batch reconciliation, informal monologue",
+ "proves": "Batch jobs, a hybrid reporting path, a tested DR with a duration, finance calendar rules.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Right, so this is Ledger Sweep. Ledger Sweep is the nightly job that reconciles card settlements against the general ledger for the finance team, and it flags anything that doesn't match before the morning close.\n\nIt's a Spring Batch application that runs on two Linux servers in the Leeds data centre, and it reads the settlement files from an SFTP server and writes the results into SQL Server. Since last year the reports also go to an Azure Storage account, and Power BI reads them from there.\n\nWe release it with Jenkins. The Jenkins job builds the jar, copies it to both servers and restarts the service, and if a release is bad you put the previous jar back from the releases folder and restart.\n\nMonitoring is mostly Zabbix on the servers, plus a check in Splunk that alerts if the job hasn't written its completion record by five in the morning. That alert goes to the finance ops on-call by SMS.\n\nThe thing that bites most is the settlement file from the acquirer arriving after midnight, then the job runs on yesterday's file and everything mismatches. When that happens, wait for the new file and rerun the job with the run-date parameter. Now and again SQL Server runs out of tempdb space during the big month-end run; the DBAs can grow it, so ring them.\n\nSQL Server is backed up by the DBA team every night with log backups every fifteen minutes, and the servers have VMware snapshots. If Leeds went down we'd restore on the Bristol servers, which we did in a test in March, and it took about six hours.\n\nPlease never rerun the job for a past date without asking finance first, it overwrites the signed-off reconciliation. And don't touch the SFTP key, the acquirer has to approve a new one and that takes weeks.\n\nMonth-end and the first two working days of each month are critical, finance closes the books then, so no releases.\n\nThere's a UAT server that gets anonymised settlement files once a week.\n\nThe SQL Server login for the job uses a service account whose password lives in CyberArk, and the SFTP connection uses key-based authentication.\n\nThe finance systems team owns Ledger Sweep. For anything urgent, go to the finance ops on-call, and then to Priyanka Rao who runs the team.\n\nThe Power BI licences are on the finance budget, and we cut the refresh to once a day to stay inside the capacity we pay for.\n\nStill to do: moving off the Jenkins box, which is end of life, and nobody's been given it yet.\n\nFirst week, get your CyberArk access and a Splunk login, and watch one month-end run with me.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the nightly job that reconciles card settlements against the general ledger for the finance team",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "it flags anything that doesn't match before the morning close",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "a Spring Batch application that runs on two Linux servers in the Leeds data centre",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "it reads the settlement files from an SFTP server and writes the results into SQL Server",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "the reports also go to an Azure Storage account, and Power BI reads them from there",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "We release it with Jenkins",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "copies it to both servers and restarts the service",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "you put the previous jar back from the releases folder and restart",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Monitoring is mostly Zabbix on the servers",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "a check in Splunk that alerts if the job hasn't written its completion record",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "That alert goes to the finance ops on-call by SMS",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "the settlement file from the acquirer arriving after midnight",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "wait for the new file and rerun the job with the run-date parameter",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "SQL Server runs out of tempdb space during the big month-end run",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "the DBAs can grow it, so ring them",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "SQL Server is backed up by the DBA team every night with log backups every fifteen minutes",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "the servers have VMware snapshots",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "we'd restore on the Bristol servers",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "never rerun the job for a past date without asking finance first",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "don't touch the SFTP key",
+   "in": [
+    "danger_zones",
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Month-end and the first two working days of each month are critical",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "a UAT server that gets anonymised settlement files once a week",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "a service account whose password lives in CyberArk",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the SFTP connection uses key-based authentication",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "The finance systems team owns Ledger Sweep",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "finance systems team",
+    "ledger sweep"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "go to the finance ops on-call, and then to Priyanka Rao who runs the team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "we cut the refresh to once a day to stay inside the capacity we pay for",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "moving off the Jenkins box, which is end of life",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "get your CyberArk access and a Splunk login",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "watch one month-end run with me",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

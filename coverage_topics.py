@@ -70,9 +70,15 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:scan\w*|trivy|snyk|sonarqube|dependabot|checkov|vulnerab\w*)\b"),
     ],
     "day1_survival_checklist": [
-        ("Access and tools to request", ("required_access",), r"\b(?:access|permissions?|accounts?|vpn|sso|onboard\w*)\b"),
+        # Access as something to get, not a name: "the patient access team"
+        # marked an undiscussed Day-1 checklist as mentioned elsewhere.
+        ("Access and tools to request", ("required_access",),
+         r"\b(?:get|request|ask\s+for|need|grant\w*|given|set\s+up)\s+(?:\w+\s+){0,3}(?:access|permissions?|accounts?|"
+         r"logins?)\b|\baccess\s+to\b|\b(?:vpn|sso|onboard\w*)\b"),
+        # "the first week of January" is a date, not the newcomer's first week.
         ("Safe first actions", ("first_safe_actions",),
-         r"\b(?:shadow\w*|read\s+the\s+runbooks?|read-only|observe|first\s+(?:week|day)|start\s+by|review\w*)\b"),
+         r"\b(?:shadow\w*|read\s+the\s+runbooks?|read-only|observe|first\s+(?:week|day)(?!\s+of\b)|start\s+by|"
+         r"review\w*)\b"),
         ("Actions to avoid at first", ("actions_not_to_perform",),
          r"\b(?:don't|do\s+not|never|avoid)\b[^.]*\b(?:first|initially|until|yet)\b"),
     ],
@@ -101,8 +107,11 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "known_bad_days": [
         # Sales EVENTS, not a sales team: "Finance and sales operations use
         # it" marked an incomplete KT's calendar as discussed.
+        # A period, not a rate: "three hundred requests a second at peak"
+        # marked an undiscussed calendar as mentioned elsewhere.
         ("High-traffic periods", ("high_traffic_periods",),
-         r"\b(?:peak|busiest|black\s+friday|(?:flash|summer|winter|holiday|seasonal|big)\s+sales?|"
+         r"\b(?:peak\s+(?:periods?|times?|seasons?|hours?|days?|weeks?|months?|traffic|load|usage)|"
+         r"(?:is|are|was|were)\s+(?:the\s+|our\s+)?peak|the\s+peak\s+(?:is|was)|busiest|black\s+friday|(?:flash|summer|winter|holiday|seasonal|big)\s+sales?|"
          r"sales?\s+(?:events?|periods?|seasons?|days?|campaigns?)|holiday\w*|season\w*|"
          r"(?:high|peak)\s+traffic|traffic\s+(?:peaks?|spikes?)|market\s+open|volatility)\b"),
         ("Month-end windows", ("month_end_windows",), r"\bmonth[\s-]end\b|\bend\s+of\s+(?:the\s+)?month\b|\bdays\s+of\s+the\s+month\b"),
@@ -119,7 +128,7 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("On-call tool", ("oncall_tool",), r"\b(?:pagerduty|opsgenie|on-?call)\b"),
     ],
     "first_30_day_ownership": [
-        ("Week 1", ("week1",), r"\b(?:first\s+week|week\s+(?:one|1))\b"),
+        ("Week 1", ("week1",), r"\b(?:first\s+week(?!\s+of\b)|week\s+(?:one|1))\b"),
         ("Week 2", ("week2",), r"\b(?:second\s+week|week\s+(?:two|2))\b"),
         ("Week 3", ("week3",), r"\b(?:third\s+week|week\s+(?:three|3))\b"),
         ("Week 4", ("week4",), r"\b(?:fourth\s+week|last\s+week|week\s+(?:four|4)|end\s+of\s+the\s+(?:first\s+)?month|day\s+30)\b"),

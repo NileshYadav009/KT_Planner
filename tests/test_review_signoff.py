@@ -170,6 +170,52 @@ def test_a_receiver_cannot_edit_and_bad_edits_change_nothing(team, env):
     assert env.JOB_QUEUE[job_id].get("document_version") is None
 
 
+def test_changes_between_versions_are_listed_per_section(team):
+    """P3-2: what each version changed, read by anyone in the workspace."""
+    client, job_id, _, people = team
+    assert _edit(client, job_id, people["giver"], 1,
+                 {"op": "replace", "section": "monitoring_observability", "block": 0, "unit": 0,
+                  "text": "Datadog monitors the booking API and the queue."},
+                 {"op": "add", "section": "security_controls", "text": "MFA is required for console access."},
+                 {"op": "delete", "section": "danger_zones", "block": 0, "unit": 0}).status_code == 200
+
+    diff = client.get(f"/documents/{job_id}/diff", headers=people["receiver"]["h"]).json()
+    assert (diff["from"], diff["to"]) == (1, 2)
+    by_id = {s["section_id"]: s for s in diff["sections"]}
+    assert by_id["monitoring_observability"]["changed"] == [
+        {"before": "Datadog monitors the booking API.", "after": "Datadog monitors the booking API and the queue."}]
+    assert by_id["security_controls"]["added"] == ["MFA is required for console access."]
+    assert by_id["security_controls"]["now_covered"]                   # "not covered" is not a removed line
+    assert by_id["danger_zones"]["removed"] == ["Never delete bookings by hand."]
+    assert "ownership_escalation" not in by_id and "kt_coverage" not in by_id
+    assert diff["summary"] == "1 added, 1 changed, 1 removed"
+
+    same = client.get(f"/documents/{job_id}/diff?from=2&to=2", headers=people["receiver"]["h"]).json()
+    assert same["sections"] == [] and same["summary"] == "No differences"
+    assert client.get(f"/documents/{job_id}/diff?from=9", headers=people["receiver"]["h"]).status_code == 404
+
+
+def test_a_kt_is_compared_with_an_earlier_kt_of_the_workspace_only(team, env):
+    client, job_id, tenant, people = team
+    earlier = "review-" + uuid.uuid4().hex[:8]
+    old_doc = _document()
+    old_doc["rendered_sections"][0]["blocks"][0]["paragraphs"] = ["Nagios monitors the booking API."]
+    env.JOB_QUEUE[earlier] = {"status": "completed", "tenant_id": tenant, "knowledge_object": old_doc}
+    diff = client.get(f"/documents/{job_id}/diff?against={earlier}", headers=people["giver"]["h"]).json()
+    monitoring = next(s for s in diff["sections"] if s["section_id"] == "monitoring_observability")
+    assert monitoring["changed"] == [{"before": "Nagios monitors the booking API.",
+                                      "after": "Datadog monitors the booking API."}]
+    assert monitoring["added"] == ["PagerDuty pages the on-call engineer."] and monitoring["removed"] == []
+    assert diff["against"] == earlier and diff["against_title"] == "TripWise"
+
+    elsewhere = "review-" + uuid.uuid4().hex[:8]
+    env.JOB_QUEUE[elsewhere] = {"status": "completed", "tenant_id": auth.create_tenant("Other Co"),
+                                "knowledge_object": old_doc}
+    assert client.get(f"/documents/{job_id}/diff?against={elsewhere}", headers=people["giver"]["h"]).status_code == 404
+    env.JOB_QUEUE[earlier] = dict(env.JOB_QUEUE[earlier], status="processing")
+    assert client.get(f"/documents/{job_id}/diff?against={earlier}", headers=people["giver"]["h"]).status_code == 409
+
+
 def test_a_section_correction_moves_the_sentence_and_changes_the_pdf(team, env):
     client, job_id, _, people = team
     resp = client.post("/feedback", json={"job_id": job_id, "sentence_id": "PagerDuty pages the on-call engineer.",

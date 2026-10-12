@@ -61,3 +61,45 @@ def test_the_announcement_is_not_reported_as_an_unmapped_finding():
 
     assert _is_session_pleasantry("Hi everyone, today I will be handing over the AWS e-commerce platform.")
     assert not _is_session_pleasantry("Hi everyone, the platform processes 120,000 orders per day.")
+
+
+def test_an_introduction_that_states_a_fact_keeps_the_fact_only():
+    from dialogue import without_framing
+
+    assert without_framing("Hi team, today I'm handing over our AWS e-commerce platform, which processes around "
+                           "40,000 orders daily.") == "Our AWS e-commerce platform processes around 40,000 orders daily."
+    assert without_framing("Today I'm handing over TripWise, the booking backend behind our app.") == \
+        "TripWise is the booking backend behind our app."
+    assert without_framing("Um, so the database is PostgreSQL on RDS.") == "The database is PostgreSQL on RDS."
+    assert without_framing("Right now the cluster runs three nodes.") == "Right now the cluster runs three nodes."
+    assert without_framing("Well-known issue: the cache fills up.") == "Well-known issue: the cache fills up."
+
+
+def test_a_field_filled_with_the_opening_sentence_keeps_only_what_it_says():
+    from knowledge.knowledge_builder import _without_session_framing
+
+    field = {"value": "Hi team, today I'm handing over our AWS e-commerce platform, which processes around "
+                      "40,000 orders daily.", "source": "semantic", "confidence": 0.7}
+    assert _without_session_framing(field)["value"] == "Our AWS e-commerce platform processes around 40,000 orders daily."
+    announcement = {"value": "Hi everyone, today I will be handing over the AWS e-commerce platform.",
+                    "source": "semantic", "confidence": 0.7}
+    assert _without_session_framing(announcement)["source"] == "unfilled"
+    assert _without_session_framing({"value": "Amazon EKS", "source": "pattern"})["value"] == "Amazon EKS"
+
+
+def test_the_kt_is_named_without_the_speakers_possessive():
+    from field_populator import _extract_by_pattern
+
+    name = _extract_by_pattern({"id": "system_name", "type": "text"},
+                               "Hi team, today I'm handing over our AWS e-commerce platform, which processes orders.")
+    assert name and not name.lower().startswith("our ")
+
+
+def test_typographic_apostrophes_from_a_pasted_transcript_do_not_hide_the_intro():
+    from devops_transcription import clean_transcript
+    from dialogue import without_framing
+
+    cleaned = clean_transcript("Hi team, today I\u2019m handing over our AWS platform, which processes 40,000 orders "
+                               "daily. Don\u2019t touch the Terraform state.")
+    assert "\u2019" not in cleaned
+    assert without_framing(cleaned.split(". ")[0] + ".") == "Our AWS platform processes 40,000 orders daily."

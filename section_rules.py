@@ -122,6 +122,19 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bredis\s+memory\s+saturation\b",
             r"\bmajor\s+outage\b",
             r"\bpod(?:s)?\s+fail(?:s|ed)?\s+immediately\s+after\s+deployment\b",
+            # A failure introduced as the one you will meet ("The incident you
+            # will meet most often is Twilio throttling us") went to
+            # Monitoring; one that clears itself ("Usually it recovers by
+            # itself, but if it lasts more than ten minutes ...") to Disaster
+            # Recovery.
+            r"\b(?:incident|failure|problem|issue)s?\s+(?:you(?:'ll|\s+will)\s+)?(?:meet|see|hit|run\s+into)\s+"
+            r"(?:most\s+)?(?:often|most)\b",
+            r"\brecovers?\s+(?:by|on)\s+(?:itself|its\s+own)\b",
+            r"\bif\s+it\s+(?:lasts|goes\s+on|persists)\s+(?:for\s+)?(?:more|longer)\s+than\b",
+            # A symptom: "Oracle archive logs filling the disk on Monday
+            # mornings" went to Disaster Recovery (archive logs, backups).
+            r"\b(?:fill(?:s|ed|ing)?\s+(?:up\s+)?the|filled\s+up\s+the)\s+(?:disk|disks|volume|partition|drive)\b",
+            r"\b(?:disk|disks|volume|partition)\s+(?:fills?|filling|filled|runs?\s+out|running\s+out)\b",
         ],
         0.96,
     ),
@@ -186,6 +199,17 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\brollout\s+can\s+be\s+(?:stopped|paused|aborted|halted)\b",
             r"\breverted\s+in\s+git\b",
             r"\bredeploy\s+the\s+(?:previous|last)\b",
+            # A release approval gate: "After the clinical safety officer
+            # signs off, the same pipeline promotes the build to production"
+            # was filed under Handover Completion (sign-off).
+            r"\bpromot(?:e|es|ed|ing)\s+(?:the\s+|a\s+)?(?:build|release|image|artifact|version)\s+to\s+"
+            r"(?:production|prod|staging|live)\b",
+            r"\b(?:safety|change|cab|release|security|go[\s-]live)\s+(?:sign[\s-]?off|approval)\s+is\s+"
+            r"(?:mandatory|required|needed)\b",
+            # "we restore the previous image from its last savepoint" is a
+            # rollback, not disaster recovery: what is restored is a build.
+            r"\b(?:restore|reinstate)\s+the\s+(?:previous|last\s+(?:good|known[\s-]good|working))\s+(?:\w+\s+)?"
+            r"(?:image|images|version|release|build|revision|tag|artifact)\b",
             r"\bif\s+a\s+(?:release|deploy(?:ment)?|rollout)\s+(?:misbehaves|fails|breaks|goes\s+wrong|goes\s+bad)\b",
         ],
         0.965,
@@ -253,6 +277,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\btrevi\b",
             r"\bvault\s+for\s+secret\b",
             r"\bsecret\s+management\b",
+            # Data residency is a control, not a recovery region: "Patient
+            # data never leaves the UK regions" went to Disaster Recovery.
+            r"\bdata\s+(?:never\s+leaves|must\s+(?:stay|remain)\s+in|stays\s+in|resides\s+in|is\s+kept\s+in)\s+"
+            r"(?:the\s+)?(?:\w+\s+){0,2}(?:regions?|country|countries|eu|uk|us|data\s+centres?|data\s+centers?)\b",
+            r"\bdata\s+residency\b",
         ],
         0.95,
     ),
@@ -265,6 +294,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\blow[\s-]?traffic\s+periods?\b",
             r"\bload\s+traffic\s+periods?\b",
             r"\bnon-?production\s+environments?\b",
+            # A saving stated by its effect: "..., which cut the SMS bill by
+            # about a third" was filed under System Overview.
+            r"\b(?:cut|cuts|reduc(?:e|es|ed)|lower(?:s|ed)?|halv(?:e|es|ed)|sav(?:e|es|ed))\s+(?:\w+\s+){0,3}"
+            r"(?:bill|costs?|spend|invoice)\b",
         ],
         0.94,
     ),
@@ -272,6 +305,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         "day1_survival_checklist",
         [
             r"\bfor\s+new\s+team\s+members\b",
+            # "To get started, request the beacon-operators group in Google
+            # Cloud" went to Monitoring.
+            r"^\W*(?:to\s+get\s+started|getting\s+started|when\s+you\s+start|before\s+anything\s+else)\b",
+            r"\b(?:request|ask\s+for|get\s+added\s+to)\s+(?:access\s+to\s+)?(?:the\s+)?[\w-]+(?:\s+[\w-]+)?\s+"
+            r"(?:group|role)\b",
             # Singular/article forms and explicit first-day framing. Only the
             # exact plural "for new team members" used to match, so "For a new
             # team member, the first day should include access to Grafana,
@@ -412,6 +450,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # "The move to MySQL 8.0 still needs doing, and no one has picked it up."
             r"\bstill\s+needs?\s+(?:doing|to\s+be\s+(?:done|finished|completed))\b",
             r"\b(?:no\s*one|nobody)\s+(?:has\s+)?(?:picked\s+(?:it|this|that)\s+up|owns\s+(?:it|this|that))\b",
+            # "...an old Azure Function that nobody really owns. It needs
+            # moving onto the notification service."
+            r"\b(?:no\s*one|nobody)\s+(?:really|actually|properly|officially)\s+owns\b",
+            r"\bneeds?\s+(?:moving|migrating|replacing|upgrading|rewriting|retiring|decommissioning)\b",
+            r"\bneeds?\s+to\s+be\s+(?:moved|migrated|replaced|upgraded|rewritten|retired|decommissioned)\b",
             r"\bnot\s+assigned\s+to\s+anyone\b",
         ],
         0.975,
@@ -424,7 +467,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\b(?:i'?m|i\s+am|we'?re|we\s+are|i'?ll\s+be|i\s+will\s+be)\s+(?:going\s+to\s+be\s+)?handing\s+over\b",
             r"\bwelcome\s+to\s+(?:the\s+)?[\w-]+\s+(?:kt|handover|knowledge\s+transfer|session|walkthrough)\b",
             r"\b(?:service|platform|system|application)\s+(?:used|relied\s+on|depended\s+on)\s+by\b",
-            r"\b(?:\w+\s+){0,3}(?:depend|rely|relies)\s+on\s+(?:it|this\s+(?:service|platform|system))\b",
+            # ...but not the reason given for a prohibition: "And don't change
+            # the ALB idle timeout, the partners' clients depend on it."
+            r"^(?!\W*(?:(?:and|but|also|so|please)\W+)*(?:never|do\s+not|don'?t)\b)"
+            r".*?\b(?:\w+\s+){0,3}(?:depend|rely|relies)\s+on\s+(?:it|this\s+(?:service|platform|system))\b",
             # "Thanks for taking over Pinecart, the checkout service ..." introduces
             # the system; it was filed under Handover Completion.
             r"\b(?:thanks?|thank\s+you)\s+for\s+taking\s+over\b",
@@ -589,10 +635,62 @@ _COMPILED_OVERVIEW_MISPLACEMENT: List[Tuple[str, re.Pattern]] = [
 ]
 
 
+# The receiver's short question names the topic of the answer it is merged
+# with (dialogue.merge_question_answers). "Security? All traffic is TLS,
+# partners authenticate with API keys ... task roles ..." went to Ownership
+# (roles), and "What goes wrong? The NHS app integration times out now and
+# then" to Monitoring. Above every phrase rule: the answer is about what was
+# asked, whatever else it mentions.
+QUESTION_TOPIC_CONFIDENCE = 0.98
+_SPEAKER_PREFIX_RE = re.compile(r"^\s*[A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)?\s*:\s+")
+_QUESTION_TOPICS = [
+    ("ownership_escalation", r"\bwho\s+(?:owns|is\s+responsible|looks\s+after|do\s+(?:i|we|you)\s+(?:call|contact|ask|"
+                             r"escalate)|to\s+(?:call|contact|escalate))\b|\bown(?:s|er|ers|ership)\b|\bescalat\w*"),
+    ("common_failures", r"\bwhat\s+(?:usually\s+|normally\s+|typically\s+)?(?:goes|go|can\s+go)\s+wrong\b|"
+                        r"\bwhat\s+(?:usually\s+|normally\s+)?(?:breaks|fails)\b|"
+                        r"\b(?:common|usual|typical|frequent|recurring)\s+(?:problems?|issues?|failures?|incidents?)\b"),
+    ("deployment_and_rollback", r"\brelease\w*|\bdeploy\w*|\broll\s*back\w*|\bci\s*/?\s*cd\b"),
+    ("disaster_recovery", r"\bbackups?\b|\bbacked\s+up\b|\bdisaster\b|\bdr\b|\brecover\w*|\brestor\w*|\b(?:rto|rpo)\b|"
+                          r"\bfailover\b"),
+    ("monitoring_observability", r"\bmonitor\w*|\balert\w*|\bdashboards?\b|\bobservab\w*|\bmetrics?\b|\blogging\b"),
+    ("danger_zones", r"\brisky\b|\brisks?\b|\bdanger\w*|\bshould(?:n'?t|\s+not)\s+(?:i\s+|we\s+)?(?:touch|change)\b"),
+    ("known_bad_days", r"\bbusy\s+(?:dates?|days?|times?|periods?)\b|\bpeak\s+(?:times?|periods?|days?)\b|\bfreezes?\b|"
+                       r"\bbad\s+days?\b"),
+    ("environments", r"\benvironments?\b|\bstaging\b"),
+    ("security_controls", r"\bsecur\w*|\bsecrets?\b|\bpermissions?\b|\bcompliance\b|\bencrypt\w*"),
+    ("cost_optimization", r"\bcosts?\b|\bspend\w*|\bbill(?:s|ing)?\b|\bbudget\w*"),
+    ("open_responsibilities", r"\bunfinished\b|\bopen\s+(?:items?|work|tasks?)\b|\bleft\s+to\s+do\b|\boutstanding\b"),
+    ("day1_survival_checklist", r"\bstart(?:ing)?\s+out\b|\bget(?:ting)?\s+started\b|\bfirst\s+day\b|\bday\s+(?:one|1)\b"),
+    ("first_30_day_ownership", r"\bfirst\s+(?:month|30\s+days|thirty\s+days)\b"),
+]
+_QUESTION_TOPIC_RES = [(sid, re.compile(rx, re.IGNORECASE)) for sid, rx in _QUESTION_TOPICS]
+
+
+def question_topic(text: str) -> Optional[SectionRuleMatch]:
+    """The section a short opening question asks about, when it is answered
+    in the same unit ("Backups? Cosmos has continuous backup ...")."""
+    body = _SPEAKER_PREFIX_RE.sub("", text or "", count=1)
+    match = re.match(r"([^?.!]{1,90})\?\s*(.*)", body, re.S)
+    if not match:
+        return None
+    question, answer = match.group(1), _SPEAKER_PREFIX_RE.sub("", match.group(2), count=1)
+    if len(question.split()) > 10 or len(re.findall(r"[A-Za-z0-9]+", answer)) < 3:
+        return None
+    hits = [(m.start(), sid, rx.pattern) for sid, rx in _QUESTION_TOPIC_RES for m in [rx.search(question)] if m]
+    if not hits:
+        return None
+    _, section_id, pattern = min(hits)
+    return SectionRuleMatch(section_id=section_id, confidence=QUESTION_TOPIC_CONFIDENCE,
+                            reason=f"question:{section_id}", matched_pattern=pattern)
+
+
 def match_section_rules(text: str) -> Optional[SectionRuleMatch]:
     """Return the best rule-based section match for a sentence, if any."""
     if not text or not text.strip():
         return None
+    asked = question_topic(text)
+    if asked:
+        return asked
 
     # Ranked by (confidence, number of this section's patterns that fired,
     # earliest match position). Ties used to go to whichever rule happened

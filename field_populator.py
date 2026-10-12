@@ -274,6 +274,17 @@ SYSTEM_NAME_STOPWORDS = {
     "the", "a", "an", "this", "that", "it", "site", "system", "platform",
     "application", "service", "app", "thing", "handover", "kt", "session", "call",
 }
+_CALENDAR_WORDS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february",
+                   "march", "april", "may", "june", "july", "august", "september", "october", "november",
+                   "december", "today", "tomorrow"}
+# A capitalised name the KT introduces as its subject (case-sensitive).
+_NAMED_SUBJECT_RES = [
+    re.compile(r"\b[Tt]his\s+is\s+([A-Z][\w\-]*(?:\s+[A-Z][\w\-]*){0,3})(?=\s*[,.(!]|\s*$)"),
+    re.compile(r"(?:^|[.!?]\s+|,\s+so\s+)(?:(?:So|Okay|Ok|Right|Well|Now|And|Basically|Um|Uh),?\s+)*"
+               r"([A-Z][\w\-]*(?:\s+[A-Z][\w\-]*){0,2})\s+is\s+(?:the|a|an|our)\s+"
+               r"(?:[\w\-]+\s+){0,4}?(?:service|system|platform|application|app|api|portal|engine|pipeline|tool|job|"
+               r"product|backend|gateway|website|site)\b"),
+]
 
 # Leading words to strip off a captured name before the stopword-only
 # rejection check above ever runs — a capture can contain real substantive
@@ -289,6 +300,8 @@ _NAME_LEADING_FILLER_WORDS = {
     "is", "was", "are", "were", "named", "called", "known", "as",
     "the", "a", "an", "this", "that", "it",
     "for", "about", "handing", "over", "welcome", "to", "handover",
+    # "handing over our AWS e-commerce platform" named the KT "Our AWS E-Commerce".
+    "our", "my", "your", "their",
 }
 
 
@@ -924,6 +937,18 @@ def _extract_by_pattern(
             if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
                 # Keep the speaker's casing: "MedRelay", not "Medrelay".
                 return name
+
+        # "This is Billing Bridge." and "Beacon is the notification service
+        # for the banking app" name the subject too. Without them the name
+        # fell to the last-resort pattern and a KT was titled "Sends Usage
+        # Records From Our Telephony". A catalog product ("Kafka is the event
+        # platform") or a date ("This is Monday") is not the system.
+        for pattern in _NAMED_SUBJECT_RES:
+            for subject in pattern.finditer(section_text):
+                name = _trim_name_capture(subject.group(1).strip())
+                if (name and name.lower() not in SYSTEM_NAME_STOPWORDS and name.lower() not in _CALENDAR_WORDS
+                        and not any(t.lower() == name.lower() for t in PATTERN_EXTRACTORS["tools"].findall(name))):
+                    return name
 
         match = re.search(
             # Trigger phrase, then 0-3 structural filler words ("the",

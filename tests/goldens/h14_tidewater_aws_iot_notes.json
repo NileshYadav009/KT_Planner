@@ -1,0 +1,282 @@
+{
+ "id": "h14_tidewater_aws_iot_notes",
+ "holdout": true,
+ "notes": "Written on 12 Oct before the fourth round of mapping fixes and scored blind once, aggregate only (82% with the other two holdouts, 78 of 95 facts). No rule has been tuned on it: with the other holdouts it measures accuracy on unseen KTs.",
+ "title": "Tidewater: AWS IoT serverless flood sensors, pasted handover notes",
+ "proves": "Headed notes (Purpose:, Deployment:, ...) instead of speech; alarms that are the product.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Handover notes: Tidewater\n\nPurpose: Tidewater collects readings from the river level sensors for the flood warning service and raises a warning when a river passes its threshold. About nine hundred sensors report every five minutes.\n\nArchitecture: The sensors publish over MQTT to AWS IoT Core. An IoT rule sends each reading to a Lambda function that validates it and stores it in Timestream. A second Lambda runs every five minutes, compares the latest readings with the thresholds in DynamoDB, and publishes warnings to an SNS topic that the public website subscribes to.\n\nDeployment: Everything is defined with the AWS SAM templates in the tidewater repo. GitHub Actions runs sam deploy on merge to main, first to staging and then to production after a manual approval. To go back, redeploy the previous tag.\n\nMonitoring: CloudWatch alarms on Lambda errors and on sensors that have not reported for thirty minutes. Alarms go to the hydrology duty officer through PagerDuty.\n\nKnown problems: Sensors drop off when their batteries run low in winter, so the missing-sensor alarm fires. Check the sensor map; if only one sensor is out, log it with the field team instead of paging anyone. Timestream throttles writes when a storm makes every sensor report at once; the Lambda retries, but if the backlog passes ten minutes raise the write limit.\n\nBackups and recovery: DynamoDB has point-in-time recovery switched on. Timestream data older than a year moves to magnetic storage automatically. The recovery time we've agreed is thirty minutes, because warnings must keep going out.\n\nDo not: never change a river threshold in DynamoDB directly, thresholds come from the hydrologists through the admin tool. Do not delete sensors from the registry even when they are dead, the history is needed for the yearly report.\n\nCalendar: Storm season runs from October to March and is the busy period, so we don't release on days with a weather warning.\n\nEnvironments: dev, staging and production accounts. Staging gets replayed readings from last winter.\n\nSecurity: The sensors authenticate to IoT Core with X.509 certificates, one per device. The admin tool sits behind Cognito with MFA.\n\nOwnership: The environmental data team owns Tidewater. Escalation goes to the duty officer first, then to Grace Okafor.\n\nCost: Most of the bill is Timestream; readings are kept in memory storage for only a day.\n\nOpen work: The certificate rotation for the oldest sensors is overdue and has no owner.\n\nGetting started: Ask for the tidewater-admins role and read the storm runbook. During your first month, take one storm shift with the duty officer.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Tidewater collects readings from the river level sensors for the flood warning service",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "raises a warning when a river passes its threshold",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "About nine hundred sensors report every five minutes",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The sensors publish over MQTT to AWS IoT Core",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "sends each reading to a Lambda function that validates it and stores it in Timestream",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "compares the latest readings with the thresholds in DynamoDB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "publishes warnings to an SNS topic that the public website subscribes to",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Everything is defined with the AWS SAM templates in the tidewater repo",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "GitHub Actions runs sam deploy on merge to main",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "then to production after a manual approval",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "To go back, redeploy the previous tag",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "CloudWatch alarms on Lambda errors and on sensors that have not reported",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Alarms go to the hydrology duty officer through PagerDuty",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Sensors drop off when their batteries run low in winter",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "if only one sensor is out, log it with the field team instead of paging anyone",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Timestream throttles writes when a storm makes every sensor report at once",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "if the backlog passes ten minutes raise the write limit",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "DynamoDB has point-in-time recovery switched on",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Timestream data older than a year moves to magnetic storage automatically",
+   "in": [
+    "disaster_recovery",
+    "cost_optimization",
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "The recovery time we've agreed is thirty minutes",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "never change a river threshold in DynamoDB directly",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Do not delete sensors from the registry even when they are dead",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Storm season runs from October to March and is the busy period",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "we don't release on days with a weather warning",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "dev, staging and production accounts",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Staging gets replayed readings from last winter",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The sensors authenticate to IoT Core with X.509 certificates, one per device",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The admin tool sits behind Cognito with MFA",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "The environmental data team owns Tidewater",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "environmental data team",
+    "tidewater"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Escalation goes to the duty officer first, then to Grace Okafor",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "readings are kept in memory storage for only a day",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The certificate rotation for the oldest sensors is overdue and has no owner",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Ask for the tidewater-admins role and read the storm runbook",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "take one storm shift with the duty officer",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

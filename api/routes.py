@@ -11,12 +11,14 @@ process or another; job state written by a worker is read from the database.
 import logging
 import os
 import re
+import threading
+import time
 import uuid
 from datetime import datetime
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, Depends, Request
+from fastapi import APIRouter, HTTPException, UploadFile, Depends, Query, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
@@ -25,6 +27,10 @@ from auth import (
     ensure_job_access, find_user, optional_principal, principal_for_key, require_permission, require_principal,
     sign_asset_urls, tenant_name, verify_asset_signature,
 )
+import ask
+import atlassian
+import dependencies
+import document_diff
 import document_model
 import signoff
 from devops_transcription import clean_transcript
@@ -36,8 +42,10 @@ import observability
 import media_guard
 import pdf_rendering
 import pipeline
+import runbook
 import sessions
 import sso
+import staleness
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -185,12 +193,96 @@ async def export_markdown(job_id: str, version: Optional[int] = None, principal:
                     headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}{suffix}.md\""})
 
 
+@router.get("/export/runbook/{job_id}")
+async def export_runbook(job_id: str, version: Optional[int] = None, principal: Principal = Depends(require_principal)):
+    """One runbook per known failure, from the KT's incident card (P3-5)."""
+    job = await _export_job(job_id, version, principal)
+    text = runbook.runbook_markdown(job_id, job, pipeline.JOB_STORE.created_at(job_id))
+    return Response(content=text, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}_runbooks.md\""})
+
+
 @router.get("/export/gaps/{job_id}")
 async def export_gaps(job_id: str, principal: Principal = Depends(require_principal)):
     """The KT's knowledge gaps as CSV, one ticket per row for Jira's CSV import (P2-2)."""
     job = await _export_job(job_id, None, principal)
     return Response(content=markdown_export.gaps_csv(job_id, job), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f"attachment; filename=\"kt_{job_id[:8]}_gaps.csv\""})
+
+
+# --------------------------------------------------------------------------
+# Publishing to Confluence and Jira (P2-2, atlassian.py)
+# --------------------------------------------------------------------------
+
+_publishing = set()
+_publishing_lock = threading.Lock()
+
+
+def _publish_once(key: tuple, fn, *args):
+    """Run one publish at a time per KT and target: a second click while the
+    first is running would create a second page or duplicate issues."""
+    with _publishing_lock:
+        if key in _publishing:
+            raise atlassian.PublishError("This KT is already being published. Wait a moment and try again.", 409)
+        _publishing.add(key)
+    try:
+        return fn(*args)
+    finally:
+        with _publishing_lock:
+            _publishing.discard(key)
+
+
+def _integration(principal: Principal, kind: str) -> dict:
+    config = atlassian.get_integration(principal.tenant_id, kind)
+    if not config:
+        raise HTTPException(status_code=409, detail=f"This workspace is not connected to {kind.capitalize()}. "
+                                                    "Ask your Continuum operator to connect it.")
+    return config
+
+
+@router.get("/integrations")
+async def integrations(principal: Principal = Depends(require_principal)):
+    """Which publishing targets this workspace is connected to."""
+    return atlassian.configured(principal.tenant_id)
+
+
+@router.post("/publish/confluence/{job_id}")
+async def publish_to_confluence(job_id: str, principal: Principal = Depends(require_permission("kt:correct"))):
+    """The current document as a Confluence page; published again, the same
+    page gets a new version."""
+    config = _integration(principal, "confluence")
+    job = await _export_job(job_id, None, principal)
+    previous = pipeline.JOB_STORE.publication(job_id, "confluence")
+    try:
+        page = await run_in_threadpool(_publish_once, (job_id, "confluence"), atlassian.publish_confluence,
+                                       job_id, job, config, previous)
+    except atlassian.PublishError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    pipeline.JOB_STORE.save_publication(job_id, "confluence", dict(
+        page, url_base=config["url"], space=config["space"], at=time.time(), by=principal.key_label))
+    audit(principal.tenant_id, principal.key_label, "kt_published",
+          {"job_id": job_id, "to": "confluence", "page_id": page["page_id"], "version": page["version"]})
+    return page
+
+
+@router.post("/publish/jira/{job_id}")
+async def publish_to_jira(job_id: str, principal: Principal = Depends(require_permission("kt:correct"))):
+    """One Jira issue per knowledge gap; gaps already sent are not sent again."""
+    config = _integration(principal, "jira")
+    job = await _export_job(job_id, None, principal)
+    previous = pipeline.JOB_STORE.publication(job_id, "jira") or {}
+    same_place = previous.get("url_base") == config["url"] and previous.get("project") == config["project"]
+    try:
+        result = await run_in_threadpool(_publish_once, (job_id, "jira"), atlassian.create_jira_issues,
+                                         job_id, job, config, previous.get("issues") if same_place else None)
+    except atlassian.PublishError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    pipeline.JOB_STORE.save_publication(job_id, "jira", {
+        "url_base": config["url"], "project": config["project"], "issues": result.pop("sent"), "at": time.time()})
+    audit(principal.tenant_id, principal.key_label, "kt_published",
+          {"job_id": job_id, "to": "jira", "created": [i["key"] for i in result["created"]],
+           "failed": len(result["failed"])})
+    return result
 
 
 @router.get("/kt-assets/{job_id}/{name}")
@@ -403,7 +495,22 @@ async def list_jobs(limit: int = 50, principal: Principal = Depends(require_prin
     for job in jobs:
         job["can_delete"] = can_delete_job(job, principal)
         job.pop("created_by_id", None)
+        staleness.annotate(job)                 # "Review due" (P3-3)
     return {"jobs": jobs}
+
+
+@router.get("/dependencies")
+async def shared_components(principal: Principal = Depends(require_principal)):
+    """Components several finished KTs of the workspace name (P3-4)."""
+    def build():
+        entries = []
+        for row in pipeline.JOB_STORE.list(principal.tenant_id, limit=200):
+            if row["status"] in pipeline.COMPLETED_STATUSES:
+                entry = dependencies.system_entry(row["job_id"], pipeline.JOB_STORE.get(row["job_id"]) or {})
+                if entry:
+                    entries.append(entry)
+        return dependencies.explore(entries)
+    return await run_in_threadpool(build)
 
 
 @router.get("/search")
@@ -447,6 +554,44 @@ async def document_version(job_id: str, version: int, principal: Principal = Dep
     if snap is None:
         raise HTTPException(status_code=404, detail="No such version")
     return dict(snap, version=version, current=document_model.current_version(job))
+
+
+@router.post("/kt/{job_id}/ask")
+async def ask_kt(job_id: str, payload: dict, principal: Principal = Depends(require_principal)):
+    """Ask the KT (P3-1): the document's own statements that answer the
+    question, each with its section and source sentence; nothing is written
+    by a model. Says so when the question's topic was not covered."""
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Type a question")
+    job = await _export_job(job_id, None, principal)
+    return ask.answer(job.get("knowledge_object") or {}, question)
+
+
+@router.get("/documents/{job_id}/diff")
+async def document_diff_view(job_id: str, to: Optional[int] = None, from_: Optional[int] = Query(None, alias="from"),
+                             against: Optional[str] = None, principal: Principal = Depends(require_principal)):
+    """What changed (P3-2): from version `from` (default: the one before
+    `to`) to version `to` (default: the current one), or, with `against`,
+    from another KT of this workspace (its current version) to this one."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        other = ensure_job_access(pipeline.JOB_QUEUE.get(against), principal) if against else None
+    if any(j is not None and j.get("status") not in pipeline.COMPLETED_STATUSES for j in (job, other)):
+        raise HTTPException(status_code=409, detail="Only finished KTs can be compared")
+    to = to or document_model.current_version(job)
+    new = document_model.version_snapshot(pipeline, job_id, job, to)
+    if against:
+        old = document_model.version_snapshot(pipeline, against, other, document_model.current_version(other))
+        base = {"against": against, "against_title": _kt_name(other)}
+    else:
+        from_ = from_ if from_ is not None else to - 1
+        old = document_model.version_snapshot(pipeline, job_id, job, from_) if from_ >= 1 else None
+        base = {"from": from_}
+    if new is None or old is None:
+        raise HTTPException(status_code=404, detail="No such version")
+    diff = document_diff.diff_snapshots(old, new)
+    return dict(base, to=to, summary=document_diff.summary_line(diff), **diff)
 
 
 @router.post("/documents/{job_id}/edits")

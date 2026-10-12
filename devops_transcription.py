@@ -573,6 +573,10 @@ def remove_repeated_phrases(text: str) -> str:
     return cleaned
 
 
+_TYPOGRAPHIC_QUOTES = str.maketrans({"‘": "'", "’": "'", "‛": "'", "′": "'",
+                                     "“": '"', "”": '"', "‟": '"', "″": '"'})
+
+
 def clean_transcript(text: str) -> str:
     """Normalize transcript before semantic classification.
 
@@ -588,6 +592,11 @@ def clean_transcript(text: str) -> str:
     """
     if not text:
         return text
+
+    # Typographic apostrophes and quotes from pasted documents are the plain
+    # characters every rule expects: with "I’m handing over" the session
+    # intro stayed in the document, and "don’t touch ..." was no prohibition.
+    text = text.translate(_TYPOGRAPHIC_QUOTES)
 
     # A paragraph break ends a sentence even when nothing else does. Pasted
     # notes often leave a line without a full stop; joining it to the next
@@ -714,12 +723,22 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
 
 
 _INFLECTION_SUFFIXES = ("s", "es", "ed", "d", "ing", "led", "ped", "ted", "red")
+# Endings that make another form of the same word ("limiter", "limiting").
+_WORD_FORM_SUFFIXES = ("ers", "ors", "ings", "ions", "er", "or", "ing", "ion", "ed", "es", "s")
+
+
+def _stem(word: str) -> str:
+    for suffix in _WORD_FORM_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[:-len(suffix)]
+    return word
 
 
 def _is_inflected_form(words: List[str], target_words: List[str]) -> bool:
-    """True when every word equals its target word or is the target plus a
-    regular inflection suffix (plural, past tense, gerund), with at least one
-    word actually inflected. Such an n-gram is a correct spelling of a known
+    """True when every word equals its target word, is the target plus a
+    regular inflection suffix (plural, past tense, gerund) or is another form
+    of the same word ("rate limiter" for "rate limiting"), with at least one
+    word actually differing. Such an n-gram is a correct spelling of a known
     term, not a transcription error."""
     if len(words) != len(target_words):
         return False
@@ -728,7 +747,7 @@ def _is_inflected_form(words: List[str], target_words: List[str]) -> bool:
         w, t = word.lower(), target.lower()
         if w == t:
             continue
-        if w.startswith(t) and w[len(t):] in _INFLECTION_SUFFIXES:
+        if (w.startswith(t) and w[len(t):] in _INFLECTION_SUFFIXES) or _stem(w) == _stem(t):
             inflected = True
             continue
         return False

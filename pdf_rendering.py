@@ -546,12 +546,19 @@ def append_residual_content(section: dict, rendered: dict) -> dict:
             if polished and _is_represented(polished, rendered_norms):
                 paraphrase_norms.append(_norm_for_match(polished))
         items = source
+    from dialogue import without_session_framing
+
     residual = []
     for item in items:
         # Polish output can carry markdown section labels ("**Access to
         # request:**") that are formatting, not facts; on their own they
         # rendered as stray paragraphs.
         item = _MD_LABEL_RE.sub(" ", str(item)).strip()
+        # Compared and kept the way every section shows a sentence, without
+        # the session's greeting or "I'm handing over": the field showed
+        # "Our AWS e-commerce platform processes ...", so the opening
+        # sentence looked missing and came back with "Hi team" in front.
+        item = without_session_framing(item)
         if len(item.split()) < 3:
             continue
         if not item or item == NOT_COVERED_MESSAGE:

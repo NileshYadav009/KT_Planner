@@ -1,7 +1,7 @@
 {
  "id": "h06_relay_aws_streaming",
- "holdout": true,
- "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind, aggregate only; no rule was changed for it. With the other holdouts it measures accuracy on unseen KTs.",
+ "holdout": false,
+ "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind once, aggregate only (89.9% with the other two holdouts, 89 of 99 facts). Part of the tuning set from 12 Oct.",
  "title": "Relay: AWS streaming data platform (MSK, Flink, Snowflake), formal",
  "proves": "Data-platform vocabulary, several facts per sentence, RPO and RTO stated separately.",
  "source": "written for this suite (synthetic)",

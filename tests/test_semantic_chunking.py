@@ -57,3 +57,14 @@ def test_semantic_chunk_sentences_noop_for_single_sentence():
 
 def test_semantic_chunk_sentences_noop_for_empty_input():
     assert semantic_chunk_sentences([]) == []
+
+
+def test_a_new_question_is_not_merged_into_the_previous_exchange():
+    # Two question-and-answer units that read alike are still two topics:
+    # merged, the first-day step was filed under Open Responsibilities.
+    sentences = [
+        _sentence("Anything unfinished? The upgrade to the new runtime has not been started and has no owner.", 0),
+        _sentence("And for me, starting out? Get added to the admins group first.", 1),
+    ]
+    chunks = semantic_chunk_sentences(sentences)
+    assert [c.text for c in chunks] == [s.text for s in sentences]

@@ -77,6 +77,10 @@ def _content_keys(text: str) -> List[str]:
     return keys
 
 
+def _flat(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
 def _numbers(text: str) -> set:
     return set(_NUMBER.findall(str(text or "")))
 
@@ -256,6 +260,7 @@ class _Index:
         canonical = [_canonical(s["quote"]) for s in sentences]
         self.keys = [set(_content_keys(c)) for c in canonical]
         self.numbers = [_numbers(c) for c in canonical]
+        self.flat = [f" {_flat(c)} " for c in canonical]
         # The document's own headings ("COMMON FAILURES & FIXES"): a table
         # cell that is one of them is a pointer, not something said.
         self.labels = {_spelling_key(label) for label in labels if label}
@@ -286,8 +291,18 @@ class _Index:
                 if set(keys) <= sent_keys and numbers <= self.numbers[i]:
                     return [i]
             return []
-        remaining, chosen = set(keys), []
-        while remaining and len(chosen) < MAX_SOURCES_PER_UNIT:
+        # A sentence the unit repeats word for word is always one of its
+        # sources: "We release it with Jenkins. The Jenkins job builds the
+        # jar ..." cited only the second sentence, which also says "release"
+        # and "Jenkins", so the first fact had no source.
+        flat, seen, chosen = f" {_flat(text)} ", set(), []
+        for i, sentence in enumerate(self.flat):
+            if len(self.keys[i]) >= 2 and sentence in flat and sentence not in seen:
+                seen.add(sentence)
+                chosen.append(i)
+        remaining = set(keys).difference(*(self.keys[i] for i in chosen))
+        limit = max(MAX_SOURCES_PER_UNIT, len(chosen))
+        while remaining and len(chosen) < limit:
             best, best_score = None, (0, 0.0)
             for i, sent_keys in enumerate(self.keys):
                 if i in chosen:

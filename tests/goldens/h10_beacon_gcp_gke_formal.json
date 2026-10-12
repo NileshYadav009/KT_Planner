@@ -1,0 +1,323 @@
+{
+ "id": "h10_beacon_gcp_gke_formal",
+ "holdout": false,
+ "notes": "Written on 12 Oct before the third round of mapping fixes and scored blind once, aggregate only (79% with the other two holdouts, 84 of 106 facts). Part of the tuning set from 12 Oct.",
+ "title": "Beacon: GCP GKE notification service for a bank, formal monologue",
+ "proves": "Several providers per sentence, SLO and recovery targets in words, regulatory rules.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Beacon is the notification service for the consumer banking app. It sends push notifications, SMS and emails for card transactions, login alerts and statements, around twelve million messages a day.\n\nBeacon runs on Google Kubernetes Engine in europe-west2. Incoming requests arrive on Pub/Sub, a dispatcher service fans them out to channel workers, and the providers are Firebase Cloud Messaging for push, Twilio for SMS and SendGrid for email. User preferences live in Cloud SQL for PostgreSQL, and Memorystore Redis holds the rate-limit counters.\n\nThe infrastructure is in Terraform, applied from Cloud Build. Application releases go through Cloud Deploy with a canary that takes ten percent of traffic for thirty minutes. If the error rate on the canary goes over one percent, Cloud Deploy stops the rollout, and you roll back by promoting the previous release.\n\nWe run three environments: dev, preprod and prod. Preprod uses the providers' sandbox accounts, so nothing reaches real customers.\n\nCloud Monitoring tracks the delivery SLO, which is ninety nine point five percent of transaction alerts delivered within thirty seconds. The burn-rate alert pages the on-call through PagerDuty, and the logs go to Cloud Logging.\n\nThe incident you will meet most often is Twilio throttling us during a large fraud campaign; the SMS queue backs up and alerts arrive late. Switch the overflow to the secondary SMS provider using the feature flag in the admin console. The other is the Pub/Sub dead-letter topic filling up after a bad payload release; fix the producer, then replay the dead-letter messages with the replay job.\n\nCloud SQL has high availability with a standby in another zone, plus daily backups kept for fourteen days. The whole stack can be rebuilt in europe-west1 from Terraform. The target is to restore service within two hours, with no more than fifteen minutes of lost preference changes.\n\nPayday and the last week before Christmas are the peak periods, when volumes triple, and the January sales also bring a spike.\n\nSome rules. Never disable the rate limiter, even during an incident, because the regulator caps how many messages a customer can receive. Do not rotate the Twilio auth token without telling the fraud team first.\n\nCustomer phone numbers and emails are personal data, so they are encrypted with Cloud KMS and never written to the logs. Workload Identity is used instead of service account keys.\n\nCosts are mostly SMS. We moved low-priority messages to push or email where the customer allows it, which cut the SMS bill by about a third.\n\nBeacon belongs to the customer communications squad. The product owner is Imogen Hart, and the escalation path is the squad on-call, then the head of platform.\n\nThe open item is the migration of statements emails from SendGrid to the bank's own mail relay, which is half done.\n\nTo get started, request the beacon-operators group in Google Cloud, and in the first two weeks read the last three incident reviews.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Beacon is the notification service for the consumer banking app",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "around twelve million messages a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Beacon runs on Google Kubernetes Engine in europe-west2",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Incoming requests arrive on Pub/Sub",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "a dispatcher service fans them out to channel workers",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Firebase Cloud Messaging for push, Twilio for SMS and SendGrid for email",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "User preferences live in Cloud SQL for PostgreSQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Memorystore Redis holds the rate-limit counters",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "The infrastructure is in Terraform, applied from Cloud Build",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Application releases go through Cloud Deploy with a canary",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Cloud Deploy stops the rollout",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "you rollback by promoting the previous release",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "We run three environments: dev, preprod and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Preprod uses the providers' sandbox accounts",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Cloud Monitoring tracks the delivery SLO",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "The burn-rate alert pages the on-call through PagerDuty",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "the logs go to Cloud Logging",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Twilio throttling us during a large fraud campaign",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Switch the overflow to the secondary SMS provider using the feature flag",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the Pub/Sub dead-letter topic filling up after a bad payload release",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "replay the dead-letter messages with the replay job",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Cloud SQL has high availability with a standby in another zone",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "daily backups kept for fourteen days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "The whole stack can be rebuilt in europe-west1 from Terraform",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "The target is to restore service within two hours",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "two hours"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "no more than fifteen minutes of lost preference changes",
+   "in": [
+    "disaster_recovery"
+   ],
+   "alt": [
+    "fifteen minutes"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Payday and the last week before Christmas are the peak periods",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the January sales also bring a spike",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Never disable the rate limiter",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Do not rotate the Twilio auth token without telling the fraud team first",
+   "in": [
+    "danger_zones",
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "they are encrypted with Cloud KMS and never written to the logs",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Workload Identity is used instead of service account keys",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "We moved low-priority messages to push or email where the customer allows it",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "Beacon belongs to the customer communications squad",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "customer communications squad",
+    "beacon"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "The product owner is Imogen Hart",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "the escalation path is the squad on-call, then the head of platform",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "the migration of statements emails from SendGrid to the bank's own mail relay",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "request the beacon-operators group in Google Cloud",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "in the first two weeks read the last three incident reviews",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "cost_optimization",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": []
+}

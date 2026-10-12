@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional
 import observability
 import pipeline
 import sessions
+import staleness
 from job_queue import LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ class Worker:
                 pipeline.TASKS.renew(self.worker_id, running)
                 pipeline.TASKS.heartbeat(self.worker_id, self.concurrency, len(running))
                 observability.check_queue_age(pipeline.TASKS.stats())
+                staleness.check_due_reviews()
             except Exception:
                 logger.warning("Worker heartbeat failed", exc_info=True)
 

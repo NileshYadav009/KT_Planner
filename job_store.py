@@ -102,9 +102,25 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE VIRTUAL TABLE IF NOT EXISTS kt_search USING fts5(
     job_id UNINDEXED, title, body, tokenize = 'porter unicode61'
 );
+-- P3-3: when a KT due for review was last reminded (staleness.py); a change
+-- to the KT after that starts a new period.
+CREATE TABLE IF NOT EXISTS review_reminders (
+    job_id   TEXT PRIMARY KEY,
+    sent_at  REAL NOT NULL
+);
+-- P2-2: where a KT was published (atlassian.py): its Confluence page, the
+-- Jira issue of each gap. Kept apart from the job so publishing does not
+-- count as a change to the document.
+CREATE TABLE IF NOT EXISTS publications (
+    job_id   TEXT NOT NULL,
+    kind     TEXT NOT NULL,
+    record   TEXT NOT NULL,
+    PRIMARY KEY (job_id, kind)
+);
 """
 # Rows that belong to a job and go when it goes.
-_JOB_TABLES = ("tasks", "idempotency_keys", "documents", "document_versions", "kt_search")
+_JOB_TABLES = ("tasks", "idempotency_keys", "documents", "document_versions", "kt_search", "review_reminders",
+               "publications")
 _SEARCHABLE = ("completed", "completed_with_warnings")
 # Snippet highlight markers; the UI turns them into <mark> after escaping.
 SNIPPET_START, SNIPPET_END = "\u0002", "\u0003"
@@ -275,6 +291,41 @@ class JobStore:
             rows = db.execute(sql, args).fetchall()
         return [{"job_id": r[0], "status": r[1], "title": r[2], "created_at": r[3], "updated_at": r[4],
                  "error": r[5], "created_by_id": r[6]} for r in rows]
+
+    def due_for_review(self, unchanged_since: float, limit: int = 50) -> List[Dict[str, Any]]:
+        """Finished KTs not changed since `unchanged_since` that have had no
+        review reminder since their last change (P3-3), oldest first."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT j.job_id, j.tenant_id, j.title, j.updated_at FROM jobs j "
+                "LEFT JOIN review_reminders r ON r.job_id = j.job_id "
+                f"WHERE j.status IN ({', '.join('?' * len(_SEARCHABLE))}) AND j.updated_at < ? "
+                "AND (r.sent_at IS NULL OR r.sent_at < j.updated_at) ORDER BY j.updated_at LIMIT ?",
+                (*_SEARCHABLE, unchanged_since, int(limit))).fetchall()
+        return [{"job_id": r[0], "tenant_id": r[1], "title": r[2], "updated_at": r[3]} for r in rows]
+
+    def claim_review_reminder(self, job_id: str, updated_at: float, now: Optional[float] = None) -> bool:
+        """Record a reminder for this quiet period. False if one was already
+        recorded after the KT's last change (another worker sent it)."""
+        with self._lock, self._connect() as db:
+            return db.execute(
+                "INSERT INTO review_reminders (job_id, sent_at) VALUES (?, ?) ON CONFLICT(job_id) DO UPDATE "
+                "SET sent_at = excluded.sent_at WHERE review_reminders.sent_at < ?",
+                (job_id, now or time.time(), updated_at)).rowcount > 0
+
+    def release_review_reminder(self, job_id: str) -> None:
+        with self._lock, self._connect() as db:
+            db.execute("DELETE FROM review_reminders WHERE job_id = ?", (job_id,))
+
+    def publication(self, job_id: str, kind: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as db:
+            row = db.execute("SELECT record FROM publications WHERE job_id = ? AND kind = ?", (job_id, kind)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_publication(self, job_id: str, kind: str, record: Dict[str, Any]) -> None:
+        with self._lock, self._connect() as db:
+            db.execute("INSERT OR REPLACE INTO publications (job_id, kind, record) VALUES (?, ?, ?)",
+                       (job_id, kind, json.dumps(record)))
 
     def delete(self, job_id: str) -> bool:
         with self._lock, self._connect() as db:

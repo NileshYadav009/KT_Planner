@@ -829,3 +829,12 @@ def test_a_tool_field_names_a_tool_or_stays_empty():
     phone = run("Nagios emails the ops mailbox, and the quote latency alert goes to the on-call phone.")
     assert phone["source"] == "unfilled"
     assert run("Pages go out through incident.io to whoever is on call.")["value"].lower() == "incident.io"
+
+
+def test_system_name_from_a_named_subject():
+    # Without these, a KT was titled "Sends Usage Records From Our Telephony".
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, "Okay, this is Billing Bridge. Billing Bridge sends usage records "
+                                                  "from our telephony platform to billing.") == "Billing Bridge"
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, "So Tern is the appointment booking system for the clinics.") == "Tern"
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, "Kafka is the event platform we use.") is None   # a product
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, "This is Monday, the busy day.") is None

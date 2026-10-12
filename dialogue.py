@@ -101,7 +101,7 @@ _GREETING_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 # "Today I'm handing over X", "This KT is for X", "I'll walk you through X".
-_ANNOUNCEMENT_RE = re.compile(
+_ANNOUNCEMENT_LEAD = (
     r"^\W*(?:(?:so|okay|ok|alright|right|well|now|and|um|uh)\W+)*"
     r"(?:(?:today|now|in\s+this\s+(?:session|call|kt)|this\s+(?:morning|afternoon))\s*,?\s+)?"
     r"(?:(?:i|we)(?:'m|'re|\s+am|\s+are|'ll|\s+will|'d\s+like\s+to|\s+would\s+like\s+to|\s+want\s+to|"
@@ -112,9 +112,28 @@ _ANNOUNCEMENT_RE = re.compile(
     r"|(?:this|today'?s|the)\s+(?:kt|session|handover|hand-?over|knowledge\s+transfer|call|walkthrough)\s+"
     r"(?:is\s+(?:for|about|on)|covers|will\s+cover)"
     r"|this\s+is\s+the\s+(?:kt|handover|hand-?over|knowledge\s+transfer|walkthrough)\s+(?:for|of|on))\s+"
-    r"(?P<what>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*[.!]?\s*$",
+)
+_ANNOUNCEMENT_RE = re.compile(
+    _ANNOUNCEMENT_LEAD + r"(?P<what>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*[.!]?\s*$",
     re.IGNORECASE,
 )
+_ANNOUNCEMENT_HEAD_RE = re.compile(_ANNOUNCEMENT_LEAD, re.IGNORECASE)
+# What an announcement goes on to say about the system: "..., which processes
+# 40,000 orders a day" or "..., the booking backend behind our app".
+_RELATIVE_TAIL_RE = re.compile(
+    r"(?P<np>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*,\s*(?:which|that|and\s+it)\s+(?P<rest>.+)$"
+    r"|(?P<np2>[^,;:()—]+?\b(?:platform|service|system|app|application|backend|api|pipeline|portal|engine|tool|"
+    r"product|site|website|database|cluster))\s+(?:which|that)\s+(?P<rest2>.+)$",
+    re.IGNORECASE | re.DOTALL)
+_APPOSITIVE_TAIL_RE = re.compile(
+    r"(?P<np>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*,\s*(?P<desc>(?:the|a|an|our)\s+.+)$",
+    re.IGNORECASE | re.DOTALL)
+# Spoken lead-ins at the start of a sentence; the transcript cleaner removes
+# most, but a value can also come from a pasted transcript or a merge.
+_LEADING_FILLER_RE = re.compile(
+    r"^\s*(?:(?:so|okay|ok|alright|right(?!\s+(?:now|away|after|before|there|here|then))|well|um+|uh+|erm|er|"
+    r"basically|anyway|you\s+know)(?![\w'-])\s*[,.!]*\s*)+",
+    re.IGNORECASE)
 _WELCOME_RE = re.compile(
     r"^\W*welcome\s+to\s+(?:the\s+|our\s+)?(?P<what>[^,;:()—]+?)\s+"
     r"(?:kt|handover|hand-?over|knowledge\s+transfer|session|walkthrough)(?:\s+session)?\s*[.!]?\s*$",
@@ -139,6 +158,44 @@ def strip_greeting(text: str) -> str:
             break
         out = rest[:1].upper() + rest[1:]
     return out
+
+
+def without_framing(sentence: str) -> str:
+    """The sentence as a statement about the system: no greeting, no spoken
+    lead-in, and no "I'm handing over" when the sentence goes on to say
+    something ("Hi team, today I'm handing over our AWS e-commerce platform,
+    which processes around 40,000 orders daily." -> "Our AWS e-commerce
+    platform processes around 40,000 orders daily."). A sentence that only
+    announces the handover is returned unchanged; is_handover_announcement
+    tells the caller to drop it. Nothing is added except "is" joining a name
+    to its description."""
+    text = strip_greeting(sentence or "")
+    stripped = _LEADING_FILLER_RE.sub("", text)
+    if stripped.strip():
+        text = stripped
+    head = _ANNOUNCEMENT_HEAD_RE.match(text)
+    if head:
+        tail = text[head.end():]
+        relative = _RELATIVE_TAIL_RE.match(tail)
+        appositive = None if relative else _APPOSITIVE_TAIL_RE.match(tail)
+        if relative:
+            np, rest = relative.group("np") or relative.group("np2"), relative.group("rest") or relative.group("rest2")
+            text = f"{np.strip()} {rest.strip()}"
+        elif appositive:
+            text = f"{appositive.group('np').strip()} is {appositive.group('desc').strip()}"
+    text = text.strip()
+    return text[:1].upper() + text[1:]
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
+
+
+def without_session_framing(text: str) -> str:
+    """A paragraph or field value without the KT session's own framing: each
+    sentence through without_framing, and sentences that only announce the
+    handover (the document's title already names the system) left out."""
+    kept = [without_framing(s) for s in _SENTENCE_SPLIT_RE.split(text or "") if s.strip()]
+    return " ".join(s for s in kept if not is_handover_announcement(s)).strip()
 
 
 def is_handover_announcement(text: str) -> bool:

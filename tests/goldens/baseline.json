@@ -77,8 +77,8 @@
   "false_covered": 0
  },
  "h01_quill_onprem_java": {
-  "accuracy": 0.96,
-  "wrong": 1,
+  "accuracy": 1.0,
+  "wrong": 0,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0
@@ -112,22 +112,64 @@
   "false_covered": 0
  },
  "h06_relay_aws_streaming": {
-  "accuracy": 0.909,
-  "wrong": 3,
+  "accuracy": 1.0,
+  "wrong": 0,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0
  },
  "h07_payslip_azure_teams": {
-  "accuracy": 0.848,
-  "wrong": 5,
+  "accuracy": 1.0,
+  "wrong": 0,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0
  },
  "h08_quarry_onprem_vmware": {
-  "accuracy": 0.939,
-  "wrong": 2,
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h09_kestrel_aws_ecs_dialogue": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 1
+ },
+ "h10_beacon_gcp_gke_formal": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h11_tern_azure_aks_meeting": {
+  "accuracy": 1.0,
+  "wrong": 0,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 2
+ },
+ "h12_ledgersweep_onprem_batch": {
+  "accuracy": 0.8,
+  "wrong": 6,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h13_lantern_gcp_cloudrun_qa": {
+  "accuracy": 0.871,
+  "wrong": 4,
+  "violations": 0,
+  "false_missing": 0,
+  "false_covered": 0
+ },
+ "h14_tidewater_aws_iot_notes": {
+  "accuracy": 0.794,
+  "wrong": 7,
   "violations": 0,
   "false_missing": 0,
   "false_covered": 0

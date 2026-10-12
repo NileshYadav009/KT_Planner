@@ -1,7 +1,7 @@
 {
  "id": "h07_payslip_azure_teams",
- "holdout": true,
- "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind, aggregate only; no rule was changed for it. With the other holdouts it measures accuracy on unseen KTs.",
+ "holdout": false,
+ "notes": "Written after the second round of mapping fixes (7 Oct) and scored blind once, aggregate only (89.9% with the other two holdouts, 89 of 99 facts). Part of the tuning set from 12 Oct.",
  "title": "Payslip: Azure App Service payroll portal, pasted Teams transcript with names",
  "proves": "Speaker-name prefixes and short question/answer turns.",
  "source": "written for this suite (synthetic)",

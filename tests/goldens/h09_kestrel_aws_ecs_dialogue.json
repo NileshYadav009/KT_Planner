@@ -1,0 +1,264 @@
+{
+ "id": "h09_kestrel_aws_ecs_dialogue",
+ "holdout": false,
+ "notes": "Written on 12 Oct before the third round of mapping fixes and scored blind once, aggregate only (79% with the other two holdouts, 84 of 106 facts). Part of the tuning set from 12 Oct.",
+ "title": "Kestrel: AWS ECS Fargate tracking API, unlabelled two-person dialogue",
+ "proves": "Questions and answers with no speaker names; cost and busy periods never discussed.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "So you're taking over Kestrel from me next week, right? Yes. Okay, so what is Kestrel? It's the shipment tracking API that our logistics customers call to get the status of their parcels. We get about three hundred requests a second at peak, mostly from two big retail partners.\n\nWhat's it built on? It's a set of Go services on ECS Fargate behind an Application Load Balancer. The tracking events come in on SQS queues from the carrier integrations, and the state is stored in Aurora PostgreSQL. There's also a Redis cache in ElastiCache in front of the status lookups.\n\nHow does it get deployed? GitHub Actions builds the images and pushes them to ECR, then CodeDeploy does a blue green deployment on ECS. If the new version fails the health checks, CodeDeploy shifts traffic back to the old task set automatically. You can also roll back by hand from the CodeDeploy console.\n\nEnvironments? We have dev, staging and production, each in its own AWS account. Staging gets a copy of the carrier test feeds.\n\nAnd monitoring? CloudWatch for metrics and logs, and we have a Datadog dashboard for the API latency. The p99 latency alert and the SQS queue age alert page the on-call engineer through Opsgenie.\n\nWhat usually goes wrong? The most common one is a carrier sending duplicate events, which makes the status jump backwards. The dedupe job fixes it, you just rerun it for that carrier. The other one is Aurora connections running out when a partner retries aggressively. Scale the service down to stop the flood, then raise the connection limit on the proxy.\n\nWhat about backups? Aurora has automated backups with point in time recovery for thirty five days, and we take a snapshot before every schema migration. We have never actually done a cross-region restore though.\n\nIs there anything I shouldn't touch? Do not purge the dead letter queue, it's the only copy of the failed events. And don't change the ALB idle timeout, the partners' clients depend on it.\n\nSecurity? All traffic is TLS, partners authenticate with API keys stored in Secrets Manager, and the services run with task roles that only allow what they need.\n\nWho owns it? The logistics platform team owns Kestrel. If something is on fire, page the on-call first and then call Ravi Menon, he's the engineering manager.\n\nIs there anything left half done? Yes, the migration from the old v1 API to v2. Two customers are still on v1 and nobody has scheduled their move.\n\nWhat should I do first? On your first day get access to the three AWS accounts through SSO. In the first month, take the on-call shift once with me as backup.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the shipment tracking API that our logistics customers call to get the status of their parcels",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "about three hundred requests a second at peak",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "a set of Go services on ECS Fargate behind an Application Load Balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The tracking events come in on SQS queues from the carrier integrations",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "the state is stored in Aurora PostgreSQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "a Redis cache in ElastiCache in front of the status lookups",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "GitHub Actions builds the images and pushes them to ECR",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "CodeDeploy does a blue green deployment on ECS",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "CodeDeploy shifts traffic back to the old task set automatically",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "rollback by hand from the CodeDeploy console",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "We have dev, staging and production, each in its own AWS account",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Staging gets a copy of the carrier test feeds",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "CloudWatch for metrics and logs",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "a Datadog dashboard for the API latency",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "The p99 latency alert and the SQS queue age alert page the on-call engineer through Opsgenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "a carrier sending duplicate events, which makes the status jump backwards",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "you just rerun it for that carrier",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Aurora connections running out when a partner retries aggressively",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Scale the service down to stop the flood, then raise the connection limit on the proxy",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Aurora has automated backups with point in time recovery",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "we take a snapshot before every schema migration",
+   "in": [
+    "disaster_recovery",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Do not purge the dead letter queue",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "don't change the ALB idle timeout",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "All traffic is TLS",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "partners authenticate with API keys stored in Secrets Manager",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "the services run with task roles that only allow what they need",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The logistics platform team owns Kestrel",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "logistics platform team",
+    "kestrel"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "call Ravi Menon, he's the engineering manager",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the migration from the old v1 API to v2",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Two customers are still on v1 and nobody has scheduled their move",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "get access to the three AWS accounts through SSO",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "take the on-call shift once with me as backup",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization",
+  "known_bad_days"
+ ]
+}

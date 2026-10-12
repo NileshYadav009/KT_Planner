@@ -89,6 +89,9 @@ local disk (not NFS).
 | `SENTRY_DSN` | unset | Send errors to Sentry (no request bodies, local variables or personal data). |
 | `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
 | `LLM_BATCH_CALLS` | `0` | `1` batches classification checks and field gap-fills (see Submitting KTs). |
+| `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to `CONTINUUM_REVIEW_WEBHOOK_URL`, naming the incoming owner. `0` turns it off. |
+| `WHISPER_MODEL` | `small` | The Whisper model. A GPU is used automatically when one is present; there `medium` or `large-v3` transcribes more accurately at a usable speed. On CPU, `medium` also needs `WHISPER_ALLOW_MEDIUM_CPU=1`. |
+| `WHISPER_COMPUTE_TYPE` | `auto` | Passed to faster-whisper (`int8` on CPU, `float16` on GPU when `auto`). |
 | `WHISPER_BATCHED` | `1` | `0` transcribes segment by segment instead of in batches (about twice as slow on CPU). |
 | `WHISPER_BATCH_SIZE` | `8` | Speech chunks transcribed together when batched. |
 | `CONTINUUM_DIARIZATION` | `1` | `0` skips speaker diarisation (sources then show no speaker). |
@@ -121,6 +124,33 @@ onto the rebuilt document; that version stays in History.
 Confluence, Notion or a repository; `GET /export/gaps/{job_id}` is a CSV of the
 knowledge gaps that Jira imports as one ticket per row. `GET /search?q=`
 searches the finished KTs of the caller's workspace.
+
+**Publishing to Confluence and Jira.** Connect a workspace once; the token stays
+in an environment variable of the API process and only its name is stored:
+
+```bash
+python -m auth confluence-set <tenant_id> --url https://acme.atlassian.net/wiki --space OPS \
+    --email bot@acme.com --token-env CONFLUENCE_TOKEN [--parent-id 123456]
+python -m auth jira-set <tenant_id> --url https://acme.atlassian.net --project OPS \
+    --email bot@acme.com --token-env JIRA_TOKEN [--issue-type Task]
+python -m auth integrations <tenant_id>          # what is connected
+```
+
+With `--email` the token is an Atlassian Cloud API token; without it, a Data
+Center personal access token. Givers and reviewers then see **Confluence** and
+**Jira issues** buttons: `POST /publish/confluence/{job_id}` makes the document
+one page (publishing again gives that page a new version) and
+`POST /publish/jira/{job_id}` makes one issue per knowledge gap (a gap already
+sent is skipped). Not yet tried against a real Atlassian site; the tests use a
+local stand-in for both APIs.
+
+**Reading a KT.** `POST /kt/{job_id}/ask` answers a question with the
+document's own statements and their sources (no model writes the answer) and
+says when the topic was not covered. `GET /export/runbook/{job_id}` is one
+runbook per known failure, built from the incident card. `GET
+/documents/{job_id}/diff` lists what changed between two versions, or (with
+`?against=<job_id>`) since another KT of the workspace. `GET /dependencies`
+lists the components that several KTs of the workspace name.
 
 **Speakers and language.** Recordings are diarised when the models are
 present (sources say who said each sentence) and checked for language:

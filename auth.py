@@ -37,6 +37,11 @@ Roles (what each may do is in PERMISSIONS):
     python -m auth sso-show <tenant_id>
     python -m auth sso-remove <tenant_id>
 
+    python -m auth confluence-set <tenant_id> --url URL --space KEY --token-env VAR [--email ADDRESS] [--parent-id ID]
+    python -m auth jira-set <tenant_id> --url URL --project KEY --token-env VAR [--email ADDRESS] [--issue-type Task]
+    python -m auth integrations <tenant_id>
+    python -m auth integration-remove <tenant_id> confluence|jira   # see atlassian.py
+
 CONTINUUM_AUTH=disabled turns authentication off for local development only
 (every request then acts as tenant "local"); it is logged loudly.
 """
@@ -134,6 +139,15 @@ CREATE TABLE IF NOT EXISTS sso_requests (
     redirect_uri  TEXT NOT NULL,
     next_path     TEXT,
     expires_at    REAL NOT NULL
+);
+-- Confluence and Jira for publishing (atlassian.py). config holds the site,
+-- space or project and the NAME of the environment variable with the token.
+CREATE TABLE IF NOT EXISTS integrations (
+    tenant_id   TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    config      TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    PRIMARY KEY (tenant_id, kind)
 );
 """
 
@@ -292,8 +306,8 @@ def set_llm_policy(tenant_id: str, policy: str) -> None:
 
 def delete_tenant(tenant_id: str) -> dict:
     """Remove a tenant and everything stored for it: jobs (transcripts,
-    documents), screenshots, cached LLM responses, API keys, people, sessions
-    and its SSO configuration."""
+    documents), screenshots, cached LLM responses, API keys, people, sessions,
+    its SSO configuration and its Confluence and Jira connections."""
     import pipeline
     from llm import cache
 
@@ -307,6 +321,7 @@ def delete_tenant(tenant_id: str) -> dict:
         db.execute("DELETE FROM sessions WHERE tenant_id = ?", (tenant_id,))
         db.execute("DELETE FROM sso_providers WHERE tenant_id = ?", (tenant_id,))
         db.execute("DELETE FROM sso_requests WHERE tenant_id = ?", (tenant_id,))
+        db.execute("DELETE FROM integrations WHERE tenant_id = ?", (tenant_id,))
         db.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
     audit(tenant_id, "cli", "tenant_deleted", {"jobs": len(job_ids), "people": people, "api_keys": keys})
     return {"tenant_id": tenant_id, "jobs": len(job_ids), "cached_llm_responses": cached, "api_keys": keys,
@@ -694,6 +709,9 @@ def _main(argv) -> int:
     elif cmd in ("sso-set", "sso-show", "sso-remove") and args:
         import sso
         return sso.cli(cmd, args)
+    elif cmd in ("confluence-set", "jira-set", "integrations", "integration-remove") and args:
+        import atlassian
+        return atlassian.cli(cmd, args)
     else:
         print(__doc__)
         return 2

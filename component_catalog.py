@@ -54,7 +54,12 @@ CATALOG: List[Product] = [
     P("AWS Step Functions", "Workflow orchestration", "orchestration", ("AWS Step Functions", "Step Functions")),
     P("AWS Secrets Manager", "Secrets", "secrets", ("AWS Secrets Manager", "Secrets Manager")),
     P("AWS CloudTrail", "Security", None, ("AWS CloudTrail", "CloudTrail", "Cloud Trail")),
-    P("AWS IAM", "Security", None, ("AWS IAM", "IAM")),
+    # Every cloud has IAM ("Cloud IAM", "Azure RBAC and IAM"): a bare "IAM"
+    # on a GCP KT was shown as AWS IAM. As with VPC below, only the
+    # vendor-qualified spelling names the AWS product.
+    P("AWS IAM", "Security", None, ("AWS IAM", "Amazon IAM")),
+    P("IAM", "Security", None, ("IAM",), case_sensitive=True),
+    P("Google Cloud IAM", "Security", None, ("Google Cloud IAM", "GCP IAM", "Cloud IAM")),
     # A bare "VPC" exists on every cloud: on a GCP KT ("VPC Service
     # Controls") it was labelled Amazon VPC. Only the vendor-qualified
     # spelling names the AWS product.
@@ -77,6 +82,7 @@ CATALOG: List[Product] = [
     P("ARM templates", "Infrastructure", "iac", ("ARM templates", "ARM template"), case_sensitive=True),
     P("Azure VNet", "Networking", None, ("Azure VNet", "VNet")),
     P("Cloud Functions", "Compute", "compute", ("Google Cloud Functions", "Cloud Functions")),
+    P("Google Cloud Storage", "Storage", "object_storage", ("GCS",), case_sensitive=True),
     # --- Source control (delivery tooling)
     P("GitHub", "Source control", None, ("GitHub",)),
     P("GitLab", "Source control", None, ("GitLab",)),

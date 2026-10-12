@@ -1,0 +1,287 @@
+{
+ "id": "h11_tern_azure_aks_meeting",
+ "holdout": false,
+ "notes": "Written on 12 Oct before the third round of mapping fixes and scored blind once, aggregate only (79% with the other two holdouts, 84 of 106 facts). Part of the tuning set from 12 Oct.",
+ "title": "Tern: Azure AKS hospital booking system, three-person Teams meeting",
+ "proves": "A manager joining in, small talk, no first-day or cost discussion.",
+ "source": "written for this suite (synthetic)",
+ "transcript": "Priya: Hi both, thanks for making the time. Daniel, this is the Tern handover, so over to you.\n\nDaniel: Thanks Priya. So Tern is the appointment booking system for the outpatient clinics across the four hospitals in the trust. Patients book through the website and the NHS app integration, and the clinic staff use the back-office screens. We handle about fifteen thousand bookings a week.\n\nChloe: Is it all in Azure?\n\nDaniel: Yes. It's a set of .NET services on AKS, with Azure Cosmos DB for the bookings and Azure Service Bus between the booking service and the notification service. The front end is a React app served from Azure Static Web Apps, and API Management sits in front of the public APIs.\n\nChloe: How do we release?\n\nDaniel: Everything is in Azure DevOps. Merging to the release branch builds the containers, and Helm deploys them to the test cluster first. After the clinical safety officer signs off, the same pipeline promotes the build to production. To roll back, rerun the previous successful release in the pipeline.\n\nPriya: And the clinical safety sign-off is mandatory, there's no way around it.\n\nChloe: What environments are there?\n\nDaniel: Dev, test and production. Test is connected to the NHS integration sandbox.\n\nChloe: Monitoring?\n\nDaniel: Azure Monitor and Application Insights, plus a Grafana board the clinics team looks at. If the booking failure rate goes above two percent, an alert goes to the support Teams channel and pages whoever is on call.\n\nChloe: What goes wrong?\n\nDaniel: The NHS app integration times out now and then, and bookings from the app fail while the website keeps working. Usually it recovers by itself, but if it lasts more than ten minutes raise a ticket with the integration team. The other one is Cosmos DB throttling with 429 errors on Monday mornings when the clinics open their lists. Increase the autoscale maximum throughput on the bookings container and it settles down.\n\nChloe: Monday mornings, okay, so that's the busy time?\n\nDaniel: Yes, Monday from eight to ten is the peak, and the first week of January when the waiting lists are reopened.\n\nChloe: Backups?\n\nDaniel: Cosmos DB has continuous backup with point in time restore over the last thirty days, and the account is replicated to UK West. We test a restore twice a year with the DR team.\n\nChloe: Anything risky?\n\nDaniel: Do not change the partition key on the bookings container, you'd have to migrate everything. And never delete appointment records by hand, they're part of the medical record.\n\nChloe: How is it secured?\n\nDaniel: Staff sign in with Entra ID, patients come through NHS login, and all the secrets are in Key Vault. Patient data never leaves the UK regions.\n\nChloe: Who owns it after I take over?\n\nPriya: You'll be in the patient access team, which owns Tern. Daniel's moving to the data team but he's still reachable for questions. For escalations, it's me first, Priya Shah, then the head of digital.\n\nChloe: Is anything unfinished?\n\nDaniel: The SMS reminders still go through an old Azure Function that nobody really owns. It needs moving onto the notification service.\n\nPriya: Right, let's leave it there, thanks both.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Tern is the appointment booking system for the outpatient clinics across the four hospitals in the trust",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Patients book through the website and the NHS app integration",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "We handle about fifteen thousand bookings a week",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "a set of .NET services on AKS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Azure Cosmos DB for the bookings",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Azure Service Bus between the booking service and the notification service",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "The frontend is a React app served from Azure Static Web Apps",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "API Management sits in front of the public APIs",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Merging to the release branch builds the containers",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Helm deploys them to the test cluster first",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "the same pipeline promotes the build to production",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "rerun the previous successful release in the pipeline",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "the clinical safety sign-off is mandatory",
+   "in": [
+    "deployment_and_rollback",
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Dev, test and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Test is connected to the NHS integration sandbox",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Azure Monitor and Application Insights, plus a Grafana board the clinics team looks at",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "an alert goes to the support Teams channel and pages whoever is on-call",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "The NHS app integration times out now and then",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "if it lasts more than ten minutes raise a ticket with the integration team",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Cosmos DB throttling with 429 errors on Monday mornings",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Increase the autoscale maximum throughput on the bookings container",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Monday from eight to ten is the peak",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "the first week of January when the waiting lists are reopened",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Cosmos DB has continuous backup with point in time restore",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the account is replicated to UK West",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "We test a restore twice a year with the DR team",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Do not change the partition key on the bookings container",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "never delete appointment records by hand",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Staff sign in with Entra ID, patients come through NHS login",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "all the secrets are in Key Vault",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Patient data never leaves the UK regions",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "the patient access team, which owns Tern",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "patient access team",
+    "tern"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "it's me first, Priya Shah, then the head of digital",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "The SMS reminders still go through an old Azure Function that nobody really owns",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "It needs moving onto the notification service",
+   "in": [
+    "open_responsibilities"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "monitoring_observability",
+  "disaster_recovery",
+  "security_controls",
+  "deployment_and_rollback",
+  "common_failures",
+  "known_bad_days",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities"
+ ],
+ "missing": [
+  "cost_optimization",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ]
+}

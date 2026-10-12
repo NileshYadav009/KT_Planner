@@ -130,6 +130,9 @@
       color:var(--text);background:var(--bg);
       overflow-x:hidden;
     }
+    /* `hidden` must win over a class or inline display: the Confluence and
+       Jira buttons showed in workspaces that are not connected. */
+    [hidden]{display:none !important}
     body,.topbar,.workspace-sidebar,.right-aside,.card,.rp-card,.cov-item,
     .sent-row,.modal-box,input,select,textarea,table,th,td,.upload-zone,
     .metric-tile,.summary-item,.toast{
@@ -665,6 +668,23 @@
     .doc-history{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px}
     .doc-history li{display:flex;gap:8px;align-items:center;padding:3px 0}
     .doc-history li span{flex:1}
+    .doc-history .diff-compare{display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-lt)}
+    .doc-history .diff-compare select{flex:1;min-width:0}
+    .doc-ask{display:flex;gap:8px;margin-bottom:8px}
+    .doc-ask input{flex:1;min-width:0;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);
+                   background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+    .doc-ask-result{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px}
+    .doc-ask-result .ask-note{margin:0 0 6px}
+    .doc-ask-result .ask-answers{margin:0;padding-left:18px}
+    .doc-ask-result .ask-answers li{margin:4px 0}
+    .doc-ask-result .ask-section{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;
+                                 background:var(--blue-dim);color:var(--blue);margin-right:4px}
+    .doc-diff{margin-top:8px}
+    .doc-diff .diff-sec{margin:8px 0}
+    .doc-diff .diff-title{font-weight:600;margin-bottom:2px}
+    .doc-diff .diff-add,.doc-diff .diff-del{padding:2px 6px;border-radius:4px;margin:2px 0;white-space:pre-wrap}
+    .doc-diff .diff-add{background:var(--green-dim);color:var(--text)}
+    .doc-diff .diff-del{background:var(--red-dim);color:var(--text);text-decoration:line-through}
     .signoff-panel{margin-top:14px;border-top:1px solid var(--border);padding-top:12px;font-size:12.5px}
     .signoff-panel h4{font-size:13px;margin:0 0 8px}
     .signoff-panel .so-status{margin-bottom:8px;color:var(--text2)}
@@ -704,13 +724,22 @@
     }
 
     /* ── MODAL ────────────────────────────────────────────────── */
-    #editModal{
+    #editModal,#depsModal{
       display:none;position:fixed;inset:0;
       background:var(--scrim);
       z-index:10000;align-items:center;justify-content:center;
       backdrop-filter:blur(3px);
     }
-    #editModal.open{display:flex}
+    #editModal.open,#depsModal.open{display:flex}
+    #depsModal .modal-box{max-width:680px;max-height:85vh;display:flex;flex-direction:column}
+    #depsModal .modal-body{overflow:auto;font-size:13px}
+    .deps-item{padding:8px 0;border-bottom:1px solid var(--border-lt)}
+    .deps-item:last-child{border-bottom:none}
+    .deps-name{font-weight:600}
+    .deps-kind{font-size:11px;color:var(--text3);margin-left:6px}
+    .deps-systems{margin:4px 0 0;padding-left:18px}
+    .deps-systems li{margin:2px 0}
+    .deps-quote{color:var(--text3);font-size:12px}
     .modal-box{
       background:var(--surface);border-radius:var(--radius-lg);
       box-shadow:var(--shadow-lg);max-width:460px;width:90%;overflow:hidden;
@@ -1111,6 +1140,9 @@
     <div class="nav-group history-group">
       <div class="history-head">
         <p class="nav-group-label">Past KTs</p>
+        <button class="history-refresh" id="depsOpen" type="button" title="Components several systems share" aria-label="Shared components across KTs" style="margin-left:auto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="8" x2="11" y2="15.5"/><line x1="16" y1="8" x2="13" y2="15.5"/></svg>
+        </button>
         <button class="history-refresh" id="historyRefresh" type="button" title="Refresh list" aria-label="Refresh past KTs">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
@@ -1301,6 +1333,12 @@
           </span>
         </div>
         <div class="doc-history" id="docHistory" hidden></div>
+        <form class="doc-ask" id="docAsk" hidden>
+          <input type="search" id="docAskInput" maxlength="300" autocomplete="off"
+                 placeholder="Ask this KT, e.g. Who do I call when it is down?" aria-label="Ask this KT">
+          <button class="btn btn-ghost btn-sm" type="submit">Ask</button>
+        </form>
+        <div class="doc-ask-result" id="docAskResult" hidden></div>
         <div class="src-bar" id="sourceBar" hidden>
           <span id="sourceBarText">Click a time beside a fact to hear where it was said.</span>
           <label class="btn btn-ghost btn-sm" style="cursor:pointer">
@@ -1391,9 +1429,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           Download KT PDF
         </button>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
           <button id="downloadMdBtn" class="btn btn-ghost" style="flex:1" title="For Confluence, Notion or a repository">Markdown</button>
           <button id="downloadGapsBtn" class="btn btn-ghost" style="flex:1" title="Knowledge gaps as CSV, one ticket per row (Jira import)">Gaps CSV</button>
+          <button id="downloadRunbookBtn" class="btn btn-ghost" style="flex:1" title="One runbook per known failure, as Markdown, from the incident card">Runbooks</button>
+        </div>
+        <div id="publishRow" style="display:flex;gap:8px;margin-bottom:8px" hidden>
+          <button id="publishConfluenceBtn" class="btn btn-ghost" style="flex:1" title="Publish this document as a Confluence page (publishing again updates the same page)" hidden>Confluence</button>
+          <button id="publishJiraBtn" class="btn btn-ghost" style="flex:1" title="Create one Jira issue per knowledge gap (gaps already sent are skipped)" hidden>Jira issues</button>
         </div>
         <button id="applyJob" class="btn btn-ghost btn-block" style="margin-bottom:8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -1449,6 +1492,19 @@
   </aside>
 
 </div><!-- /page-wrap -->
+
+<!-- SHARED COMPONENTS (P3-4) -->
+<div id="depsModal" role="dialog" aria-modal="true" aria-labelledby="depsTitle">
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <h3 id="depsTitle">Shared components</h3>
+      <button class="modal-close" type="button" id="depsClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="depsBody"></div>
+  </div>
+</div>
 
 <!-- EDIT MODAL -->
 <div id="editModal">
@@ -1957,7 +2013,7 @@ document.getElementById('attachRecording').addEventListener('change', e => {
   useLocalRecording(e.target.files[0]);
   showToast('Recording attached: click a time to play from there');
 });
-document.getElementById('renderedDocument').addEventListener('click', e => {
+function onSourceChip(e){
   const chip = e.target.closest('.src-chip');
   if(!chip) return;
   const src = SOURCE_LOOKUP[chip.dataset.src];
@@ -1973,6 +2029,33 @@ document.getElementById('renderedDocument').addEventListener('click', e => {
   } else if(src.start != null){
     showToast('Attach the recording to play it from ' + when);
   }
+}
+document.getElementById('renderedDocument').addEventListener('click', onSourceChip);
+document.getElementById('docAskResult').addEventListener('click', onSourceChip);
+
+/* Ask the KT (P3-1): the document's own statements that answer a question,
+   each with its section and source; nothing is written by a model. */
+document.getElementById('docAsk').addEventListener('submit', async e => {
+  e.preventDefault();
+  const input = document.getElementById('docAskInput');
+  const box = document.getElementById('docAskResult');
+  const question = input.value.trim();
+  if(!question || !DOC.jobId) return;
+  try{
+    const resp = await fetch(`/kt/${encodeURIComponent(DOC.jobId)}/ask`, {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({question})});
+    const r = await resp.json().catch(() => ({}));
+    if(!resp.ok){ showToast(r.detail || 'Could not search this KT', 6000, 'error'); return; }
+    const notes = [];
+    if((r.never_mentions || []).length) notes.push(`The KT never mentions ${r.never_mentions.map(escapeHtml).join(', ')}.`);
+    if((r.not_covered || []).length) notes.push('Not covered in the KT: ' + r.not_covered.map(escapeHtml).join(' '));
+    if(!r.answers.length && !notes.length) notes.push('The KT does not say. Ask the outgoing owner, or add it in a follow-up session.');
+    box.innerHTML = notes.map(n => `<p class="ask-note">${n}</p>`).join('')
+      + (r.answers.length ? '<ol class="ask-answers">' + r.answers.map(a =>
+          `<li><span class="ask-section">${escapeHtml(a.section)}</span> ${escapeHtml(a.text)} `
+          + sourceChips({sources: [(a.sources || []).map(s => s.id)]}, 0) + '</li>').join('') + '</ol>' : '');
+    box.hidden = false;
+  }catch(err){ showToast('Could not search this KT'); }
 });
 
 /* The document is the server's copy (P1-1). In edit mode each unit (a
@@ -2008,6 +2091,8 @@ function renderKnowledgeDocument(knowledge, meta){
   if(!knowledge || !Array.isArray(knowledge.rendered_sections) || knowledge.rendered_sections.length===0){
     container.innerHTML='<p class="empty-state" style="padding:6px">No rendered document available yet.</p>';
     document.getElementById('docToolbar').hidden = true;
+    document.getElementById('docAsk').hidden = true;
+    document.getElementById('docAskResult').hidden = true;
     return;
   }
   renderDocToolbar();
@@ -2116,6 +2201,7 @@ function renderBlockHtml(block, ctx){
 function renderDocToolbar(){
   const bar = document.getElementById('docToolbar');
   bar.hidden = !DOC.jobId;
+  document.getElementById('docAsk').hidden = !DOC.jobId || DOC.editing;
   const locked = documentLocked();
   document.getElementById('docVersion').textContent =
     `Version ${DOC.version}` + (locked ? ' · signed and locked' : '') + (DOC.editing ? ` · ${DOC.pending.length} unsaved change(s)` : '');
@@ -2244,13 +2330,58 @@ document.getElementById('docHistoryBtn').addEventListener('click', async () => {
       `<li><strong>v${v.version}</strong><span>${escapeHtml(v.summary || '')} · ${escapeHtml(v.author || '')}`
       + `${v.created_at ? ' · ' + escapeHtml(new Date(v.created_at * 1000).toLocaleString()) : ''}`
       + `${v.version === data.current ? ' · current' : ''}</span>`
-      + `<button type="button" class="btn btn-ghost btn-sm" data-version="${v.version}">PDF</button></li>`).join('') + '</ol>';
+      + (v.version > 1 ? `<button type="button" class="btn btn-ghost btn-sm" data-diff-to="${v.version}" title="What changed from v${v.version - 1}">Changes</button>` : '')
+      + `<button type="button" class="btn btn-ghost btn-sm" data-version="${v.version}">PDF</button></li>`).join('') + '</ol>'
+      + '<div class="diff-compare"><select id="diffAgainst" aria-label="Another KT to compare with"><option value="">Compare with another KT…</option></select>'
+      + '<button type="button" class="btn btn-ghost btn-sm" data-diff-against="1">Compare</button></div>'
+      + '<div class="doc-diff" id="docDiff"></div>';
     panel.hidden = false;
+    loadDiffTargets();
   }catch(err){ showToast('Could not load the history'); }
 });
+async function loadDiffTargets(){
+  const select = document.getElementById('diffAgainst');
+  try{
+    const resp = await fetch('/jobs?limit=100');
+    if(!resp.ok) return;
+    ((await resp.json()).jobs || []).filter(j => j.job_id !== DOC.jobId
+        && (j.status === 'completed' || j.status === 'completed_with_warnings')).forEach(j => {
+      const opt = document.createElement('option');
+      opt.value = j.job_id;
+      opt.textContent = `${j.title || 'Untitled KT'} · ${historyDate(j.created_at)}`;
+      select.appendChild(opt);
+    });
+  }catch(e){}
+}
+/* What changed between versions, or since another KT of the system (P3-2). */
+async function showDiff(query, heading){
+  const box = document.getElementById('docDiff');
+  try{
+    const resp = await fetch(`/documents/${encodeURIComponent(DOC.jobId)}/diff?${query}`);
+    if(!resp.ok){ showToast('Could not compare the documents'); return; }
+    const d = await resp.json();
+    const lines = s => s.added.map(t => `<div class="diff-add">+ ${escapeHtml(t)}</div>`).join('')
+      + s.changed.map(c => `<div class="diff-del">− ${escapeHtml(c.before)}</div><div class="diff-add">+ ${escapeHtml(c.after)}</div>`).join('')
+      + s.removed.map(t => `<div class="diff-del">− ${escapeHtml(t)}</div>`).join('');
+    box.innerHTML = `<div><strong>${escapeHtml(heading)}</strong> · ${escapeHtml(d.summary)}</div>` + d.sections.map(s =>
+      `<div class="diff-sec"><div class="diff-title">${escapeHtml(s.title)}`
+      + `${s.now_covered ? ' · now covered' : ''}${s.no_longer_covered ? ' · no longer covered' : ''}</div>${lines(s)}</div>`).join('');
+  }catch(e){ showToast('Could not compare the documents'); }
+}
 document.getElementById('docHistory').addEventListener('click', e => {
   const btn = e.target.closest('button[data-version]');
   if(btn) downloadKtPdf(DOC.jobId, '', Number(btn.dataset.version));
+  const diffBtn = e.target.closest('button[data-diff-to]');
+  if(diffBtn){
+    const to = Number(diffBtn.dataset.diffTo);
+    showDiff(`to=${to}&from=${to - 1}`, `v${to - 1} → v${to}`);
+  }
+  if(e.target.closest('button[data-diff-against]')){
+    const select = document.getElementById('diffAgainst');
+    if(!select.value){ showToast('Choose a KT to compare with'); return; }
+    showDiff(`against=${encodeURIComponent(select.value)}`,
+             `Since ${select.options[select.selectedIndex].textContent}`);
+  }
 });
 
 /* ── Sign-off (P1-3) ─────────────────────────────────────── */
@@ -2510,6 +2641,7 @@ function pollJobStatus(jobId){
         }catch(err){ console.error('Dynamic schema load error', err); }
 
         DOC.jobId = jobId; DOC.editing = false; DOC.pending = [];
+        document.getElementById("docAskResult").hidden = true;
         renderKnowledgeDocument(data.knowledge_object || {}, data);
         loadSignoff();
       } else if(data.status==='failed'){
@@ -2649,7 +2781,7 @@ async function loadHistory(){
     li.innerHTML = `
       <button class="history-open" type="button" title="Open this KT">
         <span class="history-title">${escapeHtml(title)}</span>
-        <span class="history-meta"><span class="history-status ${cls}">${escapeHtml(label)}</span><span>${escapeHtml(historyDate(job.created_at))}</span></span>
+        <span class="history-meta"><span class="history-status ${cls}">${escapeHtml(label)}</span>${job.review_due ? '<span class="history-status st-warn" title="Not changed for a long time: check it still matches the system">Review due</span>' : ''}<span>${escapeHtml(historyDate(job.created_at))}</span></span>
       </button>
       <span class="history-actions">
         <button class="history-act" type="button" data-act="pdf" ${done ? '' : 'disabled'} title="Download PDF" aria-label="Download PDF for ${escapeHtml(title)}">${HISTORY_ICONS.pdf}</button>
@@ -2970,7 +3102,8 @@ document.getElementById('downloadPdfBtn').addEventListener('click',()=>downloadK
 async function downloadKtFile(kind){
   const jobId = currentJobId;
   if(!jobId){ showToast('No active job to export'); return; }
-  const route = kind === 'gaps' ? `/export/gaps/${jobId}` : `/export/markdown/${jobId}`;
+  const route = kind === 'gaps' ? `/export/gaps/${jobId}`
+    : kind === 'runbook' ? `/export/runbook/${jobId}` : `/export/markdown/${jobId}`;
   try{
     const resp = await fetch(route);
     if(!resp.ok){
@@ -2982,10 +3115,11 @@ async function downloadKtFile(kind){
     const url = URL.createObjectURL(await resp.blob());
     const a = document.createElement('a');
     a.href = url;
-    a.download = `kt_${jobId.slice(0,8)}` + (kind === 'gaps' ? '_gaps.csv' : '.md');
+    a.download = `kt_${jobId.slice(0,8)}` + (kind === 'gaps' ? '_gaps.csv' : kind === 'runbook' ? '_runbooks.md' : '.md');
     a.click();
     URL.revokeObjectURL(url);
-    showToast(kind === 'gaps' ? 'Downloaded the knowledge gaps (CSV)' : 'Downloaded the KT as Markdown');
+    showToast(kind === 'gaps' ? 'Downloaded the knowledge gaps (CSV)'
+      : kind === 'runbook' ? 'Downloaded the runbooks (Markdown)' : 'Downloaded the KT as Markdown');
   }catch(err){
     showToast('Export failed: ' + (err.message || err), 8000, 'error');
   }
@@ -3063,6 +3197,77 @@ document.getElementById('addSessionBtn')?.addEventListener('click', async () => 
 
 document.getElementById('downloadMdBtn').addEventListener('click',()=>downloadKtFile('markdown'));
 document.getElementById('downloadGapsBtn').addEventListener('click',()=>downloadKtFile('gaps'));
+document.getElementById('downloadRunbookBtn').addEventListener('click',()=>downloadKtFile('runbook'));
+
+/* Shared components (P3-4): what several KTs of this workspace name. */
+document.getElementById('depsOpen').addEventListener('click', async () => {
+  const modal = document.getElementById('depsModal');
+  const body = document.getElementById('depsBody');
+  body.innerHTML = '<p>Loading…</p>';
+  modal.classList.add('open');
+  try{
+    const resp = await fetch('/dependencies');
+    const d = await resp.json();
+    if(!resp.ok){ body.innerHTML = `<p>${escapeHtml(d.detail || 'Could not load the components')}</p>`; return; }
+    const intro = `<p style="margin-bottom:8px">${d.systems.length} finished KT(s) with an architecture picture. `
+      + 'A component named by several systems is worth knowing about when it changes or fails. The same name may '
+      + 'still be different instances: check with the owners.</p>';
+    if(!d.shared.length){ body.innerHTML = intro + '<p>No component is named by more than one KT yet.</p>'; return; }
+    body.innerHTML = intro + d.shared.map(c => `<div class="deps-item"><span class="deps-name">${escapeHtml(c.component)}</span>`
+      + `<span class="deps-kind">${escapeHtml(c.kind || '')}${c.dependency ? '' : ' · tooling'} · ${c.systems.length} KTs</span>`
+      + '<ul class="deps-systems">' + c.systems.map(s => `<li><a href="#" data-job="${escapeHtml(s.job_id)}">${escapeHtml(s.system)}</a>`
+        + (s.how ? ` ${escapeHtml(s.how)}` : '') + (s.quote ? ` <span class="deps-quote">“${escapeHtml(s.quote)}”</span>` : '')
+        + '</li>').join('') + '</ul></div>').join('');
+  }catch(e){ body.innerHTML = '<p>Could not load the components.</p>'; }
+});
+document.getElementById('depsClose').addEventListener('click', () => document.getElementById('depsModal').classList.remove('open'));
+document.getElementById('depsModal').addEventListener('click', e => {
+  if(e.target.id === 'depsModal') e.currentTarget.classList.remove('open');
+  const link = e.target.closest('a[data-job]');
+  if(link){
+    e.preventDefault();
+    e.currentTarget.classList.remove('open');
+    openHistoryJob(link.dataset.job);
+  }
+});
+
+/* Publishing to the workspace's Confluence and Jira (P2-2), shown only when
+   an operator connected them and the role may change KTs. */
+(async function showPublishTargets(){
+  try{
+    const [me, targets] = await Promise.all([fetch('/me').then(r => r.ok ? r.json() : null),
+                                             fetch('/integrations').then(r => r.ok ? r.json() : null)]);
+    if(!me || !targets || !(me.permissions || []).includes('kt:correct')) return;
+    document.getElementById('publishConfluenceBtn').hidden = !targets.confluence;
+    document.getElementById('publishJiraBtn').hidden = !targets.jira;
+    document.getElementById('publishRow').hidden = !(targets.confluence || targets.jira);
+  }catch(e){}
+})();
+async function publishKt(kind, btn){
+  const jobId = currentJobId;
+  if(!jobId){ showToast('No active job to publish'); return; }
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/publish/${kind}/${encodeURIComponent(jobId)}`, {method: 'POST'});
+    const body = await resp.json().catch(() => ({}));
+    if(!resp.ok){ showToast(`Publishing failed: ${body.detail || `HTTP ${resp.status}`}`, 9000, 'error'); return; }
+    if(kind === 'confluence'){
+      showToast(`${body.created ? 'Published' : 'Updated'} the Confluence page (version ${body.version})`, 6000);
+      if(body.url) window.open(body.url, '_blank', 'noopener');
+    } else {
+      const parts = [`${body.created.length} issue(s) created`];
+      if(body.already.length) parts.push(`${body.already.length} already in Jira`);
+      if(body.failed.length) parts.push(`${body.failed.length} refused: ${body.failed[0].reason || 'see Jira'}`);
+      showToast(parts.join(', '), 9000, body.failed.length ? 'warn' : undefined);
+    }
+  }catch(err){
+    showToast('Publishing failed: ' + (err.message || err), 8000, 'error');
+  }finally{
+    btn.disabled = false;
+  }
+}
+document.getElementById('publishConfluenceBtn').addEventListener('click', e => publishKt('confluence', e.currentTarget));
+document.getElementById('publishJiraBtn').addEventListener('click', e => publishKt('jira', e.currentTarget));
 
 loadSchema();
 </script>

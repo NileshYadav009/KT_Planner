@@ -414,6 +414,11 @@ def _get_semantic_chunk_model(model_name: str = "all-MiniLM-L6-v2"):
     return _SEMANTIC_CHUNK_MODEL
 
 
+def _opens_with_question(text: str) -> bool:
+    first = re.match(r"[^.!?]*[.!?]", (text or "").strip())
+    return bool(first) and first.group(0).endswith("?")
+
+
 def semantic_chunk_sentences(
     sentences: List[Sentence],
     similarity_threshold: float = 0.45,
@@ -465,6 +470,12 @@ def semantic_chunk_sentences(
         # An opener or closer ("Let's start.", "That concludes the KT.") is
         # dropped before mapping; merged into a neighbour it would be kept.
         if should_merge and (_GREETING_ONLY_RE.match(candidate.text or "") or _GREETING_ONLY_RE.match(current.text or "")):
+            should_merge = False
+        # A new question opens a new topic, however alike it reads: "Anything
+        # unfinished? ... has no owner." and "And for me, starting out? Get
+        # added to the admins group first." were one chunk, and the first-day
+        # step was filed under Open Responsibilities.
+        if should_merge and _opens_with_question(candidate.text):
             should_merge = False
 
         if should_merge:

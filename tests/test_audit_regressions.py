@@ -82,6 +82,11 @@ def test_cleaning_keeps_acronym_casing_and_inflections():
     assert "rolled back" in text
 
 
+def test_cleaning_keeps_another_form_of_a_known_term():
+    # "rate limiter" is a correct word, not a mishearing of "rate limiting".
+    assert "Never disable the rate limiter" in clean_transcript("Never disable the rate limiter, even then.")
+
+
 def test_cleaning_still_corrects_lowercase_garbles():
     text = clean_transcript("pager duty is used for alerting and rabbit mq handles messaging.")
     assert "PagerDuty" in text and "RabbitMQ" in text
