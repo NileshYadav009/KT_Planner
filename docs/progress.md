@@ -1294,3 +1294,26 @@ requests, 29.8k/4.0k tokens. New: `LLM_MAX_CALLS_PER_KT`, `LLM_CACHE=replay`,
 `scripts/e2e_kts.py`, `tests/test_e2e_kts.py`. Not fixed: two-fact sentences
 are not split; passive data flows are drawn as the system's; short KTs are
 long (12-14 pages).
+
+## Docker image built and smoke-tested (audit §9aab, 13 Oct)
+
+The image now builds and runs. The model download fetches only the files the
+app loads (3.2 GB instead of 11 GB) over plain HTTPS; the Xet client stalled
+inside the build. The models are no longer stored twice by a late
+`chown -R`. The image went from 14.8 GB to 9.2 GB. The container is healthy
+in under 3 minutes, runs as non-root and loads every model offline. The four
+e2e KTs give the same results through its API as in-process. Bug found and
+fixed along the way: with no LLM key, each KT attempted and failed about 40
+LLM calls and was reported as "gemini". It now runs rules-only and says so
+once in the log. Not run yet: audio upload in the container, and
+`docker compose` with separate workers.
+
+## A smaller image (audit §9aac, 13 Oct)
+
+bge-large and GLiNER are stored in fp16 in the image (`fetch_models.py
+--half`) and still run in fp32. The golden suite and the e2e KTs rendered
+byte-identical documents with the rounded weights. The packages' test folders
+and torch's C++ headers are removed. The image went from a 3.25 GB download
+to 2.58 GB, and from 5.5 GB unpacked to 4.1 GB. Considered and rejected:
+headless OpenCV (ffmpeg needs the GL stack anyway), a static ffmpeg (security
+updates), no `.pyc` (slower starts), int8 Whisper (needs an audio check).

@@ -3861,6 +3861,111 @@ Tests: `tests/test_e2e_kts.py` (no LLM, and the recorded LLM answers),
 `tests/test_session_framing.py`, `tests/test_devops_transcription.py`,
 `tests/test_polish_integrity.py`.
 
+### 9aab. Docker image built and smoke-tested (13 Oct)
+
+First local build of the image (Docker Desktop 28.5, 4 CPUs, 6 GB RAM).
+It found three problems, all fixed:
+
+- **The model download stalled.** `snapshot_download` sat at about 40 KB/s
+  for over 35 minutes inside the build, while plain HTTPS from the same host
+  ran at about 4.6 MB/s. The Dockerfile now sets `HF_HUB_DISABLE_XET=1` for
+  that step, and the download ran at full speed.
+- **The build fetched 11 GB of model files when the app loads 3.2 GB.**
+  `scripts/fetch_models.py` now skips TF, Flax, Rust and ONNX exports and the
+  PyTorch `.bin` where safetensors exist. For `mdeberta-v3-base` it takes
+  only the config and tokenizer, because gliner 0.2.26 loads GLiNER's own
+  weights (`backbone_from_pretrained=False`). The build's offline
+  `--verify` step loads every model from the trimmed set.
+- **The models were stored twice.** A `chown -R /opt/models` in a later
+  layer copied all 3.2 GB again. The user is now created first and the
+  models are handed over in the layer that downloads them. Image: 14.8 GB
+  -> 9.2 GB as `docker image ls` reports it (5.65 -> 3.25 GB unpacked).
+
+It also found an app bug, not specific to Docker. **With no LLM key, every KT
+attempted about 40 LLM calls.** `create_llm_provider()` returned a
+`GeminiProvider` without a key. Each call raised "not configured" and logged
+a warning, and the job's usage read "gemini-2.5-flash, 43 calls, 17,750
+input tokens" (estimated, never sent). In-process tests replace
+`get_llm_provider` with `lambda: None`, so they never saw this path.
+Providers now have `configured()`. `get_llm_provider()` returns None when the
+provider has no key and logs that once. `FallbackLLMProvider` drops
+providers with no key. Tests: four in `tests/test_llm_provider.py`; all four
+failed before the fix.
+
+Smoke test of the final image, with no LLM key, a throwaway volume and a
+throwaway secret:
+
+- `healthy` after 165 s; runs as `continuum` (uid 10001).
+- Every model loads with the network off.
+- `/readyz` passes the database, ffmpeg and models checks.
+- A request without a key gets 401.
+- The four e2e KTs through `POST /kt-from-transcript`: 15/15, 17/17, 12/12
+  and 11/11 facts. That is the same one known problem (B07) as in-process,
+  with no LLM and 0 requests.
+
+Not fixed, noted:
+
+- transformers 5.1 warns that mdeberta's tokenizer has "an incorrect regex
+  pattern" (the Mistral `fix_mistral_regex` check). The same library
+  versions run outside Docker.
+- WeasyPrint ignores four CSS declarations: `word-break: break-word`,
+  `overflow-x`, and an empty `color:` and `background:`.
+- Not run: audio upload (Whisper and diarisation in the container) and
+  `docker compose` with separate workers.
+
+### 9aac. A smaller image (13 Oct)
+
+The user asked for the image to be as small as possible. Measured inside the
+§9aab image (5.5 GB unpacked): models 3.07 GB, Python packages about 2 GB
+(torch 739 MB), Debian packages about 460 MB, `.pyc` 246 MB.
+
+Done:
+
+- **bge-large and GLiNER stored in fp16 (1.2 GB less).** Done by
+  `fetch_models.py --half`, only in the image. transformers 5.1 loads a
+  checkpoint in its own dtype when the config names none. A MiniLM test with
+  fp16 weights loaded as fp16 until its config pinned `torch_dtype:
+  float32`. bge's config pins float32, and GLiNER copies its state dict into
+  a model built in fp32. So both run in fp32, and `--verify` fails the build
+  otherwise. The MiniLM pair (no dtype in their configs, 90 MB) is left as
+  is.
+  - Proof: the golden suite and the four e2e KTs, run in-process with no
+    LLM, with the weights as downloaded and then with every floating weight
+    rounded to fp16. Rounding and loading back into fp32 is exactly what the
+    fp16 files do.
+  - Result: 29/29 rendered documents byte-identical (a hash of every
+    section's text). Tuning goldens 100% in both runs. Blind holdouts 78/95
+    in both (aggregate only). e2e 15/15, 17/17, 12/12, 11/11 in both.
+- **Packages' test folders and `torch/include` removed (about 250 MB).**
+  This is done in the install layer, which then imports every heavy package.
+  No runtime module imports a `tests` directory. jinja2's `tests` is a
+  module file, so it is not removed.
+
+Considered, not done:
+
+- **Headless OpenCV, dropping libgl1 and Mesa/LLVM (about 160 MB).** ffmpeg's
+  `libavdevice59` depends on `libgl1`, which pulls Mesa and LLVM anyway, so
+  only about 60 MB would go. rapidocr also declares `opencv_python`.
+- **A static ffmpeg build (about 100 MB).** ffmpeg parses untrusted uploads
+  (`media_guard.py`), so it stays the Debian package, which gets security
+  updates.
+- **Not compiling `.pyc` (246 MB).** Every process start would compile torch
+  and transformers in memory.
+- **Whisper stored as int8 (about 230 MB).** It would need a re-conversion
+  from the original checkpoint and an audio check.
+
+Result: download 3.25 -> 2.58 GB, unpacked 5.50 -> 4.09 GB (`docker image
+ls`, which with the containerd store counts both: 9.19 -> 7.01 GB). A
+container smoke test of the slim image passed:
+
+- healthy in 155 s, runs as non-root, `/readyz` passes, 401 without a key;
+- the four e2e KTs gave the same results as before;
+- idle memory 3.8 GB.
+
+Running `fetch_models.py --verify` inside a running container loads every
+model a second time. On the 6 GB Docker Desktop VM that got the container
+OOM-killed. It is a build-time check, not something to run beside the app.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

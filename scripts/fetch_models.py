@@ -3,6 +3,7 @@
 
     python scripts/fetch_models.py            # download into HF_HOME (the image bakes them in)
     python scripts/fetch_models.py --verify   # load each one with networking off
+    python scripts/fetch_models.py --half     # the image: also store the large ones in fp16 (_HALF)
 
 The app loads these by name at their default revision; this script fetches
 the pinned commit and points the local "main" ref at it, so an offline
@@ -25,12 +26,64 @@ MODELS = {
 }
 
 
-def fetch() -> None:
-    from huggingface_hub import snapshot_download
+# Weight formats the app never loads (TensorFlow, Flax, Rust, ONNX and
+# OpenVINO exports): about half of the 10 GB the repos hold.
+_SKIP = ["*.h5", "*.msgpack", "*.ot", "onnx/*", "openvino/*", "*.onnx"]
+# GLiNER builds its backbone from mdeberta's config and loads its own weights
+# (gliner 0.2.26: backbone_from_pretrained=False), so mdeberta's own weights
+# (3.4 GB) are never read: only its config and tokenizer.
+_ONLY = {"microsoft/mdeberta-v3-base": ["*.json", "spm.model"]}
+# Stored in fp16, half the size (1.2 GB less), and still run in fp32:
+# bge's config pins torch_dtype float32, and GLiNER copies its state dict into
+# a model built in fp32 (verify() checks both). transformers 5 loads a
+# checkpoint whose config names no dtype in the checkpoint's dtype, so the
+# MiniLM models (no dtype in their configs, 90 MB together) stay as they are.
+# With these weights rounded to fp16, the golden suite and the e2e KTs
+# rendered identical documents (13 Oct, audit §9aac).
+_HALF = {
+    "BAAI/bge-large-en-v1.5": "model.safetensors",
+    "urchade/gliner_multi": "pytorch_model.bin",
+}
+
+
+def _to_half(path: str) -> None:
+    import torch
+
+    target = os.path.realpath(path)  # the cache blob the snapshot links to
+    if path.endswith(".safetensors"):
+        from safetensors.torch import load_file, save_file
+
+        tensors = load_file(target)
+        save_file({k: v.half() if v.is_floating_point() else v for k, v in tensors.items()},
+                  target + ".half", metadata={"format": "pt"})
+    else:
+        state = torch.load(target, map_location="cpu", weights_only=True)
+        torch.save({k: v.half() if isinstance(v, torch.Tensor) and v.is_floating_point() else v
+                    for k, v in state.items()}, target + ".half")
+    os.replace(target + ".half", target)
+
+
+def _ignore(api, repo: str, revision: str) -> list:
+    """Skip the PyTorch .bin copy when the repo also has safetensors, which
+    transformers loads first."""
+    files = api.list_repo_files(repo, revision=revision)
+    if any(f.endswith(".safetensors") for f in files):
+        return _SKIP + ["pytorch_model*.bin"]
+    return _SKIP
+
+
+def fetch(half: bool = False) -> None:
+    from huggingface_hub import HfApi, snapshot_download
     from huggingface_hub.constants import HF_HUB_CACHE
 
+    api = HfApi()
     for repo, revision in MODELS.items():
-        path = snapshot_download(repo_id=repo, revision=revision)
+        if repo in _ONLY:
+            path = snapshot_download(repo_id=repo, revision=revision, allow_patterns=_ONLY[repo])
+        else:
+            path = snapshot_download(repo_id=repo, revision=revision, ignore_patterns=_ignore(api, repo, revision))
+        if half and repo in _HALF:
+            _to_half(os.path.join(path, _HALF[repo]))
         # Offline loads ask for "main": make it resolve to the pinned commit.
         refs = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"), "refs")
         os.makedirs(refs, exist_ok=True)
@@ -59,16 +112,24 @@ def verify() -> int:
     from faster_whisper import WhisperModel
     from sentence_transformers import CrossEncoder, SentenceTransformer
 
-    SentenceTransformer("BAAI/bge-large-en-v1.5")
-    SentenceTransformer("all-MiniLM-L6-v2")
-    CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    loaded = {
+        "BAAI/bge-large-en-v1.5": SentenceTransformer("BAAI/bge-large-en-v1.5"),
+        "all-MiniLM-L6-v2": SentenceTransformer("all-MiniLM-L6-v2"),
+        "ms-marco-MiniLM-L-6-v2": CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2"),
+    }
     WhisperModel("small", device="cpu", compute_type="int8")
     try:
         from gliner import GLiNER
 
-        GLiNER.from_pretrained("urchade/gliner_multi")
+        loaded["gliner_multi"] = GLiNER.from_pretrained("urchade/gliner_multi")
     except ImportError:
         pass
+    # Stored in fp16 (_HALF), they must still run in fp32.
+    for name, model in loaded.items():
+        dtype = str(next(model.parameters()).dtype)
+        if dtype != "torch.float32":
+            print(f"{name} loads as {dtype}, expected torch.float32")
+            return 1
     import diarization
 
     if not diarization.available():
@@ -82,4 +143,4 @@ def verify() -> int:
 if __name__ == "__main__":
     if "--verify" in sys.argv:
         sys.exit(verify())
-    fetch()
+    fetch(half="--half" in sys.argv)

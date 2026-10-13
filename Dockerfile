@@ -26,21 +26,34 @@ RUN apt-get update \
 WORKDIR /app
 
 # Dependencies first (cached layer). The CPU build of torch comes from its
-# own index; everything else is pinned in requirements.lock.
+# own index; everything else is pinned in requirements.lock. The packages'
+# own test suites and torch's C++ headers (about 250 MB) are never used at
+# run time. They are deleted in this same layer, which is the only way they
+# stay out of the image. The imports at the end check nothing needed went.
 COPY requirements.lock .
 RUN pip install --index-url https://download.pytorch.org/whl/cpu "$(grep '^torch==' requirements.lock)" \
- && pip install -r requirements.lock
+ && pip install -r requirements.lock \
+ && cd /usr/local/lib/python3.13/site-packages \
+ && find . -type d \( -name tests -o -name test \) -prune -exec rm -rf {} + \
+ && rm -rf torch/include \
+ && python -c "import torch, transformers, sentence_transformers, gliner, faster_whisper, ctranslate2, sklearn, scipy, networkx, sympy, cv2, rapidocr, onnxruntime, sherpa_onnx, av, weasyprint, jinja2"
+
+# The runtime user exists before the models arrive, so they are handed to it
+# in the layer that downloads them: a `chown -R` in a later layer stores a
+# second copy of every model file (it added 3.2 GB on 13 Oct).
+RUN useradd --create-home --uid 10001 continuum
 
 # Models at pinned revisions, then verified to load with the network off.
+# Plain HTTPS downloads: the Xet client stalled at ~40 KB/s inside a Docker
+# Desktop build on 13 Oct while HTTPS from the same host ran at ~4.6 MB/s.
 COPY scripts/fetch_models.py scripts/fetch_models.py
 COPY diarization.py diarization.py
-RUN python scripts/fetch_models.py && python scripts/fetch_models.py --verify
+RUN HF_HUB_DISABLE_XET=1 python scripts/fetch_models.py --half && python scripts/fetch_models.py --verify \
+ && chown -R continuum:continuum /opt/models
 
 COPY . .
 
-RUN useradd --create-home --uid 10001 continuum \
- && mkdir -p /app/data \
- && chown -R continuum:continuum /app/data /opt/models
+RUN mkdir -p /app/data && chown continuum:continuum /app/data
 USER continuum
 
 # Everything the app needs is in the image; it never downloads at run time.

@@ -427,6 +427,11 @@ class LLMProvider:
     def generate(self, prompt: str, *args, **kwargs) -> str:
         raise NotImplementedError("LLMProvider subclasses must implement generate()")
 
+    def configured(self) -> bool:
+        """False when no call could succeed (no API key), so the pipeline runs
+        rules-only instead of attempting, and failing, every call."""
+        return True
+
 
 class GeminiProvider(LLMProvider):
     def __init__(self):
@@ -439,6 +444,10 @@ class GeminiProvider(LLMProvider):
             except Exception as exc:
                 LOGGER.warning("Gemini client initialization failed: %s", exc)
                 self.client = None
+
+    def configured(self) -> bool:
+        # Without the SDK, generate() falls back to the REST API with the key.
+        return bool(self.api_key)
 
     def generate(self, prompt: str, *args, **kwargs) -> str:
         if not self.api_key and not self.client:
@@ -533,6 +542,9 @@ class GroqProvider(LLMProvider):
                 LOGGER.warning("Groq OpenAI client initialization failed: %s", exc)
                 self.client = None
 
+    def configured(self) -> bool:
+        return bool(self.api_key) and self.client is not None
+
     def generate(self, prompt: str, *args, **kwargs) -> str:
         if not self.api_key:
             raise RuntimeError("Groq provider is not configured. Set GROQ_API_KEY.")
@@ -610,7 +622,11 @@ class GroqProvider(LLMProvider):
 
 class FallbackLLMProvider(LLMProvider):
     def __init__(self, providers):
-        self.providers = providers
+        # A provider without a key would fail, and log, on every call first.
+        self.providers = [p for p in providers if p.configured()]
+
+    def configured(self) -> bool:
+        return bool(self.providers)
 
     def generate(self, prompt: str, **kwargs) -> str:
         last_error = None
@@ -635,6 +651,9 @@ def create_llm_provider() -> LLMProvider:
     raise ValueError(f"Unsupported LLM_PROVIDER '{provider_name}'. Use 'gemini', 'groq', or 'fallback'.")
 
 
+_NOT_CONFIGURED_LOGGED = False
+
+
 def get_llm_provider() -> Optional[LLMProvider]:
     # A tenant whose policy forbids external LLMs gets no provider at all, so
     # every stage takes its rules-only path (llm/tenant_context.py).
@@ -645,6 +664,14 @@ def get_llm_provider() -> Optional[LLMProvider]:
         provider = create_llm_provider()
     except Exception as e:
         LOGGER.warning("Failed to initialize LLM provider: %s", e)
+        return None
+    if not provider.configured():
+        # Once per process: every KT asks for a provider.
+        global _NOT_CONFIGURED_LOGGED
+        if not _NOT_CONFIGURED_LOGGED:
+            _NOT_CONFIGURED_LOGGED = True
+            LOGGER.info("LLM_PROVIDER=%s has no API key: KTs run rules-only, without an LLM. "
+                        "Set GEMINI_API_KEY or GROQ_API_KEY to enable it.", LLM_PROVIDER_NAME)
         return None
     # Exact-response cache + per-KT usage accounting around every call. The
     # wrapper passes prompts, parameters and responses through unchanged.

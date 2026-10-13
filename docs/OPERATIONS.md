@@ -23,6 +23,26 @@ To move a model to a new revision, change its commit in
 `scripts/fetch_models.py`, then run the golden suite
 (`python scripts/golden_report.py`).
 
+The script downloads only the files the app loads: 3.2 GB of the 11 GB
+the six repos hold. It skips the TensorFlow, Flax, Rust and ONNX copies and
+the PyTorch `.bin` where safetensors exist. For `mdeberta-v3-base` it takes
+only the tokenizer, because GLiNER loads its own weights.
+
+In the image (`--half`), bge-large and GLiNER are stored in fp16. That takes
+the models from 3.2 GB to 2.0 GB, and they still run in fp32. On 13 Oct the
+golden suite and the e2e KTs rendered byte-identical documents. `--verify`
+fails the build if either model loads in anything but fp32. The packages'
+own test folders and torch's C++ headers are deleted in the install layer.
+
+The resulting image is a 2.6 GB download and 4.1 GB unpacked. Before these
+changes it was 3.25 GB and 5.5 GB. One container with every model loaded
+uses about 3.8 GB of RAM while idle.
+
+Downloads use plain HTTPS (`HF_HUB_DISABLE_XET=1`). In a Docker Desktop
+build on 13 Oct the Xet client stalled at about 40 KB/s. A first build took
+about 30 minutes on a 4-CPU laptop: about 8 for packages, 15 for models and
+the offline check, and the rest to export the image.
+
 Speaker diarisation (`diarization.py`) uses two ONNX files from the
 sherpa-onnx releases, pinned by SHA-256 in `diarization.MODELS` and fetched
 by the same script: pyannote segmentation-3.0 (MIT, CNRS) and WeSpeaker
@@ -60,6 +80,11 @@ docker compose up --scale worker=3        # more KTs at once (about 4 GB each)
 Without Docker: `uvicorn main:app` with `CONTINUUM_WORKERS=0`, plus one or
 more `python worker.py` processes using the same `CONTINUUM_DB_PATH` and
 `CONTINUUM_UPLOAD_DIR`.
+
+With no `GEMINI_API_KEY` or `GROQ_API_KEY`, KTs run rules-only. The log says
+so once, and each job's LLM usage shows no provider and no calls. Before
+13 Oct, a deployment with no key attempted about 40 LLM calls per KT. Each
+call failed and logged a warning, and the job was reported as "gemini".
 
 The queue is SQLite, so the API and the workers must share one host and a
 local disk (not NFS).

@@ -448,3 +448,49 @@ def test_extract_retry_delay_parses_gemini_retry_delay_in_message():
 def test_extract_retry_delay_falls_back_when_nothing_found():
     exc = Exception("no delay info here")
     assert lp._extract_retry_delay_seconds(exc, fallback=7.5) == 7.5
+
+
+# --- No API key means no LLM (found by the Docker smoke test, 13 Oct) ------
+# A container started without a key used to get a provider anyway: every KT
+# then attempted ~40 calls, each failed and logged a warning, and the job's
+# usage said "gemini-2.5-flash, 43 calls". In-process tests never saw it
+# because they replace get_llm_provider with `lambda: None`.
+
+def test_default_provider_without_a_key_is_no_provider(monkeypatch, caplog):
+    monkeypatch.setattr(lp, "LLM_PROVIDER_NAME", "gemini")
+    monkeypatch.setattr(lp, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(lp, "_NOT_CONFIGURED_LOGGED", False)
+    with caplog.at_level("INFO", logger=lp.LOGGER.name):
+        assert lp.get_llm_provider() is None
+        assert lp.get_llm_provider() is None
+    assert sum("no API key" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_groq_without_a_key_is_no_provider(monkeypatch):
+    monkeypatch.setattr(lp, "LLM_PROVIDER_NAME", "groq")
+    monkeypatch.setattr(lp, "GROQ_API_KEY", "")
+    assert lp.get_llm_provider() is None
+
+
+def test_a_key_makes_the_provider_configured(monkeypatch):
+    monkeypatch.setattr(lp, "GEMINI_API_KEY", "test-key")
+    assert lp.GeminiProvider().configured()
+    monkeypatch.setattr(lp, "GEMINI_API_KEY", "")
+    assert not lp.GeminiProvider().configured()
+
+
+def test_fallback_skips_providers_without_a_key():
+    class _Keyless(lp.LLMProvider):
+        def configured(self):
+            return False
+
+        def generate(self, prompt, **kwargs):
+            raise AssertionError("a provider without a key must not be called")
+
+    class _Ready(lp.LLMProvider):
+        def generate(self, prompt, **kwargs):
+            return "ok"
+
+    fallback = lp.FallbackLLMProvider([_Keyless(), _Ready()])
+    assert fallback.configured() and fallback.generate("p") == "ok"
+    assert not lp.FallbackLLMProvider([_Keyless()]).configured()
