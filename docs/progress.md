@@ -1278,3 +1278,19 @@ useful links (dashboards, runbooks, pipelines, repos, consoles) are recorded,
 both placed in the section being discussed. Camera views, chat/meeting
 windows, brief tab switches, repeats, undiscussed screens and anything that
 looks like a secret are skipped, and the UI says why.
+
+## End-to-end QA on four short KTs (audit §9aaa)
+
+Four synthetic 112-160-word KTs (`tests/e2e_kts/`) with checklists, run
+through the API on Groq and in-process with no LLM, PDFs read as text and as
+pages. Fixed: wrong and missing architecture connections (19/19 stated
+connections drawn, 0 wrong), a safety warning filed under DR, incomplete
+procedures now flagged in their own section, false coverage, framing and
+closing lines printed, "KT Document" titles, "Argo City", the false "LLM values
+discarded" banner, unsourced LLM text now marked "no source", Danger Zones no
+longer reworded, TOC page numbers, split table rows. Checklist failures
+9/8/8/13 -> 0/1/0/0 (no LLM) and 9/12/8/8 -> 0/1/0/0 (Groq). Groq use: 65
+requests, 29.8k/4.0k tokens. New: `LLM_MAX_CALLS_PER_KT`, `LLM_CACHE=replay`,
+`scripts/e2e_kts.py`, `tests/test_e2e_kts.py`. Not fixed: two-fact sentences
+are not split; passive data flows are drawn as the system's; short KTs are
+long (12-14 pages).

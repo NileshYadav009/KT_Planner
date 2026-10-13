@@ -61,8 +61,17 @@ class LLMUsageTracker:
             self.provider = provider or self.provider
             self.model = model or self.model
 
-    def record_cache_hit(self, call_site: str, *, input_tokens: int = 0, output_tokens: int = 0) -> None:
+    def live_calls(self) -> int:
+        """Requests actually sent to the provider for this KT so far."""
         with self._lock:
+            return sum(st["llm_calls"] for st in self._stages.values())
+
+    def record_cache_hit(self, call_site: str, *, input_tokens: int = 0, output_tokens: int = 0,
+                         provider: Optional[str] = None, model: Optional[str] = None) -> None:
+        with self._lock:
+            # A KT answered entirely from the cache still used this model.
+            self.provider = self.provider or provider
+            self.model = self.model or model
             st = self._stage(call_site)
             st["cache_hits"] += 1
             st.setdefault("tokens_saved", 0)

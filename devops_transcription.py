@@ -252,6 +252,10 @@ PHRASE_CORRECTIONS = {
     r"trivi\b": "Trivy",
     r"argos\s+cd": "ArgoCD",
     r"argo\s+cd": "ArgoCD",
+    # "Argo City deploys them": only where the words are about deploying, so
+    # an ordinary "Argo City" (a place, a customer) is left as said.
+    r"\bargo\s+city\b(?=\s+(?:deploy|sync|roll|appl|promot|pick)\w*)": "ArgoCD",
+    r"\b((?:deploy\w*|sync\w*|gitops)\s+(?:with|via|using|through|by)\s+)argo\s+city\b": r"\1ArgoCD",
     r"cache\s+clear": "cache layers",
     r"intra\s+changes": "infrastructure changes",
     r"infrastructure\s+as\s+cold": "Infrastructure as Code",

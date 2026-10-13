@@ -201,3 +201,49 @@ def test_the_tripwise_drawing_matches_its_snapshot():
             fh.write(svg)
     with open(path, encoding="utf-8") as fh:
         assert svg == fh.read()
+
+
+# --------------------------------------------------------------------------
+# End-to-end KT suite findings (tests/e2e_kts)
+# --------------------------------------------------------------------------
+
+def test_every_item_of_a_dependency_list_gets_its_line():
+    """'depend on Azure SQL, Azure Cache for Redis and Service Bus' drew only
+    the cache: 'depend on' was not a dependency verb, and after the first comma
+    the list lost its verb."""
+    g = build_architecture_graph(
+        ["Azure Kubernetes Service", "Azure SQL", "Redis", "Azure Service Bus"],
+        ["The .NET services on AKS depend on Azure SQL, Azure Cache for Redis and Service Bus."],
+        {"azure kubernetes service": ["aks"], "redis": ["azure cache for redis"],
+         "azure service bus": ["service bus"]}, "Paygate")
+    assert _edges(g) == {("central", "depends on", "azure-sql"), ("central", "caches in", "redis"),
+                         ("central", "depends on", "azure-service-bus")}
+
+
+def test_a_deploy_verb_belongs_to_the_tool_that_says_it():
+    """'GitHub Actions builds the images, pushes them to ECR, and ArgoCD
+    deploys them to EKS': GitHub Actions pushes, ArgoCD deploys."""
+    g = build_architecture_graph(
+        ["Amazon EKS", "GitHub Actions", "Amazon ECR", "ArgoCD", "Prometheus", "Grafana"],
+        ["GitHub Actions builds the images, pushes them to ECR, and ArgoCD deploys them to EKS.",
+         "Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer."],
+        {"amazon eks": ["eks"], "amazon ecr": ["ecr"]}, "Shopfront")
+    edges = _edges(g)
+    assert ("argocd", "deploys to", "central") in edges
+    assert ("github-actions", "pushes images to", "amazon-ecr") in edges
+    assert not any(e[0] == "github-actions" and e[2] == "central" for e in edges)
+    # Tools listed together share the verb.
+    assert {("prometheus", "monitors", "central"), ("grafana", "monitors", "central")} <= edges
+
+
+def test_a_pipeline_reads_the_queue_and_its_results_land_in_the_warehouse():
+    g = build_architecture_graph(
+        ["Pub/Sub", "Dataflow", "BigQuery", "Google Kubernetes Engine"],
+        ["Events are published to Pub/Sub, Dataflow jobs process them, and the results land in BigQuery."],
+        {}, "Streamline")
+    edges = _edges(g)
+    assert ("dataflow", "consumes from", "pub-sub") in edges
+    assert ("dataflow", "writes to", "bigquery") in edges
+    assert ("central", "writes to", "bigquery") not in edges
+    svg = render_architecture_svg(g)
+    assert "consumes from · writes to" in svg      # one label, not two drawn on top of each other

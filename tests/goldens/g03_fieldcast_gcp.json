@@ -7,7 +7,7 @@
  "facts": [
   {
    "id": "F01",
-   "quote": "Fieldcast, the telemetry ingestion service for our IoT sensors",
+   "quote": "Fieldcast, the telemetry ingestion service for our IoT sensors", "alt": ["Fieldcast is the telemetry ingestion service for our IoT sensors"],
    "in": [
     "system_overview"
    ]

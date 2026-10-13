@@ -950,6 +950,18 @@ def _extract_by_pattern(
                         and not any(t.lower() == name.lower() for t in PATTERN_EXTRACTORS["tools"].findall(name))):
                     return name
 
+        # "This is a quick handover for the orders API": an API is named by
+        # what it serves, in lower case, and "API" is part of its name.
+        api_match = re.search(
+            r"\b(?:handing\s+over|handover\s+for|kt\s+(?:is\s+)?for|this\s+is)\s+"
+            r"(?:(?:the|a|an|our|quick|short|brief|handover|hand-over|kt|for)\s+){0,5}"
+            r"([A-Za-z0-9][\w\-]*(?:\s+[A-Za-z0-9][\w\-]*){0,2}?\s+API)\b",
+            section_text, re.IGNORECASE)
+        if api_match:
+            name = _trim_name_capture(api_match.group(1).strip())
+            if name and name.split()[0].lower() not in SYSTEM_NAME_STOPWORDS:
+                return smart_title(name, section_text)
+
         match = re.search(
             # Trigger phrase, then 0-3 structural filler words ("the",
             # "handover", "for", ...) before the actual name — a single
@@ -1698,6 +1710,12 @@ def _build_llm_batch_gap_fill_prompt(section_title: str, fields: List[Dict[str, 
 
 
 _BATCH_ANSWER_RE = re.compile(r"^\W*(\d+)\s*[.):\-]\s*(.*?)\s*(?:\|\s*(EXPLICIT|INFERRED)\w*)?\s*$", re.IGNORECASE)
+# "3. NOT_MENTIONED | NOT_MENTIONED": the model put its no-value marker in the
+# basis column too. That is an answer of "not mentioned", not a value; read
+# as a value it failed the grounding check and was reported as an LLM value
+# discarded for being unsupported (the PDF said 9 were discarded on a KT
+# where the model invented nothing).
+_NOT_MENTIONED_ANSWER_RE = re.compile(r"^\s*NOT[_ ]MENTIONED\s*(?:\|.*)?$", re.IGNORECASE)
 
 
 def _fill_deferred_gaps(deferred: List[Dict[str, Any]], section_id: str, section_title: str, section_text: str,
@@ -1717,7 +1735,8 @@ def _fill_deferred_gaps(deferred: List[Dict[str, Any]], section_id: str, section
             for line in str(raw or "").splitlines():
                 m = _BATCH_ANSWER_RE.match(line.strip())
                 if m:
-                    answers.setdefault(int(m.group(1)), (m.group(2), m.group(3) or "INFERRED"))
+                    value = "NOT_MENTIONED" if _NOT_MENTIONED_ANSWER_RE.match(m.group(2)) else m.group(2)
+                    answers.setdefault(int(m.group(1)), (value, m.group(3) or "INFERRED"))
         except Exception as exc:
             logger.warning("Batched LLM field fill failed for %s: %s", section_id, exc)
         for number, item in enumerate(chunk, start=1):

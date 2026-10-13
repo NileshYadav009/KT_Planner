@@ -77,6 +77,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # is a trap warning of the same kind.
             r"\bdo\s+not\s+assume\b",
             r"\bnever\s+(?:manually\s+)?(?:change|edit|delete|touch|alter|run)\b",
+            # Spoken warnings: "One warning: the last database migration might
+            # be hard to reverse, so be careful with it." went to Disaster
+            # Recovery, and Danger Zones reported the topic not discussed.
+            r"^\W*(?:(?:one|a|another|final|big|quick)\s+)?(?:warning|caution|word\s+of\s+(?:warning|caution))\s*[:,-]",
+            r"\bbe\s+(?:very\s+|really\s+|extra\s+)?careful\s+(?:with|when|about|not\s+to)\b",
+            r"\b(?:hard|difficult|impossible|risky|tricky)\s+to\s+(?:reverse|undo|roll\s*back|revert)\b",
         ],
         0.97,
     ),
@@ -179,6 +185,14 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bargocd\b",
             r"\bargos\s+cd\b",
             r"\bgitops\b",
+            # The build-and-release chain in general form: "Azure DevOps
+            # pipelines build the images and push them to ACR, and Flux syncs
+            # the releases to AKS" reached System Overview, and Deployment &
+            # Rollback showed only a Key Vault sentence.
+            r"\bazure\s+devops\s+pipelines?\b",
+            r"\bflux\s+(?:syncs?|deploys?|reconciles?|applies)\b",
+            r"\b(?:builds?|built|building)\s+the\s+(?:container\s+|docker\s+)?images?\b",
+            r"\bpush(?:es|ed|ing)?\s+(?:them|the\s+(?:container\s+)?images?)\s+to\b",
         ],
         0.94,
     ),
@@ -408,6 +422,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bif\s+the\s+(?:platform|system|service|application)\s+(?:is|goes|was|were|becomes)\s+"
             r"(?:unavailable|down|offline)\b",
             r"\breact\s+front[\s-]?end\b",
+            # The system introduced by name: "Okay, so this is Streamline, our
+            # GCP data platform for clickstream analytics." went to
+            # Architecture (it names a cloud) and System Overview had no purpose.
+            r"^\W*(?:(?:so|okay|ok|alright|right|well|now|and|um|uh)\W+)*this\s+is\s+[\w.&+-]+(?:\s+[\w.&+-]+){0,3}"
+            r"\s*,\s*(?:our|the|a|an)\s+(?:[\w/&.+-]+\s+){0,5}?(?:platform|system|service|application|app|api|"
+            r"backend|pipeline|portal|product|website|site|engine)\b",
             r"\bfast\s*api\b",
             r"\bplatform\s+consists\s+of\b",
             r"\bcustomers?\s+cannot\s+place\s+orders\b",
@@ -549,6 +569,13 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # to Pub/Sub", "writes them to BigQuery", "archived in Cloud
             # Storage". Scored by similarity alone, these went to Disaster
             # Recovery ("archived" reads like a backup).
+            # Where the workloads run: "The ingestion services run on GKE." was
+            # merged into the next sentence (a deployment chain) and printed
+            # under Deployment & Rollback.
+            r"^\W*(?:the\s+|our\s+|all\s+)?(?:[\w-]+\s+){0,3}(?:services?|workloads?|apis?|apps?|applications?|"
+            r"microservices|consumers?|workers?)\s+(?:all\s+)?(?:run|runs|are\s+running|is\s+running|are\s+hosted|"
+            r"is\s+hosted)\s+on\s+(?:the\s+|our\s+|an?\s+)?(?:[\w-]+\s+){0,2}?(?:gke|eks|aks|kubernetes|k8s|ecs|fargate|"
+            r"cloud\s+run|app\s+service|ec2|vms?|openshift)\b",
             r"\b(?:publish\w*|writ(?:e|es|ten|ing)|stor(?:e|es|ed|ing)|archiv\w*|reads?|reading|send\w*|stream\w*|"
             r"push\w*|load\w*|ingest\w*|enqueue\w*)\b[^.;]{0,40}?\b(?:to|into|in|from|on)\s+(?:the\s+|a\s+|an\s+)?"
             r"(?:" + _DATA_COMPONENTS + r")\b",
@@ -780,8 +807,11 @@ _GREETING_WORD = (
 )
 # Closers that carry no knowledge: "That is all we had time for today."
 _CLOSING_ONLY = (
-    r"(?:that'?s|that\s+is)\s+(?:all|it|everything)(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|"
-    r"from\s+(?:me|my\s+side)))?(?:\s+today)?"
+    # "I think that's most of it." ended a short KT and was printed under
+    # Architecture as "Additional details".
+    r"(?:(?:so|okay|ok|well|right|alright|um+|uh+|and)[\s,]+)*(?:i\s+(?:think|guess|believe)\s+)?"
+    r"(?:that'?s|that\s+is)\s+(?:about\s+|pretty\s+much\s+|basically\s+)?(?:all|it|everything|most\s+of\s+it)"
+    r"(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|from\s+(?:me|my\s+side)))?(?:\s+today)?"
     # "That concludes the GCP data platform." ends the session; it is not a
     # statement that the handover is complete (the LLM inferred "Complete"
     # from it). Only when what concludes is the session or the thing handed

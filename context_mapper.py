@@ -467,6 +467,13 @@ def semantic_chunk_sentences(
             should_merge = sim >= (similarity_threshold - 0.15)
         if should_merge and rule_sections[idx] and current_rules and rule_sections[idx] not in current_rules:
             should_merge = False
+        # A prohibition starts its own unit: "All infrastructure is defined in
+        # Terraform." merged into "Never modify the Terraform state manually."
+        # was filed under Danger Zones, and Tribal Knowledge labelled "All
+        # infrastructure is defined..." safety-critical. A prohibition followed
+        # by its reason still merges.
+        if should_merge and rule_sections[idx] == "danger_zones" and "danger_zones" not in current_rules:
+            should_merge = False
         # An opener or closer ("Let's start.", "That concludes the KT.") is
         # dropped before mapping; merged into a neighbour it would be kept.
         if should_merge and (_GREETING_ONLY_RE.match(candidate.text or "") or _GREETING_ONLY_RE.match(current.text or "")):

@@ -274,3 +274,13 @@ def test_two_word_product_names_are_joined_only_where_they_are_the_product():
     gcp = clean_transcript("Events land in Pub/Sub, and the big query tables are partitioned daily.")
     assert "BigQuery tables" in gcp
     assert "a big query" in clean_transcript("Running a big query on the reporting database is slow.")
+
+
+def test_argo_city_is_argocd_only_where_it_deploys():
+    """'Argo City' is a common mishearing of ArgoCD; corrected only where the
+    sentence is about deploying, so the intended term is unambiguous."""
+    from devops_transcription import clean_transcript
+
+    assert "ArgoCD deploys them" in clean_transcript("GitHub Actions builds the images and Argo City deploys them.")
+    assert "deployed through ArgoCD" in clean_transcript("Everything is deployed through Argo City.")
+    assert "Argo City" in clean_transcript("Our biggest customer is in Argo City.")

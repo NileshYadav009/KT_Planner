@@ -134,3 +134,22 @@ def test_a_batched_value_not_in_the_transcript_is_discarded(monkeypatch):
                              section_content=SECTION)
     assert result["system_overview"]["business_criticality"]["value"] == "High"
     assert result["system_overview"]["data_sensitivity"]["source"] == "unfilled"
+
+
+def test_not_mentioned_in_both_columns_is_an_answer_not_a_discarded_value(monkeypatch):
+    """'2. NOT_MENTIONED | NOT_MENTIONED' means the field is not in the text.
+    It used to fail the grounding check and be counted as an unsupported
+    value, so the PDF claimed values were discarded when none was invented."""
+    from llm.usage import LLMUsageTracker, track_job
+
+    class Unsure(_FillStub):
+        def generate(self, prompt, **kwargs):
+            return "1. High | EXPLICIT\n2. NOT_MENTIONED | NOT_MENTIONED"
+
+    monkeypatch.setenv("LLM_BATCH_CALLS", "1")
+    tracker = LLMUsageTracker("job")
+    with track_job(tracker):
+        result = populate_fields(SCHEMA, {"system_overview": {"content": []}}, llm_provider=Unsure(),
+                                 section_content=SECTION)
+    assert result["system_overview"]["data_sensitivity"]["source"] == "unfilled"
+    assert tracker.summary()["rejected"] == 0

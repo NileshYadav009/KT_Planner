@@ -39,6 +39,8 @@ def _line(value: Any) -> str:
 def _refs(block: Dict[str, Any], i: int) -> str:
     refs = block.get("sources") or []
     ids = refs[i] if i < len(refs) and isinstance(refs[i], list) else []
+    if not ids and i in (block.get("unsourced") or []):
+        return " [no source]"
     return (" " + "".join(f"[{int(n)}]" for n in ids)) if ids else ""
 
 
@@ -128,7 +130,8 @@ def job_markdown(job_id: str, job: Dict[str, Any], created: Optional[float] = No
     sources = ko.get("sources") or []
     if sources:
         out += ["## Sources", "", "Each fact above is followed by the number of the transcript sentence it comes "
-                "from. Values marked inferred were not stated in the session and have no source.", ""]
+                "from. Values marked inferred were not stated in the session and have no source; a fact marked "
+                "[no source] could not be matched to a transcript sentence, so check it before relying on it.", ""]
         for src in sources:
             when = format_time(src.get("start"))
             if src.get("session"):

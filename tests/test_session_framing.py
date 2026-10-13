@@ -103,3 +103,53 @@ def test_typographic_apostrophes_from_a_pasted_transcript_do_not_hide_the_intro(
                                "daily. Don\u2019t touch the Terraform state.")
     assert "\u2019" not in cleaned
     assert without_framing(cleaned.split(". ")[0] + ".") == "Our AWS platform processes 40,000 orders daily."
+
+
+@pytest.mark.parametrize("said, kept", [
+    # The system introduced as "a quick handover for X", or by name with an appositive.
+    ("Right, so this is a quick handover for the orders API, which serves order history to the mobile app.",
+     "The orders API serves order history to the mobile app."),
+    ("Okay, so this is Streamline, our GCP data platform for clickstream analytics.",
+     "Streamline is our GCP data platform for clickstream analytics."),
+    # The LLM polish pass's own framing.
+    ("This document serves as the handover for Paygate, the Azure payment platform that authorises card payments.",
+     "Paygate is the Azure payment platform that authorises card payments."),
+    # Not an introduction: left as said.
+    ("This is important, the cache must be warm before a release.",
+     "This is important, the cache must be warm before a release."),
+])
+def test_named_and_quick_handover_introductions_keep_only_the_fact(said, kept):
+    from dialogue import without_framing
+
+    assert without_framing(said) == kept
+
+
+def test_a_closing_remark_is_not_content_but_a_closing_fact_is():
+    from section_rules import _GREETING_ONLY_RE
+
+    assert _GREETING_ONLY_RE.match("I think that's most of it.")
+    assert _GREETING_ONLY_RE.match("Okay, that's all from me.")
+    assert not _GREETING_ONLY_RE.match("That is it for the rollback steps.")
+    assert not _GREETING_ONLY_RE.match("I think that's the main risk.")
+
+
+@pytest.mark.parametrize("text, name", [
+    ("Right, so this is a quick handover for the orders API, which serves order history to the mobile app.",
+     "Orders API"),
+    ("Okay, so this is Streamline, our GCP data platform for clickstream analytics.", "Streamline"),
+])
+def test_the_kt_title_comes_from_a_quick_or_named_introduction(text, name):
+    from field_populator import _extract_by_pattern
+
+    assert _extract_by_pattern({"id": "system_name", "label": "System name"}, text) == name
+
+
+def test_a_value_with_no_framing_is_left_exactly_as_it_was():
+    """A field value was capitalised by the framing cleanup although nothing
+    was removed: 'thirty minutes (replaces four hours ...)' printed 'Thirty'."""
+    from dialogue import without_framing, without_session_framing
+
+    value = "thirty minutes (replaces four hours, stated in the session as the old value)"
+    assert without_framing(value) == value
+    assert without_session_framing(value) == value
+    assert without_framing("so the cache is warm") == "The cache is warm"

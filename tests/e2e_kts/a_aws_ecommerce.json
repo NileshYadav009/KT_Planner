@@ -1,0 +1,52 @@
+{
+  "id": "e2e_a_aws_ecommerce",
+  "title": "Shopfront: AWS e-commerce on EKS",
+  "source": "synthetic, written for the end-to-end suite (12 Oct)",
+  "proves": "A complete short KT: flow, dependencies vs hosting, deploy chain, a safety rule, two incidents with no fix given, backups with RTO/RPO explicitly undocumented, split ownership. Opens with a greeting that must not reach the document.",
+  "transcript": "Hi everyone, thanks for joining. Today I'm handing over Shopfront, our AWS e-commerce platform, which takes every customer order. Customers use the React storefront, which is served through CloudFront to an Application Load Balancer in front of our EKS cluster. The services on EKS depend on RDS PostgreSQL for orders and Redis for sessions and carts. GitHub Actions builds the images, pushes them to ECR, and ArgoCD deploys them to EKS. All infrastructure is defined in Terraform. Never modify the Terraform state manually. Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer. The two incidents you will see most are database connection exhaustion on RDS and pods that fail to start because a Kubernetes secret reference is wrong. RDS takes daily backups that are kept for 30 days, and we run a DR test every quarter. Our RTO and RPO have never been documented. Developers own the application code, and Platform Engineering owns EKS and the deployment infrastructure.",
+  "facts": [
+    {"id": "A01", "kind": "purpose", "quote": "takes every customer order", "in": ["system_overview"]},
+    {"id": "A02", "kind": "flow", "quote": "served through CloudFront to an Application Load Balancer in front of our EKS cluster", "in": ["architecture_reference", "system_overview"]},
+    {"id": "A03", "kind": "dependency", "quote": "The services on EKS depend on RDS PostgreSQL for orders and Redis for sessions and carts", "in": ["architecture_reference", "system_overview"]},
+    {"id": "A04", "kind": "deployment", "quote": "GitHub Actions builds the images, pushes them to ECR, and ArgoCD deploys them to EKS", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "A05", "kind": "deployment", "quote": "All infrastructure is defined in Terraform", "in": ["deployment_and_rollback", "architecture_reference", "environments"]},
+    {"id": "A06", "kind": "safety", "quote": "Never modify the Terraform state manually", "in": ["danger_zones"]},
+    {"id": "A07", "kind": "monitoring", "quote": "Prometheus and Grafana cover monitoring", "in": ["monitoring_observability"]},
+    {"id": "A08", "kind": "alerting", "quote": "PagerDuty pages the on-call engineer", "in": ["monitoring_observability", "ownership_escalation"]},
+    {"id": "A09", "kind": "incident", "quote": "database connection exhaustion on RDS", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "A10", "kind": "incident", "quote": "pods that fail to start because a Kubernetes secret reference is wrong", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "A11", "kind": "backup", "quote": "RDS takes daily backups that are kept for 30 days", "in": ["disaster_recovery"]},
+    {"id": "A12", "kind": "backup", "quote": "we run a DR test every quarter", "in": ["disaster_recovery"]},
+    {"id": "A13", "kind": "undocumented", "quote": "Our RTO and RPO have never been documented", "in": ["disaster_recovery"]},
+    {"id": "A14", "kind": "ownership", "quote": "Developers own the application code", "in": ["ownership_escalation"]},
+    {"id": "A15", "kind": "ownership", "quote": "Platform Engineering owns EKS and the deployment infrastructure", "in": ["ownership_escalation"]}
+  ],
+  "safety": ["A06"],
+  "covered": ["system_overview", "architecture_reference", "monitoring_observability", "disaster_recovery", "deployment_and_rollback", "common_failures", "danger_zones", "ownership_escalation"],
+  "missing": ["cost_optimization", "known_bad_days", "environments", "security_controls"],
+  "relations": [
+    {"from": "CloudFront", "to": "Application Load Balancer", "kind": "flow"},
+    {"from": "Application Load Balancer", "to": "EKS", "kind": "flow"},
+    {"from": "EKS", "to": "RDS", "kind": "dependency"},
+    {"from": "EKS", "to": "Redis", "kind": "dependency"},
+    {"from": "GitHub Actions", "to": "ECR", "kind": "deploy"},
+    {"from": "ArgoCD", "to": "EKS", "kind": "deploy"}
+  ],
+  "wrong_relations": [
+    {"from": "GitHub Actions", "to": "EKS", "label": "deploy", "why": "GitHub Actions builds and pushes; ArgoCD deploys"}
+  ],
+  "undocumented": [
+    {"topic": "RTO", "forbid": "\\bRTO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"},
+    {"topic": "RPO", "forbid": "\\bRPO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"}
+  ],
+  "incomplete": [
+    {"topic": "fix for RDS connection exhaustion", "note": "Only the symptom is stated; no first check or fix.", "section": "common_failures"},
+    {"topic": "fix for a wrong Kubernetes secret reference", "note": "Only the symptom is stated.", "section": "common_failures"},
+    {"topic": "rollback procedure", "note": "Never discussed.", "section": "deployment_and_rollback"}
+  ],
+  "forbidden": [
+    {"why": "invented command", "pattern": "kubectl|terraform\\s+(apply|import|state\\s+rm)|helm\\s+rollback"},
+    {"why": "invented alerting or paging tool", "pattern": "Opsgenie|VictorOps|CloudWatch\\s+alarm"},
+    {"why": "invented fix for connection exhaustion", "pattern": "(increase|raise)\\s+(the\\s+)?(max_connections|connection\\s+pool|pool\\s+size)|RDS\\s+Proxy"}
+  ]
+}

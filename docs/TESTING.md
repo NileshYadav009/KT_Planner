@@ -51,6 +51,63 @@ either already-imported name.
 rather than calling `pipeline.load_models()`, since that function
 additionally loads a Whisper speech-to-text model no text-only test needs.
 
+## End-to-end KT suite (tests/e2e_kts)
+
+Four short synthetic handovers (112-160 words): AWS e-commerce on EKS, an
+Azure payment platform on AKS, a GCP data platform (Pub/Sub, Dataflow,
+BigQuery) and an ambiguous, incomplete KT with one misheard term ("Argo City"
+for ArgoCD). Each file holds the transcript and a checklist written from the
+transcript before any output was looked at: the facts and the sections they
+belong in, safety warnings, the connections the KT states and ones it does not,
+values the speaker called unknown, claims that would be invented, and the
+procedures the KT leaves incomplete.
+
+`tests/test_e2e_kts.py` runs each one through `pipeline.run_kt_pipeline` (what
+`POST /kt-from-transcript` queues) and the real PDF renderer with **no LLM**
+(zero requests), then checks the PDF text (`tests/e2e_eval.py`), per dataset:
+no fact lost; safety warnings in Danger Zones and incidents not; no value for
+anything the speaker said is undocumented; no invented commands, tools,
+durations, products or owners; no greeting or hand-over framing; no claim the
+handover is complete; every stated connection drawn and none of the wrong
+ones; every incomplete procedure flagged in its own section; the coverage
+matrix agrees with what is printed; every fact shown has its source sentence;
+misheard terms corrected; placement at or above `tests/e2e_kts/floors.json`.
+False negatives and false positives are reported separately.
+
+The LLM path is run by `scripts/e2e_kts.py`, which labels every result with
+its mode and never mixes them:
+
+```
+# no LLM, in-process (the pytest mode)
+python scripts/e2e_kts.py --llm off --out e2e_out
+# a running server exactly as a client uses it (POST, poll, export PDF), with
+# whatever LLM it is configured for; its per-KT usage report is included
+python scripts/e2e_kts.py --api http://127.0.0.1:8011 --key-file key.txt --out e2e_live
+# recorded LLM output, offline: nothing is sent; unrecorded requests are skipped
+python scripts/e2e_kts.py --llm replay --recording tests/fixtures/e2e_kts_llm_recording.json --out e2e_replay
+```
+
+`tests/fixtures/e2e_kts_llm_recording.json` holds the 45 Groq
+`qwen/qwen3.8-27b` responses (no prompts, no keys) the current code asks for
+on these four KTs, recorded on 12 Oct through the API with `LLM_BATCH_CALLS=1`.
+A prompt change makes those requests unrecorded; re-record with `--api` and
+`--export-recording CACHE.sqlite JSON --since <start of the run>`.
+
+Measured on 12 Oct (problems = checklist failures; see the report):
+
+| | AWS | Azure | GCP | Ambiguous |
+|---|---|---|---|---|
+| No LLM, before fixes | 9 | 8 | 8 | 13 |
+| No LLM, after | 0 | 1 | 0 | 0 |
+| Groq through the API, before fixes | 9 | 12 | 8 | 8 |
+| Groq (recorded answers, final code), after | 0 | 1 | 0 | 0 |
+
+The one remaining failure: a sentence that states two facts ("Infrastructure
+is written in Bicep, and all secrets are stored in Key Vault") is not split,
+so the Bicep half is printed under Security. Two connections are inferred from
+passive sentences and drawn as the system's ("Events are published to Pub/Sub"
+becomes "Streamline publishes to Pub/Sub"); the checklist does not rule them out.
+
 ## What's explicitly not covered
 
 Stated plainly rather than implied by omission:

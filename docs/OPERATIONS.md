@@ -89,6 +89,8 @@ local disk (not NFS).
 | `SENTRY_DSN` | unset | Send errors to Sentry (no request bodies, local variables or personal data). |
 | `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
 | `LLM_BATCH_CALLS` | `0` | `1` batches classification checks and field gap-fills (see Submitting KTs). |
+| `LLM_MAX_CALLS_PER_KT` | `0` (no limit) | Live LLM requests one KT may send. Later requests are skipped (the KT keeps its rules-only results) and counted as skipped in the KT's LLM usage, so one long KT cannot empty a daily quota. Cache hits do not count. |
+| `LLM_CACHE` | `readwrite` | `read`, `off`, or `replay`: answer only from stored responses and never send an unrecorded request (offline runs of recorded LLM output; `scripts/e2e_kts.py --llm replay`). |
 | `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to `CONTINUUM_REVIEW_WEBHOOK_URL`, naming the incoming owner. `0` turns it off. |
 | `WHISPER_MODEL` | `small` | The Whisper model. A GPU is used automatically when one is present; there `medium` or `large-v3` transcribes more accurately at a usable speed. On CPU, `medium` also needs `WHISPER_ALLOW_MEDIUM_CPU=1`. |
 | `WHISPER_COMPUTE_TYPE` | `auto` | Passed to faster-whisper (`int8` on CPU, `float16` on GPU when `auto`). |
@@ -162,6 +164,14 @@ English, put a warning on the document.
 gap-fills (`LLM_GAP_FILL_BATCH_SIZE`, default 12) in batches: about 70% fewer
 calls for the same document with a deterministic test model. It is off until
 real LLM runs confirm the answers match one call each.
+
+On 12 Oct the four end-to-end KTs (tests/e2e_kts) ran through the API on Groq
+`qwen/qwen3.8-27b` with `LLM_BATCH_CALLS=1`, `LLM_MAX_CALLS_PER_KT=40` and
+`LLM_MAX_TOKENS_PER_MINUTE=7000` (the account allows 8,000 tokens a minute): 9 to 15
+requests and 4,100-5,600 input tokens (370-480 per request) for a 110-160-word KT (46
+requests in all), no failures or retries. A rerun after code changes reused every
+unchanged answer from the cache (19 new requests); Danger Zones are no longer sent to
+the polish pass. See docs/TESTING.md, "End-to-end KT suite".
 
 ## Watching it
 

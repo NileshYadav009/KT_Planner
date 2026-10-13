@@ -3764,6 +3764,103 @@ Not yet run on real Teams/Zoom recordings.
 
 Tests: `tests/test_screen_capture.py`.
 
+### 9aaa. End-to-end QA: four short KTs, no LLM and live on Groq (12 Oct)
+
+Four synthetic transcripts of 112-160 words (`tests/e2e_kts/`: AWS
+e-commerce on EKS, Azure payments on AKS, a GCP Pub/Sub-Dataflow-BigQuery
+platform, an ambiguous incomplete KT with "Argo City" for ArgoCD), each with a
+checklist written before any output was read. Run through the real path: the
+API (`POST /kt-from-transcript`, `GET /status`, `GET /export/pdf`) on a scratch
+server with a tenant API key, and in-process with no LLM; PDFs read as text
+and as rendered pages. Scored by `tests/e2e_eval.py`.
+
+**Baseline defects (in order of harm), with the fix:**
+
+1. Architecture connections wrong or missing (`architecture_diagram.py`).
+   "depend on" (no s) was not a dependency verb, and "depend on Azure SQL,
+   Azure Cache for Redis and Service Bus" lost its verb after the first comma:
+   RDS, Azure SQL and Service Bus had no line. A deploy verb anywhere in the
+   sentence was credited to every CI/CD tool ("GitHub Actions deploys to
+   EKS" when ArgoCD deploys). "the results land in BigQuery" was drawn from
+   the application instead of Dataflow, and Dataflow had no line at all.
+   Now: dependency verbs, list continuation, cue ownership (the tool named
+   inside or just before the verb, plus tools listed with it), result
+   attribution to the pipeline named before, queue -> pipeline "consumes
+   from", CI -> registry "pushes images to". 11 of 19 stated connections
+   drawn before, 19 of 19 after; 5 wrong ones before, 0 after.
+2. A safety warning ("One warning: the last database migration might be hard
+   to reverse, so be careful with it.") filed under Disaster Recovery, Danger
+   Zones reported "not discussed", DR reported covered. Danger-zone rules for
+   spoken warnings (`section_rules.py`).
+3. Incomplete procedures not flagged where they appear: "check the pool
+   metrics first" sat under "Common Failures & Fixes" as if it were the fix;
+   no fix and no rollback procedure were said, and only the coverage matrix
+   pages later said so. Sections discussed without what an engineer acts on
+   (fix, rollback procedure/time, RTO/RPO/backups/failover, owners/escalation,
+   paging) now end with "Not covered in the KT session: ..." (9 unflagged
+   before, 0 after).
+4. False coverage: a failure about a wrong Kubernetes secret reference counted
+   as Security "Secrets management"; "migration" counted as open work; RTO/RPO
+   stated as never documented were reported "not discussed".
+5. Mapping: B's deployment chain went to System Overview and Deployment &
+   Rollback showed only a Key Vault sentence; C's purpose went to
+   Architecture; a neutral sentence merged into a prohibition was filed (and
+   labelled safety-critical) under Danger Zones; "The ingestion services run on
+   GKE" merged into the deployment chain. Rules for the build/release chain,
+   the named introduction and hosting; a prohibition starts its own unit.
+6. Session framing printed: "Today I'm handing over Shopfront, our ..." in
+   Architecture Details (that block skipped the framing cleanup), "This is a
+   quick handover for ...", "I think that's most of it.", and the polish
+   pass's own "This document serves as the handover for ...".
+7. Title "KT Document" for two of four KTs ("this is Streamline, our ...",
+   "a quick handover for the orders API"); "Argo City" not corrected
+   (corrected only next to a deploy verb).
+8. LLM mode: every "NOT_MENTIONED | NOT_MENTIONED" gap-fill answer was counted
+   as an LLM value discarded for being unsupported, so each PDF said 7-12
+   values had been discarded when the model invented nothing; an LLM
+   restatement with no source ("Receive page from PagerDuty") printed exactly
+   like a stated fact (now marked "no source"); numbered steps ("1. **Trigger:**
+   ...") never linked to their sentence; the polish pass reworded a Danger
+   Zones reason (Danger Zones are no longer polished); a KT answered entirely
+   from the cache reported provider "none".
+9. Layout: no page numbers in the contents; a table row split across pages
+   with the header repeated mid-sentence; six-column tables broke words
+   ("connection s"); two diagram labels printed on top of each other; ".NET"
+   printed as "The.NET".
+
+**Measured** (checklist failures per KT, AWS/Azure/GCP/ambiguous): no LLM
+9/8/8/13 before, 0/1/0/0 after; Groq through the API 9/12/8/8 before, 0/1/0/0
+after on the final code (recorded answers). Facts in the PDF 54/55 -> 55/55;
+placement 87% -> 98%; titles 2/4 -> 4/4. Groq use for the whole exercise: 65
+requests (46 baseline, 19 after the fixes; 29 answers reused from the cache),
+29,841 input and 4,038 output tokens as reported by the provider, no failures,
+no retries, no 429s.
+
+**Cost guards added:** `LLM_MAX_CALLS_PER_KT` (requests past it are skipped
+and counted) and `LLM_CACHE=replay` (recorded answers only; an unrecorded
+request is never sent). `scripts/e2e_kts.py` runs the suite with no LLM,
+against a server, or from a recording, labelling every result with its mode;
+`tests/fixtures/e2e_kts_llm_recording.json` holds the 45 answers the final
+code uses.
+
+**Not fixed:** a sentence stating two facts is not split ("Infrastructure is
+written in Bicep, and all secrets are stored in Key Vault" prints under
+Security); passive sentences become the system's connections ("Events are
+published to Pub/Sub" -> "Streamline publishes to Pub/Sub"); a 160-word KT
+is still 12-14 pages, 4-7 of its sections saying only "not covered"; a value
+and the sentence it came from can both print in one section (RTO).
+
+Three golden annotations (g01, g03, g04 F01) quoted the hand-over framing
+itself ("handing over TripWise, the booking backend"); they matched only
+because Architecture Details printed the raw intro. They now also accept the
+statement without the framing ("TripWise is the booking backend").
+
+Tests: `tests/test_e2e_kts.py` (no LLM, and the recorded LLM answers),
+`tests/test_architecture_diagram.py`, `tests/test_evidence.py`,
+`tests/test_llm_cost_controls.py`, `tests/test_llm_batching.py`,
+`tests/test_session_framing.py`, `tests/test_devops_transcription.py`,
+`tests/test_polish_integrity.py`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -7,7 +7,7 @@
  "facts": [
   {
    "id": "F01",
-   "quote": "handing over TripWise, the booking backend",
+   "quote": "handing over TripWise, the booking backend", "alt": ["TripWise is the booking backend"],
    "in": [
     "system_overview"
    ]

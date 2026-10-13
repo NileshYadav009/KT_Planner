@@ -170,6 +170,8 @@ def _refs(block: dict, position: int) -> str:
     refs = block.get("sources") or []
     ids = refs[position] if position < len(refs) and isinstance(refs[position], list) else []
     if not ids:
+        if position in (block.get("unsourced") or []):
+            return "<sup class=\"src-ref src-none\">no source</sup>"
         return ""
     links = ",".join(f"<a href=\"#src-{int(i)}\">{int(i)}</a>" for i in ids)
     return f"<sup class=\"src-ref\">{links}</sup>"
@@ -206,7 +208,8 @@ def render_sources_appendix(sources: list) -> str:
             else "the time it was said in the recording" if timed else "who said it" if attributed else "")
     intro = ("Each fact in this document is followed by the number of the transcript sentence it comes from"
              + (f", with {said}. " if said else ". ")
-             + "Values marked inferred were not stated in the session and have no source.")
+             + "Values marked inferred were not stated in the session and have no source; a fact marked "
+             "“no source” could not be matched to a transcript sentence, so check it before relying on it.")
     return ("<section class=\"section-block sources-section\" id=\"sources\">"
             "<h2 class=\"section-title\"><span class=\"section-number\">&#167;</span>Sources</h2>"
             f"<p class=\"sources-intro\">{intro}</p><ol class=\"sources-list\">{''.join(items)}</ol></section>")
@@ -272,7 +275,10 @@ def render_section_blocks(rendered_sections: list) -> str:
                 html.append("</table></div>")
             elif block_type == "DecisionTable":
                 columns = block.get("columns", [])
-                html.append("<div class=\"table-wrapper\"><table class=\"grid-table\">")
+                # Five or more columns at full size broke words mid-word
+                # ("connection s" in a six-column incident record).
+                wide = " wide-table" if len(columns) >= 5 else ""
+                html.append(f"<div class=\"table-wrapper\"><table class=\"grid-table{wide}\">")
                 html.append("<thead><tr>")
                 for col in columns:
                     html.append(f"<th>{html_escape(col)}</th>")
@@ -603,6 +609,17 @@ def build_rendered_sections(knowledge_object: dict) -> list:
             rendered = append_residual_content(section, rendered)
 
         if rendered and _has_meaningful_rendered_blocks(rendered):
+            not_stated = (knowledge_object.get("_not_stated") or {}).get(section_id)
+            if not_stated:
+                # The coverage check found the section discussed but without
+                # what an engineer acts on (a fix, a rollback procedure).
+                rendered.setdefault("blocks", []).append({
+                    "type": "NarrativeBlock", "title": "Gaps to confirm",
+                    # One sentence: the document-wide dedup drops a sentence
+                    # repeated in a second section.
+                    "paragraphs": [f"Not covered in the KT session: {'; '.join(not_stated)} (confirm with the "
+                                   "outgoing owner before relying on this section)."],
+                })
             rendered_sections.append(rendered)
             continue
 

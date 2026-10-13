@@ -1,0 +1,48 @@
+{
+  "id": "e2e_d_ambiguous_handover",
+  "title": "Orders API: ambiguous, incomplete handover",
+  "source": "synthetic, written for the end-to-end suite (12 Oct)",
+  "proves": "A thin KT: a first check that is not a fix, a rollback described only as 'usually quick', a risky migration, no owners, a half-remembered environment, and one speech-recognition error ('Argo City' for ArgoCD) whose intended term is unambiguous in context.",
+  "transcript": "Right, so this is a quick handover for the orders API, which serves order history to the mobile app. It's a small API running on Kubernetes, and it uses PostgreSQL and Redis. GitHub Actions builds the images and Argo City deploys them. Grafana shows the service health. A couple of months ago we had an incident where the database ran out of connections. If you see that again, check the pool metrics first. Rolling back is usually quick. One warning: the last database migration might be hard to reverse, so be careful with it. Um, there's a staging cluster too, but I can't remember what's different about it. I think that's most of it.",
+  "asr": [{"heard": "Argo City", "expected": "ArgoCD"}],
+  "facts": [
+    {"id": "D01", "kind": "purpose", "quote": "serves order history to the mobile app", "in": ["system_overview"]},
+    {"id": "D02", "kind": "hosting", "quote": "a small API running on Kubernetes", "in": ["architecture_reference", "system_overview"]},
+    {"id": "D03", "kind": "dependency", "quote": "it uses PostgreSQL and Redis", "alt": ["uses PostgreSQL and Redis"], "in": ["architecture_reference", "system_overview"]},
+    {"id": "D04", "kind": "deployment", "quote": "GitHub Actions builds the images and ArgoCD deploys them", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "D05", "kind": "monitoring", "quote": "Grafana shows the service health", "in": ["monitoring_observability"]},
+    {"id": "D06", "kind": "incident", "quote": "we had an incident where the database ran out of connections", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "D07", "kind": "first_check", "quote": "check the pool metrics first", "in": ["common_failures"]},
+    {"id": "D08", "kind": "rollback", "quote": "Rolling back is usually quick", "in": ["deployment_and_rollback"]},
+    {"id": "D09", "kind": "safety", "quote": "the last database migration might be hard to reverse", "in": ["danger_zones", "deployment_and_rollback"]},
+    {"id": "D10", "kind": "environment", "quote": "there's a staging cluster too", "alt": ["there is a staging cluster too", "a staging cluster too"], "in": ["environments"]},
+    {"id": "D11", "kind": "ambiguity", "quote": "I can't remember what's different about it", "alt": ["can't remember what's different", "cannot remember what is different"], "in": ["environments", "open_responsibilities"]}
+  ],
+  "safety": ["D09"],
+  "covered": ["system_overview", "architecture_reference", "monitoring_observability", "deployment_and_rollback", "common_failures", "danger_zones", "environments"],
+  "missing": ["ownership_escalation", "disaster_recovery", "security_controls", "cost_optimization", "known_bad_days"],
+  "relations": [
+    {"from": "Kubernetes", "to": "PostgreSQL", "kind": "dependency"},
+    {"from": "Kubernetes", "to": "Redis", "kind": "dependency"},
+    {"from": "ArgoCD", "to": "Kubernetes", "kind": "deploy"}
+  ],
+  "wrong_relations": [
+    {"from": "GitHub Actions", "to": "Kubernetes", "label": "deploy", "why": "GitHub Actions builds; ArgoCD deploys"}
+  ],
+  "undocumented": [
+    {"topic": "rollback time", "forbid": "roll(ing)?\\s*back[^.\\n]{0,60}?\\b(\\d+|one|two|three|five|ten|fifteen|thirty)\\s*(seconds?|minutes?|hours?)\\b"},
+    {"topic": "RTO/RPO", "forbid": "\\bRT[OP]\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"}
+  ],
+  "incomplete": [
+    {"topic": "fix for database connection exhaustion", "note": "Only the first check (pool metrics) is given; it must not be presented as the fix.", "section": "common_failures"},
+    {"topic": "rollback command and target time", "note": "'Usually quick' only.", "section": "deployment_and_rollback"},
+    {"topic": "how to reverse the last migration", "note": "Only that it may be hard.", "section": null},
+    {"topic": "owners and escalation", "note": "Never discussed.", "section": "ownership_escalation"},
+    {"topic": "how staging differs", "note": "The speaker could not remember.", "section": "environments"}
+  ],
+  "forbidden": [
+    {"why": "invented rollback command", "pattern": "kubectl\\s+rollout|helm\\s+rollback|argocd\\s+app\\s+rollback"},
+    {"why": "invented fix for connection exhaustion", "pattern": "(increase|raise)\\s+(the\\s+)?(max_connections|connection\\s+pool|pool\\s+size)|PgBouncer|restart\\s+(the\\s+)?(pods|database|postgres)"},
+    {"why": "invented alerting tool", "pattern": "PagerDuty|Opsgenie|Alertmanager"}
+  ]
+}

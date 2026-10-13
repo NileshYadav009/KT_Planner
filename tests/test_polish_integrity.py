@@ -51,3 +51,35 @@ def test_ignores_fragments_too_short_to_judge():
 def test_handles_empty_inputs():
     assert _fragments_missing_from([], "anything") == []
     assert _fragments_missing_from(FRAGMENTS, "") == FRAGMENTS
+
+
+def test_local_cleanup_keeps_the_space_before_a_dotted_name():
+    """'The .NET services' printed as 'The.NET services'."""
+    from ai import _local_cleanup
+
+    assert _local_cleanup("our AKS cluster . The .NET services use SQL , Redis .") == \
+        "Our AKS cluster. The .NET services use SQL, Redis."
+
+
+def test_danger_zones_are_never_reworded(monkeypatch):
+    """A rewrite turned 'because they are the only copy we can replay from' into
+    'as they are the only copy available for replay': safety warnings keep the
+    speaker's words, and no LLM call is spent on them."""
+    import ai
+
+    class Rewriter:
+        model = "stub"
+
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt, **kwargs):
+            self.prompts.append(prompt)
+            return "Reworded text."
+
+    stub = Rewriter()
+    monkeypatch.setattr(ai, "get_llm_provider", lambda: stub)
+    warning = "Never delete raw events during an active investigation, because they are the only copy we can replay from."
+    out = ai.polish_coverage_sections({"danger_zones": {"title": "Danger Zones", "fragments": [warning]}})
+    assert out["danger_zones"] == [warning]
+    assert stub.prompts == []

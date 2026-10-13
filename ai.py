@@ -153,7 +153,9 @@ def _extract_json_response(text: str):
 
 def _local_cleanup(text: str) -> str:
     text = ' '.join(text.split())
-    text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+    # Only punctuation that ends a word: "The .NET services" kept its space
+    # (it printed as "The.NET services").
+    text = re.sub(r'\s+([,.;:!?])(?![\w])', r'\1', text)
     if text and text[0].islower():
         text = text[0].upper() + text[1:]
     if text and text[-1] not in '.!?':
@@ -433,6 +435,8 @@ _POLISH_RETENTION_RATIO = 0.7
 # Fragments shorter than this carry too few content words for the ratio to
 # mean anything, so they are not checked.
 _POLISH_MIN_CONTENT_WORDS = 4
+# Sections printed in the speaker's own words, never sent to the polish pass.
+_VERBATIM_SECTIONS = frozenset({"danger_zones"})
 
 
 def _fragments_missing_from(fragments: List[str], polished_text: str) -> List[str]:
@@ -508,6 +512,11 @@ def polish_coverage_sections(
         return rule + prompt_text
 
     def _polish_one(sid: str, section: dict) -> List[str]:
+        if sid in _VERBATIM_SECTIONS:
+            # Safety warnings stay in the speaker's words: a rewrite turned
+            # "because they are the only copy we can replay from" into "as
+            # they are the only copy available for replay". No call is made.
+            return _local_cleanup_list(_all_fragments(section))
         prompt_template = SECTION_POLISH_PROMPTS.get(sid, SECTION_POLISH_PROMPTS["default"])
         joined_fragments = "\n".join(f"- {fragment}" for fragment in section["fragments"])
         prompt = prompt_template.format(

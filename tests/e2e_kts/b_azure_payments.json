@@ -1,0 +1,52 @@
+{
+  "id": "e2e_b_azure_payments",
+  "title": "Paygate: Azure payment platform on AKS",
+  "source": "synthetic, written for the end-to-end suite (12 Oct)",
+  "proves": "Stated RTO/RPO values that must survive with no LLM, failures with trigger conditions, a staging caveat, Key Vault as the one security fact, and an explicitly undocumented recovery procedure that must not be filled in.",
+  "transcript": "This is the handover for Paygate, the Azure payment platform that authorises card payments for our online stores. The React front end goes through Azure Front Door to an Application Gateway, which routes traffic to our AKS cluster. The .NET services on AKS depend on Azure SQL, Azure Cache for Redis and Service Bus. Azure DevOps pipelines build the images and push them to ACR, and Flux syncs the releases to AKS. Infrastructure is written in Bicep, and all secrets are stored in Key Vault. Azure Monitor and Application Insights give us metrics and traces, and PagerDuty pages the on-call engineer. The common problems are a Service Bus backlog when the settlement consumer falls behind, and SQL connection exhaustion during sales peaks. Our RTO is two hours and our RPO is 30 minutes. Staging uses mocked payment integrations, so a passing staging test does not prove the real card provider works. The Service Bus recovery procedure is not documented.",
+  "facts": [
+    {"id": "B01", "kind": "purpose", "quote": "authorises card payments for our online stores", "in": ["system_overview"]},
+    {"id": "B02", "kind": "flow", "quote": "goes through Azure Front Door to an Application Gateway", "in": ["architecture_reference", "system_overview"]},
+    {"id": "B03", "kind": "flow", "quote": "routes traffic to our AKS cluster", "in": ["architecture_reference", "system_overview"]},
+    {"id": "B04", "kind": "dependency", "quote": "The .NET services on AKS depend on Azure SQL, Azure Cache for Redis and Service Bus", "in": ["architecture_reference", "system_overview"]},
+    {"id": "B05", "kind": "deployment", "quote": "Azure DevOps pipelines build the images and push them to ACR", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "B06", "kind": "deployment", "quote": "Flux syncs the releases to AKS", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "B07", "kind": "deployment", "quote": "Infrastructure is written in Bicep", "in": ["deployment_and_rollback", "architecture_reference", "environments"]},
+    {"id": "B08", "kind": "security", "quote": "all secrets are stored in Key Vault", "in": ["security_controls"]},
+    {"id": "B09", "kind": "monitoring", "quote": "Azure Monitor and Application Insights give us metrics and traces", "in": ["monitoring_observability"]},
+    {"id": "B10", "kind": "alerting", "quote": "PagerDuty pages the on-call engineer", "in": ["monitoring_observability", "ownership_escalation"]},
+    {"id": "B11", "kind": "incident", "quote": "a Service Bus backlog when the settlement consumer falls behind", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "B12", "kind": "incident", "quote": "SQL connection exhaustion during sales peaks", "in": ["common_failures", "known_bad_days"], "not_in": ["danger_zones"]},
+    {"id": "B13", "kind": "recovery", "quote": "Our RTO is two hours", "alt": ["RTO two hours", "RTO 2 hours"], "terms": ["rto", "two hours"], "in": ["disaster_recovery"]},
+    {"id": "B14", "kind": "recovery", "quote": "our RPO is 30 minutes", "alt": ["RPO 30 minutes"], "terms": ["rpo", "30 minutes"], "in": ["disaster_recovery"]},
+    {"id": "B15", "kind": "environment", "quote": "Staging uses mocked payment integrations", "in": ["environments"]},
+    {"id": "B16", "kind": "safety", "quote": "a passing staging test does not prove the real card provider works", "in": ["environments", "danger_zones", "deployment_and_rollback"]},
+    {"id": "B17", "kind": "undocumented", "quote": "The Service Bus recovery procedure is not documented", "in": ["common_failures", "disaster_recovery", "danger_zones", "open_responsibilities"]}
+  ],
+  "safety": ["B16"],
+  "covered": ["system_overview", "architecture_reference", "environments", "monitoring_observability", "disaster_recovery", "security_controls", "deployment_and_rollback", "common_failures"],
+  "missing": ["cost_optimization"],
+  "relations": [
+    {"from": "Azure Front Door", "to": "Application Gateway", "kind": "flow"},
+    {"from": "Application Gateway", "to": "AKS", "kind": "flow"},
+    {"from": "AKS", "to": "Azure SQL", "kind": "dependency"},
+    {"from": "AKS", "to": "Redis", "kind": "dependency"},
+    {"from": "AKS", "to": "Service Bus", "kind": "dependency"},
+    {"from": "Azure DevOps", "to": "ACR", "kind": "deploy"},
+    {"from": "Flux", "to": "AKS", "kind": "deploy"}
+  ],
+  "wrong_relations": [
+    {"from": "Azure DevOps", "to": "AKS", "label": "deploy", "why": "Azure DevOps builds and pushes to ACR; Flux syncs to AKS"}
+  ],
+  "undocumented": [],
+  "incomplete": [
+    {"topic": "Service Bus recovery procedure", "note": "Explicitly not documented; the document must not supply steps.", "section": null},
+    {"topic": "fix for SQL connection exhaustion", "note": "Only the symptom and trigger are stated.", "section": "common_failures"},
+    {"topic": "owners and escalation beyond PagerDuty", "note": "Never discussed.", "section": "ownership_escalation"}
+  ],
+  "forbidden": [
+    {"why": "invented Service Bus recovery steps", "pattern": "dead[- ]?letter|purge|resubmit|replay\\s+the\\s+(queue|messages)|restart\\s+the\\s+(settlement\\s+)?consumer"},
+    {"why": "invented command", "pattern": "kubectl|az\\s+(aks|sql|servicebus)\\b|flux\\s+(reconcile|suspend)"},
+    {"why": "invented fix for SQL exhaustion", "pattern": "(increase|raise)\\s+(the\\s+)?(max\\s+pool|pool\\s+size|DTU|vCore)|scale\\s+(up|out)\\s+(the\\s+)?(database|SQL)"}
+  ]
+}

@@ -7,7 +7,7 @@
  "facts": [
   {
    "id": "F01",
-   "quote": "Meridian, the payments clearing platform",
+   "quote": "Meridian, the payments clearing platform", "alt": ["Meridian is the payments clearing platform"],
    "in": [
     "system_overview"
    ]

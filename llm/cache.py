@@ -11,7 +11,12 @@ first run, so a cache hit reproduces that run's outcome.
 Stored: the key hash and the response text. Prompts are not stored.
 
 Settings (environment):
-  LLM_CACHE            readwrite (default) | read | off
+  LLM_CACHE            readwrite (default) | read | off | replay
+                       replay: answer only from stored responses; a request
+                       that was never recorded is not sent to the provider
+                       (the call site falls back to its rules-only result and
+                       the KT's usage report counts it as skipped). For
+                       offline runs of recorded LLM output; never live.
   LLM_CACHE_PATH       default data/llm_cache.sqlite
   LLM_CACHE_TTL_DAYS   default 90 (0 = never expire)
   LLM_CACHE_NAMESPACE  optional; change it to invalidate everything, or set
@@ -39,7 +44,7 @@ _INITIALISED: set = set()
 
 def cache_mode() -> str:
     mode = os.getenv("LLM_CACHE", "readwrite").strip().lower()
-    return mode if mode in ("readwrite", "read", "off") else "readwrite"
+    return mode if mode in ("readwrite", "read", "off", "replay") else "readwrite"
 
 
 def cache_path() -> str:

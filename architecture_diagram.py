@@ -246,15 +246,36 @@ _CONSUME_RE = re.compile(r"\b(?:consum\w*|subscrib\w*|listen\w*|pull\w*|process(
 _CALL_RE = re.compile(r"\b(?:call\w*|go(?:es)? through|via|sent (?:with|through|via)|send\w* (?:with|through|via)|"
                       r"integrat\w*|talk\w* to|hit\w*|handled by|powered by|process(?:es|ed)? (?:by|with|through))\b",
                       re.IGNORECASE)
-_USE_RE = re.compile(r"\b(?:use[sd]?|using|backed by|on top of|relies on|depends on|connects? to|runs? on)\b",
-                     re.IGNORECASE)
+_USE_RE = re.compile(r"\b(?:use[sd]?|using|backed by|on top of|rel(?:y|ies|ying) on|depend(?:s|ing)? on|connects? to|"
+                     r"runs? on)\b", re.IGNORECASE)
+# "The services depend on Azure SQL": said as a dependency, so the line says
+# so rather than guessing what the dependency is used for.
+_DEPEND_RE = re.compile(r"\b(?:depend(?:s|ing)?|rel(?:y|ies|ying))\s+on\b", re.IGNORECASE)
+_GENERIC_USE_LABELS = {"stores data in", "stores files in", "sends messages via", "uses"}
+# "depend on Azure SQL, Azure Cache for Redis and Service Bus": the words
+# between two components of one list (a separator, no sentence break), so
+# the list's verb applies to every item.
+_LIST_GAP_RE = re.compile(r"^(?=.*(?:,|\band\b|\bor\b|&))[^.;:]{0,60}$", re.IGNORECASE)
+# "Pub/Sub, Dataflow jobs process them, and the results land in BigQuery":
+# the results of the component named before ("Dataflow") are what lands.
+_RESULT_SUBJECT_RE = re.compile(r"^\W*(?:and\s+|then\s+)*(?:the\s+)?(?:results?|outputs?|output\s+data|processed\s+"
+                                r"(?:data|events|records|messages))\b", re.IGNORECASE)
+# "Dataflow jobs process them": a pipeline reading what the queue just named holds.
+_PROCESSES_IT_RE = re.compile(r"^\s+(?:\w+\s+){0,2}?(?:process|consum|read|pull|transform|enrich|handl|ingest)\w*\s+"
+                              r"(?:them|it|those|these|the\s+(?:events|messages|records|data))\b", re.IGNORECASE)
+# Tools of one list share the verb that follows or precedes the list
+# ("Prometheus and Grafana cover monitoring").
+_TOOL_LIST_GAP_RE = re.compile(r"^\s*(?:,\s*(?:and\s+|or\s+)?|and\s+|or\s+|&\s*)$", re.IGNORECASE)
+# "GitHub Actions builds the images, pushes them to ECR": CI publishing to a registry.
+_PUSH_RE = re.compile(r"\bpush(?:es|ed|ing)?\b|\bpublish(?:es|ed|ing)?\b|\bupload(?:s|ed|ing)?\b", re.IGNORECASE)
 _LOCATED_RE = re.compile(r"\b(?:is|are|lives?|sits?)\s+(?:in|on)\b", re.IGNORECASE)
 # "Redis is used for caching", "PostgreSQL is the primary database",
 # "Service Bus to queue invoice jobs".
 _DEFINED_AS_RE = re.compile(r"^\s*(?:(?:is|are)\s+(?:used\s+)?(?:for|as|our|the)|to|for|as)\b", re.IGNORECASE)
 _DEPLOY_RE = re.compile(r"\b(?:deploy\w*|release\w*|ship\w*|roll\w* out|sync\w*|promot\w*)\b", re.IGNORECASE)
-_MONITOR_RE = re.compile(r"\b(?:monitor\w*|watch\w*|dashboard\w*|metric\w*|logs?|logging|observ\w*|trac\w*|alert\w*)\b",
-                         re.IGNORECASE)
+# "Grafana shows the service health" is monitoring too.
+_MONITOR_RE = re.compile(r"\b(?:monitor\w*|watch\w*|dashboard\w*|metric\w*|logs?|logging|observ\w*|trac\w*|alert\w*|"
+                         r"health)\b", re.IGNORECASE)
 _SECRETS_RE = re.compile(r"\b(?:secret\w*|credential\w*|certificat\w*|keys?)\b", re.IGNORECASE)
 _PROVISION_RE = re.compile(r"\b(?:defined|provision\w*|managed|built|created|described|codified|kept|lives?|is|are)\s+"
                            r"(?:in|with|by|using|through)\b|\bas code\b|\binfrastructure\b", re.IGNORECASE)
@@ -343,6 +364,41 @@ def _label_for(layer: str, window: str, defining: str) -> Optional[str]:
         if _USE_RE.search(text) or defining:
             return "uses"
     return None
+
+
+def _has_cue(text: str) -> bool:
+    """A verb of its own between two components: a new statement, not a list."""
+    return any(r.search(text) for r in (_WRITE_RE, _READ_RE, _PUBLISH_RE, _CONSUME_RE, _CALL_RE, _USE_RE))
+
+
+def _stated_label(layer: str, window: str, defining: str) -> Optional[str]:
+    label = _label_for(layer, window, defining)
+    if label in _GENERIC_USE_LABELS and _DEPEND_RE.search(window + " " + defining):
+        return "depends on"
+    return label
+
+
+def _cue_owners(cue_start: int, cue_end: int, tools: List[Tuple[int, int, str]], sentence: str) -> set:
+    """The tools a job word belongs to: the tool it is part of or the one
+    named just before it, else the first one after it, with the tools
+    listed alongside that one. In "GitHub Actions builds the images, and
+    ArgoCD deploys them", "deploys" is ArgoCD's alone."""
+    inside = [i for i, (s, e, _) in enumerate(tools) if s <= cue_start and cue_end <= e]
+    before = [i for i, (s, e, _) in enumerate(tools) if e <= cue_start]
+    after = [i for i, (s, e, _) in enumerate(tools) if s >= cue_end]
+    idx = inside[0] if inside else before[-1] if before else after[0] if after else None
+    if idx is None:
+        return set()
+    group = {idx}
+    i = idx
+    while i > 0 and _TOOL_LIST_GAP_RE.match(sentence[tools[i - 1][1]:tools[i][0]]):
+        i -= 1
+        group.add(i)
+    i = idx
+    while i + 1 < len(tools) and _TOOL_LIST_GAP_RE.match(sentence[tools[i][1]:tools[i + 1][0]]):
+        i += 1
+        group.add(i)
+    return {tools[i][2] for i in group}
 
 
 def _mentions(sentence: str, aliases: Dict[str, List[str]]) -> List[Tuple[int, int, str]]:
@@ -456,6 +512,9 @@ def build_architecture_graph(
     targets = {n["id"] for n in data + external}
     for sentence in sentences:
         spots = _mentions(sentence, node_aliases)
+        # (end, source, window) of the last component given a connection in
+        # this sentence: the head of a list the next component may continue.
+        prev = None
         for idx, (start, end, nid) in enumerate(spots):
             if nid not in targets:
                 continue
@@ -464,30 +523,49 @@ def build_architecture_graph(
             brk = _CLAUSE_BREAK_RE.search(sentence, end, after)
             tail = sentence[end:(brk.start() if brk else after)]
             defining = tail if _DEFINED_AS_RE.match(tail) else ""
-            source, window = None, None
-            for pstart, pend, pid in reversed(spots[:idx]):
-                segment = sentence[pend:start]
-                if pid == "central":
-                    # Only the target's own clause: in "GKE is used for
-                    # workloads, Vertex AI supports ML", "used" is about GKE.
-                    cut = max(segment.rfind(","), segment.rfind(";"))
-                    source, window = "central", (segment[cut + 1:] if cut >= 0 else segment)
-                    break
-                if node_layer.get(pid) in _ACTOR_LAYERS and not _CLAUSE_BREAK_RE.search(segment) \
-                        and _label_for(layer, segment, ""):
-                    source, window = pid, segment
-                    break
-            if source is None:
-                clause = _clause_of(sentence, start, end)
-                window = clause[:clause.lower().find(sentence[start:end].lower())] if clause else sentence[:start]
-                subject_ok = (_SYSTEM_SUBJECT_RE.match(window) or _PASSIVE_RE.search(window)
-                              or (system_word and re.search(system_word, window.lower())) or defining)
-                if not subject_ok:
+            if layer in _ACTOR_LAYERS:
+                # "Events are published to Pub/Sub, Dataflow jobs process them":
+                # the pipeline reads from the queue named before it.
+                queue = next((p for p in reversed(spots[:idx]) if node_layer.get(p[2]) == "queue"), None)
+                if queue and _PROCESSES_IT_RE.match(tail):
+                    add_edge(nid, queue[2], "consumes from", sentence, "data")
+                    prev = None
                     continue
-                source = "central"
-            label = _label_for(layer, window, defining)
+            label = None
+            if prev and _LIST_GAP_RE.match(sentence[prev[0]:start]) and not _has_cue(sentence[prev[0]:start]):
+                source, window = prev[1], prev[2]
+                label = _stated_label(layer, window, defining)
+            if label is None:
+                source, window = None, None
+                for pstart, pend, pid in reversed(spots[:idx]):
+                    segment = sentence[pend:start]
+                    if pid == "central":
+                        # Only the target's own clause: in "GKE is used for
+                        # workloads, Vertex AI supports ML", "used" is about GKE.
+                        cut = max(segment.rfind(","), segment.rfind(";"))
+                        source, window = "central", (segment[cut + 1:] if cut >= 0 else segment)
+                        break
+                    if node_layer.get(pid) in _ACTOR_LAYERS:
+                        breaks = list(_CLAUSE_BREAK_RE.finditer(segment))
+                        own = segment[breaks[-1].end():] if breaks else segment
+                        if (not breaks or _RESULT_SUBJECT_RE.match(own)) and _label_for(layer, own, ""):
+                            source, window = pid, own
+                            break
+                if source is None:
+                    clause = _clause_of(sentence, start, end)
+                    window = clause[:clause.lower().find(sentence[start:end].lower())] if clause else sentence[:start]
+                    subject_ok = (_SYSTEM_SUBJECT_RE.match(window) or _PASSIVE_RE.search(window)
+                                  or (system_word and re.search(system_word, window.lower())) or defining)
+                    if not subject_ok:
+                        prev = None
+                        continue
+                    source = "central"
+                label = _stated_label(layer, window, defining)
             if label:
                 add_edge(source, nid, label, sentence, "data" if layer != "external" else "external")
+                prev = (end, source, window)
+            else:
+                prev = None
 
     # Delivery and operations: stated when the tool is named in a sentence
     # about that job. The quote is the sentence where the tool and the job
@@ -501,11 +579,15 @@ def build_architecture_graph(
             "secrets": (_SECRETS_RE, "supplies secrets to", "operations")}
     best: Dict[str, Tuple[int, str]] = {}
     for sentence in sentences:
-        for start, end, nid in _mentions(sentence, node_aliases):
+        spots = _mentions(sentence, node_aliases)
+        for start, end, nid in spots:
             job = jobs.get(node_layer.get(nid))
             if not job:
                 continue
-            cues = [m for m in job[0].finditer(sentence)]
+            # A job word is credited only to the tool that does it: CI/CD and
+            # GitOps tools compete for "deploys", monitoring tools for "metrics".
+            peers = [sp for sp in spots if jobs.get(node_layer.get(sp[2]), (None,))[0] is job[0]]
+            cues = [m for m in job[0].finditer(sentence) if nid in _cue_owners(m.start(), m.end(), peers, sentence)]
             if cues:
                 gap = min(min(abs(m.start() - end), abs(start - m.end())) for m in cues)
                 if nid not in best or gap < best[nid][0]:
@@ -514,6 +596,20 @@ def build_architecture_graph(
         pattern, label, kind = jobs[node_layer[nid]]
         if central is not None:
             add_edge(nid, "central", label, sentence, kind)
+    # "GitHub Actions builds the images, pushes them to ECR": the CI tool
+    # publishes to the registry (listed under the connections; the drawing
+    # keeps one line from the delivery lane).
+    for sentence in sentences:
+        spots = _mentions(sentence, node_aliases)
+        for i, (_, ci_end, ci) in enumerate(spots):
+            if node_layer.get(ci) != "cicd":
+                continue
+            for reg_start, _, reg in spots[i + 1:]:
+                if node_layer.get(reg) in ("cicd", "gitops"):
+                    break
+                if node_layer.get(reg) == "registry" and _PUSH_RE.search(sentence[ci_end:reg_start]):
+                    add_edge(ci, reg, "pushes images to", sentence, "delivery")
+                    break
 
     for sentence in sentences:
         if iac and boundary and not boundary["subtitle"]:
@@ -741,6 +837,15 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
         # Stated data flows. From another data component: drawn down the
         # data column's left side; from the workload: straight across.
         side_lane = 0
+        # Lines leaving one data component share one label spot below it, so
+        # their labels are joined ("consumes from · writes to"); drawn one by
+        # one they overprinted each other.
+        side_labels: Dict[str, List[str]] = defaultdict(list)
+        for e in graph["edges"]:
+            if e["kind"] == "data" and e["from"] != "central" and e["from"] in data_pos \
+                    and e["label"] not in side_labels[e["from"]]:
+                side_labels[e["from"]].append(e["label"])
+        labelled = set()
         for e in graph["edges"]:
             if e["kind"] == "data":
                 ty, th = data_pos[e["to"]]
@@ -753,7 +858,9 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                     lane_x = data_x - 12 - side_lane * 6
                     side_lane = (side_lane + 1) % 2
                     c.path([(data_x, fy + fh / 2), (lane_x, fy + fh / 2), (lane_x, tcy), (data_x - 2, tcy)])
-                    c.label(data_x + 6, fy + fh + 12, e["label"], anchor="start")
+                    if e["from"] not in labelled:
+                        labelled.add(e["from"])
+                        c.label(data_x + 6, fy + fh + 12, " · ".join(side_labels[e["from"]]), anchor="start")
             elif e["kind"] == "external":
                 ty, th = ext_pos[e["to"]]
                 tcy = clamp(ty + th / 2)

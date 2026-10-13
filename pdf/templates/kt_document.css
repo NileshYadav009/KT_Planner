@@ -127,6 +127,12 @@ h1 {
   text-decoration: none;
 }
 
+/* The page each section starts on (WeasyPrint resolves target-counter). */
+.toc-page a::after {
+  content: leader('.') target-counter(attr(href), page);
+  color: #6b7280;
+}
+
 .section-block {
   /* Allow long sections to break across pages. Previously 'page-break-inside: avoid' caused
      very long sections to overflow the page instead of splitting. */
@@ -197,6 +203,18 @@ th, td {
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+/* A table row is not split across pages: a split Environments row printed
+   half its sentence, the repeated header, then the rest. */
+tr { break-inside: avoid; }
+
+/* Five or more columns: smaller type and padding so whole words fit a column. */
+table.wide-table th, table.wide-table td {
+  font-size: 0.8em;
+  padding: 5px 5px;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 /* Architecture diagram (architecture_diagram.py): full width, kept on one page. */
@@ -330,6 +348,11 @@ code {
 .src-ref a {
   color: #6b7280;
   text-decoration: none;
+}
+/* A fact no transcript sentence supports: visible, so it is checked. */
+.src-none {
+  color: #b45309;
+  font-style: italic;
 }
 .sources-intro {
   font-size: 9pt;

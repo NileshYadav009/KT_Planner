@@ -37,10 +37,14 @@ okay ok um uh like really basically actually right well yeah so going get got ge
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“'(])")
 # A renderer's own words beside a value: "RTO (Recovery Time Objective)".
 _PARENTHETICAL = re.compile(r"\s*\([^()]*\)")
+_LIST_LABEL = re.compile(r"^\s*(?:\d{1,2}[.)]\s+)?(?:\*\*[^*]{1,40}?:\*\*\s*)?")
 # Cells and lines that say nothing was stated are not facts.
 _PLACEHOLDER = re.compile(
     r"^\s*(?:not discussed|not covered(?: during kt| in the kt(?: session)?)?|not stated|none stated|unknown|tbd|n/?a|-+)"
     r"\s*\.?\s*$", re.IGNORECASE)
+# A section's note on what the KT left out ("Not covered in the KT session:
+# Fixes or workarounds ...") names topics; it states nothing about the system.
+_GAP_NOTE = re.compile(r"^\s*not covered in the kt session\s*:|\bwere not covered in the session\b", re.IGNORECASE)
 _WORD = re.compile(r"[a-z0-9]+(?:[.\-][a-z0-9]+)*")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
@@ -270,6 +274,9 @@ class _Index:
         self.system_name = re.compile(re.escape(system_name), re.IGNORECASE) if len(system_name or "") > 3 else None
 
     def _strip(self, text: str) -> str:
+        # The list's own numbering and a bold label ("1. **Trigger:** ...")
+        # are the renderer's words: "1" is not a number the session said.
+        text = _LIST_LABEL.sub("", text) or text
         stripped = _PARENTHETICAL.sub("", text) or text
         if self.system_name is not None:
             without = self.system_name.sub(" ", stripped)
@@ -363,7 +370,8 @@ class _Index:
 
 def _is_fact(text: str) -> bool:
     stripped = text.strip()
-    return bool(stripped) and stripped not in SECTION_STATUS_MESSAGES and not _PLACEHOLDER.match(stripped)
+    return bool(stripped) and stripped not in SECTION_STATUS_MESSAGES and not _PLACEHOLDER.match(stripped) \
+        and not _GAP_NOTE.search(stripped)
 
 
 def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, Any]],
@@ -383,6 +391,10 @@ def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, 
                 continue
             cells = block_cells(block)
             refs: List[List[int]] = []
+            # Facts no transcript sentence supports: shown with a "no source"
+            # mark, not silently like a stated fact (an LLM's restatement
+            # "Receive page from PagerDuty" printed exactly like one).
+            unsourced: List[int] = []
             for position, text in enumerate(units):
                 if not _is_fact(text):
                     refs.append([])
@@ -394,8 +406,14 @@ def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, 
                     continue
                 found = index.sources_for_row(cells[position]) if cells else index.sources_for(text)
                 stats["stated" if found else "unsourced"] += 1
+                if not found:
+                    unsourced.append(position)
                 refs.append(sorted(numbering.setdefault(i, len(numbering) + 1) for i in found))
             block["sources"] = refs
+            if unsourced:
+                block["unsourced"] = unsourced
+            else:
+                block.pop("unsourced", None)
     knowledge_object["sources"] = [
         dict(id=source_id, quote=_short(sentences[i]["quote"]), start=sentences[i]["start"], end=sentences[i]["end"],
              **{key: sentences[i][key] for key in ("speaker", "session") if sentences[i].get(key)})

@@ -1,0 +1,46 @@
+{
+  "id": "e2e_c_gcp_data_platform",
+  "title": "Streamline: GCP data platform (Pub/Sub, Dataflow, BigQuery)",
+  "source": "synthetic, written for the end-to-end suite (12 Oct)",
+  "proves": "A data pipeline rather than a request path, retention stated as a duration, monitoring with no alerting tool (none may be invented), a safety rule with its reason, and ownership never discussed (no owner may be invented).",
+  "transcript": "Okay, so this is Streamline, our GCP data platform for clickstream analytics. Events are published to Pub/Sub, Dataflow jobs process them, and the results land in BigQuery. Raw files are kept in Cloud Storage for 90 days. The ingestion services run on GKE. Terraform manages the infrastructure, GitHub Actions builds the images, and ArgoCD deploys them to GKE. Credentials are read from Secret Manager. Dashboards live in Cloud Monitoring and Grafana. The failures you will hit most are a Pub/Sub backlog, where unacknowledged messages pile up, and Dataflow jobs that fail and stop processing. Never delete raw events during an active investigation, because they are the only copy we can replay from.",
+  "facts": [
+    {"id": "C01", "kind": "purpose", "quote": "data platform for clickstream analytics", "in": ["system_overview"]},
+    {"id": "C02", "kind": "flow", "quote": "Events are published to Pub/Sub, Dataflow jobs process them, and the results land in BigQuery", "in": ["architecture_reference", "system_overview"]},
+    {"id": "C03", "kind": "retention", "quote": "Raw files are kept in Cloud Storage for 90 days", "in": ["disaster_recovery", "architecture_reference", "security_controls"]},
+    {"id": "C04", "kind": "hosting", "quote": "The ingestion services run on GKE", "in": ["architecture_reference", "system_overview"]},
+    {"id": "C05", "kind": "deployment", "quote": "Terraform manages the infrastructure", "in": ["deployment_and_rollback", "architecture_reference", "environments"]},
+    {"id": "C06", "kind": "deployment", "quote": "GitHub Actions builds the images, and ArgoCD deploys them to GKE", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "C07", "kind": "security", "quote": "Credentials are read from Secret Manager", "in": ["security_controls"]},
+    {"id": "C08", "kind": "monitoring", "quote": "Dashboards live in Cloud Monitoring and Grafana", "in": ["monitoring_observability"]},
+    {"id": "C09", "kind": "incident", "quote": "a Pub/Sub backlog, where unacknowledged messages pile up", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "C10", "kind": "incident", "quote": "Dataflow jobs that fail and stop processing", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "C11", "kind": "safety", "quote": "Never delete raw events during an active investigation", "in": ["danger_zones"]},
+    {"id": "C12", "kind": "safety", "quote": "they are the only copy we can replay from", "in": ["danger_zones", "disaster_recovery"]}
+  ],
+  "safety": ["C11"],
+  "covered": ["system_overview", "architecture_reference", "monitoring_observability", "security_controls", "deployment_and_rollback", "common_failures", "danger_zones"],
+  "missing": ["ownership_escalation", "cost_optimization", "known_bad_days", "environments"],
+  "relations": [
+    {"from": "Pub/Sub", "to": "Dataflow", "kind": "flow"},
+    {"from": "Dataflow", "to": "BigQuery", "kind": "flow"},
+    {"from": "ArgoCD", "to": "GKE", "kind": "deploy"}
+  ],
+  "wrong_relations": [
+    {"from": "GitHub Actions", "to": "GKE", "label": "deploy", "why": "GitHub Actions builds; ArgoCD deploys"},
+    {"from": "SYSTEM", "to": "BigQuery", "label": "writ", "why": "Dataflow writes the results to BigQuery"}
+  ],
+  "undocumented": [
+    {"topic": "RTO/RPO", "forbid": "\\bRT[OP]\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"}
+  ],
+  "incomplete": [
+    {"topic": "who owns BigQuery operations", "note": "Never discussed; no owner may be named.", "section": "ownership_escalation"},
+    {"topic": "how alerts reach anyone", "note": "Only dashboards are mentioned.", "section": "monitoring_observability"},
+    {"topic": "fixes for a Pub/Sub backlog or a failed Dataflow job", "note": "Only symptoms are stated.", "section": "common_failures"}
+  ],
+  "forbidden": [
+    {"why": "invented alerting or paging tool", "pattern": "PagerDuty|Opsgenie|VictorOps"},
+    {"why": "invented owner for BigQuery", "pattern": "(data|analytics|platform)\\s+(engineering\\s+)?team\\s+owns|owned\\s+by\\s+the"},
+    {"why": "invented command", "pattern": "gcloud|kubectl|bq\\s+(rm|query)|gsutil"}
+  ]
+}

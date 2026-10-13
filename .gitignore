@@ -105,3 +105,6 @@ data/kt_assets/
 
 # KT jobs and documents (customer data; job_store.py)
 data/continuum.sqlite*
+
+# End-to-end KT suite outputs (scripts/e2e_kts.py)
+e2e_out*/

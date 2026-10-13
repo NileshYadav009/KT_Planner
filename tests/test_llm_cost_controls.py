@@ -113,6 +113,47 @@ def test_cache_off_and_read_only_modes(monkeypatch):
     assert inner.calls == 4  # read-only never stores
 
 
+def test_replay_mode_answers_only_from_recorded_responses(monkeypatch):
+    """LLM_CACHE=replay runs recorded output offline: a recorded request is
+    served, an unrecorded one is never sent and is reported as skipped."""
+    from llm.cached_provider import LLMNotRecorded
+
+    recorder = CountingProvider("Recorded reply.")
+    _polish_one(CachedLLMProvider(recorder), "recorded prompt")
+    monkeypatch.setenv("LLM_CACHE", "replay")
+    live = CountingProvider("live reply")
+    provider = CachedLLMProvider(live)
+    tracker = LLMUsageTracker("job")
+    with track_job(tracker):
+        assert _polish_one(provider, "recorded prompt") == "Recorded reply."
+        with pytest.raises(LLMNotRecorded):
+            _polish_one(provider, "new prompt")
+    assert live.calls == 0
+    usage = tracker.summary()
+    assert usage["cache_mode"] == "replay"
+    assert (usage["llm_calls"], usage["cache_hits"], usage["skipped"]) == (0, 1, 1)
+    assert (usage["provider"], usage["model"]) == ("counting", "stub-model")   # named though nothing was sent
+
+
+def test_per_kt_call_budget_stops_live_calls_but_not_cache_hits(monkeypatch):
+    from llm.cached_provider import LLMBudgetExhausted
+
+    monkeypatch.setenv("LLM_MAX_CALLS_PER_KT", "2")
+    inner = CountingProvider("reply")
+    provider = CachedLLMProvider(inner)
+    tracker = LLMUsageTracker("job")
+    with track_job(tracker):
+        _polish_one(provider, "p1")
+        _polish_one(provider, "p2")
+        with pytest.raises(LLMBudgetExhausted):
+            _polish_one(provider, "p3")
+        assert _polish_one(provider, "p1") == "reply"  # cached: costs nothing
+    assert inner.calls == 2
+    usage = tracker.summary()
+    assert usage["llm_calls"] == 2 and usage["skipped"] == 1 and usage["cache_hits"] == 1
+    assert any("budget" in reason for reason in usage["stages"][0]["skip_reasons"])
+
+
 def test_expired_entries_are_not_reused(monkeypatch):
     inner = CountingProvider()
     CachedLLMProvider(inner).generate("p")

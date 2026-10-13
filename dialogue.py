@@ -111,8 +111,17 @@ _ANNOUNCEMENT_LEAD = (
     r"|let\s+me\s+(?:hand\s+over|walk\s+you\s+through|take\s+you\s+through|talk\s+about)"
     r"|(?:this|today'?s|the)\s+(?:kt|session|handover|hand-?over|knowledge\s+transfer|call|walkthrough)\s+"
     r"(?:is\s+(?:for|about|on)|covers|will\s+cover)"
-    r"|this\s+is\s+the\s+(?:kt|handover|hand-?over|knowledge\s+transfer|walkthrough)\s+(?:for|of|on))\s+"
+    r"|this\s+is\s+(?:the|a|an|our)\s+(?:(?:quick|short|brief|final|first|last|second|small)\s+)?"
+    r"(?:kt|handover|hand-?over|knowledge\s+transfer|walkthrough)\s+(?:for|of|on|about)"
+    # The polish pass's own framing: "This document serves as the handover for Paygate, ..."
+    r"|this\s+document\s+(?:serves\s+as|is)\s+(?:the|a|an)\s+(?:kt|handover|hand-?over|knowledge\s+transfer)"
+    r"(?:\s+document)?\s+(?:for|of|on))\s+"
 )
+# "This is Streamline, our GCP data platform for clickstream analytics."
+# introduces the system by name: "Streamline is our GCP data platform ...".
+_THIS_IS_NAME_RE = re.compile(
+    r"^(?i:this\s+is)\s+(?P<name>[A-Z][\w.&+-]*(?:\s+[A-Z][\w.&+-]*){0,3})\s*,\s*(?P<desc>(?i:our|the|a|an)\s+.+)$",
+    re.DOTALL)
 _ANNOUNCEMENT_RE = re.compile(
     _ANNOUNCEMENT_LEAD + r"(?P<what>[^,;:()—]+?)(?:\s+(?:today|now|here|with\s+you))?\s*[.!]?\s*$",
     re.IGNORECASE,
@@ -183,7 +192,15 @@ def without_framing(sentence: str) -> str:
             text = f"{np.strip()} {rest.strip()}"
         elif appositive:
             text = f"{appositive.group('np').strip()} is {appositive.group('desc').strip()}"
+    else:
+        named = _THIS_IS_NAME_RE.match(text.strip())
+        if named:
+            text = f"{named.group('name')} is {named.group('desc').strip()}"
     text = text.strip()
+    if text == (sentence or "").strip():
+        # Nothing removed: the value stays exactly as it was ("thirty minutes
+        # (replaces four hours ...)" was printed as "Thirty minutes ...").
+        return text
     return text[:1].upper() + text[1:]
 
 

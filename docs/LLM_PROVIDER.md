@@ -19,6 +19,8 @@ extraction, `context_mapper.py`'s classification verification) calls through
 | `LLM_RETRY_MAX_DELAY_SECONDS` | Cap on any single retry's backoff | `60` |
 | `LLM_MAX_CALLS_PER_MINUTE` | Proactive throttle ceiling, **requests**/min per provider | `20` |
 | `LLM_MAX_TOKENS_PER_MINUTE` | Proactive throttle ceiling, **tokens**/min per provider. `0` = off (opt-in; see below) | `0` |
+| `LLM_MAX_CALLS_PER_KT` | Live requests one KT may send; later ones are skipped and counted (cache hits are free) | `0` (no limit) |
+| `LLM_CACHE` | `readwrite`, `read`, `off`, or `replay` (answer only from recorded responses, never send) | `readwrite` |
 
 **Setting `GROQ_API_KEY` alone does not route calls to Groq** — `LLM_PROVIDER`
 must also be set to `groq`, or `create_llm_provider()` defaults to Gemini

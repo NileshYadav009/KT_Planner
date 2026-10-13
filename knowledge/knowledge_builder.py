@@ -9,13 +9,45 @@ from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, smart_title
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap
+from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap,
+                      without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
 
 
 def _short_quote(text: str, limit: int = 140) -> str:
     text = re.sub(r"\s+", " ", (text or "").strip())
     return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+_TOPIC_WORD_STOP = {"and", "the", "or", "of", "for", "time", "path", "links", "procedure", "plan"}
+
+# Topics an incoming engineer acts on. When a section was discussed but one
+# of these was not, the section itself says so, not only the coverage matrix
+# pages later: "If you see that again, check the pool metrics first" under
+# Common Failures & Fixes otherwise reads as the fix.
+_ACTION_TOPICS = {
+    "common_failures": ("Fixes or workarounds",),
+    "deployment_and_rollback": ("Rollback procedure", "Rollback time and approval"),
+    "disaster_recovery": ("RTO", "RPO", "Backups", "Failover / standby"),
+    "ownership_escalation": ("Owning teams", "Escalation path"),
+    "monitoring_observability": ("Paging and alert routing",),
+}
+
+
+def _filled_value(field: Any) -> bool:
+    if not isinstance(field, dict):
+        return False
+    if "value" not in field:  # a group of fields
+        return any(_filled_value(v) for v in field.values())
+    return field.get("source", "unfilled") != "unfilled" and field.get("value") not in (None, "", [], {})
+
+
+def _named_in(topic: str, gap_sentences: List[str]) -> bool:
+    """True when a stated gap names the topic ("RTO" in "Our RTO and RPO
+    have never been documented")."""
+    words = [w for w in re.findall(r"[A-Za-z][\w-]{2,}", topic) if w.lower() not in _TOPIC_WORD_STOP]
+    return bool(words) and any(re.search(r"\b" + re.escape(w) + r"\b", s, re.IGNORECASE)
+                               for w in words for s in gap_sentences)
 from renderers.blocks.common import split_bullet_blob
 
 UNMAPPED_FINDINGS_SECTION_ID = "unmapped_findings"
@@ -1163,7 +1195,9 @@ def enrich_architecture_knowledge(
     for text in descriptive_sentences:
         parts = split_bullet_blob([text]) or [text]
         for part in parts:
-            part = part.strip()
+            # Printed as written, so without the session's framing ("Today
+            # I'm handing over Shopfront, our ..." -> "Shopfront is our ...").
+            part = without_session_framing(part.strip())
             if part:
                 expanded.append(part)
 
@@ -1461,9 +1495,21 @@ def append_coverage_matrix_section(
                 if elsewhere:
                     where = sorted({titles.get(w, w) for _, _, w in elsewhere})
                     assessment += f" ({len(elsewhere)} under {', '.join(where)})"
+                # "Our RTO and RPO have never been documented" discusses RTO
+                # and RPO: they are known to be unknown, not undiscussed.
+                unknown = [m for m in missing if _named_in(m, stated_gaps)]
+                missing = [m for m in missing if m not in unknown]
+                if unknown:
+                    assessment += f"; stated as not documented: {', '.join(unknown)}"
                 assessment += f"; not discussed: {', '.join(missing)}." if missing else "."
                 if missing:
                     gaps.append(f"{title}: {', '.join(missing)}")
+                action_gaps = [m for m in missing if m in _ACTION_TOPICS.get(section_id, ())]
+                # Shown content: its own statements or a value filled from
+                # elsewhere ("On-call tool: PagerDuty" with no owner named).
+                shows_values = any(_filled_value(v) for v in field_objects.values())
+                if action_gaps and (own_texts or shows_values):
+                    knowledge_object.setdefault("_not_stated", {})[section_id] = action_gaps
         else:
             if not (texts or sentence_count):
                 bucket = "Missing"

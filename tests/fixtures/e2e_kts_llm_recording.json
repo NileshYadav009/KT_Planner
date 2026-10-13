@@ -1,0 +1,463 @@
+{
+ "recorded_with": {
+  "provider_setting": "groq",
+  "model": "qwen/qwen3.8-27b",
+  "requests": 45,
+  "tenant": "t_eced34cf4400",
+  "settings": {
+   "LLM_BATCH_CALLS": "1"
+  }
+ },
+ "responses": [
+  {
+   "key": "c4f1b4505d9b8289a0d4de6058b8069347d6d2fdcb49cd041ccdcb750fa5fb0f",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. GitHub Actions builds the images.\n2. GitHub Actions pushes the images to ECR.\n3. ArgoCD deploys the images to EKS.",
+   "input_tokens": 249,
+   "output_tokens": 35,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "3bb70d6d3d9ccdf1eac2fd7ffa818f8cdce50194a63445fb5aa1e044643936ab",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "This document covers the handover of Shopfront, the AWS-based e-commerce platform that processes all customer orders. Customers interact with the React storefront, which is served via CloudFront to an Application Load Balancer positioned in front of the EKS cluster. The services running on EKS rely on RDS PostgreSQL for order data and Redis for sessions and carts.",
+   "input_tokens": 230,
+   "output_tokens": 72,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "56970e62ea4764de71a2512dbf2bd61d34a3f556f94e4fa42a1f217e0a5232eb",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"tools\": [\n    \"Prometheus\",\n    \"Grafana\",\n    \"PagerDuty\"\n  ],\n  \"first_response_steps\": [],\n  \"alert_routing\": \"PagerDuty pages the on-call engineer\"\n}",
+   "input_tokens": 103,
+   "output_tokens": 57,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "e55f0e57c9c40ba59a0181cbaeecd1d332070d6a103c753edd90a8b2138c2246",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"rto_steps\": null,\n  \"rpo_steps\": \"RDS daily backups\\n30-day retention\",\n  \"known_failure_scenarios\": null,\n  \"recovery_contact\": null,\n  \"dr_testing_frequency\": \"quarterly\"\n}",
+   "input_tokens": 315,
+   "output_tokens": 61,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "a313ab38bdf8402d6e2df3f50ec58c03cd680e112f72ee2bac92298bd6d0f753",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"oncall_tool\": null,\n  \"escalation_chain\": null,\n  \"application_ownership\": \"Developers\",\n  \"infrastructure_ownership\": \"Platform Engineering\",\n  \"operational_escalation_guidance\": null\n}",
+   "input_tokens": 330,
+   "output_tokens": 57,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "c41effb5b3aef522b4902e5d7e4c541594e2a708360dac877515c4912ce2fb63",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"failures\": [\n    {\n      \"symptom\": \"Database connection exhaustion on RDS\",\n      \"condition\": null,\n      \"cause\": null,\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": \"most common\",\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": null,\n      \"resolution\": null,\n      \"preventive_action\": null\n    },\n    {\n      \"symptom\": \"Pods fail to start\",\n      \"condition\": \"Because a Kubernetes secret reference is wrong\",\n      \"cause\": \"Kubernetes secret reference is wrong\",\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": \"most common\",\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": null,\n      \"resolution\": null,\n      \"preventive_action\": null\n    }\n  ]\n}",
+   "input_tokens": 753,
+   "output_tokens": 213,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "32155a25a45448c2fa0d5ef6335c482f0f53671be4a8b82933200fc619885571",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. Takes every customer order | EXPLICIT\n2. B2C | INFERRED\n3. NOT_MENTIONED | NOT_MENTIONED\n4. NOT_MENTIONED | NOT_MENTIONED\n5. NOT_MENTIONED | NOT_MENTIONED\n6. Takes every customer order | EXPLICIT\n7. NOT_MENTIONED | NOT_MENTIONED\n8. NOT_MENTIONED | NOT_MENTIONED\n9. NOT_MENTIONED | NOT_MENTIONED\n10. Customers | EXPLICIT\n11. NOT_MENTIONED | NOT_MENTIONED\n12. NOT_MENTIONED | NOT_MENTIONED",
+   "input_tokens": 584,
+   "output_tokens": 136,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "f9acdcd155fcdadab76e29489f9fce5fa967ea78f0597a69deeee29fc81c4ebe",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT\n4. NOT_MENTIONED | EXPLICIT\n5. NOT_MENTIONED | EXPLICIT\n6. NOT_MENTIONED | EXPLICIT\n7. NOT_MENTIONED | EXPLICIT\n8. NOT_MENTIONED | EXPLICIT\n9. NOT_MENTIONED | EXPLICIT\n10. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 479,
+   "output_tokens": 101,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "993a5bb737c90c650b4ea9d8de19386ee2dfe73e80ef6579d2490035ce2464c3",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "Staging uses mocked payment integrations, so a passing staging test does not prove the real card provider works.",
+   "input_tokens": 187,
+   "output_tokens": 23,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "234d2d5ba98820ba74862493a566fbda2798a528feeaabfe564d19bb09c8242e",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"rto_steps\": null,\n  \"rpo_steps\": null,\n  \"known_failure_scenarios\": null,\n  \"recovery_contact\": null,\n  \"dr_testing_frequency\": null\n}",
+   "input_tokens": 306,
+   "output_tokens": 49,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "1a9f494013308fff6424ff692086be8ab29eda0d34c6a8d1bc4a50a85707ad1f",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"security_scan_config\": null,\n  \"vault_configuration\": \"Key Vault\",\n  \"security_issues\": null\n}",
+   "input_tokens": 181,
+   "output_tokens": 30,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "1a474814511b8cf61fee51412316b621a0fc2afe0509fa2ba1f2126f9da6f6de",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"tools\": [\n    \"Azure Monitor\",\n    \"Application Insights\",\n    \"PagerDuty\"\n  ],\n  \"first_response_steps\": [\n    \"Receive page from PagerDuty\",\n    \"Check metrics and traces in Azure Monitor and Application Insights\"\n  ],\n  \"alert_routing\": \"PagerDuty pages the on-call engineer\"\n}",
+   "input_tokens": 107,
+   "output_tokens": 83,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "881ad0edc50777cc757a83be73f9a897c7a867dbd8a17bf831d0d1f31afb6ade",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"failures\": [\n    {\n      \"symptom\": \"Service Bus backlog\",\n      \"condition\": \"When the settlement consumer falls behind\",\n      \"cause\": null,\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": null,\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": null,\n      \"resolution\": null,\n      \"preventive_action\": null\n    },\n    {\n      \"symptom\": \"SQL connection exhaustion\",\n      \"condition\": \"During sales peaks\",\n      \"cause\": null,\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": null,\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": null,\n      \"resolution\": null,\n      \"preventive_action\": null\n    }\n  ]\n}",
+   "input_tokens": 748,
+   "output_tokens": 201,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "b9787233a709cb9d7ba69bef5d0f73f220a0bb4f90d2d5c67db3fd0235c2a636",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 330,
+   "output_tokens": 30,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "c9c9d540656d2115800eefa015f7488a5ea841d897968f6d3fc2abfcff35c2b9",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "This is Streamline, our GCP data platform for clickstream analytics.",
+   "input_tokens": 180,
+   "output_tokens": 16,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "9453e474df87eaacbf0a744fdfb6ecf617b6881a57185f64c50585ae1dc67776",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"failures\": [\n    {\n      \"symptom\": \"Pub/Sub backlog\",\n      \"condition\": null,\n      \"cause\": null,\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": \"most common\",\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": \"unacknowledged messages pile up\",\n      \"resolution\": null,\n      \"preventive_action\": null\n    },\n    {\n      \"symptom\": \"Dataflow jobs fail\",\n      \"condition\": null,\n      \"cause\": null,\n      \"first_checks\": null,\n      \"fix\": null,\n      \"frequency\": \"most common\",\n      \"ticket\": null,\n      \"when\": null,\n      \"impact\": \"stop processing\",\n      \"resolution\": null,\n      \"preventive_action\": null\n    }\n  ]\n}",
+   "input_tokens": 756,
+   "output_tokens": 206,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "3d9707885d8d4acb695fbaf50aefdaf8c4f47a4423e0348f4aa8474678e575b2",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"tools\": [\n    \"Cloud Monitoring\",\n    \"Grafana\"\n  ],\n  \"first_response_steps\": [],\n  \"alert_routing\": null\n}",
+   "input_tokens": 96,
+   "output_tokens": 41,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "859149ad279cb468fdad812115ceb358646487de29c795d436bb067b94d27720",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"security_scan_config\": null,\n  \"vault_configuration\": \"Secret Manager\",\n  \"security_issues\": null\n}",
+   "input_tokens": 171,
+   "output_tokens": 30,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "15d37a29208987432db81da9dd1a868a994fb7f7ee9ac25451a9a849453eadc6",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | NOT_MENTIONED\n2. NOT_MENTIONED | NOT_MENTIONED\n3. NOT_MENTIONED | NOT_MENTIONED\n4. NOT_MENTIONED | NOT_MENTIONED\n5. NOT_MENTIONED | NOT_MENTIONED\n6. NOT_MENTIONED | NOT_MENTIONED\n7. NOT_MENTIONED | NOT_MENTIONED\n8. NOT_MENTIONED | NOT_MENTIONED\n9. NOT_MENTIONED | NOT_MENTIONED\n10. NOT_MENTIONED | NOT_MENTIONED\n11. NOT_MENTIONED | NOT_MENTIONED\n12. NOT_MENTIONED | NOT_MENTIONED",
+   "input_tokens": 440,
+   "output_tokens": 147,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "c36498ac3a904e9283da32e2cb460d0ba0abbb03d20c85d9ac2a614abcc042b4",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. GCP | EXPLICIT",
+   "input_tokens": 304,
+   "output_tokens": 8,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "c5ef97283abb67d3935aef4138f3a5e888b7dbca3ac232ec4f8efc571c205320",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "This is a quick handover for the orders API, which serves order history to the mobile app.",
+   "input_tokens": 185,
+   "output_tokens": 21,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "b5d87e64b2bfff1a14f163a2053fab5610a7d23edcd44673e3b9875fe3bcaa5f",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "- It is a small API running on Kubernetes, and it uses PostgreSQL and Redis.",
+   "input_tokens": 181,
+   "output_tokens": 18,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "2e9d95f5c4c6687773b33db33ab467861d51f25802b2f7cc924edd3a9e43ae2d",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "A staging cluster is also available, though the specific differences between it and the other environments are not currently documented.",
+   "input_tokens": 183,
+   "output_tokens": 23,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "669b66b37c85f6b933d2483c247bf9f81ce64e21065727eb7515c95d21cb2bc7",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\"tools\": [\"Grafana\"], \"first_response_steps\": [\"Check service health in Grafana\"], \"alert_routing\": null}",
+   "input_tokens": 93,
+   "output_tokens": 28,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "677dce8e34bc10f8ebc988ae2fcb8af260669d646cb3be9a09fb61a8dde3dde1",
+   "call_site": "structured_extraction",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "{\n  \"failures\": [\n    {\n      \"symptom\": \"Database ran out of connections\",\n      \"condition\": null,\n      \"cause\": null,\n      \"first_checks\": \"Pool metrics\",\n      \"fix\": null,\n      \"frequency\": null,\n      \"ticket\": null,\n      \"when\": \"A couple of months ago\",\n      \"impact\": null,\n      \"resolution\": null,\n      \"preventive_action\": null\n    }\n  ]\n}",
+   "input_tokens": 756,
+   "output_tokens": 112,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "fce065482a5bba7c023dae4521c50c005582862924f39fbb8ef82c85327d0a3b",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 283,
+   "output_tokens": 10,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "1045d183ea52966ad2a6590754122350d69eb7aa94254484751de82edf6e8f2e",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 322,
+   "output_tokens": 30,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "ba286ef29350fe2048f841b55fc574d47fcdd6c14241e2788ee141dccb3a2afd",
+   "call_site": "classification_check",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1: NONE\n2: system_overview\n3: deployment_and_rollback\n4: architecture_reference\n5: danger_zones\n6: monitoring_observability\n7: common_failures\n8: disaster_recovery\n9: disaster_recovery\n10: ownership_escalation",
+   "input_tokens": 1680,
+   "output_tokens": 58,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "ca34827437c8fb88cb08c8b672f33e0712727f0919116179762c1e1c25c68f3b",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "All infrastructure is defined in Terraform.",
+   "input_tokens": 173,
+   "output_tokens": 9,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "23e3dd36e5b0e6704d8cabc1cdb3e35bf4dfbe3d44b015b6f4686bb5de4174ad",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 275,
+   "output_tokens": 10,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "5a2b018704c4d4fc5e91304f2bc5ac9016491c53514fba7301624e2320ebcd80",
+   "call_site": "classification_check",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1: system_overview\n2: system_overview\n3: deployment_and_rollback\n4: security_controls\n5: monitoring_observability\n6: common_failures\n7: disaster_recovery\n8: environments\n9: disaster_recovery",
+   "input_tokens": 1513,
+   "output_tokens": 51,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "6383c9dde643d22575187d4f9a9684656befbf1a97f370df8049ea35efc9d9e2",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "This document serves as the handover for Paygate, the Azure payment platform that authorises card payments for our online stores.\n\nThe React frontend goes through Azure Front Door to an Application Gateway, which routes traffic to our AKS cluster. The .NET services on AKS depend on Azure SQL, Azure Cache for Redis and Service Bus.",
+   "input_tokens": 232,
+   "output_tokens": 69,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "c7c217661be5d074271cb5236db334e2f86b178189b30ef6428831574a8e01ea",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "**Trigger:** Azure DevOps pipelines build the images and push them to ACR, and Flux syncs the releases to AKS.",
+   "input_tokens": 250,
+   "output_tokens": 28,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "ee5cce3fd557214a24cae7f8fbf439023adacc07dbfa381da37595dee7be5028",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. Authorises card payments for our online stores | EXPLICIT\n2. B2C | INFERRED\n3. NOT_MENTIONED | NOT_MENTIONED\n4. NOT_MENTIONED | NOT_MENTIONED\n5. NOT_MENTIONED | NOT_MENTIONED\n6. Authorises card payments for our online stores | EXPLICIT\n7. NOT_MENTIONED | NOT_MENTIONED\n8. NOT_MENTIONED | NOT_MENTIONED\n9. NOT_MENTIONED | NOT_MENTIONED\n10. NOT_MENTIONED | NOT_MENTIONED\n11. NOT_MENTIONED | NOT_MENTIONED\n12. NOT_MENTIONED | NOT_MENTIONED",
+   "input_tokens": 562,
+   "output_tokens": 149,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "ba8afc58047de4162eb059bde1149530edf8f23404189434ffae1c30ca7a7ac5",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT\n4. NOT_MENTIONED | EXPLICIT\n5. NOT_MENTIONED | EXPLICIT\n6. NOT_MENTIONED | EXPLICIT\n7. NOT_MENTIONED | EXPLICIT\n8. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 386,
+   "output_tokens": 80,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "4e6df25dedb29b3206c78694fc4493d156af34746293e0931592f9fc98508fbf",
+   "call_site": "classification_check",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1: system_overview\n2: architecture_reference\n3: architecture_reference\n4: architecture_reference\n5: deployment_and_rollback\n6: security_controls\n7: monitoring_observability\n8: common_failures\n9: danger_zones",
+   "input_tokens": 1277,
+   "output_tokens": 51,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "0566ebced5e7e27cecb20bf0b45beab3c3f534c60b004a0c0f4daaa6ede93a5f",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. **Trigger:** Terraform manages the infrastructure, GitHub Actions builds the images, and ArgoCD deploys them to GKE.",
+   "input_tokens": 249,
+   "output_tokens": 29,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "4f9509bf0e3d94019da388da907464bc249ca56aa0ca622c9cd2875e956d98bc",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "- Events are published to Pub/Sub, processed by Dataflow jobs, and the results are stored in BigQuery.\n- Raw files are retained in Cloud Storage for 90 days.\n- The ingestion services run on GKE.",
+   "input_tokens": 211,
+   "output_tokens": 49,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "837cc5e34d30942f40afdf07b944229d8d0e470e2a21c749525cf9cf4c296f44",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 382,
+   "output_tokens": 30,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "eb45801db8a0786ccc8ece60a3fa8872cc047ffdc9801d350d587d9cf0895d08",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT\n4. NOT_MENTIONED | EXPLICIT\n5. NOT_MENTIONED | EXPLICIT\n6. NOT_MENTIONED | EXPLICIT\n7. NOT_MENTIONED | EXPLICIT\n8. NOT_MENTIONED | EXPLICIT\n9. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 464,
+   "output_tokens": 90,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "1fac60c6b93c765a3b6913045762fdf0c07dfef1b7334d835f86f667331b2354",
+   "call_site": "classification_check",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1: system_overview\n2: architecture_reference\n3: deployment_and_rollback\n4: monitoring_observability\n5: common_failures\n6: common_failures\n7: deployment_and_rollback\n8: danger_zones\n9: environments\n10: handover_completion",
+   "input_tokens": 1288,
+   "output_tokens": 60,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "465e866834716f9d1ecdabdd0745d225d615b95bc1509dad6339f5dbc562299f",
+   "call_site": "section_polish",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "**Deployment Steps**\n\n1. GitHub Actions builds the images.\n2. ArgoCD deploys them.\n\n**Rollback**\n\n**Rollback trigger:** Usually quick.\n**Action:** Rolling back.\n**Target time:** Not specified.",
+   "input_tokens": 247,
+   "output_tokens": 53,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "a6731e4b275860e2b18656c21ca68d30dc682fde49f1bd42cbf6392f7527d433",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. Serves order history to the mobile app | EXPLICIT\n2. B2C | INFERRED\n3. NOT_MENTIONED | NOT_MENTIONED\n4. NOT_MENTIONED | NOT_MENTIONED\n5. NOT_MENTIONED | NOT_MENTIONED\n6. Serves order history to the mobile app | EXPLICIT\n7. NOT_MENTIONED | NOT_MENTIONED\n8. NOT_MENTIONED | NOT_MENTIONED\n9. NOT_MENTIONED | NOT_MENTIONED\n10. NOT_MENTIONED | NOT_MENTIONED\n11. NOT_MENTIONED | NOT_MENTIONED\n12. NOT_MENTIONED | NOT_MENTIONED",
+   "input_tokens": 445,
+   "output_tokens": 149,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "87e518ae8af36e9d6076668641bda2485633c9d273c6d65bf7b8a700cfadca04",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT",
+   "input_tokens": 370,
+   "output_tokens": 20,
+   "tenant": "t_eced34cf4400"
+  },
+  {
+   "key": "89a003c46c5312b95bfa2477eafc25c14ae2fe84ea508e38f3a686d36669de43",
+   "call_site": "field_fill",
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "response": "1. NOT_MENTIONED | EXPLICIT\n2. NOT_MENTIONED | EXPLICIT\n3. NOT_MENTIONED | EXPLICIT\n4. NOT_MENTIONED | EXPLICIT\n5. NOT_MENTIONED | EXPLICIT\n6. NOT_MENTIONED | EXPLICIT\n7. NOT_MENTIONED | EXPLICIT\n8. NOT_MENTIONED | EXPLICIT\n9. Quick | EXPLICIT",
+   "input_tokens": 450,
+   "output_tokens": 87,
+   "tenant": "t_eced34cf4400"
+  }
+ ]
+}

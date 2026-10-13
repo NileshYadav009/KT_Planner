@@ -132,3 +132,28 @@ def test_the_documents_wording_of_a_fact_still_finds_what_was_said():
     # The system's own name in a row does not pull in the sentences that name the platform.
     assert pairs[next(k for k in pairs if k.startswith("GCP Data Platform runs"))] == ["GKE is used for Kubernetes workloads."]
     assert not any(q.startswith("That concludes") for qs in pairs.values() for q in qs)
+
+
+def test_a_fact_with_no_source_is_marked_in_the_pdf_and_gap_notes_are_not_facts():
+    """An LLM restatement no sentence supports ('Receive page from PagerDuty')
+    printed exactly like a stated fact; a section's note on what the KT left
+    out names topics and states nothing."""
+    from pdf_rendering import render_pdf_html
+
+    ko = _ko({"type": "ChecklistBlock", "title": "First response", "items": [
+        "Alerts go to PagerDuty.", "Rotate the database password from the admin console.",
+        "Not covered in the KT session: Fixes or workarounds (confirm with the outgoing owner)."]})
+    stats = attach_evidence(ko, transcript_sentences("", SEGMENTS))
+    assert (stats["stated"], stats["unsourced"]) == (1, 1)
+    assert ko["rendered_sections"][0]["blocks"][0]["unsourced"] == [1]
+    html = render_pdf_html("Payments", "job", ko["rendered_sections"], {}, "6 October 2026", sources=ko["sources"])
+    assert html.count('<sup class="src-ref src-none">no source</sup>') == 1
+
+
+def test_a_numbered_labelled_step_is_linked_to_the_sentence_it_repeats():
+    """'1. **Trigger:** <sentence>' had no source: the list's own '1' was
+    treated as a number the session must have said."""
+    ko = _ko({"type": "ChecklistBlock", "title": "Steps", "items": [
+        "1. **Trigger:** Alerts go to PagerDuty, and the on-call rotation is weekly."]})
+    stats = attach_evidence(ko, transcript_sentences("", SEGMENTS))
+    assert (stats["stated"], stats["unsourced"]) == (1, 0)

@@ -20,7 +20,7 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "system_overview": [
         ("Purpose", ("what_it_does", "problem_solved", "system_name"),
          r"\b(?:this\s+(?:kt|handover)\s+(?:is\s+for|covers)|handing\s+over|taking\s+over|responsible\s+for|"
-         r"handles|processes|sends|lets|allows|is\s+(?:the|our)\s+\w+)\b"),
+         r"handles|processes|sends|lets|allows|serves|takes|authori[sz]es|powers|is\s+(?:the|our)\s+\w+)\b"),
         ("Users and reach", ("users", "customer_reach", "who_affected"),
          r"\b(?:used\s+by|customers?|users|clients|travell?ers|hospitals|businesses|teams?\s+use)\b"),
         ("Business criticality and impact",
@@ -63,7 +63,14 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:test\w*\s+(?:the\s+)?(?:failover|restores?|recovery|dr)|(?:failover|restore|recovery|dr)\s+(?:test|drill)\w*)\b"),
     ],
     "security_controls": [
-        ("Secrets management", ("vault_configuration",), r"\b(?:secrets?|key\s+vault|vault|kms|credentials?)\b"),
+        # Where secrets are kept and how they reach the system, not any
+        # mention of a secret: "pods fail to start because a Kubernetes
+        # secret reference is wrong" (a failure) counted as Security coverage.
+        ("Secrets management", ("vault_configuration",),
+         r"\b(?:key\s+vault|vault|kms|secrets?\s+manager|secret\s+manager)\b"
+         r"|\b(?:secrets?|credentials?|passwords?|api\s+keys?)\s+(?:are\s+|is\s+)?(?:all\s+)?(?:stored|kept|managed|"
+         r"rotated|held|injected|loaded|pulled|read|fetched|live|lives|come|comes)\b"
+         r"|\b(?:stor\w*|keep\w*|manag\w*|rotat\w*)\s+(?:the\s+|all\s+|our\s+)?(?:secrets?|credentials?)\b"),
         ("Access control", (),
          r"\b(?:access|iam|rbac|least\s+privilege|permissions?|service\s+accounts?|workload\s+identity|sso)\b"),
         ("Security scanning", ("security_scan_config",),
@@ -135,7 +142,12 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     ],
     "open_responsibilities": [
         ("Open work", ("open_tasks",),
-         r"\b(?:not\s+yet|still\s+open|pending|in\s+progress|no\s+owner|nobody\s+has|unfinished|migration)\b"),
+         # A migration under way, not any mention of one: "the last database
+         # migration might be hard to reverse" (a warning) was listed as open work.
+         r"\b(?:not\s+yet|still\s+open|pending|in\s+progress|no\s+owner|nobody\s+has|unfinished)\b"
+         r"|\b(?:ongoing|planned|pending|unfinished|half[\s-]done|in[\s-]flight)\s+(?:\w+\s+)?migration\b"
+         r"|\bmigrat(?:e|es|ing|ion)\s+(?:off|away\s+from)\b|\bmigrating\s+(?:to|from)\b"
+         r"|\bmigration\s+(?:is|was)\s+(?:not\s+(?:yet\s+)?(?:done|finished|complete)|still|half|planned|scheduled)\b"),
         ("Recurring duties", ("recurring_responsibilities",),
          r"\b(?:every\s+(?:week|month|day|quarter)|weekly|monthly|recurring|renew\w*|rotat\w*)\b"),
     ],

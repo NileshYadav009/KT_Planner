@@ -3,6 +3,7 @@ exact-response cache first and (2) counted against the current KT's usage
 tracker. Prompts, parameters and the returned text are passed through
 unchanged; on a miss the real provider is called exactly as before.
 """
+import os
 import sys
 import time
 from typing import Any, Optional
@@ -34,6 +35,24 @@ def infer_call_site(max_depth: int = 12) -> str:
         frame = frame.f_back
         depth += 1
     return "other"
+
+
+class LLMNotRecorded(RuntimeError):
+    """LLM_CACHE=replay and the request has no stored response."""
+
+
+class LLMBudgetExhausted(RuntimeError):
+    """This KT has already sent LLM_MAX_CALLS_PER_KT requests."""
+
+
+def max_calls_per_kt() -> int:
+    """LLM_MAX_CALLS_PER_KT: live requests one KT may send (0 = no limit).
+    Requests past it are skipped and the call sites keep their rules-only
+    results, so a daily quota cannot be emptied by one long KT."""
+    try:
+        return max(0, int(os.getenv("LLM_MAX_CALLS_PER_KT", "0") or 0))
+    except ValueError:
+        return 0
 
 
 def _provider_name(provider: Any) -> str:
@@ -74,8 +93,19 @@ class CachedLLMProvider:
         hit = cache.get(key)
         if hit is not None:
             if tracker is not None:
-                tracker.record_cache_hit(call_site, input_tokens=hit["input_tokens"], output_tokens=hit["output_tokens"])
+                tracker.record_cache_hit(call_site, input_tokens=hit["input_tokens"], output_tokens=hit["output_tokens"],
+                                         provider=provider, model=model)
             return hit["response"]
+        if cache.cache_mode() == "replay":
+            # Offline run of recorded output: an unrecorded request is never
+            # sent. The call site takes its rules-only path, as on any failure.
+            if tracker is not None:
+                tracker.record_skip(call_site, "replay: response not recorded")
+            raise LLMNotRecorded("LLM_CACHE=replay and this request was not recorded")
+        limit = max_calls_per_kt()
+        if limit and tracker is not None and tracker.live_calls() >= limit:
+            tracker.record_skip(call_site, f"per-KT LLM call budget ({limit}) reached")
+            raise LLMBudgetExhausted(f"LLM_MAX_CALLS_PER_KT={limit} reached for this KT")
 
         reset_call_stats()
         started = time.time()
