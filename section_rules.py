@@ -35,6 +35,9 @@ def _data_components() -> str:
 
 _DATA_COMPONENTS = _data_components()
 
+# Infrastructure-as-code tools, for "Infrastructure is written in Bicep".
+_IAC = r"(?:terraform|opentofu|bicep|pulumi|cloudformation|arm\s+templates?|(?:aws\s+)?cdk|crossplane|ansible)"
+
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "danger_zones",
@@ -193,6 +196,35 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bflux\s+(?:syncs?|deploys?|reconciles?|applies)\b",
             r"\b(?:builds?|built|building)\s+the\s+(?:container\s+|docker\s+)?images?\b",
             r"\bpush(?:es|ed|ing)?\s+(?:them|the\s+(?:container\s+)?images?)\s+to\b",
+        ],
+        0.94,
+    ),
+    (
+        # A statement that is only about the infrastructure-as-code tool
+        # ("Infrastructure is written in Bicep.", "Terraform manages
+        # infrastructure."): what the platform is built with. The whole
+        # sentence must be that statement. Matched inside a longer one, the
+        # rule decided the section for everything else in it, and moved those
+        # facts as well: "Cloud Build deploys to Cloud Run" in "Everything is
+        # in Terraform, and Cloud Build deploys ...", a canary release chunked
+        # after "The infrastructure is in Terraform, applied from Cloud Build",
+        # "GKE is used for Kubernetes workloads" chunked before "Terraform
+        # manages infrastructure". Those keep the classifier's placement. It
+        # needs the infrastructure itself, so rebuilding from the tool (DR)
+        # and its state (Danger Zones) keep their own rules.
+        "architecture_reference",
+        [
+            r"^\W*(?:"
+            r"(?:all\s+(?:of\s+)?(?:the\s+|our\s+)?|the\s+|our\s+)?(?:infrastructure|infra|everything|"
+            r"(?:whole\s+|entire\s+)?stack)\s+(?:is|are)\s+(?:all\s+)?(?:(?:written|defined|managed|provisioned|"
+            r"described|declared|codified|kept)\s+)?(?:(?:in|with|using|as|via)\s+)?" + _IAC +
+            r"|" + _IAC + r"\s+(?:manages|provisions|defines|describes|creates)\s+(?:all\s+(?:of\s+)?)?"
+            r"(?:the\s+|our\s+)?(?:infrastructure|infra|cloud\s+resources)"
+            r"|(?:we\s+)?(?:manage|provision|define)s?\s+(?:the\s+|our\s+|all\s+(?:the\s+|our\s+)?)?(?:infrastructure|infra)\s+"
+            r"(?:with|in|using|through)\s+" + _IAC +
+            r"|(?:we\s+)?(?:use|uses|using)\s+" + _IAC + r"\s+(?:for|to\s+(?:manage|provision|define|build))\s+"
+            r"(?:the\s+|our\s+|all\s+(?:the\s+|our\s+)?)?(?:infrastructure|infra)"
+            r")[\s.!]*$",
         ],
         0.94,
     ),
@@ -986,6 +1018,12 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
         raw = (cs.sentence.raw_text or cs.sentence.text or "").strip()
         text = (cs.sentence.text or "").strip()
         if not text:
+            continue
+        # Half of a two-topic sentence: split off because its own rule claims
+        # it for another section. Its raw text starts lowercase ("all secrets
+        # are stored in Key Vault"), which read as a cut-off fragment and sent
+        # it back to the section it had been split from.
+        if getattr(cs.sentence, "split_clause", False):
             continue
         own_rule = match_section_rules(text)
         # Only an explicit safety prohibition outranks the sentence's

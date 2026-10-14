@@ -3966,6 +3966,96 @@ Running `fetch_models.py --verify` inside a running container loads every
 model a second time. On the 6 GB Docker Desktop VM that got the container
 OOM-killed. It is a build-time check, not something to run beside the app.
 
+### 9aad. KT improvements from the pending list (13-14 Oct)
+
+The user asked to work through the open KT-quality items in order and to be
+asked where a decision was theirs. Measured on the golden suite (tuning set
+and blind holdouts, no LLM) and the four e2e KTs. Each run was compared with
+a baseline from the same morning, using per-document hashes of every
+rendered section's text.
+
+1. **One sentence, two facts.**
+   - The problem: "Infrastructure is written in Bicep, and all secrets are
+     stored in Key Vault" went to Security whole. This was B07, the last e2e
+     checklist failure.
+   - The split: `context_mapper.split_two_topic_sentence` splits a sentence
+     at its one ", and" or ";", but only when routing rules (>= 0.94) claim
+     both halves for different sections. A wider gate (a rule on one half
+     only) would have split 31 sentences in the tuning corpus. Most of those
+     splits were wrong ("The symptom is slow checkout, and the fix is ...").
+   - A new standalone rule: an infrastructure-as-code statement goes to
+     Architecture. It matches only when the whole sentence is that
+     statement. Routed to Deployment, the rule pulled g11's "GKE is used for
+     Kubernetes workloads", chunked with "Terraform manages infrastructure.".
+     Matched inside longer sentences, it moved g03's "Cloud Build deploys
+     ..." and h10's canary release. Each attempt was caught by the golden
+     suite and reverted.
+   - A second fix: the continuation rules treated a raw text starting
+     lowercase as a cut-off fragment ("all secrets are ..."), so they sent
+     the split half back to Deployment. Split halves are now marked
+     (`Sentence.split_clause`) and skipped.
+2. **A queue with no named sender.**
+   - "Events are published to Pub/Sub" was drawn as the system publishing.
+     At the user's choice, the arrow is now dashed, with a note on the
+     diagram, and the connections table says "(sender not stated in the
+     KT)".
+   - This applies only to queues and topics. Data stores keep the solid
+     line ("Raw files are kept in Cloud Storage").
+   - "... by the web trackers" names a sender that is not a component, so
+     no line is drawn from the system.
+4. **Shorter PDFs.** These were the user's four choices, made at PDF time,
+   so they also apply to KTs re-downloaded later.
+   - Sections with nothing from the KT are listed once ("Not Covered in
+     This KT").
+   - The connections table prints "sentence N", linked to Sources, instead
+     of repeating the sentence.
+   - The coverage table gets column widths and tighter cells.
+   - With 9 pages or fewer, there is no contents page and the cover lists
+     the sections.
+   - The e2e KTs went from 13/14/12/12 pages to 10/11/10/8. The floors
+     (`tests/e2e_kts/floors.json`) are tightened to those numbers.
+5. **Repeated RTO line.**
+   - The problem: "Our RTO is two hours and our RPO is 30 minutes" printed
+     under "Additional details", although both values were already shown as
+     fields.
+   - The check: a sentence now counts as shown when every clause of it is
+     shown, and "our/we/you" are not content words. A clause of one content
+     word (a list item) does not count as a clause.
+6. **Stylesheet.**
+   - `body` used `--color-text` and `--color-background`, which were never
+     defined, so WeasyPrint dropped both declarations. They are now defined.
+   - `word-break: break-word` duplicated `overflow-wrap`, and is removed.
+   - `pre` blocks wrap instead of running off the page.
+12. **The GLiNER tokenizer warning is a false positive.** transformers 5.1
+    warns about any local tokenizer whose config lacks
+    `transformers_version`; mdeberta's (`deberta-v2`) has none. The
+    tokenizer is left unchanged unless `fix_mistral_regex=True` is passed.
+    No code change.
+
+Result:
+
+- Tuning goldens 100%, with scores identical to the baseline.
+- Blind holdouts 78/95, unchanged (aggregate only).
+- e2e: B went from 1 problem to 0, so all four KTs now have 0 problems.
+- Eight documents changed text without a score change. Those are the
+  repeated lines removed and the infrastructure-as-code statements now in
+  Architecture. In g04 and h01, the before/after section diff shows only
+  the removed repeats.
+- Full suite: 967 passed, 0 failed, 1 xfailed, 4 skipped (1 h 40 min).
+- The 4 skips are the e2e LLM replay tests. The changes alter the prompts,
+  so the recorded Groq answers no longer match. The fix is to re-record them
+  (`scripts/e2e_kts.py --api`, then `--export-recording`; about 45
+  requests) once the Groq key is rotated. Until then, LLM mode has no
+  offline regression check.
+
+Not done, needs the user:
+
+- Real anonymised KTs: a folder `C:\Users\dell\Continumm\real_kts\`, outside
+  the repo, was created for them.
+- LLM-mode accuracy, batching A/B, and Gemini: all wait on the rotated Groq
+  key (and a Gemini key).
+- Audio/video end to end.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

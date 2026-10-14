@@ -1317,3 +1317,26 @@ and torch's C++ headers are removed. The image went from a 3.25 GB download
 to 2.58 GB, and from 5.5 GB unpacked to 4.1 GB. Considered and rejected:
 headless OpenCV (ffmpeg needs the GL stack anyway), a static ffmpeg (security
 updates), no `.pyc` (slower starts), int8 Whisper (needs an audio check).
+
+## KT improvements from the pending list (audit §9aad, 13-14 Oct)
+
+- **Two-topic sentences are split** when routing rules claim both halves for
+  different sections. Infrastructure-as-code statements, when the whole
+  sentence is one, go to Architecture.
+- **Queue flows with no named sender** are drawn dashed and marked "sender
+  not stated in the KT".
+- **Short KTs give shorter PDFs**: one "Not covered" list, sentence numbers
+  in the connections table, a compact coverage table, and no contents page
+  at 9 pages or fewer. The e2e KTs went from 12-14 pages to 8-11.
+- **A sentence already shown clause by clause as fields is not repeated.**
+- **Three CSS bugs are fixed.**
+- **The GLiNER tokenizer warning** is documented as a false positive.
+
+Results:
+
+- Tuning goldens 100% (identical scores).
+- Blind holdouts 78/95 (unchanged).
+- All four e2e KTs at 0 problems.
+
+Waiting on the user: real KTs (folder `../real_kts/`), the rotated Groq
+key (LLM-mode accuracy, batching A/B), a Gemini key, and audio test files.

@@ -7,6 +7,9 @@
   --accent: #2563eb;
   --accent-dark: #1d4ed8;
   --danger: #dc2626;
+  /* body uses these; undefined, WeasyPrint dropped both declarations. */
+  --color-text: #1c2431;
+  --color-background: #ffffff;
 }
 
 @page {
@@ -200,7 +203,6 @@ table {
   table-layout: fixed;
 }
 th, td {
-  word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -230,6 +232,28 @@ table.wide-table th, table.wide-table td {
 #quick_reference .grid-table th:nth-child(3), #quick_reference .grid-table td:nth-child(3) { width: 17%; }
 #quick_reference .grid-table td:nth-child(3) { font-size: 0.82em; color: #6b7280; }
 #quick_reference .grid-table tr { break-inside: avoid; }
+
+/* Coverage assessment: the assessment gets the room. In equal thirds every
+   note wrapped to 5-7 lines and the table ran over two pages. */
+#kt_coverage .grid-table th:nth-child(1), #kt_coverage .grid-table td:nth-child(1) { width: 24%; }
+#kt_coverage .grid-table th:nth-child(2), #kt_coverage .grid-table td:nth-child(2) { width: 11%; }
+#kt_coverage .grid-table th:nth-child(3), #kt_coverage .grid-table td:nth-child(3) { width: 58%; }
+#kt_coverage .grid-table th, #kt_coverage .grid-table td { padding: 4px 8px; font-size: 0.9em; line-height: 1.35; }
+
+/* Connections: the last column is a sentence number, not the sentence, so
+   the names get the room ("Streamline (Google Kubernetes Engine)"). */
+table.connections-table th:nth-child(1), table.connections-table td:nth-child(1) { width: 33%; }
+table.connections-table th:nth-child(2), table.connections-table td:nth-child(2) { width: 20%; }
+table.connections-table th:nth-child(3), table.connections-table td:nth-child(3) { width: 33%; }
+table.connections-table th:nth-child(4), table.connections-table td:nth-child(4) { width: 14%; }
+table.connections-table th, table.connections-table td { padding: 5px 8px; }
+table.connections-table td.sentence-ref { white-space: nowrap; font-size: 0.85em; color: #6b7280; }
+
+/* Short documents list their sections on the cover instead of a contents page. */
+.cover-contents { margin-top: 2rem; font-size: 9.5pt; color: #374151; }
+.cover-contents-title { text-transform: uppercase; letter-spacing: 0.12em; color: #6b7280; margin: 0 0 0.4rem; }
+.cover-contents ol { margin: 0; padding-left: 1.3rem; columns: 2; column-gap: 1.5rem; }
+.cover-contents a { color: inherit; text-decoration: none; }
 
 th {
   background: #eef2ff;
@@ -300,7 +324,9 @@ pre {
   padding: 12px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  overflow-x: auto;
+  /* A page cannot scroll: a long line was cut off at the margin. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 code {

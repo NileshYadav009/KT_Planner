@@ -85,3 +85,27 @@ def test_general_phrasings_from_the_fourth_blind_round():
     for text, section in cases.items():
         rule = match_section_rules(text)
         assert rule and rule.section_id == section, (text, rule)
+
+
+def test_the_infrastructure_as_code_tool_is_an_architecture_fact():
+    # "Infrastructure is written in Bicep" matched no rule, so it went
+    # wherever the sentence it shared went (Security, with Key Vault).
+    for text in ["Infrastructure is written in Bicep", "Everything is defined in Bicep.",
+                 "All infrastructure is defined in Terraform.", "Terraform manages the infrastructure",
+                 "We manage the infrastructure with Pulumi", "We use Terraform for all our infrastructure"]:
+        match = match_section_rules(text)
+        assert match and match.section_id == "architecture_reference", text
+    # Only a sentence that is nothing else: inside a longer one the rule
+    # decided the section for the other facts too.
+    chain = "Terraform manages the infrastructure, GitHub Actions builds the images, and ArgoCD deploys them to GKE."
+    assert match_section_rules(chain).section_id == "deployment_and_rollback"
+    for text in ["Everything is in Terraform, and Cloud Build deploys to Cloud Run on every merge to main.",
+                 "The infrastructure is in Terraform, applied from Cloud Build. Application releases go through Cloud Deploy.",
+                 "GKE is used for Kubernetes workloads. Terraform manages infrastructure."]:
+        assert match_section_rules(text) is None, text
+    # Rebuilding from it is DR, and its state is a Danger Zone.
+    assert match_section_rules("For disaster recovery, Terraform is used to recreate infrastructure.").section_id \
+        == "disaster_recovery"
+    assert match_section_rules("Never modify the Terraform state manually.").section_id == "danger_zones"
+    rebuild = match_section_rules("The whole stack can be rebuilt in europe-west1 from Terraform.")
+    assert rebuild is None or rebuild.section_id != "architecture_reference"

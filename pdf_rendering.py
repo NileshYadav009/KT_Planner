@@ -11,6 +11,7 @@ import re
 
 from renderers import get_renderer
 from renderers.blocks.common import NOT_COVERED_MESSAGE
+from renderers.sections.architecture_reference import CONNECTIONS_TABLE_TITLE
 
 try:
     from markdown import markdown as markdown_to_html
@@ -33,6 +34,44 @@ def html_escape(value: str) -> str:
              .replace('"', "&quot;")
              .replace("'", "&#39;")
     )
+
+
+# Cover + contents + up to 7 pages of content: no contents page.
+SHORT_DOCUMENT_PAGES = 9
+NOT_COVERED_SECTION_ID = "not_covered"
+NOT_COVERED_SECTION_TITLE = "Not Covered in This KT"
+# The combined list goes after the content sections, before these.
+_DIGEST_SECTIONS = ("unmapped_findings", "tribal_knowledge", "kt_coverage", "signoff")
+
+
+def _only_not_covered(section: dict) -> bool:
+    blocks = section.get("blocks") or []
+    return bool(blocks) and all(
+        block.get("type") == "NarrativeBlock"
+        and [str(p).strip() for p in block.get("paragraphs") or [] if str(p).strip()] == [NOT_COVERED_MESSAGE]
+        for block in blocks)
+
+
+def collapse_not_covered_sections(rendered_sections: list) -> list:
+    """Sections with nothing from the KT, listed once. Each used to take a
+    heading and a "not covered" paragraph: six of them in a 112-word KT."""
+    empty = [s for s in rendered_sections if _only_not_covered(s)]
+    if not empty:
+        return rendered_sections
+    kept = [s for s in rendered_sections if not _only_not_covered(s)]
+    combined = {
+        "section_id": NOT_COVERED_SECTION_ID,
+        "section_title": NOT_COVERED_SECTION_TITLE,
+        "blocks": [
+            {"type": "NarrativeBlock", "title": NOT_COVERED_SECTION_TITLE,
+             "paragraphs": ["Nothing in the KT session covered these sections. Confirm them with the outgoing "
+                            "owner before relying on this handover."]},
+            {"type": "ChecklistBlock", "title": NOT_COVERED_SECTION_TITLE,
+             "items": [s.get("section_title") or s.get("section_id") for s in empty]},
+        ],
+    }
+    at = next((i for i, s in enumerate(kept) if s.get("section_id") in _DIGEST_SECTIONS), len(kept))
+    return kept[:at] + [combined] + kept[at:]
 
 
 def build_toc_sections(rendered_sections: list) -> list:
@@ -92,11 +131,15 @@ def safe_url_fetcher(url, *args, **kwargs):
     raise ValueError(f"External resource blocked in KT document: {str(url)[:80]}")
 
 
+def _layout(html_doc: str):
+    from weasyprint import HTML
+    return HTML(string=html_doc, url_fetcher=safe_url_fetcher).render()
+
+
 def html_to_pdf_bytes(html_doc: str) -> bytes:
     """Render a KT document with the restricted fetcher. The only entry point
     the API should use to produce a PDF."""
-    from weasyprint import HTML
-    return HTML(string=html_doc, url_fetcher=safe_url_fetcher).write_pdf()
+    return _layout(html_doc).write_pdf()
 
 
 def _render_inline_text(value) -> str:
@@ -165,10 +208,15 @@ def _render_image_block(block: dict) -> str:
     return "".join(parts)
 
 
-def _refs(block: dict, position: int) -> str:
-    """Superscript links to the Sources list for one unit of a block (P1-2)."""
+def _source_ids(block: dict, position: int) -> list:
     refs = block.get("sources") or []
     ids = refs[position] if position < len(refs) and isinstance(refs[position], list) else []
+    return [int(i) for i in ids]
+
+
+def _refs(block: dict, position: int) -> str:
+    """Superscript links to the Sources list for one unit of a block (P1-2)."""
+    ids = _source_ids(block, position)
     if not ids:
         if position in (block.get("unsourced") or []):
             return "<sup class=\"src-ref src-none\">no source</sup>"
@@ -278,7 +326,12 @@ def render_section_blocks(rendered_sections: list) -> str:
                 # Five or more columns at full size broke words mid-word
                 # ("connection s" in a six-column incident record).
                 wide = " wide-table" if len(columns) >= 5 else ""
-                html.append(f"<div class=\"table-wrapper\"><table class=\"grid-table{wide}\">")
+                # The connections table repeated each KT sentence in a narrow
+                # column (5-8 lines a row, over two pages for a short KT):
+                # the sentence number, linked to Sources, says the same.
+                by_number = raw_block_title == CONNECTIONS_TABLE_TITLE
+                extra = " connections-table" if by_number else ""
+                html.append(f"<div class=\"table-wrapper\"><table class=\"grid-table{wide}{extra}\">")
                 html.append("<thead><tr>")
                 for col in columns:
                     html.append(f"<th>{html_escape(col)}</th>")
@@ -288,7 +341,10 @@ def render_section_blocks(rendered_sections: list) -> str:
                     for c, col in enumerate(columns):
                         refs = _refs(block, i) if c == len(columns) - 1 else ""
                         cell_value = row.get(col, "")
-                        if isinstance(cell_value, str) and cell_value.strip():
+                        if by_number and c == len(columns) - 1 and _source_ids(block, i):
+                            links = ", ".join(f"<a href=\"#src-{n}\">{n}</a>" for n in _source_ids(block, i))
+                            html.append(f"<td class=\"sentence-ref\">sentence {links}</td>")
+                        elif isinstance(cell_value, str) and cell_value.strip():
                             html.append(f"<td>{_render_inline_text(cell_value)}{refs}</td>")
                         else:
                             html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}{refs}</td>")
@@ -324,13 +380,17 @@ def load_template_environment():
 
 
 def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
-                    warnings: list = None, notices: list = None, sources: list = None) -> str:
+                    warnings: list = None, notices: list = None, sources: list = None,
+                    show_toc: bool = True) -> str:
     """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
     degraded document never looks like a complete one; `notices` are
     informational (e.g. built without an LLM). `sources` are the transcript
-    sentences the facts point to (knowledge/evidence.py), listed at the end."""
+    sentences the facts point to (knowledge/evidence.py), listed at the end.
+    Without `show_toc` the cover lists the sections and there is no
+    contents page (build_job_pdf, for short documents)."""
     env = load_template_environment()
     template = env.get_template("kt_document.html")
+    rendered_sections = collapse_not_covered_sections(rendered_sections)
     toc_sections = build_toc_sections(rendered_sections)
     content_html = render_section_blocks(rendered_sections)
     if sources:
@@ -347,6 +407,7 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
         job_id=job_id,
         date_str=date_str,
         toc_sections=toc_sections,
+        show_toc=show_toc,
         content_html=content_html,
         style_css=style_css,
         warnings=[w for w in (warnings or []) if w],
@@ -417,6 +478,9 @@ RESIDUAL_BLOCK_TITLE = "Additional details from the KT session"
 _RESIDUAL_STOPWORDS = frozenset(
     "a an and are as at be been but by can for from had has have if in into is it its of on or "
     "that the their then there these this to was were when which while will with "
+    # Who is speaking is not part of the fact: "Our RTO is two hours" is
+    # shown as "RTO: two hours".
+    "our we us you your "
     # Relation verbs: a table row states "owner | what they own" without the
     # verb, so these must not decide whether the fact is shown.
     "own owns owned use uses used using provide provides handle handles manage manages "
@@ -458,13 +522,23 @@ def _block_strings(value) -> list:
     return out
 
 
-def _is_represented(text: str, rendered_norms: list) -> bool:
+# "Our RTO is two hours and our RPO is 30 minutes" renders as two field rows:
+# no one string holds the sentence, but each clause is shown, and the
+# sentence was printed again under "Additional details".
+_CLAUSE_SPLIT_RE = re.compile(r"\s*[,;]\s*(?:and\s+|but\s+)?|\s+(?:and|but)\s+", re.IGNORECASE)
+
+
+def _content_words(text: str) -> list:
+    return [_word_key(w) for w in _norm_for_match(text).split() if w not in _RESIDUAL_STOPWORDS]
+
+
+def _is_represented(text: str, rendered_norms: list, by_clause: bool = True) -> bool:
     norm = _norm_for_match(text)
     if not norm:
         return True
     if any(norm in r for r in rendered_norms):
         return True
-    words = [_word_key(w) for w in norm.split() if w not in _RESIDUAL_STOPWORDS]
+    words = _content_words(text)
     if not words:
         return True
     # Short sentences need every content word: at 80%, "The staging deployment
@@ -475,6 +549,13 @@ def _is_represented(text: str, rendered_norms: list) -> bool:
         r_words = {_word_key(w) for w in r.split()}
         if sum(1 for w in words if w in r_words) / len(words) >= required:
             return True
+    if by_clause:
+        # Every clause shown in full somewhere. A clause of one content word
+        # ("Prometheus" in "Prometheus and Grafana cover monitoring") is a
+        # list item, not a statement: then the sentence is judged whole.
+        clauses = [c for c in _CLAUSE_SPLIT_RE.split(text) if c and c.strip()]
+        if len(clauses) > 1 and all(len(_content_words(c)) >= 2 for c in clauses):
+            return all(_is_represented(c, rendered_norms, by_clause=False) for c in clauses)
     return False
 
 
@@ -681,14 +762,22 @@ def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
     import signoff
     rendered_sections = signoff.apply_to_document(rendered_sections, job, int(job.get("document_version") or 1))
 
-    html_doc = render_pdf_html(
-        title=title,
-        job_id=job_id,
-        rendered_sections=rendered_sections,
-        coverage=job.get("coverage", {}),
-        date_str=date_str,
-        warnings=job.get("warnings"),
-        notices=job.get("notices"),
-        sources=knowledge_object.get("sources"),
-    )
-    return html_to_pdf_bytes(html_doc)
+    def _html(show_toc: bool) -> str:
+        return render_pdf_html(
+            title=title,
+            job_id=job_id,
+            rendered_sections=rendered_sections,
+            coverage=job.get("coverage", {}),
+            date_str=date_str,
+            warnings=job.get("warnings"),
+            notices=job.get("notices"),
+            sources=knowledge_object.get("sources"),
+            show_toc=show_toc,
+        )
+
+    # A contents page for a few pages of content is a page of its own for
+    # little: a short document lists its sections on the cover instead.
+    document = _layout(_html(True))
+    if len(document.pages) <= SHORT_DOCUMENT_PAGES:
+        return html_to_pdf_bytes(_html(False))
+    return document.write_pdf()

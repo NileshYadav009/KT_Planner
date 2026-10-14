@@ -8,6 +8,9 @@ from renderers.blocks.common import (
     coverage_paragraphs as shared_coverage_paragraphs,
 )
 
+# The PDF prints this table's last column as sentence numbers (pdf_rendering).
+CONNECTIONS_TABLE_TITLE = "Connections stated in the KT"
+
 # (field_id, display label) for the 3 template-defined administrative facts
 # this section's schema actually has. These are metadata about the
 # architecture doc, never the architecture knowledge itself.
@@ -66,7 +69,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         ))
         connections = section.get("_architecture_connections") or []
         if connections:
-            blocks.append(build_table_block("Connections stated in the KT",
+            blocks.append(build_table_block(CONNECTIONS_TABLE_TITLE,
                                             ["From", "Connection", "To", "Said in the KT"], connections))
 
     # Architecture Metadata: always render all 3 admin fields explicitly,

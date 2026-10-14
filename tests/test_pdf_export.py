@@ -88,3 +88,94 @@ def test_build_fallback_paragraphs_dedupes_repeated_content():
 
     assert len(paragraphs) == 1
     assert paragraphs[0] == "System overview content from coverage."
+
+
+# --------------------------------------------------------------------------
+# Short KTs, shorter PDFs (13 Oct): a 112-word KT was 12 pages.
+# --------------------------------------------------------------------------
+
+from pdf_rendering import (  # noqa: E402
+    NOT_COVERED_SECTION_ID, _is_represented, _norm_for_match, build_job_pdf, collapse_not_covered_sections,
+)
+from renderers.blocks.common import NOT_COVERED_MESSAGE, no_coverage_block  # noqa: E402
+from renderers.sections.architecture_reference import CONNECTIONS_TABLE_TITLE  # noqa: E402
+
+
+def _section(sid, title, blocks):
+    return {"section_id": sid, "section_title": title, "blocks": blocks}
+
+
+def _narrative(text):
+    return {"type": "NarrativeBlock", "title": "Summary", "paragraphs": [text]}
+
+
+def test_sections_with_nothing_from_the_kt_are_listed_once_before_the_digests():
+    sections = [
+        _section("system_overview", "System Overview", [_narrative("Paygate authorises card payments.")]),
+        _section("day1_survival_checklist", "Day-1 Survival Checklist", [no_coverage_block("Day-1 Survival Checklist")]),
+        _section("security_controls", "Security", [_narrative("Secrets are in Key Vault.")]),
+        _section("known_bad_days", "Operational Calendar", [no_coverage_block("Operational Calendar")]),
+        _section("kt_coverage", "KT Coverage", [_narrative("Coverage matrix.")]),
+    ]
+    out = collapse_not_covered_sections(sections)
+    assert [s["section_id"] for s in out] == ["system_overview", "security_controls", NOT_COVERED_SECTION_ID, "kt_coverage"]
+    listed = out[2]["blocks"][1]["items"]
+    assert listed == ["Day-1 Survival Checklist", "Operational Calendar"]
+    html_doc = render_pdf_html(title="T", job_id="job-1", rendered_sections=sections, coverage={}, date_str="d")
+    assert NOT_COVERED_MESSAGE not in html_doc and "Not Covered in This KT" in html_doc
+
+
+def test_a_section_with_its_own_content_is_never_folded_into_the_list():
+    sections = [_section("disaster_recovery", "Disaster Recovery",
+                         [_narrative("RDS takes daily backups."), no_coverage_block("Disaster Recovery")])]
+    assert collapse_not_covered_sections(sections) == sections
+
+
+def test_the_connections_table_prints_the_sentence_number_not_the_sentence():
+    table = {"type": "DecisionTable", "title": CONNECTIONS_TABLE_TITLE,
+             "columns": ["From", "Connection", "To", "Said in the KT"],
+             "rows": [{"From": "Dataflow", "Connection": "writes to", "To": "BigQuery",
+                       "Said in the KT": "Dataflow jobs process them, and the results land in BigQuery."}],
+             "sources": [[2]]}
+    html_doc = render_pdf_html(title="T", job_id="job-1", rendered_sections=[
+        _section("architecture_reference", "Architecture", [table])], coverage={}, date_str="d")
+    assert 'sentence <a href="#src-2">2</a>' in html_doc
+    assert "the results land in BigQuery" not in html_doc
+
+
+def test_without_the_contents_page_the_cover_lists_the_sections():
+    sections = [_section("system_overview", "System Overview", [_narrative("Paygate authorises card payments.")])]
+    with_toc = render_pdf_html(title="T", job_id="job-1", rendered_sections=sections, coverage={}, date_str="d")
+    without = render_pdf_html(title="T", job_id="job-1", rendered_sections=sections, coverage={}, date_str="d",
+                              show_toc=False)
+    assert 'class="toc-page"' in with_toc and 'class="cover-contents"' not in with_toc
+    assert 'class="toc-page"' not in without and 'class="cover-contents"' in without
+
+
+def test_a_short_document_has_no_contents_page():
+    pytest.importorskip("weasyprint")
+    from pypdf import PdfReader
+    import io
+    job = {"knowledge_object": {"system_name": "Paygate", "rendered_sections": [
+        _section("system_overview", "System Overview", [_narrative("Paygate authorises card payments.")])]}}
+    text = "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(build_job_pdf("job-1", job))).pages)
+    assert "TABLE OF CONTENTS" not in text.upper() and "CONTENTS" in text.upper()
+    assert "System Overview" in text.split("01 System Overview")[0]     # listed on the cover
+
+
+def test_a_sentence_shown_clause_by_clause_as_fields_is_not_repeated():
+    rendered = [_norm_for_match(s) for s in ["RTO (Recovery Time Objective) two hours",
+                                             "RPO (Recovery Point Objective) 30 minutes"]]
+    assert _is_represented("Our RTO is two hours and our RPO is 30 minutes.", rendered)
+    assert not _is_represented("Our RTO is two hours and restores are tested monthly.", rendered)
+    # A one-word list item is not a clause: the sentence is judged whole.
+    assert not _is_represented("Prometheus and Grafana cover monitoring.", [_norm_for_match("Prometheus covers metrics")])
+
+
+def test_the_stylesheet_defines_every_variable_it_uses():
+    import re
+    css = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "pdf", "templates", "kt_document.css"),
+               encoding="utf-8").read()
+    used = set(re.findall(r"var\((--[\w-]+)\)", css))
+    defined = set(re.findall(r"(--[\w-]+)\s*:", css))
+    assert used <= defined, used - defined

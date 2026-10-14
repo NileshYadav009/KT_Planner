@@ -227,7 +227,10 @@ class Sentence:
     segment_ids: List[int] = None  # Which Whisper segments contributed
     explicit_evidence: List[str] = None
     is_inferred: bool = False
-    
+    # Half of a two-topic sentence (split_two_topic_sentence): a statement
+    # of its own, never a fragment of the sentence before it.
+    split_clause: bool = False
+
     def __post_init__(self):
         if self.segment_ids is None:
             self.segment_ids = []
@@ -235,6 +238,39 @@ class Sentence:
             self.raw_text = self.text
         if self.explicit_evidence is None:
             self.explicit_evidence = []
+
+
+# One sentence can state two facts that belong in two sections: "Infrastructure
+# is written in Bicep, and all secrets are stored in Key Vault" went to
+# Security whole, the Bicep half with it. It is split at its one ", and" or
+# ";" only when the routing rules claim both halves, for different sections.
+# With one rule or none ("The symptom is slow checkout, and the fix is to
+# ..."), the halves may depend on each other, so the sentence stays whole.
+_CLAUSE_BREAK_RE = re.compile(r",\s+and\s+|;\s+", re.IGNORECASE)
+
+
+def split_two_topic_sentence(text: str) -> List[str]:
+    """`text` as one statement, or as its two halves (verbatim slices)."""
+    breaks = list(_CLAUSE_BREAK_RE.finditer(text))
+    if len(breaks) != 1:
+        return [text]
+    left, right = text[:breaks[0].start()], text[breaks[0].end():]
+    if len(left.split()) < 3 or len(right.split()) < 3:
+        return [text]
+    sections = []
+    for half in (left, right):
+        match = match_section_rules(half)
+        if not match or match.confidence < RULE_OVERRIDE_CONFIDENCE:
+            return [text]
+        sections.append(match.section_id)
+    return [text] if sections[0] == sections[1] else [left, right]
+
+
+def _as_statement(clause: str) -> str:
+    clause = clause.strip().rstrip(",;").strip()
+    if clause and clause[-1] not in ".!?":
+        clause += "."
+    return clause[:1].upper() + clause[1:]
 
 
 def segment_sentences(
@@ -305,10 +341,15 @@ def segment_sentences(
             continue
         refined_sentences.append(st)
 
-    sentence_texts = refined_sentences
+    # (text, is_clause): a clause split off a two-topic sentence is cleaned
+    # into a statement of its own below.
+    sentence_texts = []
+    for st in refined_sentences:
+        halves = split_two_topic_sentence(st)
+        sentence_texts.extend((half, len(halves) > 1) for half in halves)
 
     current_pos = 0
-    for sent_text in sentence_texts:
+    for sent_text, is_clause in sentence_texts:
         if not sent_text.strip():
             continue
 
@@ -349,7 +390,9 @@ def segment_sentences(
         # Clean text: normalize whitespace, basic grammar fixes
         cleaned = sent_text.strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
-        
+        if is_clause:
+            cleaned = _as_statement(cleaned)
+
         sent = Sentence(
             text=cleaned,
             start=start_time,
@@ -357,7 +400,8 @@ def segment_sentences(
             speaker=speaker,
             raw_text=sent_text,
             audio_confidence=float(avg_conf),
-            segment_ids=list(range(start_seg, end_seg + 1))
+            segment_ids=list(range(start_seg, end_seg + 1)),
+            split_clause=is_clause,
         )
         sentences.append(sent)
     

@@ -502,11 +502,14 @@ def build_architecture_graph(
     edges: List[Dict[str, str]] = []
     seen_edges = set()
 
-    def add_edge(src: str, dst: str, label: str, quote: str, kind: str) -> None:
+    def add_edge(src: str, dst: str, label: str, quote: str, kind: str, unstated_sender: bool = False) -> None:
         if (src, dst) in seen_edges or src == dst:
             return
         seen_edges.add((src, dst))
-        edges.append({"from": src, "to": dst, "label": label, "quote": quote, "kind": kind})
+        edge = {"from": src, "to": dst, "label": label, "quote": quote, "kind": kind}
+        if unstated_sender:
+            edge["unstated_sender"] = True
+        edges.append(edge)
 
     system_word = re.escape(system_name.lower()) if system_name else None
     targets = {n["id"] for n in data + external}
@@ -532,8 +535,9 @@ def build_architecture_graph(
                     prev = None
                     continue
             label = None
+            unstated = False
             if prev and _LIST_GAP_RE.match(sentence[prev[0]:start]) and not _has_cue(sentence[prev[0]:start]):
-                source, window = prev[1], prev[2]
+                source, window, unstated = prev[1], prev[2], prev[3]
                 label = _stated_label(layer, window, defining)
             if label is None:
                 source, window = None, None
@@ -559,11 +563,23 @@ def build_architecture_graph(
                     if not subject_ok:
                         prev = None
                         continue
+                    # "Events are published to Pub/Sub": nobody is named,
+                    # and what feeds a queue is often outside the system
+                    # (devices, browsers, partners). The line is drawn dashed
+                    # and the table says the sender was not stated; "... by
+                    # the web trackers" names a sender that is not a
+                    # component, so no line comes from the system at all.
+                    if layer == "queue" and not (_SYSTEM_SUBJECT_RE.match(window) or defining
+                                                 or (system_word and re.search(system_word, window.lower()))):
+                        if re.match(r"\s*by\b", tail, re.IGNORECASE):
+                            prev = None
+                            continue
+                        unstated = True
                     source = "central"
                 label = _stated_label(layer, window, defining)
             if label:
-                add_edge(source, nid, label, sentence, "data" if layer != "external" else "external")
-                prev = (end, source, window)
+                add_edge(source, nid, label, sentence, "data" if layer != "external" else "external", unstated)
+                prev = (end, source, window, unstated)
             else:
                 prev = None
 
@@ -646,8 +662,9 @@ def describe_connections(graph: Dict[str, Any]) -> List[Dict[str, str]]:
     names = {n["id"]: n["label"] for key in ("entry", "data", "external", "delivery", "operations") for n in graph[key]}
     central = graph["central"] or {"label": "the system"}
     names["central"] = central["label"] + (f" ({central['header']})" if central.get("header") else "")
-    rows = [{"From": names.get(e["from"], e["from"]), "Connection": e["label"], "To": names.get(e["to"], e["to"]),
-             "Said in the KT": e["quote"]} for e in graph["edges"]]
+    rows = [{"From": names.get(e["from"], e["from"]) + (" (sender not stated in the KT)" if e.get("unstated_sender") else ""),
+             "Connection": e["label"], "To": names.get(e["to"], e["to"]), "Said in the KT": e["quote"]}
+            for e in graph["edges"]]
     boundary = graph.get("boundary") or {}
     if boundary.get("subtitle"):
         rows.append({"From": boundary["subtitle"].replace("Provisioned with ", ""), "Connection": "provisions",
@@ -851,7 +868,7 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                 ty, th = data_pos[e["to"]]
                 tcy = ty + th / 2
                 if e["from"] == "central":
-                    c.path([(box_x, clamp(tcy)), (data_x + data_w + 2, clamp(tcy))])
+                    c.path([(box_x, clamp(tcy)), (data_x + data_w + 2, clamp(tcy))], dashed=e.get("unstated_sender", False))
                     c.label((box_x + data_x + data_w) / 2, clamp(tcy) - 5, e["label"])
                 elif e["from"] in data_pos:
                     fy, fh = data_pos[e["from"]]
@@ -911,6 +928,10 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                     c.label(start_x - 6, label_y, " · ".join(stated), anchor="end")
         bottom = max(heights)
 
+    if any(e.get("unstated_sender") for e in graph["edges"]):
+        bottom += 18
+        c.text(18, bottom, "Dashed arrow: the KT does not say who sends this; the system is assumed.",
+               size=9.5, fill="#64748b", anchor="start")
     height = bottom + 14
     defs = ('<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
             'orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>')

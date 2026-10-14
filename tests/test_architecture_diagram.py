@@ -247,3 +247,31 @@ def test_a_pipeline_reads_the_queue_and_its_results_land_in_the_warehouse():
     assert ("central", "writes to", "bigquery") not in edges
     svg = render_architecture_svg(g)
     assert "consumes from · writes to" in svg      # one label, not two drawn on top of each other
+
+
+def test_a_queue_fed_by_an_unnamed_sender_is_drawn_dashed_and_says_so():
+    # "Events are published to Pub/Sub" does not say who publishes; on a
+    # clickstream platform it is the websites and apps, not the system.
+    g = build_architecture_graph(
+        ["Pub/Sub", "Dataflow", "BigQuery", "Cloud Storage", "Google Kubernetes Engine"],
+        ["Events are published to Pub/Sub, Dataflow jobs process them, and the results land in BigQuery.",
+         "Raw files are kept in Cloud Storage for 90 days."],
+        {}, "Streamline")
+    by_target = {e["to"]: e for e in g["edges"] if e["from"] == "central"}
+    assert by_target["pub-sub"].get("unstated_sender") is True
+    # A data store holding the system's own files keeps its solid line.
+    assert not by_target["cloud-storage"].get("unstated_sender")
+    publish = [r for r in describe_connections(g) if r["To"] == "Pub/Sub" and r["Connection"] == "publishes to"]
+    assert publish and publish[0]["From"].endswith("(sender not stated in the KT)")
+    svg = render_architecture_svg(g)
+    assert 'stroke-dasharray="4 3"' in svg and "does not say who sends this" in svg
+
+
+def test_a_named_sender_or_the_system_itself_keeps_a_solid_line():
+    g = build_architecture_graph(["Pub/Sub", "Google Kubernetes Engine"],
+                                 ["The ingestion API publishes events to Pub/Sub."], {}, "Streamline")
+    assert [e for e in g["edges"] if e["to"] == "pub-sub" and not e.get("unstated_sender")]
+    # A sender that is not a component: no line from the system at all.
+    g = build_architecture_graph(["Pub/Sub", "Google Kubernetes Engine"],
+                                 ["Events are published to Pub/Sub by the web trackers."], {}, "Streamline")
+    assert not [e for e in g["edges"] if e["to"] == "pub-sub"]
