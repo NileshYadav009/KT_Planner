@@ -284,3 +284,73 @@ def test_argo_city_is_argocd_only_where_it_deploys():
     assert "ArgoCD deploys them" in clean_transcript("GitHub Actions builds the images and Argo City deploys them.")
     assert "deployed through ArgoCD" in clean_transcript("Everything is deployed through Argo City.")
     assert "Argo City" in clean_transcript("Our biggest customer is in Argo City.")
+
+
+# --------------------------------------------------------------------------
+# A recorded KT spoken with deliberate mistakes (14 Oct): misheard tool
+# names stayed in the document, one "sentence" ran 90 words, and the tour
+# narration and closing remarks were kept.
+# --------------------------------------------------------------------------
+
+def test_sound_alikes_of_devops_terms_are_corrected():
+    from devops_transcription import clean_transcript
+
+    out = clean_transcript(
+        "The services uses post gray SQL on Amazon RDS for order data and ready for caching GitHub Action Built "
+        "builds the application and Argo UD deploys them to eCase. PromoTales and Grafana monitor application "
+        "health. Never modify data form code manually. Then we see the nodes, the ports running on them. "
+        "How many ports are there on each node? The HPA, Main Max, the CPU target. The namespecies are here.")
+    for expected in ("PostgreSQL on Amazon RDS", "Redis for caching", "GitHub Actions builds the application",
+                     "ArgoCD deploys them to EKS", "Prometheus and Grafana", "Never modify Terraform code",
+                     "the pods running on them", "How many pods are there on each node", "min/max", "namespaces"):
+        assert expected in out, expected
+
+
+def test_the_ordinary_words_stay_where_they_are_ordinary():
+    from devops_transcription import clean_transcript
+
+    out = clean_transcript("Open port 443 on the load balancer. The data form on the website is ready for review. "
+                           "We use GitHub Actions and Argo CD. Postgres is fine.")
+    for kept in ("port 443", "The data form on the website is ready for review", "GitHub Actions", "Postgres is fine"):
+        assert kept in out, kept
+
+
+def test_a_run_on_sentence_is_split_at_its_sentence_openers():
+    from context_mapper import AudioSegment, segment_sentences, split_run_on
+
+    run_on = ("I am handing over our online grocery platform It processes around 15,000 orders daily customers use a "
+              "react application with requests going through CloudFront and an application load balancer to services "
+              "running on Amazon EKS The services use PostgreSQL on Amazon RDS for order data.")
+    assert split_run_on(run_on)[:2] == ["I am handing over our online grocery platform",
+                                        "It processes around 15,000 orders daily customers use a react application with "
+                                        "requests going through CloudFront and an application load balancer to services "
+                                        "running on Amazon EKS"]
+    texts = [s.text for s in segment_sentences([AudioSegment(text=run_on, start=0, end=9, avg_logprob=-0.3)])]
+    assert "I am handing over our online grocery platform." in texts
+    # Not merged back: the rebuilt run-on went whole to Deployment, business
+    # volume and all.
+    assert "The services use PostgreSQL on Amazon RDS for order data." in texts
+    # A sentence of normal length is left alone.
+    short = "Airflow handles orchestration and The scheduler retries tasks."
+    assert split_run_on(short) == [short]
+
+
+def test_a_segment_that_ends_mid_sentence_gets_no_full_stop():
+    # A recording is cleaned one Whisper segment at a time: "stores container
+    # images and. ArgoCD deploys them" came from a full stop added to each.
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("Amazon ECR stores container images and") == "Amazon ECR stores container images and"
+
+
+def test_closing_remarks_at_the_end_are_trimmed():
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("There are three recommendations by category so I hope it is very clear it is very useful "
+                            "for you so please if you have any doubts any questions let me know thank you") == \
+        "There are three recommendations by category."
+    assert clean_transcript("Backups run nightly. Thank you.") == "Backups run nightly."
+    # A recording's last segment: only a stub is left, and it is dropped.
+    assert clean_transcript("For you so please if you have any doubts any questions let me know thank you") == ""
+    assert clean_transcript("Airflow handles orchestration. Thanks to Redis the cache is warm.") == \
+        "Airflow handles orchestration. Thanks to Redis the cache is warm."

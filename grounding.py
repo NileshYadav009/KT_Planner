@@ -124,8 +124,41 @@ def _present(term: str, norm_source: str, source_words: Set[str]) -> bool:
         if _fuzz is not None and len(w) >= 5 and any(
                 abs(len(w) - len(sw)) <= 2 and _fuzz.ratio(w, sw) >= 88 for sw in source_words):
             continue
-        return False
+        return _sounds_like_in_source(term, norm_source)
     return True
+
+
+def _known_tool(term: str) -> bool:
+    """The whole term is a tool the component catalog knows."""
+    try:
+        from field_populator import PATTERN_EXTRACTORS
+        tools = PATTERN_EXTRACTORS.get("tools")
+    except ImportError:
+        return False
+    if tools is None:
+        return False
+    key = re.sub(r"[^a-z0-9]", "", term.lower())
+    return any(re.sub(r"[^a-z0-9]", "", str(found).lower()) == key for found in tools.findall(term))
+
+
+def _sounds_like_in_source(term: str, norm_source: str) -> bool:
+    """A known tool name the source holds as a mishearing: a polish fixing
+    "post gray SQL" to "PostgreSQL" or "Argo UD" to "Argo CD" was rejected as
+    adding facts, so the misheard name stayed in the document. Only names
+    the component catalog knows, compared without spaces over one to three
+    source words (PostgreSQL 86, Argo CD 83; Datadog/"dataflow" 67)."""
+    if _fuzz is None or not _known_tool(term):
+        return False
+    target = re.sub(r"[^a-z0-9]", "", term.lower())
+    if len(target) < 6:
+        return False
+    words = norm_source.split()
+    for n in (1, 2, 3):
+        for i in range(len(words) - n + 1):
+            window = "".join(words[i:i + n])
+            if abs(len(window) - len(target)) <= 3 and _fuzz.ratio(target, window) >= 80:
+                return True
+    return False
 
 
 def _specific_terms(value: str) -> List[str]:

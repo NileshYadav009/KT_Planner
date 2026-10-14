@@ -254,6 +254,30 @@ PHRASE_CORRECTIONS = {
     r"argo\s+cd": "ArgoCD",
     # "Argo City deploys them": only where the words are about deploying, so
     # an ordinary "Argo City" (a place, a customer) is left as said.
+    # Sound-alikes of DevOps terms in spoken KTs, each tied to the words
+    # around it so the ordinary word is left alone elsewhere: "ready for
+    # caching" (Redis), "ports running on" a node (pods), "data form code"
+    # (Terraform), "Rending on Amazon EKS" (running), "Main Max" replicas,
+    # "SRO status" (SLO), "SST reports" (SAST). All from one recorded KT.
+    # The fuzzy matcher leaves these alone: they contain a known word ("SQL",
+    # "GitHub") or carry brand casing ("Argo UD").
+    r"\bpost\s*gr[ae]y\s*(?:sql|sequel)\b|\bpostgre\s+sql\b|\bpostgres\s+sequel\b": "PostgreSQL",
+    r"\bargo\s*(?:ud|seedy)\b": "ArgoCD",
+    r"\bgit\s*hub\s+action\b(?!s)": "GitHub Actions",
+    r"\bpromo\s*(?:tales|tails|theus)\b": "Prometheus",
+    r"\bready(?=\s+(?:for\s+(?:caching|cache|sessions?)|as\s+(?:a|the|our)\s+cache)\b)": "Redis",
+    r"\bports(?=\s+(?:running\s+on|(?:are\s+there\s+)?on\s+(?:each|every|the|that|this|a)\s+nodes?)\b)": "pods",
+    r"(?<=consumed by the )ports\b": "pods",
+    r"\bdata\s*form(?=\s+(?:code|state|plans?|apply|modules?|files?|scripts?|config\w*)\b)": "Terraform",
+    r"\brending(?=\s+on\b)": "running",
+    r"\bname\s*species\b": "namespaces",
+    r"\bmain\s*/?\s*max\b": "min/max",
+    r"\bSRO(?=\s+(?:status|targets?|burn|budget)\b)": "SLO",
+    r"\bSST(?=\s+(?:reports?|scans?|findings|results)\b)": "SAST",
+    # A verb said twice in two forms: "GitHub Actions built builds",
+    # "deployed deploys".
+    r"\bbuilt\s+(?=builds?\b)": "",
+    r"\b(\w{3,}?)ed\s+(?=\1(?:e?s)\b)": "",
     r"\bargo\s+city\b(?=\s+(?:deploy|sync|roll|appl|promot|pick)\w*)": "ArgoCD",
     r"\b((?:deploy\w*|sync\w*|gitops)\s+(?:with|via|using|through|by)\s+)argo\s+city\b": r"\1ArgoCD",
     r"cache\s+clear": "cache layers",
@@ -454,6 +478,13 @@ PHRASE_CORRECTIONS = {
 # ============================================================================
 
 WORD_CORRECTIONS = {
+    # One-word sound-alikes, and acronyms the vocabulary keys in lowercase.
+    "ecase": "EKS",
+    "promotales": "Prometheus",
+    "namespecies": "namespaces",
+    "eks": "EKS",
+    "aks": "AKS",
+    "gke": "GKE",
     "qbritis": "kubernetes",
     "cubernetes": "kubernetes",
     "cubernetis": "kubernetes",
@@ -622,6 +653,19 @@ def clean_transcript(text: str) -> str:
     if _GCP_CONTEXT_RE.search(normalized):
         normalized = re.sub(r"\bdata\s+flow\b(?!\s+diagram)", "Dataflow", normalized, flags=re.IGNORECASE)
         normalized = re.sub(r"\bbig\s+query\b", "BigQuery", normalized, flags=re.IGNORECASE)
+    # Only when a closing was cut: a recording is cleaned one Whisper
+    # segment at a time, and a full stop after every segment broke its
+    # sentences ("stores container images and. ArgoCD deploys them").
+    closing = _CLOSING_TAIL_RE.search(normalized)
+    if closing:
+        trimmed = normalized[:closing.start()].rstrip(" ,;")
+        # What the closing ran on from, when it is only a stub and not a
+        # finished sentence ("For you so please if you have any doubts ..."):
+        # it went into the document as the sentence "For you."
+        ended = bool(re.match(r"[\s,]*[.!?]", closing.group(0)))
+        if not ended and len(trimmed.split()) <= 3 and not re.search(r"[.!?]", trimmed):
+            trimmed = ""
+        normalized = trimmed + ("." if trimmed and trimmed[-1] not in ".!?" else "")
     # Capitalised connectives in the middle of a sentence ("And Airflow
     # handles...", "Can affect", "Before proceeding") are dictation
     # artifacts; they were copied into the document as said.
@@ -632,6 +676,18 @@ def clean_transcript(text: str) -> str:
 
 
 _GCP_CONTEXT_RE = re.compile(r"\b(?:GCP|Google\s+Cloud|BigQuery|Pub/Sub|Vertex\s+AI|GKE|Cloud\s+Run)\b", re.IGNORECASE)
+
+# Closing remarks at the very end of a KT ("so I hope it is very clear it is
+# very useful for you so please if you have any doubts let me know thank
+# you"), trimmed from the last sentence they were joined to. Only at the end.
+_CLOSING_TAIL_RE = re.compile(
+    r"[\s,.]*(?:\b(?:so|and|ok(?:ay)?)\s+)?(?:(?:\bi\s+hope\s+(?:it|this|that)\s+(?:is|was|has\s+been|helps)\b"
+    r"|\b(?:please\s+)?(?:let\s+me\s+know\s+if\s+you\s+have\s+any|if\s+you\s+have\s+any\s+(?:doubts|questions))\b)"
+    r"[^.!?]{0,200}"
+    # "Thanks to Redis the cache is warm" is not a closing: only a bare
+    # thank-you ends the text.
+    r"|\bthank(?:s|\s+you)(?:\s+(?:all|everyone|guys|team|so\s+much|a\s+lot))?)[.!?]*\s*$",
+    re.IGNORECASE)
 # A connective or auxiliary capitalised after a lowercase word or a comma,
 # followed by a lowercase word or a name: "..., And Airflow", "data schema
 # Can affect", "owner Before proceeding". Words that also start names

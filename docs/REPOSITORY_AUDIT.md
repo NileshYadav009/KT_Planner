@@ -4056,6 +4056,97 @@ Not done, needs the user:
   key (and a Gemini key).
 - Audio/video end to end.
 
+### 9aae. A recorded KT with deliberate speaking mistakes (14 Oct)
+
+The user recorded a 7-minute walkthrough of a single-page ops console and
+spoke with deliberate mistakes. Two questions: why weren't the mistakes
+corrected, and why were there no screenshots? The job record and the video
+were on this machine, so each decision was replayed on the real video.
+
+**Screenshots: 30 stable screens, 0 screenshots.**
+
+- The console's menu ("Pipelines", "Deployments") is on every screen, so
+  every view was typed as a pipeline page, and only dashboard/other/console
+  pages could be screenshots.
+- The dashboard vocabulary was monitoring-only. Deployments, pods,
+  vulnerabilities and cost views scored 0-3.
+- Describing a screen ("we ran 64 pipelines across 7 repositories, the
+  success rate, the median duration") without "as you can see" scored 0 for
+  speech.
+- Every view shares one URL, and the de-duplication compared URLs, so 16
+  views were "repeats" of one never-captured screen.
+
+Fixes in `screen_capture.py`:
+
+- Operational-console vocabulary.
+- Pipeline pages are eligible.
+- 4+ words shared by the speech and the screen's OCR count as discussing it
+  (described views shared 5-19, passing views 0-3).
+- Screenshots are de-duplicated by picture only (dHash <= 6 bits; views of
+  this console differed by 8-20, the same view by 1-5). Links still by URL.
+- The browser's tab strip, address bar and bookmarks bar are cropped off.
+  They showed the giver's other tabs (mail, chat, video sites).
+- Titles skip buttons and bare values.
+- Links are counted once per distinct URL.
+
+Result on the video: 10 screenshots (the cap; 16 views qualified) and 1
+link.
+
+**Wrong words: two causes.**
+
+1. **Unknown mishearings.** These were not in the corrections: "post gray
+   SQL", "Argo UD", "eCase", "PromoTales", "ready for caching" (Redis),
+   "ports running on" a node (pods), "data form code" (Terraform),
+   "namespecies", "Main Max", "SRO status", "SST reports", "Rending on". The
+   fuzzy matcher skips phrases that contain a known word or have brand
+   casing. They are now explicit corrections in `devops_transcription.py`,
+   each tied to its context where the word is ordinary. The negatives are
+   tested: "port 443", "the data form on the website", "ready for review".
+2. **The LLM's fixes were thrown away.** Groq had corrected them ("added
+   PostgreSQL, Redis, Argo CD"), and the grounding check rejected the fixes
+   as added facts. `grounding._sounds_like_in_source` now accepts a tool the
+   component catalog knows when one to three source words sound like it
+   (ratio >= 80 without spaces: PostgreSQL 86, Argo CD 83; Datadog vs
+   "dataflow" 67 stays rejected).
+
+**Tidying, the user's choice "fix terms + tidy":**
+
+- **Run-on sentences** (Whisper gave one 90-word "sentence") are split at
+  capitalised sentence openers. This is done in `segment_sentences`, before
+  the 240-character cut, which had broken "... EKS The services | use ...".
+  The pieces are never merged back, because merging rebuilt the run-on and a
+  deployment rule took the business volume with it.
+- **Screen-tour narration** ("let me show you the UI", "I will give you the
+  tour", "this is just a small overview") is meta-commentary.
+- **Closing remarks** at the very end are trimmed: "I hope it is clear", "if
+  you have any questions let me know", a bare "thank you". "Thanks to Redis
+  ..." stays.
+- **Duplicated verbs** ("built builds") are collapsed.
+
+**Bugs found on the way, both fixed and tested:**
+
+- A full stop was added after every Whisper segment ("container images
+  and. ArgoCD").
+- The closing trim left the stub "For you." as a sentence.
+
+Checks:
+
+- Tuning goldens 100% and holdouts 78/95, both unchanged.
+- e2e 0/0/0/0.
+- Only g10's text changed: its closing "Thank you." was trimmed, and
+  "GitHub Action" became "GitHub Actions".
+- Full suite 978 passed, 0 failed (4 LLM replay skips, as in §9aad).
+- The video re-run through the real upload path, with no LLM: 10
+  screenshots, every listed mishearing corrected, no narration or closing
+  remark left.
+
+Not done:
+
+- The screen text could confirm a correction ("Pods" on screen while
+  "ports" was said). That needs the OCR before transcript cleaning.
+- The Business volume field stays empty in no-LLM mode, because the
+  15,000-orders sentence now goes to Architecture Details.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

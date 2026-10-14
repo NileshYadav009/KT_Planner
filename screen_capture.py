@@ -12,16 +12,19 @@ per transcript segment). A screenshot is taken only when all of these hold:
 1. The screen was held still for a while (a "stable screen"), not flashed
    past while switching tabs.
 2. OCR shows it is a readable screen (not the camera, not a blank slide).
-3. Its content identifies it as a dashboard: a monitoring tool name and/or
-   dashboard vocabulary (panels, time ranges, p95, error rate, time-axis
-   labels).
+3. Its content identifies it as an operational screen: a monitoring tool
+   name and/or dashboard vocabulary (panels, time ranges, p95, error rate,
+   time-axis labels), or the status views of a delivery/ops console
+   (pipelines, deployments, nodes and pods, vulnerabilities, cloud cost).
 4. The speaker was talking about it (pointing language such as "as you can
-   see on this dashboard", or naming the tool or the metrics on screen)
-   while it was visible, or it was held on screen long enough to be clearly
-   deliberate.
+   see on this dashboard", naming the tool or the metrics, or describing
+   what the screen shows in its own words) while it was visible, or it was
+   held on screen long enough to be clearly deliberate.
 5. It shows nothing that looks like a secret (passwords, tokens, keys). Such
    a screen is never saved.
-6. It is not a repeat of a dashboard already captured.
+6. It is not a repeat of a screen already captured: the same picture. A
+   single-page console keeps one URL for all its views, so for screenshots
+   the URL does not decide; for links it does.
 
 Links are recorded for every useful page that was held on screen (dashboards,
 runbooks/docs, pipelines, repositories, cloud consoles); meeting, chat, mail
@@ -83,10 +86,20 @@ _DASHBOARD_TERMS = [
     r"\butili[sz]ation\b", r"\bsaturation\b", r"\buptime\b", r"\bavailability\b", r"\bslo\b|\bsli\b",
     r"\bapdex\b", r"\blast\s+\d+\s*(?:m|min|minutes?|h|hours?|d|days?)\b", r"\brefresh\b",
     r"\b(?:5xx|4xx|errors?)\b", r"\bqueue depth\b|\blag\b", r"\bheap\b|\bgc\b",
+    # Delivery and operations consoles: their status views are what a KT
+    # giver walks through ("we ran 64 pipelines", "six nodes", "two critical
+    # vulnerabilities", "the forecast is $23,150"), and they scored 0-3.
+    r"\bdeploy(?:ment)?\s+frequency\b|\blead\s+time\b|\bchange\s+failure\b", r"\bmttr\b|\bmean\s+time\s+to\b",
+    r"\bsuccess\s+rate\b|\bmedian\s+duration\b", r"\bpods?\b|\bnodes?\b|\breplicas?\b",
+    r"\bhpa\b|\bautoscal\w*", r"\bhealthy\b|\bdegraded\b|\bsynced\b|\bout\s+of\s+sync\b",
+    r"\bvulnerabilit(?:y|ies)\b|\bcve-\d", r"\bcompliance\b", r"\bfindings?\b|\bseverity\b|\bscann(?:er|ing)\b",
+    r"\b\d+\s+(?:critical|high|medium|low)\b", r"\bsast\b|\bdast\b|\bsbom\b|\bhard-?coded\s+secrets?\b",
+    r"\bcost\b|\bspend\b", r"\bforecast\b|\bbudget\b", r"\bsavings?\b|\brecommendations?\b", r"/mo\b|\bper\s+month\b",
+    r"\b(?:active\s+)?(?:alerts?|incidents?)\b",
 ]
 _DASHBOARD_TERM_RES = [re.compile(t, re.IGNORECASE) for t in _DASHBOARD_TERMS]
 _TIME_TICK_RE = re.compile(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b")
-_UNIT_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|%|k|m|gb|mb|rps|/s)\b", re.IGNORECASE)
+_UNIT_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|%|k|m|gb|mb|rps|/s)\b|\$\s?\d[\d,]*", re.IGNORECASE)
 
 # Page types, by URL host/path and on-screen words. Order matters: first match wins.
 _PAGE_TYPES: List[Tuple[str, re.Pattern, re.Pattern]] = [
@@ -404,6 +417,33 @@ def _dashboard_score(text: str, url: Optional[str]) -> Tuple[int, List[str]]:
     return score, why
 
 
+# A button or a bare value is not a page title: "Share", "Chat", "22min",
+# "$2,210/mo" and "100%" were picked as titles.
+_UI_WORD_RE = re.compile(r"^(?:share|chat|history|export|refresh|search|filter|apply|edit|settings|help|"
+                         r"sign in|log in|live\b.*|ask \w+)$", re.IGNORECASE)
+_BARE_VALUE_RE = re.compile(r"^(?:[\s$€£₹%\d.,:/+\-·]|(?<=[\d/])(?:ms|min|mo|h|k|m|s|d)\b)*$", re.IGNORECASE)
+_BOOKMARKS_BAR_RE = re.compile(r"^(?:all |other )?(?:bookmarks|favou?rites)$", re.IGNORECASE)
+
+
+def _browser_chrome_bottom(lines, url: Optional[str]) -> float:
+    """Where the browser's own bars end (a fraction of the height), or 0.
+
+    The tab strip shows whatever else the KT giver had open (mail, chat,
+    video sites, an unread count); it is cropped off the screenshot. The
+    address is kept as the screenshot's link. Cropped only when the address
+    bar itself is found near the top."""
+    host = (urlsplit(url).netloc or "").lower() if url else ""
+    if not host:
+        return 0.0
+    bottom = 0.0
+    for text, top, height in lines:
+        if top > 0.25:
+            continue
+        if host in text.replace(" ", "").lower() or _BOOKMARKS_BAR_RE.match(text.strip()):
+            bottom = max(bottom, top + height)
+    return min(bottom + 0.012, 0.3) if bottom else 0.0
+
+
 def _title(lines, url: Optional[str]) -> str:
     """The biggest text near the top that is not browser chrome or the URL."""
     best = None
@@ -411,6 +451,8 @@ def _title(lines, url: Optional[str]) -> str:
         if top > 0.35 or len(text) < 4 or (url and _URL_RE.fullmatch(text.replace(" ", ""))):
             continue
         if re.search(r"https?[:;]|www\.|\.com|\.io/", text, re.I):
+            continue
+        if _UI_WORD_RE.match(text.strip()) or _BARE_VALUE_RE.match(text.strip()):
             continue
         key = (height, -top)
         if best is None or key > best[0]:
@@ -435,11 +477,36 @@ def _spoken_during(segments: Sequence[Dict[str, Any]], start: float, end: float,
     return " ".join(t for t in out if t)
 
 
-def _speech_score(spoken: str, tool: Optional[str], page_type: str) -> Tuple[int, List[str]]:
+# Two screenshots are the same picture within this many of the 64 dHash bits.
+# The views of one console share its menu and header: different views
+# differed by 8-20 bits, the same view a few seconds apart by 1-5.
+_SAME_PICTURE_BITS = 6
+
+# Words too common to show that the speaker is describing the screen.
+_COMMON_WORDS = frozenset(
+    "this that with have from your there here will they them then what when which were been being about into "
+    "just like right also very more much some these those their than only over each other able want".split())
+# Distinct words the speech and the screen must share: the screens a speaker
+# described shared 5-19, passing screens 0-3 (13 Oct ops-console KT).
+_DESCRIBED_MIN_SHARED = 4
+
+
+def _content_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z][a-z0-9-]{3,}", (text or "").lower()) if w not in _COMMON_WORDS}
+
+
+def _speech_score(spoken: str, tool: Optional[str], page_type: str, screen_text: str = "") -> Tuple[int, List[str]]:
     score, why = 0, []
     if _POINTING_RE.search(spoken):
         score += 2
         why.append("speaker refers to the screen")
+    # Describing it is talking about it, with no "as you can see": "today we
+    # ran 64 pipelines across 7 repositories, the success rate, the median
+    # duration" while the pipelines view was up scored 0.
+    shared = _content_words(spoken) & _content_words(screen_text)
+    if len(shared) >= _DESCRIBED_MIN_SHARED:
+        score += 2
+        why.append(f"speaker describes what is on screen ({', '.join(sorted(shared)[:4])})")
     if tool and re.search(re.escape(tool), spoken, re.I):
         score += 2
         why.append(f"speaker names {tool}")
@@ -542,16 +609,21 @@ def analyze_screen_shares(
         tool = tool_match.group(0) if tool_match else None
         spoken = _spoken_during(shifted, run.start, run.end)
         visual, vwhy = _dashboard_score(text, url)
-        speech, swhy = _speech_score(spoken, tool, page_type if visual < 5 else "dashboard")
-        title = _title(lines, url) or (f"{tool} dashboard" if tool else page_type.title())
+        speech, swhy = _speech_score(spoken, tool, page_type if visual < 5 else "dashboard", text)
+        chrome = _browser_chrome_bottom(lines, url)
+        title = _title([ln for ln in lines if ln[1] >= chrome], url) or (f"{tool} dashboard" if tool else page_type.title())
 
-        is_dashboard = visual >= 5 and (page_type in ("dashboard", "other", "console") or bool(tool))
+        # "pipeline" too: a console's menu ("Pipelines", "Deployments") is on
+        # every one of its screens, so its dashboards were all typed as
+        # pipeline pages and none could be a screenshot.
+        is_dashboard = visual >= 5 and (page_type in ("dashboard", "other", "console", "pipeline") or bool(tool))
         deliberate = speech >= 2 or (run.dwell >= 10 and visual >= 7)
         if is_dashboard and deliberate and not sensitive:
             asset = ScreenAsset(kind="dashboard", start=run.start, end=run.end, page_type="dashboard", title=title,
                                 url=url, tool=tool, score=float(visual + speech + min(run.dwell / 10, 2)),
                                 reasons=vwhy + swhy + [f"held on screen {run.dwell:.0f}s"], spoken_context=spoken[:400])
-            candidates.append((asset, img, run.dhash))
+            shot = img.crop((0, int(chrome * img.height), img.width, img.height)) if chrome else img
+            candidates.append((asset, shot, run.dhash))
             continue
         if sensitive:
             skip("possible secret on screen (not saved)")
@@ -572,8 +644,11 @@ def analyze_screen_shares(
         elif not is_dashboard and page_type != "terminal":
             skip("not a dashboard and no useful link")
 
-    # De-duplicate: the same dashboard shown twice (same picture or same URL),
-    # and the same link opened repeatedly. Keep the best-scoring instance.
+    # De-duplicate: the same dashboard shown twice (the same picture), and the
+    # same link opened repeatedly (the same URL). Keep the best-scoring
+    # instance. Two screenshots are not compared by URL: every view of a
+    # single-page console has one URL, and its pipelines, deployments,
+    # cluster, alerts, security and cost views were dropped as repeats.
     def url_key(u: Optional[str]) -> Optional[str]:
         if not u:
             return None
@@ -583,8 +658,9 @@ def analyze_screen_shares(
     kept: List[Tuple[ScreenAsset, Any, int]] = []
     for cand in sorted(candidates, key=lambda c: -c[0].score):
         a, _, h = cand
-        dup = next((k for k in kept if (k[0].kind == a.kind == "dashboard" and _hamming(k[2], h) <= 8)
-                    or (url_key(a.url) and url_key(a.url) == url_key(k[0].url))), None)
+        dup = next((k for k in kept if (k[0].kind == a.kind == "dashboard" and _hamming(k[2], h) <= _SAME_PICTURE_BITS)
+                    or (not k[0].kind == a.kind == "dashboard" and url_key(a.url)
+                        and url_key(a.url) == url_key(k[0].url))), None)
         if dup is not None:
             skip("repeat of a screen already captured")
             if a.kind == "dashboard" and dup[0].kind == "link":
@@ -607,9 +683,9 @@ def analyze_screen_shares(
             img.save(os.path.join(out_dir, name), "JPEG", quality=82, optimize=True)
             a.image_path = os.path.join(out_dir, name)
             stats["screenshots"] += 1
-        if a.url:
-            stats["links"] += 1
         assets.append(a.to_dict())
+    # Distinct pages: a console's screenshots all carry its one URL.
+    stats["links"] = len({url_key(a["url"]) for a in assets if a.get("url")})
     return {"assets": assets, "stats": stats}
 
 

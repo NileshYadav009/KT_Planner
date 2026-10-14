@@ -62,7 +62,7 @@ DEVOPS_VOCABULARY = {
     "rds": ["rds", "r-d-s", "relational database service"],
     "lambda": ["lambda", "lam-da", "aws lambda"],
     "ecs": ["ecs", "e-c-s", "elastic container service"],
-    "eks": ["eks", "e-k-s", "elastic kubernetes service"],
+    "eks": ["eks", "e-k-s", "elastic kubernetes service", "e case"],
     "fargate": ["fargate", "far-gate"],
     "cloudfront": ["cloudfront", "cloud front", "cloud-front"],
     "route53": ["route53", "route 53", "route fifty three"],
@@ -143,12 +143,12 @@ DEVOPS_VOCABULARY = {
     "gitlab": ["gitlab", "git-lab", "git labs"],
     "gitlab ci": ["gitlab ci", "gitlab c-i", "csed pipeline"],
     "github": ["github", "git-hub", "git hubs"],
-    "github actions": ["github actions", "git hub actions"],
+    "github actions": ["github actions", "git hub actions", "github action", "git hub action"],
     "circleci": ["circleci", "circle ci", "circle c-i"],
     "travis ci": ["travis ci", "travis c-i"],
     "teamcity": ["teamcity", "team city"],
     "bamboo": ["bamboo", "bam-boo"],
-    "argocd": ["argocd", "argo cd", "argos cd", "argo c-d"],
+    "argocd": ["argocd", "argo cd", "argos cd", "argo c-d", "argo ud", "argo seedy"],
     "flux": ["flux", "fluxcd", "flux cd"],
     "spinnaker": ["spinnaker", "spin-a-ker"],
     "tekton": ["tekton", "tek-ton"],
@@ -173,7 +173,7 @@ DEVOPS_VOCABULARY = {
     # ------------------------------------------------------------------
     # Observability / monitoring / logging
     # ------------------------------------------------------------------
-    "prometheus": ["prometheus", "prom-eth-eus"],
+    "prometheus": ["prometheus", "prom-eth-eus", "promo tales", "promo theus"],
     "grafana": ["grafana", "gra-fan-a"],
     "datadog": ["datadog", "data-dog"],
     "new relic": ["new relic", "new-relic"],
@@ -213,7 +213,8 @@ DEVOPS_VOCABULARY = {
     # Databases & storage
     # ------------------------------------------------------------------
     "database": ["database", "data-base"],
-    "postgresql": ["postgresql", "postgres", "post-gre-sql", "postgres sql"],
+    "postgresql": ["postgresql", "postgres", "post-gre-sql", "postgres sql", "post gray sql", "post grey sql",
+                   "postgre sql", "postgres sequel"],
     "mysql": ["mysql", "my sql", "my-sequel"],
     "mongodb": ["mongodb", "mongo-db", "mongo db"],
     "redis": ["redis", "red-is"],

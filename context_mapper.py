@@ -200,6 +200,17 @@ _KT_META_COMMENTARY_PATTERNS = [
         re.IGNORECASE,
     ),
     re.compile(r"^\s*there\s+(?:would|will)\s+be\s+no\s+gaps\.?\s*$", re.IGNORECASE),
+    # A screen tour's narration ("Now let me show you the UI how it looks.",
+    # "I will just give you the tour like how this looks like.", "This is
+    # just a small overview."): about the walkthrough, not the system. Each
+    # needs the whole sentence to be that narration.
+    re.compile(r"^\W*(?:(?:ok(?:ay)?|so|now|and)\W+)*let\s+me\s+(?:show|walk|take)\s+you\b[^.!?]{0,40}"
+               r"\b(?:ui|screen|console|dashboard|tour|how\s+(?:it|this)\s+looks?(?:\s+like)?)\b[^.!?]{0,15}[.!?]?\s*$",
+               re.IGNORECASE),
+    re.compile(r"^\W*(?:(?:so|now|and)\W+)*(?:i\s+will|i'?ll|let\s+me)\s+(?:just\s+)?give\s+you\s+(?:a|the)\s+"
+               r"(?:quick\s+|short\s+)?tour\b[^.!?]{0,40}[.!?]?\s*$", re.IGNORECASE),
+    re.compile(r"^\W*this\s+is\s+(?:just\s+)?(?:a|the)\s+(?:small|quick|short|brief|high[\s-]level)\s+overview[.!?]?\s*$",
+               re.IGNORECASE),
 ]
 
 
@@ -230,6 +241,9 @@ class Sentence:
     # Half of a two-topic sentence (split_two_topic_sentence): a statement
     # of its own, never a fragment of the sentence before it.
     split_clause: bool = False
+    # Starts where a run-on was cut (split_run_on): never merged back into the
+    # sentence before it.
+    run_on_cut: bool = False
 
     def __post_init__(self):
         if self.segment_ids is None:
@@ -264,6 +278,29 @@ def split_two_topic_sentence(text: str) -> List[str]:
             return [text]
         sections.append(match.section_id)
     return [text] if sections[0] == sections[1] else [left, right]
+
+
+# Speech without pauses comes back from Whisper with few full stops: one
+# "sentence" of a recorded KT ran 90 words, from the system intro through its
+# database, cache, build and deploy chain, and one field took all of it.
+# Inside such a run, a capitalised sentence opener after a word ("platform It
+# processes", "Amazon EKS The services") starts a new sentence. Sentences of
+# normal length are left alone. Applied here, where the whole text is split
+# into sentences: a recording is cleaned one Whisper segment at a time.
+_RUN_ON_WORDS = 30
+_SENTENCE_OPENER_RE = re.compile(
+    r"(?<=[A-Za-z0-9%)])\s+(?=(?:It|We|They|You|This|These|There|Our|So|Now|Then|The|Here|Suppose|Whatever|Once)\s)")
+
+
+def split_run_on(text: str) -> List[str]:
+    """`text`, or the sentences a run-on holds (verbatim slices)."""
+    if len(text.split()) <= _RUN_ON_WORDS:
+        return [text]
+    cuts = [m.start() for m in _SENTENCE_OPENER_RE.finditer(text)]
+    if not cuts:
+        return [text]
+    bounds = [0] + cuts + [len(text)]
+    return [text[a:b].strip() for a, b in zip(bounds, bounds[1:]) if text[a:b].strip()]
 
 
 def _as_statement(clause: str) -> str:
@@ -305,14 +342,19 @@ def segment_sentences(
             char_to_segment[char_pos + i] = seg_idx
         char_pos += len(seg_text) + 1  # +1 for space
     
-    # Split by sentence endings
-    sentence_texts = re.split(r"(?<=[.!?])\s+", full_text.strip())
+    # Split by sentence endings, then a run-on at its sentence openers. The
+    # run-on split comes first: the length cut below broke "... Amazon EKS The
+    # services | use PostgreSQL ..." in the middle of a sentence.
+    staged = []   # (text, cut out of a run-on, starts at a cut)
+    for st in re.split(r"(?<=[.!?])\s+", full_text.strip()):
+        pieces = split_run_on(st)
+        staged.extend((piece, len(pieces) > 1, i > 0) for i, piece in enumerate(pieces))
 
     # If some sentences are extremely long (e.g., long monologue without punctuation),
     # further split them on commas or after a max length to ensure every word gets a mapping.
-    refined_sentences = []
+    refined_sentences = []   # (text, cut out of a run-on, starts at a cut); a length cut is neither
     MAX_SENT_LEN = 240
-    for st in sentence_texts:
+    for st, run_on, cut in staged:
         if len(st) > MAX_SENT_LEN:
             # Split at comma boundaries while KEEPING the commas, so every
             # chunk is a verbatim slice of full_text. The previous version
@@ -337,19 +379,23 @@ def segment_sentences(
                     cur = p
             if cur:
                 temp.append(cur)
-            refined_sentences.extend(temp)
+            refined_sentences.extend((t, False, cut and i == 0) for i, t in enumerate(temp))
             continue
-        refined_sentences.append(st)
+        refined_sentences.append((st, run_on, cut))
 
-    # (text, is_clause): a clause split off a two-topic sentence is cleaned
-    # into a statement of its own below.
+    # (text, kind): a sentence cut out of a run-on ("run_on") or a clause
+    # split off a two-topic sentence ("clause") is cleaned into a statement
+    # of its own below.
     sentence_texts = []
-    for st in refined_sentences:
+    for st, run_on, cut in refined_sentences:
         halves = split_two_topic_sentence(st)
-        sentence_texts.extend((half, len(halves) > 1) for half in halves)
+        if len(halves) > 1:
+            sentence_texts.extend((half, "clause", cut and i == 0) for i, half in enumerate(halves))
+        else:
+            sentence_texts.append((st, "run_on" if run_on else None, cut))
 
     current_pos = 0
-    for sent_text, is_clause in sentence_texts:
+    for sent_text, kind, cut in sentence_texts:
         if not sent_text.strip():
             continue
 
@@ -390,7 +436,7 @@ def segment_sentences(
         # Clean text: normalize whitespace, basic grammar fixes
         cleaned = sent_text.strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
-        if is_clause:
+        if kind:
             cleaned = _as_statement(cleaned)
 
         sent = Sentence(
@@ -401,7 +447,8 @@ def segment_sentences(
             raw_text=sent_text,
             audio_confidence=float(avg_conf),
             segment_ids=list(range(start_seg, end_seg + 1)),
-            split_clause=is_clause,
+            split_clause=(kind == "clause"),
+            run_on_cut=cut,
         )
         sentences.append(sent)
     
@@ -527,6 +574,11 @@ def semantic_chunk_sentences(
         # added to the admins group first." were one chunk, and the first-day
         # step was filed under Open Responsibilities.
         if should_merge and _opens_with_question(candidate.text):
+            should_merge = False
+        # A boundary inferred in a run-on: merging across it rebuilt the
+        # 90-word "sentence", and a deployment rule took the system's
+        # business volume along with its build chain.
+        if should_merge and getattr(candidate, "run_on_cut", False):
             should_merge = False
 
         if should_merge:

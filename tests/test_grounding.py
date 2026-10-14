@@ -158,3 +158,11 @@ def test_invented_facts_never_reach_the_document(monkeypatch, mapper):
 def test_malformed_replies_never_reach_the_document(monkeypatch, mapper):
     _, rendered = _run_with(Garbage(), monkeypatch, mapper, "ground-garbage-0001")
     assert "Sure! Here is what I found" not in rendered
+
+
+def test_a_polish_may_fix_a_misheard_tool_name_but_not_add_one():
+    # Groq corrected "post gray SQL" and "Argo UD"; both fixes were rejected as
+    # added facts, so the misheard names stayed in the document (14 Oct).
+    source = ["The services uses post gray SQL on Amazon RDS for order data and Argo UD deploys them."]
+    assert added_specifics("The services use PostgreSQL on Amazon RDS and Argo CD deploys them.", source) == []
+    assert added_specifics("The services use PostgreSQL; Datadog monitors them.", source) == ["Datadog"]

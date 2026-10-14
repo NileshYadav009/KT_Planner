@@ -201,3 +201,98 @@ def test_meeting_video_end_to_end(meeting_video, tmp_path):
     assert skipped.get("possible secret on screen (not saved)") == 1
     assert skipped.get("repeat of a screen already captured") == 1
     assert len(os.listdir(tmp_path / "assets")) == 1   # nothing else written to disk
+
+
+# --------------------------------------------------------------------------
+# A single-page ops console (14 Oct): 30 stable screens, 0 screenshots.
+# Its menu ("Pipelines", "Deployments") typed every view as a pipeline page,
+# every view shared one URL so all but one were "repeats", and describing a
+# view without "as you can see" did not count as discussing it.
+# --------------------------------------------------------------------------
+
+def test_describing_what_is_on_screen_counts_as_discussing_it():
+    screen = "Pipelines\nRuns today 64\nSuccess rate 92%\nMedian duration 6m 12s\nBlocked by policy 2\nRepositories 7"
+    said = "We have pipelines running so today we ran 64 pipelines across 7 repositories. The success rate, the median duration, the block by policy pipelines are 2."
+    score, why = sc._speech_score(said, None, "dashboard", screen)
+    assert score >= 2 and any("describes" in w for w in why)
+    assert sc._speech_score("Any questions so far?", None, "dashboard", screen)[0] < 2
+
+
+def test_console_status_views_score_as_operational_screens():
+    k8s = ("Kubernetes relay-prod-01\nNodes ready 6/6\nPods running 84\nCluster CPU 47%\nCluster memory 68%\n"
+           "Nodes: CPU and memory utilisation\nAutoscaling (HPA) replicas min/max, CPU vs target 70%")
+    cost = "Cloud cost\nMonth to date $18,420\nForecast $23,150\nPotential savings $2,210/mo\nRecommendations"
+    security = ("Security posture\nOpen vulnerabilities\n2 critical 9 high 34 medium\nCompliance score 86%\n"
+                "Hardcoded secrets 0\nFindings by scanner: image, dependency, SAST")
+    for text in (k8s, cost, security):
+        assert sc._dashboard_score(text, None)[0] >= 5, text
+
+
+def test_the_browser_bars_are_cropped_and_never_give_the_title():
+    lines = [("Netflix x  YouTube x  (1) WhatsApp", 0.01, 0.02), ("claude.ai/artifact/abc123", 0.06, 0.02),
+             ("All Bookmarks", 0.105, 0.015), ("Share", 0.15, 0.03), ("Kubernetes - relay-prod-01", 0.2, 0.025),
+             ("22min", 0.22, 0.05)]
+    chrome = sc._browser_chrome_bottom(lines, "https://claude.ai/artifact/abc123")
+    assert 0.12 <= chrome <= 0.14
+    assert sc._browser_chrome_bottom(lines, None) == 0.0
+    assert sc._title([ln for ln in lines if ln[1] >= chrome], "https://claude.ai/artifact/abc123") == "Kubernetes - relay-prod-01"
+
+
+def _draw_console_view(view, url):
+    """One view of a single-page console: same URL and menu, different content."""
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        f, fb = ImageFont.truetype("arial.ttf", 16), ImageFont.truetype("arialbd.ttf", 22)
+    except OSError:
+        f = fb = ImageFont.load_default()
+    img = Image.new("RGB", (960, 540), (22, 24, 29))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, 960, 40], fill=(235, 236, 240))
+    d.text((20, 10), url, fill=(20, 20, 20), font=f)
+    for i, item in enumerate(["Overview", "Pipelines", "Deployments", "Kubernetes", "Cost"]):
+        d.text((14, 70 + i * 34), item, fill=(200, 200, 200), font=f)
+    if view == "k8s":
+        d.text((180, 52), "Kubernetes relay-prod-01", fill=(230, 230, 230), font=fb)
+        rows = ["Nodes ready 6/6", "Pods running 84", "Cluster CPU 47%", "Cluster memory 68%", "Autoscaling HPA replicas"]
+        for i, r in enumerate(rows):
+            d.rectangle([180, 100 + i * 80, 940, 170 + i * 80], outline=(60, 62, 70), fill=(30, 33, 39))
+            d.text((196, 120 + i * 80), r, fill=(220, 220, 220), font=fb)
+    else:
+        d.text((180, 52), "Cloud cost", fill=(230, 230, 230), font=fb)
+        for i, (k, v) in enumerate([("Month to date", "$18,420"), ("Forecast", "$23,150"), ("Savings", "$2,210/mo")]):
+            x = 180 + i * 255
+            d.rectangle([x, 100, x + 240, 220], outline=(60, 62, 70), fill=(30, 33, 39))
+            d.text((x + 12, 112), k, fill=(200, 200, 200), font=f)
+            d.text((x + 12, 150), v, fill=(240, 240, 240), font=fb)
+        for i in range(6):
+            h = 40 + (i * 37) % 160
+            d.rectangle([200 + i * 120, 500 - h, 280 + i * 120, 500], fill=(80, 140, 220))
+        d.text((200, 260), "Recommendations: rightsize 6 instances, stop dev outside hours", fill=(220, 220, 220), font=f)
+    return img
+
+
+def test_two_views_of_one_console_url_are_both_captured(tmp_path):
+    av = pytest.importorskip("av")
+    pytest.importorskip("rapidocr")
+    url = "https://ops.acme.io/console"
+    path = str(tmp_path / "console.mp4")
+    scenes = [(0, 8, _draw_console_view("k8s", url)), (8, 16, _draw_console_view("cost", url))]
+    with av.open(path, "w") as c:
+        s = c.add_stream("libx264", rate=4)
+        s.width, s.height, s.pix_fmt = 960, 540, "yuv420p"
+        for i in range(16 * 4):
+            img = next(sc_ for a, b, sc_ in scenes if a <= i / 4 < b)
+            for pkt in s.encode(av.VideoFrame.from_image(img)):
+                c.mux(pkt)
+        for pkt in s.encode():
+            c.mux(pkt)
+    segments = [
+        {"start": 1.0, "end": 7.0, "text": "The cluster has six nodes ready and 84 pods running, cluster CPU at 47 percent."},
+        {"start": 9.0, "end": 15.0, "text": "Cloud cost month to date is 18,420, the forecast is 23,150, savings from the recommendations."},
+    ]
+    result = sc.analyze_screen_shares(path, segments, str(tmp_path / "assets"))
+    shots = [a for a in result["assets"] if a["kind"] == "dashboard"]
+    assert len(shots) == 2, result["stats"]
+    assert result["stats"]["links"] == 1
+    from PIL import Image
+    assert all(Image.open(a["image_path"]).height < 540 for a in shots)   # address bar cropped off

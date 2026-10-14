@@ -153,3 +153,14 @@ def test_a_value_with_no_framing_is_left_exactly_as_it_was():
     assert without_framing(value) == value
     assert without_session_framing(value) == value
     assert without_framing("so the cache is warm") == "The cache is warm"
+
+
+def test_screen_tour_narration_is_not_a_fact():
+    from context_mapper import is_kt_session_meta_commentary
+
+    for text in ["Now let me show you the UI how it looks.", "I will just give you the tour like how this looks like.",
+                 "This is just a small overview."]:
+        assert is_kt_session_meta_commentary(text), text
+    for text in ["Let me show you how the rollback works: run helm rollback payments 3.",
+                 "We have an operation console UI as you can see in front of you."]:
+        assert not is_kt_session_meta_commentary(text), text

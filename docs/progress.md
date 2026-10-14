@@ -1340,3 +1340,23 @@ Results:
 
 Waiting on the user: real KTs (folder `../real_kts/`), the rotated Groq
 key (LLM-mode accuracy, batching A/B), a Gemini key, and audio test files.
+
+## A recorded KT with deliberate speaking mistakes (audit §9aae, 14 Oct)
+
+- **Screenshots from a single-page ops console: 0 -> 10.** The console's
+  menu had typed every view as a pipeline page, and one shared URL made
+  every view a "repeat". Describing a screen now counts as discussing it.
+  The browser tabs and bookmarks are cropped off.
+- **Misheard tool names are corrected** (PostgreSQL, Redis, ArgoCD, EKS,
+  Prometheus, pods, Terraform, namespaces...), each tied to its context.
+  The LLM's own corrections are no longer rejected when they sound like the
+  transcribed words.
+- **Run-on speech is split into sentences**, which are not merged back.
+- **Tour narration and closing remarks** are dropped.
+
+Results:
+
+- Tuning goldens 100% and holdouts 78/95, both unchanged.
+- e2e 0/0/0/0.
+- Only g10's text changed (its closing "Thank you." trimmed, "GitHub Action"
+  corrected).
