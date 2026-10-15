@@ -19,6 +19,7 @@ _CALL_SITES = {
     "_verify_batch_with_llm": "classification_check",
     "_try_llm_repair": "sentence_repair",
     "_polish_one": "section_polish",
+    "_rewrite_remote": "copy_edit",
     "_extract_structured_section": "structured_extraction",
     "_populate_fields_recursive": "field_fill",
     "_fill_deferred_gaps": "field_fill",

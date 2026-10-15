@@ -59,6 +59,7 @@ def test_fetch_converts_only_when_asked(monkeypatch, tmp_path):
 
     monkeypatch.setattr(huggingface_hub, "HfApi", _Api)
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **k: str(tmp_path))
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *a, **k: str(tmp_path / "copyedit.gguf"))
     monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path))
     monkeypatch.setitem(sys.modules, "diarization", type(sys)("diarization"))
     sys.modules["diarization"].fetch = lambda: {}

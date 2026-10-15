@@ -52,6 +52,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import numpy as np
 
 import media_guard
+from renderers.blocks.common import NOT_COVERED_MESSAGE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -167,6 +168,7 @@ class ScreenAsset:
     reasons: List[str] = field(default_factory=list)
     spoken_context: str = ""
     section_id: Optional[str] = None
+    topic_section: Optional[str] = None   # the section the screen itself is about (screen_topic_section)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -584,6 +586,8 @@ def analyze_screen_shares(
         order = order[:max_ocr]
 
     candidates: List[Tuple[ScreenAsset, Any, int]] = []
+    screen_bodies: List[List[str]] = []     # text below the browser bars, per screen read
+    bodies: Dict[int, List[Any]] = {}       # id(candidate asset) -> its OCR lines below the browser bars
     for i in sorted(order):
         run = runs[i]
         if run.edge < 0.01:
@@ -612,6 +616,8 @@ def analyze_screen_shares(
         speech, swhy = _speech_score(spoken, tool, page_type if visual < 5 else "dashboard", text)
         chrome = _browser_chrome_bottom(lines, url)
         title = _title([ln for ln in lines if ln[1] >= chrome], url) or (f"{tool} dashboard" if tool else page_type.title())
+        body = [ln[0] for ln in lines if ln[1] >= chrome]
+        screen_bodies.append(body)
 
         # "pipeline" too: a console's menu ("Pipelines", "Deployments") is on
         # every one of its screens, so its dashboards were all typed as
@@ -624,6 +630,7 @@ def analyze_screen_shares(
                                 reasons=vwhy + swhy + [f"held on screen {run.dwell:.0f}s"], spoken_context=spoken[:400])
             shot = img.crop((0, int(chrome * img.height), img.width, img.height)) if chrome else img
             candidates.append((asset, shot, run.dhash))
+            bodies[id(asset)] = [ln for ln in lines if ln[1] >= chrome]
             continue
         if sensitive:
             skip("possible secret on screen (not saved)")
@@ -641,8 +648,24 @@ def analyze_screen_shares(
                                 tool=tool, score=float(speech + min(run.dwell / 10, 2)),
                                 reasons=swhy + [f"open on screen {run.dwell:.0f}s"], spoken_context=spoken[:400])
             candidates.append((asset, None, run.dhash))
+            bodies[id(asset)] = [ln for ln in lines if ln[1] >= chrome]
         elif not is_dashboard and page_type != "terminal":
             skip("not a dashboard and no useful link")
+
+    # What each screen is about, from its own heading and contents. Lines on
+    # most screens (a console's side menu: "Pipelines", "Monitoring",
+    # "Security", "Cost") are the app's frame, not the page, and are ignored.
+    menu = _repeated_lines(screen_bodies)
+    for a, _, _ in candidates:
+        page = [ln for ln in bodies.get(id(a), []) if ln[0].strip().lower() not in menu]
+        menu_title = a.title.strip().lower() in menu
+        a.topic_section = screen_topic_section("" if menu_title else a.title, [ln[0] for ln in page])
+        title_topic = screen_topic_section(a.title, []) if menu_title else None
+        if title_topic and a.topic_section and title_topic != a.topic_section:
+            # The title is a menu item for another page ("Deployments" over a
+            # security view): the page's own heading instead. A menu label
+            # that matches the page ("Monitoring") is the page's heading too.
+            a.title = _title(page, a.url) or a.title
 
     # De-duplicate: the same dashboard shown twice (the same picture), and the
     # same link opened repeatedly (the same URL). Keep the best-scoring
@@ -703,6 +726,57 @@ _DEFAULT_SECTION = {
 }
 SHARED_SCREENS_SECTION_ID = "shared_screens"
 SHARED_SCREENS_TITLE = "Shared Screens & Links"
+SHOWN_NOT_DISCUSSED_MESSAGE = ("Shown on screen in the KT session but not explained. Confirm the details "
+                               "with the outgoing owner.")
+
+# The section a screen is about, from the words on it. Checked in this order
+# against the screen's heading; the specific topics come before the broad ones.
+_SCREEN_TOPICS: List[Tuple[str, "re.Pattern[str]"]] = [(sid, re.compile(p, re.IGNORECASE)) for sid, p in [
+    ("security_controls", r"\bsecurity\b|\bvulnerabilit(?:y|ies)\b|\bcve-\d|\bcompliance\b|\bsast\b|\bdast\b|\bsbom\b"
+                          r"|\bsecrets?\b|\bposture\b|\bfindings?\b|\bthreats?\b"),
+    ("cost_optimization", r"\bcosts?\b|\bspend\b|\bbudgets?\b|\bforecast\b|\bsavings?\b|\bbilling\b|\binvoices?\b"),
+    ("deployment_and_rollback", r"\bdeploy\w*|\bpipelines?\b|\breleases?\b|\brollbacks?\b|\brolled\s+back\b|\bbuilds?\b"
+                                r"|\bci\s*/\s*cd\b|\bargo\s*cd\b|\bgithub\s+actions\b|\bjenkins\b|\bdora\b"
+                                r"|\blead\s+time\b|\bchange\s+failure\b"),
+    ("disaster_recovery", r"\bbackups?\b|\brestores?\b|\bfailover\b|\bdisaster\b|\brto\b|\brpo\b|\breplication\b"),
+    ("monitoring_observability", r"\bmonitor\w*|\bobservability\b|\balert\w*|\bgrafana\b|\bprometheus\b|\bdatadog\b"
+                                 r"|\bnew\s+relic\b|\bkibana\b|\blatency\b|\berror\s+rate\b|\bp9[59]\b|\bsl[oi]s?\b"
+                                 r"|\buptime\b|\bservice\s+health\b|\bmetrics\b|\blogs\b|\btraces?\b|\bincidents?\b|\bmttr\b"),
+    ("architecture_reference", r"\bkubernetes\b|\bk8s\b|\bclusters?\b|\bnodes?\b|\bpods?\b|\bnamespaces?\b|\btopology\b"
+                               r"|\barchitecture\b|\binfrastructure\b|\bhpa\b|\breplicas?\b"),
+    ("system_overview", r"\boverview\b"),
+]]
+# From the contents alone (no telling heading) a topic needs this many
+# different terms and more than any other topic.
+_SCREEN_TOPIC_MIN_TERMS = 2
+
+
+def _repeated_lines(bodies: List[List[str]]) -> set:
+    """Lines on at least half of the screens read (4+ screens): the app's
+    menu and header, which name every topic and so name none."""
+    if len(bodies) < 4:
+        return set()
+    seen: Dict[str, int] = {}
+    for body in bodies:
+        for ln in {b.strip().lower() for b in body if b.strip()}:
+            seen[ln] = seen.get(ln, 0) + 1
+    return {ln for ln, n in seen.items() if n >= len(bodies) / 2}
+
+
+def screen_topic_section(title: str, body: Sequence[str]) -> Optional[str]:
+    """The section a screen is about: its heading names the topic
+    ("Monitoring", "Cloud cost", "Security posture"), or else its contents
+    clearly lean to one topic. None when the screen doesn't say."""
+    for sid, pattern in _SCREEN_TOPICS:
+        if title and pattern.search(title):
+            return sid
+    text = "\n".join(body)
+    terms = {sid: {m.group(0).lower() for m in pattern.finditer(text)}
+             for sid, pattern in _SCREEN_TOPICS if sid != "system_overview"}
+    ranked = sorted(terms.items(), key=lambda kv: -len(kv[1]))
+    if ranked and len(ranked[0][1]) >= _SCREEN_TOPIC_MIN_TERMS and len(ranked[0][1]) > len(ranked[1][1]):
+        return ranked[0][0]
+    return None
 
 
 def _mmss(seconds: float) -> str:
@@ -711,10 +785,12 @@ def _mmss(seconds: float) -> str:
 
 
 def assign_sections(assets: List[Dict[str, Any]], coverage: Dict[str, Any], transcript_offset: float = 0.0) -> None:
-    """Put each capture in the section being discussed while it was on
-    screen: the most common section among the sentences spoken in that
-    window (transcript timeline = video timeline - offset). Falls back to
-    the page type when nothing was said."""
+    """Put each capture in the section its screen is about (a monitoring
+    dashboard in Monitoring, a deployments view in Deployment). When the
+    screen doesn't say, the section being discussed while it was on screen:
+    the most common section among the sentences spoken in that window
+    (transcript timeline = video timeline - offset). Falls back to the page
+    type when nothing was said."""
     timed: List[Tuple[float, float, str]] = []
     for sid, cov in (coverage or {}).items():
         for s in (cov or {}).get("sentences") or []:
@@ -730,6 +806,8 @@ def assign_sections(assets: List[Dict[str, Any]], coverage: Dict[str, Any], tran
             # A runbook is operational whatever sentence introduced it ("this
             # is the runbook in Confluence" reads as documentation).
             a["section_id"] = "common_failures"
+        elif a.get("topic_section") and (not coverage or a["topic_section"] in coverage):
+            a["section_id"] = a["topic_section"]
         elif counts:
             a["section_id"] = max(counts, key=lambda k: (counts[k], k == _DEFAULT_SECTION.get(a["page_type"])))
         else:
@@ -758,6 +836,12 @@ def attach_to_rendered_sections(rendered_sections: List[Dict[str, Any]], assets:
                 rendered_sections.append(target)
                 index[SHARED_SCREENS_SECTION_ID] = target
         blocks = target.setdefault("blocks", [])
+        if any(a["kind"] == "dashboard" and a.get("image_path") for a in items):
+            # A section only shown on screen is not "not covered".
+            for b in blocks:
+                if b.get("type") == "NarrativeBlock" and \
+                        [str(p).strip() for p in b.get("paragraphs") or [] if str(p).strip()] == [NOT_COVERED_MESSAGE]:
+                    b["paragraphs"] = [SHOWN_NOT_DISCUSSED_MESSAGE]
         for a in items:
             if a["kind"] == "dashboard" and a.get("image_path"):
                 tool = f"{a['tool'].title()} " if a.get("tool") else ""

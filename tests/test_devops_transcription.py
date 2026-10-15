@@ -354,3 +354,26 @@ def test_closing_remarks_at_the_end_are_trimmed():
     assert clean_transcript("For you so please if you have any doubts any questions let me know thank you") == ""
     assert clean_transcript("Airflow handles orchestration. Thanks to Redis the cache is warm.") == \
         "Airflow handles orchestration. Thanks to Redis the cache is warm."
+
+
+def test_spoken_agreement_and_turn_fillers_are_removed_without_commas():
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("Then we have the request throughput which reached 15,000 right so yep so we have "
+                            "three active alerts") == \
+        "Then we have the request throughput which reached 15,000. We have three active alerts"
+    assert clean_transcript("Yeah, the cluster runs on EKS.") == "The cluster runs on EKS."
+    assert clean_transcript("The latency is fine okay so now we check alerts") == \
+        "The latency is fine. Now we check alerts"
+    # "right" as an answer or a direction is kept.
+    assert clean_transcript("That is right so it works") == "That is right so it works"
+    assert clean_transcript("Turn right so the traffic flows") == "Turn right so the traffic flows"
+
+
+def test_a_transcribed_piece_is_closed_when_the_next_one_opens_a_sentence():
+    from devops_transcription import close_segment_sentences
+
+    assert close_segment_sentences(["everything in dev is moved on to production", "Then we can see the health",
+                                    "and we have", "The rollout history."]) == \
+        ["everything in dev is moved on to production.", "Then we can see the health",
+         "and we have", "The rollout history."]

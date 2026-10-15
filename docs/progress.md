@@ -1360,3 +1360,44 @@ Results:
 - e2e 0/0/0/0.
 - Only g10's text changed (its closing "Thank you." trimmed, "GitHub Action"
   corrected).
+
+## Screenshots in the section their screen is about (audit §9aaf, 15 Oct)
+
+- **Each screenshot goes to the section its screen is about.** A monitoring
+  dashboard goes to Monitoring, a deployments view to Deployment, a security
+  view to Security and a cost view to Cost. The screen's heading decides,
+  or its contents when the heading doesn't say. What was being said is used
+  only when the screen gives no clear topic.
+- **A console's side menu is ignored**, because it names every topic.
+- **A section that was only shown on screen** says so, instead of "not
+  covered".
+- On the user's recorded KT, all 10 screenshots are in their section.
+
+## Spoken sentences rewritten as written English (audit §9aag, 15 Oct)
+
+- **Fillers without commas are removed** ("right so yep so"), and a new
+  speech piece that starts a sentence gets a full stop before it.
+- **A copy-edit step rewrites sentences that read as speech** into written
+  English. It uses Groq when a key is set (fast, no local memory).
+  Otherwise it uses a local model: Qwen2.5-1.5B in 4 bits through
+  llama.cpp (1.1 GB, Apache-2.0).
+  - It is loaded only for this step and freed after it.
+  - It uses half the CPU cores.
+  - It is skipped when less than 1.5 GB of memory is free.
+  - It stops after 5 minutes.
+- **A rewrite that changes a fact is refused**, and the speaker's sentence
+  stays. That covers a lost tool or number, a lost "never" or "still",
+  dropped content words, and new words the speaker never said. Safety
+  rules are never rewritten.
+- **A reworded paragraph keeps its sources**: it is matched sentence by
+  sentence when it no longer matches as a whole.
+- **On the user's 7-minute KT:**
+  - 20 of 30 spoken sentences were rewritten;
+  - the KT took about 2 minutes longer;
+  - peak memory went from 3.8 to 5.3 GB;
+  - every fact keeps its source.
+- **Ruled out:**
+  - the grammar-correction models (non-commercial licence);
+  - the 0.5B model (accepted only 8 of 20 rewrites);
+  - the 1.5B in full precision (6 GB of RAM, 16 s a sentence);
+  - bf16 (20x slower) and PyTorch int8 (garbage output).

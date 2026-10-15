@@ -96,6 +96,12 @@ def fetch(half: bool = False) -> None:
 
     for name, path in diarization.fetch().items():
         print(f"diarisation {name} -> {path}")
+    # The copy edit's local model (copyedit.py): one 4-bit file, 1.1 GB.
+    import copyedit
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(copyedit.LOCAL_REPO, copyedit.LOCAL_FILE, revision=copyedit.LOCAL_REVISION)
+    print(f"copy edit -> {path}")
     try:
         from rapidocr import RapidOCR
 
@@ -136,6 +142,11 @@ def verify() -> int:
         print("speaker diarisation models missing: run scripts/fetch_models.py")
         return 1
     diarization._diarizer()
+    import copyedit
+
+    if copyedit.ENABLED and copyedit.local_model_path() is None and copyedit.LOCAL_MODEL.lower() != "off":
+        print("copy-edit model missing: run scripts/fetch_models.py")
+        return 1
     print("all models load offline")
     return 0
 

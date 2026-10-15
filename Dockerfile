@@ -32,11 +32,11 @@ WORKDIR /app
 # stay out of the image. The imports at the end check nothing needed went.
 COPY requirements.lock .
 RUN pip install --index-url https://download.pytorch.org/whl/cpu "$(grep '^torch==' requirements.lock)" \
- && pip install -r requirements.lock \
+ && pip install --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -r requirements.lock \
  && cd /usr/local/lib/python3.13/site-packages \
  && find . -type d \( -name tests -o -name test \) -prune -exec rm -rf {} + \
  && rm -rf torch/include \
- && python -c "import torch, transformers, sentence_transformers, gliner, faster_whisper, ctranslate2, sklearn, scipy, networkx, sympy, cv2, rapidocr, onnxruntime, sherpa_onnx, av, weasyprint, jinja2"
+ && python -c "import torch, transformers, sentence_transformers, gliner, faster_whisper, ctranslate2, sklearn, scipy, networkx, sympy, cv2, rapidocr, onnxruntime, sherpa_onnx, av, weasyprint, jinja2, llama_cpp"
 
 # The runtime user exists before the models arrive, so they are handed to it
 # in the layer that downloads them: a `chown -R` in a later layer stores a

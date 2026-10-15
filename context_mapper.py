@@ -2620,6 +2620,17 @@ class ContextMappingPipeline:
         # STAGE 2: Segment sentences
         sentences = segment_sentences(segments)
         logger.info(f"Stage 2: Segmented into {len(sentences)} sentences")
+
+        # STAGE 2.5: Spoken sentences rewritten as written English where a
+        # model is available and the rewrite keeps every fact (copyedit.py).
+        # raw_text keeps the speaker's sentence.
+        try:
+            import copyedit
+            edited, self.copyedit_stats = copyedit.copyedit_sentences([s.text for s in sentences])
+            for s, text in zip(sentences, edited):
+                s.text = text
+        except Exception as exc:
+            logger.warning("Copy edit skipped: %s", exc)
         
         # STAGE 3: Classify sentences
         # Precompute embeddings for sentences to allow context-aware scoring

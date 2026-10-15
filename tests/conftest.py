@@ -11,3 +11,7 @@ os.environ.setdefault("CONTINUUM_VOCAB_CANDIDATES_PATH", os.path.join(_STATE_DIR
 # Route tests that are not about authentication run as the local tenant;
 # tests/test_auth.py switches authentication on and checks every boundary.
 os.environ.setdefault("CONTINUUM_AUTH", "disabled")
+# The copy edit rewrites sentences with a local model when one is downloaded
+# (copyedit.py): tests score the pipeline's own output, so it is off except
+# in tests/test_copyedit.py.
+os.environ.setdefault("CONTINUUM_COPYEDIT", "0")

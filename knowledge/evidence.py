@@ -286,6 +286,24 @@ class _Index:
 
     def sources_for(self, text: str) -> List[int]:
         """Indexes of the sentences that state `text`, or [] if none do."""
+        found = self._sources_for(text)
+        if found:
+            return found
+        # A paragraph of several sentences, none repeated word for word (a
+        # copy-edited paragraph, copyedit.py), finds too few sources as a
+        # whole: it is sourced when every sentence in it is.
+        parts = [p for p in _SENTENCE_SPLIT.split(text) if _content_keys(self._strip(p))]
+        if len(parts) < 2:
+            return []
+        chosen: set = set()
+        for part in parts:
+            got = self._sources_for(part)
+            if not got:
+                return []
+            chosen.update(got)
+        return sorted(chosen)
+
+    def _sources_for(self, text: str) -> List[int]:
         text = self._strip(text)
         keys = _content_keys(text)
         if not keys:

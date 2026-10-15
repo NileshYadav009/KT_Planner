@@ -12,6 +12,7 @@ transformers>=4.45.0      # Hugging Face transformers for advanced NLP tasks
 sentence-transformers>=5.2.0  # Semantic embeddings for accurate section classification
 torch>=2.2.0              # PyTorch backend (required by transformers and sentence-transformers)
 gliner>=0.2.13            # Entity extraction for classification signals (entity_extractor.py)
+llama-cpp-python>=0.3.36  # Local copy-edit model, 4-bit (copyedit.py). Prebuilt CPU wheels: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 openai>=1.0.0             # OpenAI-compatible client, used by llm_provider.GroqProvider (Groq's API is OpenAI-compatible)
 
 # Audio/Video Processing (Enhanced Processing Pipeline)

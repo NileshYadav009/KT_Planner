@@ -4147,6 +4147,168 @@ Not done:
 - The Business volume field stays empty in no-LLM mode, because the
   15,000-orders sentence now goes to Architecture Details.
 
+### 9aaf. Screenshots in the section their screen is about (15 Oct)
+
+The user saw the screenshots from §9aae scattered across the KT. Each one
+went to the section that the sentences spoken while it was on screen were
+classified into. While touring a console, the speaker talks about
+whatever comes to mind, so a monitoring view could land in Architecture.
+
+Fix (`screen_capture.py`):
+
+- `screen_topic_section(title, body)` names the section a screen is about:
+  - The heading decides first. "Monitoring" or "Alerts" goes to
+    Monitoring, "Deployments" to Deployment, "Security posture" to
+    Security, "Cloud cost" to Cost, "Kubernetes" to Architecture, and
+    "... overview" to System Overview.
+  - Otherwise the contents decide, when they hold at least 2 different
+    terms of one topic and more terms than any other topic.
+- Lines on at least half of the screens are ignored as the app's frame
+  (`_repeated_lines`). A console's side menu names every topic, so it
+  would otherwise decide every screen.
+- Some titles are menu items for another topic, like the menu's
+  "Deployments" over the Security page. Those are re-picked from the
+  page's own text. Re-picking every menu-item title made headings worse:
+  "Monitoring" became "prod · ap-south-". A menu label that matches the
+  page stays.
+- `assign_sections`: a runbook still goes to Common Failures. Otherwise the
+  screen's topic decides, then what was being said (as before), then the
+  page type.
+- A section that has a screenshot but nothing spoken now says "Shown on
+  screen in the KT session but not explained" instead of "not covered".
+
+Checks:
+
+- 4 new tests in tests/test_screen_capture.py (37 pass). The other three
+  test files that touch screenshots pass (43).
+- On the user's video, all 10 screenshots are in their section. Overview
+  → System Overview. The overview's alerts and throughput view, service
+  health, Monitoring and Alerts → Monitoring. Deployments → Deployment.
+  Kubernetes → Architecture. Security posture → Security. The two cost
+  views → Cost. I checked the four unclear ones by looking at the images.
+- The golden and e2e KTs are text-only, with no screen capture, so they
+  can't change. The full suite was not re-run for this change.
+
+### 9aag. Spoken sentences rewritten as written English (15 Oct)
+
+The user found the KT unprofessional: "right so yep so", sentences
+running into each other ("15,000 orders daily Customers uses ..."), and
+paragraphs that read as speech. Without an LLM, the app only removed
+fillers that commas set off, and Whisper rarely writes commas. The user
+asked for a local grammar model if it adds value, rules where needed, and
+Groq where needed.
+
+Rules (`devops_transcription.py`):
+
+- "yep", "yeah" and "yup" (and a "so" after them) are removed anywhere.
+  "right so" or "okay so" before a subject starts a new sentence, but not
+  after "is", "was", "get" and similar ("that is right so it works" is
+  kept).
+- `close_segment_sentences`: a transcribed piece gets a full stop when the
+  next piece opens a sentence ("We", "Then", "Here", ...) and it has no
+  ending of its own. Used in `pipeline.transcribe_recording`.
+
+Copy edit (`copyedit.py`, stage 2.5 in `context_mapper`, after the
+sentences are formed and before they are classified):
+
+- Only sentences that read as speech are rewritten (`needs_edit`): no
+  full stop, more than 25 words, a spoken marker ("so", "you can see",
+  "then we have", ...) or a capital mid-sentence that is not a product
+  name. Safety rules are never sent.
+- The model, in order:
+  1. Groq or Gemini, when configured and the workspace allows external
+     LLMs. One numbered list per 15 sentences, and at most a quarter of
+     `LLM_MAX_CALLS_PER_KT`. Sentences it could not take (a dead key, a
+     rate limit mid-KT, no network, the call limit) go to the local model.
+  2. Else the local model: Qwen2.5-1.5B-Instruct in 4 bits
+     (`qwen2.5-1.5b-instruct-q4_k_m.gguf`, 1.1 GB, Apache-2.0), run
+     through llama.cpp (`llama-cpp-python`). It is used whenever the file
+     is in the local cache and is never downloaded during a KT
+     (`scripts/fetch_models.py` fetches it).
+     - It is loaded for the copy edit only and freed straight after.
+     - It runs on half the CPU cores (`CONTINUUM_COPYEDIT_THREADS`).
+     - It stops after `CONTINUUM_COPYEDIT_MAX_SECONDS` (300); later
+       sentences stay as said.
+     - It is skipped when less than `CONTINUUM_COPYEDIT_MIN_FREE_GB`
+       (1.5) of memory is free as it starts.
+  3. Else nothing is rewritten.
+- `CONTINUUM_COPYEDIT=0` turns it off. tests/conftest.py does that, so the
+  suite scores the pipeline's own output.
+- A rewrite is kept only if `problems()` finds nothing. The rules:
+  - Every tool and number survives.
+  - Every "never/not/must/only/still/without/until/unless" survives, and
+    none is added.
+  - At least 85% of the content words are kept, and at most
+    max(2, 20%) new ones are added.
+  - Nothing new is stated (`added_specifics`).
+  - The length stays similar, and the reply is not chat ("Sure! ...").
+  - A safety rule ("Never ...", "Do not ...") is never sent.
+- The Sources appendix is built from the transcript itself, so it keeps
+  the speaker's own words.
+
+Which local model, measured on 20 sentences of the user's KT:
+
+- **Licence:** the grammar-correction models (CoEdIT,
+  flan-t5-grammar-synthesis, t5-base-grammar-correction) are CC BY-NC,
+  so they can't be used in a paid product. The Qwen2.5 Instruct models
+  are Apache-2.0.
+- **Qwen2.5-0.5B (fp32, 1 GB):**
+  - about 7 s a sentence, measured while the golden check ran;
+  - 8 of 20 rewrites accepted, all of them correct;
+  - checks a polish rewrite already had to pass let through four meaning
+    changes: "Never modify Terraform code manually" became "cannot be
+    modified", ArgoCD was dropped, "still need" became "should also", and
+    an ownership statement was rewritten. The new checks refuse all four.
+- **Qwen2.5-1.5B (fp32, 3 GB):**
+  - 8 of 8 rewrites accepted, and much better writing;
+  - 16.5 s a sentence with the machine otherwise idle, and about 6 GB of
+    RAM;
+  - beside the pipeline's other models it swaps: 231 s a sentence.
+  - So it is for a server, not this laptop.
+- **Formats that failed:** bf16 ran 20x slower than fp32 on this CPU, and
+  int8 dynamic quantisation of the 1.5B produced garbage.
+- **Qwen2.5-1.5B in 4 bits through llama.cpp (chosen):**
+  - 3.0 s a sentence on 2 threads, and 2.5 s to load;
+  - 17 of 20 rewrites accepted;
+  - the 3 refused were all right to refuse: a safety rule (never sent in
+    the real step), a dropped "tour" phrase, and a rewrite that turned
+    "MTTR is 22 minutes" into "failure rate is 22 minutes";
+  - 1.3 GB of RAM after loading and 1.66 GB after three rewrites; back to
+    0.04 GB once freed.
+- **In the pipeline, on the user's KT rebuilt from its saved
+  transcription:**
+  - 220 s and a 3.81 GB peak working set without the copy edit;
+  - 344 s and a 5.29 GB peak with it;
+  - peak committed memory went from 4.84 to 5.61 GB. The rest is the model
+    file, mapped, which Windows can drop under pressure;
+  - 30 sentences needed a rewrite, 20 were rewritten and 10 refused;
+  - free RAM dropped to 0.2 GB with Chrome and VS Code open. That is why
+    the copy edit is skipped when less than 1.5 GB is free.
+- **Sources:** reworded paragraphs lost their source, because a paragraph
+  was matched as a whole and its sentences no longer appear word for
+  word. `evidence._Index.sources_for` now falls back to matching each
+  sentence, and sources the paragraph only when every sentence has a
+  source. On the user's KT: 0 facts without a source. Golden/e2e with the
+  copy edit off: no document changed at all, and the scores are unchanged
+  (tuning 100%, holdout 78/95, e2e unchanged).
+
+Checks:
+
+- tests/test_copyedit.py (5) and 2 new rule tests in
+  tests/test_devops_transcription.py.
+- Golden/e2e: tuning 100% and holdout 78/95, both unchanged; e2e
+  unchanged. Only g05's text changed ("Yeah, two hours." became "two
+  hours.").
+- The user's video, rebuilt from its saved transcription with the 0.5B
+  model, took about 2.5 minutes longer. No "yep"/"yeah" is left, and every
+  fact keeps its source.
+- Full suite: 989 passed and 1 failed (4 LLM replay skips as before). The
+  failure: "Aurora. Okay so we use Kafka" became "Aurora.. We use Kafka",
+  because the "okay so" rule fired after a full stop. It now fires only
+  right after a word.
+- Full suite on the final code (4-bit model, memory guard, sentence-by-
+  sentence sources): 994 passed, 0 failed (4 LLM replay skips, 1 xfail).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

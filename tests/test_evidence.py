@@ -58,6 +58,24 @@ def test_each_fact_points_to_the_sentence_that_states_it():
     assert ko["rendered_sections"][0]["blocks"][0]["sources"][0] == [1]
 
 
+def test_a_reworded_paragraph_is_sourced_sentence_by_sentence():
+    segments = [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate([
+        "so today we ran 64 pipelines across 7 repositories right.",
+        "The blocked by policy pipelines are 2 this week.",
+        "The median duration to run a pipeline is 9 minutes.",
+        "Rollbacks go through the release manager on call.",
+        "Canary deploys cover 10 percent of the traffic first."])]
+    edited = ("Today we ran 64 pipelines across 7 repositories. Pipelines blocked by policy are 2 this week. "
+              "A pipeline's median duration is 9 minutes. Rollbacks go through the on-call release manager. "
+              "Canary deploys cover 10 percent of traffic first.")
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [edited]})
+    assert attach_evidence(ko, transcript_sentences("", segments))["unsourced"] == 0
+    assert ko["rendered_sections"][0]["blocks"][0]["sources"] == [[1, 2, 3, 4, 5]]
+    # One sentence nobody said leaves the whole paragraph unsourced.
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [edited + " Failover takes 4 minutes."]})
+    assert attach_evidence(ko, transcript_sentences("", segments))["unsourced"] == 1
+
+
 def test_a_number_the_session_never_said_is_not_sourced():
     ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [
         "Never restart the ledger writer during the 4 AM batch window."]})

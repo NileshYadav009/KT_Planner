@@ -556,6 +556,20 @@ _ANYWHERE_FILLER_RE = re.compile(
     _NOT_IN_WORD + r"(?:um+|uh+|basically|actually)" + _NOT_JOINED + r",?\s*",
     re.IGNORECASE,
 )
+# Spoken agreement carries no content anywhere, commas or not ("reached
+# 15,000 right so yep so we have"), with a "so" that follows it.
+_AGREEMENT_FILLER_RE = re.compile(
+    _NOT_IN_WORD + r"(?:yep|yeah|yup)" + _NOT_JOINED + r"(?:\s*,?\s*so" + _NOT_JOINED + r")?[,.]?\s*",
+    re.IGNORECASE,
+)
+# "right so" / "okay so" before a subject starts a new sentence ("... 15,000
+# right so we have three alerts" -> "... 15,000. We have three alerts").
+# Not after a verb that makes "right" an answer ("that is right so it works").
+_TURN_FILLER_RE = re.compile(
+    r"(?<=\w)(?<!\bis)(?<!\bwas)(?<!\bare)(?<!\bwere)(?<!\bbe)(?<!\bget)(?<!\bgot)(?<!\bdo)(?<!\bdone)"
+    r"[\s,]+(?:right|okay|ok)\s+so" + _NOT_JOINED + r",?\s+(?=(?:we|you|i|they|it|this|these|that|here|there|now|our)\b)",
+    re.IGNORECASE,
+)
 REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)(?:\s+\1\b)+", re.IGNORECASE)
 REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,12}\w+)\s+\1\b", re.IGNORECASE)
 
@@ -570,6 +584,8 @@ def remove_fillers(text: str) -> str:
     if not text:
         return text
     cleaned = _ANYWHERE_FILLER_RE.sub("", text)
+    cleaned = _AGREEMENT_FILLER_RE.sub("", cleaned)
+    cleaned = _TURN_FILLER_RE.sub(". ", cleaned)
     # "We use Kafka, right?" is a statement with a tag, not a question.
     cleaned = _TAG_QUESTION_RE.sub(".", cleaned)
     cleaned = _TRAILING_TAG_RE.sub("", cleaned)
@@ -582,6 +598,26 @@ def remove_fillers(text: str) -> str:
     cleaned = re.sub(r",\s*([.!?])", r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+# A recording is transcribed in pieces, and a piece that starts a new
+# sentence was joined to the previous one with no full stop ("... moved on
+# to production" + "Then we can see the health ..."). Not "The"/"It"/"So":
+# those continue a sentence as often as they start one.
+_SEGMENT_OPENER_RE = re.compile(
+    r"^(?:We|They|You|This|These|There|Our|Now|Then|Here|Suppose|Whatever|Once|If|When|Next|Also|Finally)\s")
+
+
+def close_segment_sentences(texts: List[str]) -> List[str]:
+    """End a transcribed piece with a full stop when the next piece opens a
+    new sentence and this one has no ending of its own."""
+    out = list(texts)
+    for i in range(len(out) - 1):
+        cur, nxt = (out[i] or "").rstrip(), (out[i + 1] or "").lstrip()
+        if (cur and nxt and cur[-1] not in ".!?,;:" and len(cur.split()) >= 3
+                and _SEGMENT_OPENER_RE.match(nxt)):
+            out[i] = cur + "."
+    return out
 
 
 def remove_repeated_words(text: str) -> str:

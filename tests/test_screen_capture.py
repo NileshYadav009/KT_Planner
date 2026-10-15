@@ -95,6 +95,52 @@ def test_assign_sections_follows_the_discussion_with_fallbacks():
     assert runbook["section_id"] == "common_failures"          # runbook title wins
 
 
+def test_a_screenshot_goes_to_the_section_its_screen_is_about():
+    # Its heading names the topic.
+    assert sc.screen_topic_section("Monitoring", []) == "monitoring_observability"
+    assert sc.screen_topic_section("Alerts", []) == "monitoring_observability"
+    assert sc.screen_topic_section("Deployments", []) == "deployment_and_rollback"
+    assert sc.screen_topic_section("Security posture", []) == "security_controls"
+    assert sc.screen_topic_section("Cloud cost", []) == "cost_optimization"
+    assert sc.screen_topic_section("Kubernetes·relay-prod-01", []) == "architecture_reference"
+    assert sc.screen_topic_section("Platform overview", []) == "system_overview"
+    # No telling heading: the contents decide when they clearly lean one way.
+    dora = ["Elite", "Deploy frequency", "14/day", "Lead time", "2h 10m", "Change failure", "3%", "MTTR 22min"]
+    assert sc.screen_topic_section("Elite", dora) == "deployment_and_rollback"
+    assert sc.screen_topic_section("Relay", ["Relay", "orders-api", "42"]) is None
+
+
+def test_a_console_menu_on_every_screen_does_not_decide_the_section():
+    menu = ["Overview", "Pipelines", "Deployments", "Kubernetes", "Monitoring", "Alerts", "Security", "Cost"]
+    screens = [menu + ["Monitoring", "p95 latency", "Error rate"], menu + ["Cloud cost", "$2,210/mo"],
+               menu + ["Deployments", "orders-api v2.4"], menu + ["Alerts", "3 active"]]
+    repeated = sc._repeated_lines(screens)
+    assert {"pipelines", "security", "cost"} <= repeated
+    page = [ln for ln in screens[0] if ln.strip().lower() not in repeated]
+    assert sc.screen_topic_section("", page) == "monitoring_observability"
+
+
+def test_the_screen_topic_wins_over_what_was_said_meanwhile():
+    coverage = {"architecture_reference": {"sentences": [{"text": "a", "start": 20.0, "end": 24.0}]},
+                "monitoring_observability": {"sentences": []}}
+    dash = dict(_asset("dashboard", "dashboard", 26.0), topic_section="monitoring_observability")
+    unclear = _asset("dashboard", "dashboard", 26.0)
+    sc.assign_sections([dash, unclear], coverage, transcript_offset=6.0)
+    assert dash["section_id"] == "monitoring_observability"
+    assert unclear["section_id"] == "architecture_reference"   # screen doesn't say: the discussion decides
+
+
+def test_a_section_only_shown_on_screen_is_not_called_not_covered():
+    from renderers.blocks.common import NOT_COVERED_MESSAGE
+    rendered = [{"section_id": "cost_optimization", "section_title": "Cost Optimization",
+                 "blocks": [{"type": "NarrativeBlock", "paragraphs": [NOT_COVERED_MESSAGE]}]}]
+    shot = dict(_asset("dashboard", "dashboard", 393.0, title="Cloud cost"), section_id="cost_optimization")
+    sc.attach_to_rendered_sections(rendered, [shot], "job-1234-5678")
+    blocks = rendered[0]["blocks"]
+    assert blocks[0]["paragraphs"] == [sc.SHOWN_NOT_DISCUSSED_MESSAGE]
+    assert blocks[1]["type"] == "ImageBlock"
+
+
 def test_attach_blocks_and_ui_payload():
     rendered = [{"section_id": "monitoring_observability", "section_title": "Monitoring", "blocks": []}]
     dash = dict(_asset("dashboard", "dashboard", 14.0, title="Payments latency"), section_id="monitoring_observability")
