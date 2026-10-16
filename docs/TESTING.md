@@ -87,9 +87,16 @@ python scripts/e2e_kts.py --api http://127.0.0.1:8011 --key-file key.txt --out e
 python scripts/e2e_kts.py --llm replay --recording tests/fixtures/e2e_kts_llm_recording.json --out e2e_replay
 ```
 
-`tests/fixtures/e2e_kts_llm_recording.json` holds the 45 Groq
+`tests/fixtures/e2e_kts_llm_recording.json` holds the 66 Groq
 `qwen/qwen3.8-27b` responses (no prompts, no keys) the current code asks for
-on these four KTs, recorded on 12 Oct through the API with `LLM_BATCH_CALLS=1`.
+on the five e2e KTs, QuickBite included. They were recorded on 16 Oct with
+batching on, the default (`LLM_BATCH_CALLS=1`); the run took one new request,
+and the cache answered the rest. The 12 Oct recording held 45 responses
+for four KTs. From 13 Oct to 16 Oct these tests skipped without running the
+LLM path: the "no key, no LLM" rule (`get_llm_provider`) also applied to
+replay, which needs no key because it never sends a request. Replay is now
+exempt from that rule. A skip means no recorded answer matched; the test
+says so.
 A prompt change makes those requests unrecorded; re-record with `--api` and
 `--export-recording CACHE.sqlite JSON --since <start of the run>`.
 

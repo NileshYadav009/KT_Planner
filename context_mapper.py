@@ -2747,9 +2747,9 @@ class ContextMappingPipeline:
             )
             prepared.append((classifications, primary, secondary, rule_decided))
 
-        # With LLM_BATCH_CALLS=1 the borderline checks go out in batches
-        # (P1-12) instead of one call per sentence. Off until LLM runs on the
-        # golden set show the same placements.
+        # With LLM_BATCH_CALLS on (the default) the borderline checks go out
+        # in batches (P1-12) instead of one call per sentence; =0 is one call
+        # each. See llm/batching.py for the A/B that switched it on.
         verdicts = None
         if llm_batch_calls_enabled() and self.classifier.llm_fallback_fn:
             verdicts = self.classifier.verify_in_batches([

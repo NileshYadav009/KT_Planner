@@ -168,10 +168,10 @@
   "false_covered": 0
  },
  "h14_tidewater_aws_iot_notes": {
-  "accuracy": 0.794,
-  "wrong": 7,
+  "accuracy": 0.765,
+  "wrong": 8,
   "violations": 0,
-  "false_missing": 0,
+  "false_missing": 1,
   "false_covered": 0
  }
 }

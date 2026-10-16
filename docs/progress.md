@@ -1456,4 +1456,10 @@ Results:
     `.env`.
   - Groq requests now stay within the account's 1,000 output tokens a
     minute instead of retrying a request that cannot fit.
-- **Spent:** 346 requests, 147k tokens.
+- **Spent:** 346 requests, 147k tokens, plus 1 request to re-record.
+- **Follow-up:**
+  - Batching is now the default.
+  - The replay recording covers all five e2e KTs on the current prompts.
+  - h14's baseline floor was rewritten and accepted by the user. Besides
+    the one fact, it accepts one covered section shown as Missing with no
+    LLM; with Groq there are none. h14 stays blind.

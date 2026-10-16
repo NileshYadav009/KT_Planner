@@ -28,6 +28,9 @@
    "id": "Q03",
    "kind": "peak",
    "quote": "demand increasing significantly during weekends and dinner hours",
+   "alt": [
+    "demand increases significantly during weekends and dinner hours"
+   ],
    "in": [
     "known_bad_days"
    ]
@@ -221,6 +224,10 @@
    "quote": "Database backups run daily and are retained for 14 days",
    "in": [
     "disaster_recovery"
+   ],
+   "terms": [
+    "database backups run daily",
+    "retained for 14 days"
    ]
   },
   {

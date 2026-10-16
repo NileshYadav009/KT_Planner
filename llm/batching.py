@@ -8,11 +8,16 @@ go out LLM_VERIFY_BATCH_SIZE sentences per call
 (context_mapper.ContextClassifier.verify_in_batches) and each section's
 gap-fills in one call (field_populator._fill_deferred_gaps).
 
-Off by default until LLM runs on the golden set show the same placements and
-values as one call each.
+On by default since 16 Oct (audit §9aai). Live Groq runs on the five e2e
+KTs: 66 requests and 35k tokens batched against 238 and 87k one call each,
+in half the time. Every checklist was equal or better batched: one call each
+misplaced two GCP facts (one was a splitter defect, since fixed) and drew a
+flow nobody stated. The blind holdouts scored 83 of 95 batched, against 77
+with no LLM. The two modes do not word every LLM-written value identically.
+LLM_BATCH_CALLS=0 restores one call each.
 """
 import os
 
 
 def llm_batch_calls_enabled() -> bool:
-    return os.getenv("LLM_BATCH_CALLS", "0").strip().lower() in ("1", "true", "yes", "on")
+    return os.getenv("LLM_BATCH_CALLS", "1").strip().lower() in ("1", "true", "yes", "on")

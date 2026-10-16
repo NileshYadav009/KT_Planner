@@ -693,6 +693,15 @@ def get_llm_provider() -> Optional[LLMProvider]:
         LOGGER.warning("Failed to initialize LLM provider: %s", e)
         return None
     if not provider.configured():
+        # LLM_CACHE=replay answers only from recorded responses and never
+        # calls the provider (llm/cached_provider.py), so it needs no key.
+        # Without this exception the offline LLM tests (tests/test_e2e_kts.py)
+        # got no provider from 13 Oct on, ran rules-only and skipped, with a
+        # message blaming stale prompts.
+        from llm import cache
+        if cache.cache_mode() == "replay":
+            from llm.cached_provider import CachedLLMProvider
+            return CachedLLMProvider(provider)
         # Once per process: every KT asks for a provider.
         global _NOT_CONFIGURED_LOGGED
         if not _NOT_CONFIGURED_LOGGED:

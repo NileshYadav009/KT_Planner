@@ -113,7 +113,7 @@ local disk (not NFS).
 | `CONTINUUM_ALERT_QUEUE_AGE_SECONDS` | `900` | Alert when the oldest queued KT has waited this long. |
 | `SENTRY_DSN` | unset | Send errors to Sentry (no request bodies, local variables or personal data). |
 | `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
-| `LLM_BATCH_CALLS` | `0` | `1` batches classification checks and field gap-fills (see Submitting KTs). |
+| `LLM_BATCH_CALLS` | `1` | Batches classification checks and field gap-fills (see Submitting KTs); `0` sends one call each. |
 | `LLM_MAX_CALLS_PER_KT` | `0` (no limit) | Live LLM requests one KT may send. Later requests are skipped (the KT keeps its rules-only results) and counted as skipped in the KT's LLM usage, so one long KT cannot empty a daily quota. Cache hits do not count. |
 | `LLM_CACHE` | `readwrite` | `read`, `off`, or `replay`: answer only from stored responses and never send an unrecorded request (offline runs of recorded LLM output; `scripts/e2e_kts.py --llm replay`). |
 | `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to `CONTINUUM_REVIEW_WEBHOOK_URL`, naming the incoming owner. `0` turns it off. |
@@ -189,11 +189,18 @@ present (sources say who said each sentence) and checked for language:
 parts that are clearly not English, and pasted text that does not read as
 English, put a warning on the document.
 
-**LLM calls.** `LLM_BATCH_CALLS=1` asks the classification checks
+**LLM calls.** By default (`LLM_BATCH_CALLS=1`) the classification checks
 (`LLM_VERIFY_BATCH_SIZE`, default 15 per call) and each section's field
-gap-fills (`LLM_GAP_FILL_BATCH_SIZE`, default 12) in batches: about 70% fewer
-calls for the same document with a deterministic test model. It is off until
-real LLM runs confirm the answers match one call each.
+gap-fills (`LLM_GAP_FILL_BATCH_SIZE`, default 12) go out in batches. On 16
+Oct, on Groq `qwen/qwen3.8-27b`, the five end-to-end KTs took 66 requests and
+35k tokens batched, against 238 requests and 87k tokens one call each, in
+half the time, with every checklist equal or better (REPOSITORY_AUDIT.md
+§9aai). `LLM_BATCH_CALLS=0` sends one call each.
+
+Groq accounts also cap output tokens per minute (1,000 on the account
+measured). A request asking for more is refused whatever is retried, so the
+provider keeps the limit Groq names in the refusal and asks within it from
+then on.
 
 On 12 Oct the four end-to-end KTs (tests/e2e_kts) ran through the API on Groq
 `qwen/qwen3.8-27b` with `LLM_BATCH_CALLS=1`, `LLM_MAX_CALLS_PER_KT=40` and

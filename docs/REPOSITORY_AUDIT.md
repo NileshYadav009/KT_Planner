@@ -4590,6 +4590,43 @@ Files: `fact_units.py`, `llm_provider.py`, `tests/conftest.py`,
 `tests/golden_eval.py`, `tests/e2e_eval.py`, `tests/test_golden_suite.py`
 (xfail reason: 77 of 95), the tests above, `docs/KT_PIPELINE.md`.
 
+**Follow-up the same day, on the user's decisions:**
+
+- **Batching is on by default.** `llm/batching.py` now defaults
+  `LLM_BATCH_CALLS` to on, and `docs/OPERATIONS.md` says so.
+  `LLM_BATCH_CALLS=0` restores one call each.
+- **The replay tests had not run since 13 Oct.** The "no API key means no
+  LLM" fix (§9aab) made `get_llm_provider()` return nothing without a key,
+  in replay mode too. The offline LLM tests run keyless on purpose, so they
+  had no provider, ran rules-only, saw no cached answer and skipped. The
+  skip message blamed stale prompts, and so did §9aad.
+  - Replay never calls the provider: an unrecorded request raises
+    `LLMNotRecorded` before any send. `get_llm_provider` therefore returns
+    the cache wrapper in replay mode with or without a key.
+  - Test: `test_replay_needs_no_key_and_never_calls_the_provider`, which
+    fails without the fix.
+- **Replay tests re-recorded.** `tests/fixtures/e2e_kts_llm_recording.json`
+  now holds the 66 batched Groq answers the current code asks for on all
+  five e2e KTs, QuickBite included; the 12 Oct recording had 45 answers for
+  four KTs. Recording took one new request (1,433 tokens); the cache
+  answered the rest.
+  - Live result: 0 problems on all five KTs, every fact in the PDF.
+  - QuickBite's checklist gained two disclosed matchers for the LLM's
+    rewording: an `alt` for Q03 ("Demand increases significantly ...") and
+    `terms` for Q24, whose backup and retention are now two lines.
+- **h14 baseline: accepted by the user.** Rewritten from h14's current
+  no-LLM score, the floor moved on three counts:
+  - accuracy (lower);
+  - wrong (one more);
+  - `false_missing` (one more): a section the KT covers is shown as Missing
+    on the coverage page.
+
+  Told all three, the user accepted them and kept h14 blind. Nothing about
+  which fact or section was read.
+
+  **Known issue:** with no LLM, one covered section of h14 is reported
+  Missing. With Groq batched, the holdouts show none.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

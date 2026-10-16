@@ -506,6 +506,23 @@ def test_groq_without_a_key_is_no_provider(monkeypatch):
     assert lp.get_llm_provider() is None
 
 
+def test_replay_needs_no_key_and_never_calls_the_provider(monkeypatch, tmp_path):
+    # Found 16 Oct: the no-key rule above also took the provider away from
+    # LLM_CACHE=replay, so the recorded-LLM tests ran rules-only and skipped.
+    from llm.cached_provider import LLMNotRecorded
+
+    monkeypatch.setattr(lp, "LLM_PROVIDER_NAME", "groq")
+    monkeypatch.setattr(lp, "GROQ_API_KEY", "")
+    monkeypatch.setenv("LLM_CACHE", "replay")
+    monkeypatch.setenv("LLM_CACHE_PATH", str(tmp_path / "replay.sqlite"))
+    provider = lp.get_llm_provider()
+    assert provider is not None
+    with pytest.raises(LLMNotRecorded):      # unrecorded: refused, nothing sent
+        provider.generate("a prompt nobody recorded")
+    monkeypatch.setenv("LLM_CACHE", "readwrite")
+    assert lp.get_llm_provider() is None     # outside replay, no key still means no LLM
+
+
 def test_a_key_makes_the_provider_configured(monkeypatch):
     monkeypatch.setattr(lp, "GEMINI_API_KEY", "test-key")
     assert lp.GeminiProvider().configured()
