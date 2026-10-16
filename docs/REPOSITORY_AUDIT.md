@@ -4309,6 +4309,287 @@ Checks:
 - Full suite on the final code (4-bit model, memory guard, sentence-by-
   sentence sources): 994 passed, 0 failed (4 LLM replay skips, 1 xfail).
 
+### 9aah. Facts, not sentences, are what the mapper classifies (15 Oct)
+
+The user asked for section mapping to be fixed at the root: transcript to
+atomic, evidence-backed facts; mapping by meaning and context; one canonical
+section per fact; coverage from validated knowledge records; no fact lost
+without a record. Tested on their AWS, Azure, GCP and QuickBite KTs, with
+PDFs generated before and after.
+
+**Root cause.** The mapper classified spoken sentences, not facts, and before
+classification `semantic_chunk_sentences` merged neighbouring sentences that
+read alike. Each unit got one section, whatever it held. A sentence was split
+only in one narrow case: exactly one ", and" or ";", with routing rules
+claiming the two halves for different sections. Coverage then counted those
+units. On the user's QuickBite KT (job "QuickBite", 14 Oct):
+
+- "Developers own business services, Platform Engineering owns EKS and
+  deployment tooling, and the Data Platform team manages MSK" was one unit.
+  The Ownership table re-split it with a narrower splitter of its own and
+  printed "Business services, Platform Engineering owns EKS and deployment
+  tooling -> Developers". The Data Platform/MSK owner appeared nowhere in
+  the table.
+- "Recovery testing is performed twice a year, but the platform's RTO and RPO
+  have not been formally documented" was one Disaster Recovery unit. The gap
+  in it was not listed, and RTO and RPO were counted as covered.
+- "..., with demand increasing significantly during weekends and dinner
+  hours" stayed inside the volume sentence in System Overview and never
+  reached the Operational Calendar.
+- Coverage counted 18 units for a KT of 30 facts.
+
+Across the tuning goldens the chunker merged 42 pairs. Several mixed topics:
+a system's purpose with its request flow, a scheduler with the build, deploy
+and rollback chain, and a Day-1 list with failure scenarios.
+
+**Fix: the fact is the unit.**
+
+1. `fact_units.py` (new). `split_into_facts` cuts a sentence at a clause
+   boundary (", and", ", but", ", while", ", whereas", ";", the comma of a
+   list of clauses, and a "with <noun> <verb>-ing" phrase), but only when
+   each piece is a statement of its own: an explicit subject and a finite
+   verb. A piece stays attached when it leans on what comes before it:
+   - it opens with a pronoun or a connective, or refers back ("rolls them
+     up");
+   - it explains the previous clause ("the fix is ...");
+   - it is the reason after an instruction ("Never deploy on Fridays, we had
+     an outage");
+   - the sentence opens with a condition;
+   - it is part of a list of nouns, an apposition, a participle phrase or a
+     reply.
+
+   An answer to a question is not split, because the question governs it.
+   The pieces are verbatim spans, and the rules are grammatical only: no
+   section, tool or transcript is named.
+2. `segment_sentences`:
+   - Every fact keeps `source_id`, `source_text` and `source_span`.
+   - Remarks about the session are recorded with the reason they were left
+     out (`StructuredKT.excluded_statements`).
+   - **Nothing is merged before classification** except a question with its
+     answer. `semantic_chunk_sentences` and its second embedding model
+     (MiniLM) are removed.
+3. Each fact is scored with the spoken sentences around it as context, two
+   either side. The window is counted in sentences, not facts, so splitting
+   a sentence does not change a neighbour's context.
+4. Stage 3.6 `rejoin_classified`. Once every fact has its section, the facts
+   of one sentence that sit side by side in one section become one unit
+   again, shown as the spoken sentence. Facts of one sentence placed in
+   different sections stay apart. The section text, its fields and its
+   renderer read the same unit. Without this step, fields read clipped facts
+   while the section read the whole sentence, and the completeness check
+   accepted one as the other.
+5. A ledger. `verify_document_coverage` records every fact in
+   `knowledge_object["_facts_ledger"]` with:
+   - its source sentence and time, and the section it was assigned;
+   - the sections it appears in, and whether it states a gap;
+   - its status: mapped, unmapped (Additional Notes), recovered (added by
+     the check) or excluded (with the reason).
+
+   The Knowledge coverage figures are computed from the ledger, and two
+   counts are added: stated gaps and excluded statements.
+6. Gaps:
+   - Each stated gap is listed under Knowledge Gaps, quoted as its own fact.
+     Before, only the first gap in a section was listed, quoted together
+     with the clause before it.
+   - "have not been formally documented" and "the failover runbook is still
+     missing" are recognised as gaps (`dialogue.py`). "Missing" counts only
+     for documents, procedures and controls.
+   - A stated gap no longer counts as coverage of what it says is missing.
+
+**Defects found and fixed on the way (all generic):**
+
+| # | Defect | Fix |
+|---|---|---|
+| D2 | The Ownership table split clauses with its own splitter, which missed list commas, and "manages" was not an ownership verb. | It uses `fact_texts`; "manages", "maintains", "looks after" and "Engineering" teams are recognised. |
+| D5 | Security's schema hints held "amazon ecr", "ecr" and "container images" (+0.21 for a plain registry fact). `section_rules.py` had removed the same words from the rules as "the root cause of that exact misclassification in 2 of 3 real audited transcripts". | Replaced with "image scanning". |
+| D7 | No rule for a rise in load over a period ("demand increasing during weekends"), so peak periods missed the Operational Calendar. | `RISING_LOAD_PERIOD`: a load word, a rise and a period; a bare rate is not a period. |
+| D9 | The coverage topics used regexes of their own and disagreed with the routing rules. The calendar reported "High-traffic periods" and "Change freezes" as not discussed beside its own statements of both. | The topic shares `RISING_LOAD_PERIOD`; "avoid production deployments" counts as a freeze. |
+| D10 | A sentence saying RTO and RPO were not documented counted them as covered ("4 of 5 topics"). | Topics are assessed on the section's facts without its stated gaps: "2 of 5 covered; stated as not documented: RTO, RPO, Failover / standby". |
+| D11 | The ledger's four-word floor dropped three-word facts ("PagerDuty sends alerts."). | Short facts count when they name a tool or a figure. |
+| D12 | Deployment steps rendered as one bullet holding the whole section, as in the user's recorded KT. Its source links could not cover all of it (two unsourced facts on g11). | One step per sentence. |
+
+**Measured before and after.** No LLM, copy edit off, scratch database. The
+holdouts (h12-h14) are scored as an aggregate only and were not inspected.
+
+| | before | with the chunker kept | final |
+|---|---|---|---|
+| Tuning goldens (26) | 100% | 99.3% (h02, h04 x2, h09 misplaced; g11 2 unsourced) | **100%**, 0 wrong/lost/unsourced/repeated |
+| Blind holdouts | 78 of 95 | 76 of 95 | **77 of 95** |
+| e2e AWS / Azure / GCP / ambiguous | 15/15, 17/17, 12/12, 11/11 | all correct | all correct, every fact in the PDF |
+| e2e QuickBite (new, 32 facts) | 31/32; 2 incomplete procedures unflagged | 32/32 | **32/32**, 0 problems |
+| QuickBite coverage | 18 units | | 30 facts verified, 2 stated gaps, 1 excluded |
+
+The intermediate run is why the chunker was removed and why the
+back-reference and question rules were added. h04's scheduler, build and
+deploy-and-rollback sentences had been merged into one unit and filed under
+Architecture. h02's "a second function rolls them up ... for the
+dashboards", split off its flow, went to Monitoring. h09's "Security? ...,
+and the services run with task roles ..." lost its question when split.
+
+The facts the e2e checklists allow two sections for now land in the more
+specific one. A flow or dependency stated next to the purpose sentence
+(A02, A03, B04) moved from System Overview to Architecture. ECR (Q15) moved
+from Deployment to Architecture.
+
+**Not fixed, said plainly:** the blind holdouts lost one fact (78 to 77 of
+95). It was not inspected, because inspecting it would end their use as an
+unseen measure. Accuracy on unseen KTs stays about 81-84%, below the 90%
+target.
+
+**Checklist changes, all disclosed:**
+
+- QuickBite's checklist was written before any new output. After the
+  baseline, one "incomplete" item was dropped: "fix for Kafka consumer lag".
+  The transcript says to check the lag "before restarting consumers", which
+  states the remediation.
+- The e2e gap marker (`tests/e2e_eval.py`) now accepts "not formally
+  documented" and "still missing": the DR section said both, in the
+  speaker's words.
+- A14 and A15 (AWS) and Q27-Q29 (QuickBite) got `terms`, the suite's
+  convention for ownership facts shown as table rows. The rows are now
+  clean, so the garbled sentence is no longer printed as well.
+
+**Tests:**
+
+- `tests/test_fact_units.py` (19 tests): every split and no-split case
+  above, source spans, rejoining, per-section placement, ownership rows, the
+  ledger, short facts, stated gaps, coverage topics, deployment steps, and
+  that only a question and its answer are merged.
+- `tests/e2e_kts/e_quickbite_food_delivery.json` with a floor of 32/32.
+- `tests/test_semantic_chunking.py` is removed along with the function it
+  tested.
+
+**Full suite (16 Oct, LLM keys blanked):** 1,019 passed, 5 skipped, 1
+xfailed (unseen-KT accuracy target), 1 failed:
+`test_no_golden_gets_worse_than_its_baseline[h14_tidewater_aws_iot_notes]`,
+the blind holdouts' one-fact drop above. Its detail was not read. The floor
+in `tests/goldens/baseline.json` is unchanged pending the user's decision:
+accept 77 of 95 as the new floor, or unblind the holdouts.
+
+Files: `fact_units.py` (new), `context_mapper.py`, `pipeline.py`,
+`knowledge/knowledge_builder.py`, `dialogue.py`, `section_rules.py`,
+`coverage_topics.py`, `kt_schema_new.json`,
+`renderers/sections/{ownership_escalation,deployment,kt_coverage}.py`,
+`docs/{KT_PIPELINE,SYSTEM_FLOW}.md`, the tests above.
+
+### 9aai. Live Groq: accuracy with the LLM, and batched vs one call (16 Oct)
+
+The user rotated the Groq key and put it in `.env`. A model listing
+(`GET /openai/v1/models`, no tokens) confirmed it: HTTP 200,
+`qwen/qwen3.8-27b` available. With the user's go-ahead, the five e2e KTs ran
+on Groq in both modes (`LLM_BATCH_CALLS=1` and `0`), and the blind holdouts
+ran batched. Setup: in process; scratch database, assets and LLM cache (the
+cache was seeded from the 12 Oct live run); copy edit off, as in every
+accuracy figure; `LLM_MAX_TOKENS_PER_MINUTE=7000`;
+`LLM_MAX_CALLS_PER_KT=150`.
+
+**E2e KTs (placement, checklist problems):**
+
+| KT | no LLM | Groq batched | Groq one call |
+|---|---|---|---|
+| AWS (15 facts) | 100%, 0 | 100%, 0 | 100%, 0 |
+| Azure (17) | 100%, 0 | 100%, 0 | 100%, 0 |
+| GCP (12) | 100%, 0 | 100%, 0 | 83%, 4; **92%, 1 after fix 1** |
+| Ambiguous (11) | 100%, 0 | 100%, 0 | 100%, 0 |
+| QuickBite (32) | 100%, 0 | 94%, 2* | 94%, 2* |
+
+\* Q03 and Q24 were reworded by the LLM: "Demand increases significantly
+during weekends and dinner hours"; "Database backups run daily" plus
+"Retained for 14 days". The checklist's verbatim quote then no longer
+matches. Both were checked by hand: present, in the right section (the
+Operational Calendar and Disaster Recovery) and sourced. The checklist was
+not changed.
+
+**Cost of the five KTs, counting cached answers as if sent:**
+
+| | batched | one call |
+|---|---|---|
+| Requests | 66 | 238 |
+| Tokens | 35k | 87k |
+| Classification checks | 7 requests | 80 requests |
+| Field fills | 23 requests, 10.5k tokens | 123 requests, 54.5k tokens |
+| Wall time | 9 min | 19 min |
+
+**Blind holdouts (h12-h14), aggregate only, not inspected:**
+
+| | correct | wrong | lost | unsourced | repeated |
+|---|---|---|---|---|---|
+| No LLM | 77 of 95 (81%) | | | | |
+| Groq batched | **83 of 95 (87%)** | 6 | 6 | 0 | 2 |
+
+The Groq batched run took 74 requests and 40k tokens. One-call mode on the
+holdouts was not run: it needs about 100k tokens, more than the day's
+remaining limit.
+
+**Defects found and fixed:**
+
+1. **A result clause was cut off from the step that produced it.** The
+   sentence was "Events are published to Pub/Sub, Dataflow jobs process
+   them, and the results land in BigQuery". The splitter made "the results
+   land in BigQuery" a fact of its own. In one-call mode, Groq's check filed
+   it under System Overview, beside "Streamline is our GCP data platform".
+   That fact (C02) was lost, Dataflow -> BigQuery went missing, and the
+   relationship extractor drew "Streamline (Google Kubernetes Engine
+   application) writes to BigQuery", which the speaker never said. Batched
+   mode had kept the two facts together.
+   - Fix: `fact_units._EXPLAINS_RE` accepts plurals and "output". The
+     results or output of a step stay with that step, as "them" already did.
+   - Live recheck, one-call mode: C02 kept, 3 of 3 stated connections
+     drawn, nothing invented.
+   - No LLM: 0 of 30 documents changed; tuning 100%; holdouts 77 of 95. The
+     only difference is the GCP ledger, which counts 10 facts instead of 11.
+2. **"No-LLM" runs could call Groq.** `llm_provider` loads `.env` at
+   import, so with a key there:
+   - An ordinary `pytest` run would have sent live, quota-spending
+     requests. `tests/conftest.py` now defaults the keys to empty, which
+     python-dotenv leaves alone; a key exported on purpose still works.
+   - `golden_eval.run_all` and `e2e_eval.run_all` (and so
+     `scripts/e2e_kts.py --llm off`) switched off the provider in `pipeline`
+     and `ai` only. The copy edit asks `llm_provider` directly, so it would
+     have called Groq; the runners now switch that off too.
+3. **Groq refuses requests that ask for more output than the account's
+   per-minute limit.** On this account `qwen/qwen3.8-27b` allows 1,000
+   output tokens a minute. A request for 1,024 (the structured extraction)
+   was refused as "Request too large ... (OTPM): Limit 1000"; the copy edit
+   asks for 2,048. Retried unchanged, such a request cannot fit, and each
+   retry spends the day's 1,000 requests. `GroqProvider.generate` now keeps
+   the limit Groq names in the refusal and asks within it, from the retry
+   on.
+
+**Not fixed, said plainly:**
+
+- One-call mode filed "Credentials are read from Secret Manager." (C07)
+  under Architecture, in both one-call runs. Batched mode and no LLM put it
+  under Security. No routing rule covers the sentence; it is a borderline
+  call the LLM overturned. Not patched with a rule for this one sentence.
+- Section texts and field values differ between the two modes in all five
+  KTs, mostly the LLM-written key-technologies list in System Overview.
+  `llm/batching.py` keeps batching off "until LLM runs on the golden set
+  show the same placements and values as one call each". Strictly, that is
+  not met. On every checklist, batched mode is equal or better, at about a
+  quarter of the requests and 40% of the tokens. Switching the default is
+  the user's decision.
+- `test_no_golden_gets_worse_than_its_baseline[h14_...]` still fails (§9aah).
+
+**Groq spent:** 346 requests, 138.4k input and 9.1k output tokens (147k of
+the account's 200k a day), plus the model listing.
+
+**Tests:**
+
+- `tests/test_offline_harness.py` (new, 3): both no-LLM runners hide a
+  "live" provider from the copy edit's lookup. Against the runners without
+  the fix, those two fail. `conftest.py` keeps a key in `.env` out of a
+  fresh process.
+- `test_fact_units.py`:
+  `test_the_results_of_a_step_stay_with_the_step_that_produced_them`.
+- `test_llm_provider.py`:
+  `test_a_request_over_the_output_per_minute_limit_is_resent_within_it`,
+  which fails without the fix.
+
+Files: `fact_units.py`, `llm_provider.py`, `tests/conftest.py`,
+`tests/golden_eval.py`, `tests/e2e_eval.py`, `tests/test_golden_suite.py`
+(xfail reason: 77 of 95), the tests above, `docs/KT_PIPELINE.md`.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

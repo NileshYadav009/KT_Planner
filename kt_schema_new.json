@@ -290,18 +290,15 @@
       "sub_topics": [
         "security scanning",
         "secret management",
-        "container images",
-        "amazon ecr",
-        "vulnerability"
+        "vulnerability",
+        "image scanning"
       ],
       "hints": [
         "security scanning",
         "trivy",
         "vault",
         "secret management",
-        "container images",
-        "amazon ecr",
-        "ecr",
+        "image scanning",
         "vulnerability",
         "secrets"
       ]

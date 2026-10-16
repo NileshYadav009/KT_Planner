@@ -14,6 +14,9 @@ def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     return [str(item).strip() for item in coverage_content if isinstance(item, str) and item.strip()]
 
 
+_STEP_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(A-Z0-9])")
+
+
 def _normalized_key(text: str) -> str:
     return " ".join(str(text or "").split()).lower()[:120]
 
@@ -52,7 +55,12 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         if "|" in str(deployment_value):
             decision_rows = parse_table_rows(deployment_value, ["Step", "Action", "Tool/Command", "Expected Result"])
         else:
-            checklist = [line.strip() for line in str(deployment_value).split("\n") if line.strip()]
+            # One step per sentence. The field joins the section's matching
+            # sentences into one line, and a recorded KT's deployment steps
+            # rendered as a single ten-sentence bullet whose source links
+            # could not cover all of it.
+            checklist = [sentence.strip() for line in str(deployment_value).split("\n")
+                         for sentence in _STEP_SPLIT_RE.split(line) if sentence.strip()]
 
     if not checklist and not decision_rows and coverage_content:
         for item in coverage_content:

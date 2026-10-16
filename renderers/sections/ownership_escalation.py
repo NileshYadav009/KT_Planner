@@ -4,6 +4,7 @@ from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.ownership import build_block as build_ownership_table
 from renderers.blocks.common import no_coverage_block
 from conflicts import CORRECTION_RE
+from fact_units import fact_texts
 
 
 def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
@@ -13,18 +14,22 @@ def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     return [str(item).strip() for item in coverage_content if isinstance(item, str) and item.strip()]
 
 
-# "<the X team | developers | engineers> owns/own/is responsible for <what>."
+# "<the X team | developers | engineers> owns/own/is responsible for/manages <what>."
 _OWNS_RE = re.compile(
     r"(?:^|(?<=[.;]\s))(?P<who>(?:the\s+)?(?:[A-Za-z][A-Za-z/&\- ]{0,50}?\s)?"
-    r"(?:team|teams|developers?|engineers?|group|squad|owners?))\s+"
-    r"(?:owns?|is\s+responsible\s+for|are\s+responsible\s+for)\s+(?P<what>[^.;]{3,200})",
+    r"(?:team|teams|developers?|engineers?|engineering|group|squad|owners?))\s+"
+    r"(?:owns?|is\s+responsible\s+for|are\s+responsible\s+for|manages?|maintains?|looks?\s+after)\s+"
+    r"(?P<what>[^.;]{3,200})",
     re.IGNORECASE,
 )
 
 
 # One sentence often states two owners ("The mobile team owns the app, and
 # our squad owns the backend"); matched whole, the second clause became part
-# of the first owner's "what". Each clause is matched on its own.
+# of the first owner's "what". Each fact is matched on its own: the mapper's
+# own fact split (fact_units.py), which also cuts a list of clauses at its
+# commas ("Developers own the services, Platform Engineering owns EKS, and
+# ..."), then the connectives this table always split at.
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _CLAUSE_SPLIT_RE = re.compile(r";\s*|,\s*(?:and|while|but|whereas)\s+|\s+(?:while|whereas)\s+", re.IGNORECASE)
 _LEAD_IN_RE = re.compile(r"^(?:actually|so|and|but|now|also|currently|basically|then|today)\b[\s,]*", re.IGNORECASE)
@@ -47,7 +52,8 @@ def _explicit_ownership_statements(section: Dict[str, Any]) -> List[Tuple[str, s
         for sentence in _SENTENCE_SPLIT_RE.split(text):
             if sentence.strip().endswith("?"):
                 continue  # a question names no owner
-            for clause in _CLAUSE_SPLIT_RE.split(sentence):
+            clauses = [c for fact in fact_texts(sentence) for c in _CLAUSE_SPLIT_RE.split(fact)]
+            for clause in clauses:
                 clause = _LEAD_IN_RE.sub("", clause.strip())
                 we = _WE_OWN_RE.match(clause)
                 if we:

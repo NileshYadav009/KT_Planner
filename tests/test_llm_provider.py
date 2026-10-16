@@ -405,6 +405,40 @@ def test_per_minute_rate_limit_still_retries(monkeypatch):
     assert len(attempts) == 3
 
 
+def test_a_request_over_the_output_per_minute_limit_is_resent_within_it(monkeypatch):
+    # Live 16 Oct: the account allows 1,000 output tokens a minute and calls
+    # asked for 1,024 (structured extraction) or 2,048 (copy edit). Resent
+    # unchanged, such a request can never fit and each retry spends the day's
+    # request quota.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(lp, "LLM_MAX_CALLS_PER_MINUTE", 100)
+    monkeypatch.setattr(lp, "LLM_MAX_TOKENS_PER_MINUTE", 0)
+    monkeypatch.setattr(lp, "_learned_output_limit", None)
+    _clear_throttle_state()
+    _patched_clock(monkeypatch)
+    asked = []
+
+    class _Completions:
+        def create(self, **kwargs):
+            asked.append(kwargs["max_tokens"])
+            if kwargs["max_tokens"] > 1000:
+                raise _QuotaRateLimitError(
+                    "Request too large for model `qwen/qwen3.8-27b` in organization `org_x` service tier "
+                    "`on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 2048. The request's "
+                    "expected output tokens exceed the enforced limit; reduce max_tokens")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    provider = lp.GroqProvider.__new__(lp.GroqProvider)
+    provider.model, provider.api_key = "qwen/qwen3.8-27b", "test-key"
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
+
+    assert provider.generate("p", max_output_tokens=2048) == "ok"
+    assert provider.generate("p", max_output_tokens=2048) == "ok"   # later calls ask within it at once
+    assert provider.generate("p", max_output_tokens=20) == "ok"     # smaller asks are unchanged
+    assert asked == [2048, 1000, 1000, 20]
+
+
 class _FakeResponse:
     def __init__(self, status_code, headers=None):
         self.status_code = status_code

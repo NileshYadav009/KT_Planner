@@ -15,3 +15,9 @@ os.environ.setdefault("CONTINUUM_AUTH", "disabled")
 # (copyedit.py): tests score the pipeline's own output, so it is off except
 # in tests/test_copyedit.py.
 os.environ.setdefault("CONTINUUM_COPYEDIT", "0")
+# No live LLM in tests: llm_provider loads .env at import, and a key there
+# would send real (quota-spending) requests from an ordinary pytest run. An
+# empty value counts as set, so python-dotenv leaves it alone. Export a key
+# explicitly to run against a live provider on purpose.
+for _key in ("GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+    os.environ.setdefault(_key, "")

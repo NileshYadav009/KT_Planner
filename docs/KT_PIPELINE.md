@@ -12,12 +12,52 @@ normalizes this into a 0-1 range (logprob -2.0 -> 0%, 0.0 -> 100%) — used
 later to weight section-level confidence and to trigger LLM-based repair for
 low-confidence sentences (`ContextRepair`, Stage 4).
 
-## Stage 2 — Sentence segmentation
+## Stage 2 — Segmentation into facts
 
-Raw segments are split into individual sentences, preserving timestamps by
-splitting each segment's char range proportionally across its sentences.
-Adjacent very-short fragments get merged (`_merge_sentences`) so a
-mid-sentence Whisper segment break doesn't produce two artificial sentences.
+Raw segments are joined and split into sentences, keeping each sentence's
+time from the Whisper segments it came from. A run-on (speech with no full
+stops) is cut at its sentence openers.
+
+**Each sentence is then cut into the facts it states**
+(`fact_units.split_into_facts`, via `context_mapper.split_facts`). The unit
+the rest of the pipeline classifies, fills fields from and counts is a fact,
+not a spoken sentence: "Developers own business services, Platform
+Engineering owns EKS and deployment tooling, and the Data Platform team
+manages MSK" is three ownership facts, and "Recovery testing is performed
+twice a year, but the RTO and RPO have not been documented" is a recovery
+fact and a stated gap. A cut is made at ", and", ", but", ", while",
+", whereas", ";" or the comma of a list of clauses, and only when the pieces
+on both sides are statements of their own (an explicit subject and a finite
+verb). Clauses that lean on each other stay one fact: a pronoun or connective
+opener ("and it is owned by..."), a predicate with no subject ("..., pushes
+them to ECR"), an explanation ("..., and the fix is to..."), the result of
+the step before ("..., and the results land in BigQuery"), a rule and its
+reason ("Never deploy on Fridays, we had an outage"), a sentence that opens
+with a condition, and lists of nouns. The rules are grammatical; no section,
+tool or transcript is named in them.
+
+Every fact keeps its source: `Sentence.source_id` (the spoken sentence's
+position), `source_text` (the sentence verbatim) and `source_span` (the
+fact's characters in it). Statements about the session itself are left out
+here and recorded with the reason (`StructuredKT.excluded_statements`).
+
+Nothing is merged before classification except a question with its answer
+(`dialogue.merge_question_answers`); an answer is not cut into facts, so the
+question's topic reaches all of it. Sentences used to be merged when they
+read alike (`semantic_chunk_sentences`, removed 15 Oct): the merged unit got
+one section, so a system's purpose went to System Overview with its request
+flow, and a scheduler with the build, deploy and rollback chain. A sentence
+that depends on the one before ("The fix is to ...") follows it by the
+continuation rules in `section_rules.py`, and each fact is scored with the
+spoken sentences around it (two either side, counted in sentences, not
+facts) as context.
+
+**Stage 3.6 — one unit per sentence and section** (`rejoin_classified`):
+once every fact has its section, the facts of one sentence that sit side by
+side in one section become one unit again, shown as the spoken sentence.
+Facts of one sentence placed in different sections stay apart. The section
+text, its fields and its renderer then read the same unit; the atomic facts
+are kept for the ledger (`StructuredKT.facts`, `fact_sections`).
 
 ## Stage 3 — Semantic classification
 
@@ -52,9 +92,12 @@ explicitly regression-tests against).
 
 ## Stage 5 — Gap detection / topic blocks
 
-`detect_gaps()` groups consecutive same-section sentences into `TopicBlock`s
+`detect_gaps()` groups consecutive same-section facts into `TopicBlock`s
 (preserving paragraph continuity rather than treating every sentence in
-isolation) and scores each section with `semantic_coverage_score()` — a
+isolation). Facts of one spoken sentence that sit side by side in a block are
+shown as that sentence again (`rejoin_facts`); facts of one sentence placed in
+different sections are shown apart, each in its own section. Each section is
+scored with `semantic_coverage_score()` — a
 4-dimension score (confidence / depth / actionability / completeness) that
 favors coherent, complete coverage over raw sentence count. Status
 (`missing`/`weak`/`covered`) comes from this score, not a simple sentence
@@ -113,3 +156,18 @@ Produces the final `KTResult` (`kt.coverage`, `kt.section_content`,
 7. **`pdf_rendering.build_rendered_sections()`** — dispatches each section to
    its renderer, producing the typed blocks `render_pdf_html()` turns into
    the final PDF. See `PDF_RENDERING.md`.
+8. **`knowledge.verify_document_coverage()`** — the fact ledger and the
+   knowledge-coverage figures. Every fact the mapper classified is checked
+   against the rendered document and recorded in
+   `knowledge_object["_facts_ledger"]`: its text, source sentence and time,
+   the section it was placed in, the sections it appears in, whether it
+   states a gap, and its status — `mapped` (shown in a section), `unmapped`
+   (shown under Additional Notes), `recovered` (shown nowhere, so added to
+   Additional Notes by this check) or `excluded` (greeting, remark about the
+   session, under four words, or a repeat), with the reason. The KT Coverage
+   page's "Knowledge coverage" line is computed from this ledger, so a fact
+   cannot disappear without a record. The Coverage matrix below it is
+   separate: per section, which of its expected topics the session covered
+   (`coverage_topics.py`). Each gap the speaker stated ("the failover
+   runbook is still missing") is listed, quoted, under the Knowledge Gaps
+   checklist.

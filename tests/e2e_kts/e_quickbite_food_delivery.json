@@ -1,0 +1,386 @@
+{
+ "id": "e2e_e_quickbite_food_delivery",
+ "title": "QuickBite: AWS food delivery on EKS",
+ "source": "the user's own KT transcript (14 Oct job 'QuickBite'), annotated 15 Oct before the fact-level mapping change",
+ "proves": "Compound sentences holding several facts (three owners in one sentence; a DR test and an undocumented RTO/RPO in one sentence; CI, registry and GitOps in one sentence); peak periods stated inside the volume sentence; a first check stated after its failure; two missing runbooks.",
+ "transcript": "Hi team, today I'm handing over QuickBite, our food delivery platform. It processes approximately 90,000 orders per day across multiple cities, with demand increasing significantly during weekends and dinner hours. Customers place orders through a React Native mobile application and a React web portal. Requests enter through Cloudflare and an AWS Application Load Balancer before reaching microservices running on Amazon EKS. The Order Service manages order creation and status. The Restaurant Service handles restaurant availability and menu updates, while the Dispatch Service assigns delivery partners. PostgreSQL on Amazon RDS stores order and payment records. Redis caches restaurant menus and courier locations. Amazon MSK carries order and delivery events between services, and Amazon SQS handles delayed notification jobs. Courier GPS updates arrive through an API and are processed by the Tracking Service before the latest location is stored in Redis and displayed to customers. GitHub Actions runs CI, Amazon ECR stores container images, and ArgoCD deploys workloads to EKS. Terraform manages infrastructure. Prometheus and Grafana monitor service health, and PagerDuty sends alerts. During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag. Check consumer lag and the Order Service error rate before restarting consumers. Redis memory saturation can also make courier locations appear stale. Never delete messages from production queues during an incident without approval. Database backups run daily and are retained for 14 days. Recovery testing is performed twice a year, but the platform's RTO and RPO have not been formally documented. Developers own business services, Platform Engineering owns EKS and deployment tooling, and the Data Platform team manages MSK. The payment-provider failover procedure and courier-tracking recovery runbook are still missing. Avoid production deployments during major promotional campaigns.",
+ "facts": [
+  {
+   "id": "Q01",
+   "kind": "purpose",
+   "quote": "food delivery platform",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q02",
+   "kind": "volume",
+   "quote": "approximately 90,000 orders per day",
+   "in": [
+    "system_overview"
+   ],
+   "alt": [
+    "90,000 orders per day"
+   ]
+  },
+  {
+   "id": "Q03",
+   "kind": "peak",
+   "quote": "demand increasing significantly during weekends and dinner hours",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "Q04",
+   "kind": "clients",
+   "quote": "Customers place orders through a React Native mobile application and a React web portal",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q05",
+   "kind": "flow",
+   "quote": "Requests enter through Cloudflare and an AWS Application Load Balancer before reaching microservices running on Amazon EKS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q06",
+   "kind": "component",
+   "quote": "The Order Service manages order creation and status",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q07",
+   "kind": "component",
+   "quote": "The Restaurant Service handles restaurant availability and menu updates",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q08",
+   "kind": "component",
+   "quote": "the Dispatch Service assigns delivery partners",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q09",
+   "kind": "dependency",
+   "quote": "PostgreSQL on Amazon RDS stores order and payment records",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q10",
+   "kind": "dependency",
+   "quote": "Redis caches restaurant menus and courier locations",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q11",
+   "kind": "dependency",
+   "quote": "Amazon MSK carries order and delivery events between services",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q12",
+   "kind": "dependency",
+   "quote": "Amazon SQS handles delayed notification jobs",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q13",
+   "kind": "flow",
+   "quote": "Courier GPS updates arrive through an API and are processed by the Tracking Service",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "Q14",
+   "kind": "deployment",
+   "quote": "GitHub Actions runs CI",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "Q15",
+   "kind": "deployment",
+   "quote": "Amazon ECR stores container images",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "Q16",
+   "kind": "deployment",
+   "quote": "ArgoCD deploys workloads to EKS",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "Q17",
+   "kind": "deployment",
+   "quote": "Terraform manages infrastructure",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference",
+    "environments"
+   ]
+  },
+  {
+   "id": "Q18",
+   "kind": "monitoring",
+   "quote": "Prometheus and Grafana monitor service health",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "Q19",
+   "kind": "alerting",
+   "quote": "PagerDuty sends alerts",
+   "in": [
+    "monitoring_observability",
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "Q20",
+   "kind": "incident",
+   "quote": "delayed order processing caused by Kafka consumer lag",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "Q21",
+   "kind": "first_check",
+   "quote": "Check consumer lag and the Order Service error rate before restarting consumers",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "Q22",
+   "kind": "incident",
+   "quote": "Redis memory saturation can also make courier locations appear stale",
+   "in": [
+    "common_failures"
+   ],
+   "not_in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "Q23",
+   "kind": "safety",
+   "quote": "Never delete messages from production queues during an incident without approval",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "Q24",
+   "kind": "backup",
+   "quote": "Database backups run daily and are retained for 14 days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "Q25",
+   "kind": "dr_test",
+   "quote": "Recovery testing is performed twice a year",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "Q26",
+   "kind": "undocumented",
+   "quote": "RTO and RPO have not been formally documented",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "Q27",
+   "kind": "ownership",
+   "quote": "Developers own business services",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "Developers",
+    "business services"
+   ]
+  },
+  {
+   "id": "Q28",
+   "kind": "ownership",
+   "quote": "Platform Engineering owns EKS and deployment tooling",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "Platform Engineering",
+    "EKS and deployment tooling"
+   ]
+  },
+  {
+   "id": "Q29",
+   "kind": "ownership",
+   "quote": "Data Platform team manages MSK",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "Data Platform team",
+    "MSK"
+   ]
+  },
+  {
+   "id": "Q30",
+   "kind": "gap",
+   "quote": "payment-provider failover procedure",
+   "in": [
+    "disaster_recovery",
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "Q31",
+   "kind": "gap",
+   "quote": "courier-tracking recovery runbook",
+   "in": [
+    "disaster_recovery",
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "Q32",
+   "kind": "calendar",
+   "quote": "Avoid production deployments during major promotional campaigns",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  }
+ ],
+ "safety": [
+  "Q23"
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "monitoring_observability",
+  "disaster_recovery",
+  "deployment_and_rollback",
+  "common_failures",
+  "danger_zones",
+  "ownership_escalation",
+  "known_bad_days"
+ ],
+ "missing": [
+  "cost_optimization",
+  "environments",
+  "security_controls"
+ ],
+ "relations": [
+  {
+   "from": "Cloudflare",
+   "to": "Application Load Balancer",
+   "kind": "flow"
+  },
+  {
+   "from": "Application Load Balancer",
+   "to": "EKS",
+   "kind": "flow"
+  },
+  {
+   "from": "ArgoCD",
+   "to": "EKS",
+   "kind": "deploy"
+  }
+ ],
+ "wrong_relations": [
+  {
+   "from": "GitHub Actions",
+   "to": "EKS",
+   "label": "deploy",
+   "why": "GitHub Actions runs CI; ArgoCD deploys"
+  }
+ ],
+ "undocumented": [
+  {
+   "topic": "RTO",
+   "forbid": "\\bRTO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"
+  },
+  {
+   "topic": "RPO",
+   "forbid": "\\bRPO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"
+  }
+ ],
+ "incomplete": [
+  {
+   "topic": "rollback procedure",
+   "note": "Never discussed.",
+   "section": "deployment_and_rollback"
+  },
+  {
+   "topic": "payment-provider failover procedure",
+   "note": "Stated as missing.",
+   "section": "disaster_recovery"
+  }
+ ],
+ "forbidden": [
+  {
+   "why": "invented command",
+   "pattern": "kubectl|terraform\\s+(apply|import|state\\s+rm)|helm\\s+rollback"
+  },
+  {
+   "why": "invented paging tool",
+   "pattern": "Opsgenie|VictorOps|CloudWatch\\s+alarm"
+  },
+  {
+   "why": "invented fix for consumer lag",
+   "pattern": "(add|increase)\\s+(more\\s+)?partitions|scale\\s+(up|out)\\s+(the\\s+)?consumers"
+  }
+ ]
+}

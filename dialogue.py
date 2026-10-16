@@ -36,7 +36,15 @@ _GAP_RES = [
     re.compile(r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+not\s+(?:really\s+)?sure\b", re.IGNORECASE),
     re.compile(r"\b(?:i|we)\s+(?:don'?t|do\s+not)\s+(?:really\s+)?know\b", re.IGNORECASE),
     re.compile(r"\b(?:i|we)\s+have\s+never\s+(?:checked|tested|seen|verified)\b", re.IGNORECASE),
-    re.compile(r"\b(?:not|never)\s+(?:been\s+)?(?:documented|tested|defined|agreed)\b", re.IGNORECASE),
+    # "have not been formally documented": an adverb between them.
+    re.compile(r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:(?:formally|properly|fully|really|officially|actually|"
+               r"clearly|ever|yet)\s+)?(?:documented|tested|defined|agreed)\b", re.IGNORECASE),
+    # "The failover procedure and the recovery runbook are still missing." Only
+    # a document, procedure or control, so "the alert fires when a heartbeat
+    # is missing" is not a gap.
+    re.compile(r"\b(?:runbooks?|procedures?|documentation|docs|plans?|process(?:es)?|diagrams?|owners?|"
+               r"playbooks?|polic(?:y|ies)|tests?|alerting|monitoring|dashboards?|backups?|rto|rpo|slas?)\b"
+               r"[^.!?]{0,80}?\b(?:is|are)\s+(?:still\s+|currently\s+|also\s+)?missing\b", re.IGNORECASE),
     # A topic put off to a later session is not covered: "We will cover
     # deployment and the rest next week."
     re.compile(r"\b(?:we(?:'ll|\s+will)|let'?s|i(?:'ll|\s+will))\s+(?:cover|go\s+(?:over|through)|discuss|"

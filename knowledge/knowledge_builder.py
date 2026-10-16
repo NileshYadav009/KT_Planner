@@ -12,6 +12,7 @@ from component_catalog import display_name
 from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap,
                       without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
+from fact_units import fact_texts
 
 
 def _short_quote(text: str, limit: int = 140) -> str:
@@ -1444,7 +1445,12 @@ def append_coverage_matrix_section(
         knowledge_items = (section_obj or {}).get("_architecture_components") or []
         structured = cov.get("_structured") if isinstance(cov.get("_structured"), dict) else {}
         own_texts = [t for t in texts if is_field_candidate(t)]
-        topic_states = assess_topics(section_id, field_objects, own_texts, other_texts_for(section_id), structured)
+        # A fact saying something is missing ("the RTO and RPO have not been
+        # documented") does not cover it: topics are assessed on the section's
+        # facts without its stated gaps. Read whole, that sentence counted
+        # RTO and RPO as discussed.
+        own_facts = [f for t in own_texts for f in fact_texts(t) if not is_gap_statement(f)]
+        topic_states = assess_topics(section_id, field_objects, own_facts, other_texts_for(section_id), structured)
         if topic_states and not own_texts:
             # A section the session never discussed as such, though one of its
             # topics came up elsewhere ("Secret Manager handles secrets" under
@@ -1520,8 +1526,13 @@ def append_coverage_matrix_section(
                 assessment = f"{len(texts) or sentence_count} statement(s) captured."
 
         if stated_gaps and not only_stated_gaps:
-            assessment = f"{assessment} Stated gap: “{_short_quote(stated_gaps[0])}”"
-            gaps.append(f"{title}: “{_short_quote(stated_gaps[0])}”")
+            # Each gap the speaker stated, as its own fact: "Recovery testing
+            # is done twice a year, but the RTO and RPO have not been
+            # documented" quotes the RTO/RPO half, and a section with two
+            # missing runbooks lists both.
+            gap_facts = [f for t in stated_gaps for f in fact_texts(t) if is_gap_statement(f)] or stated_gaps
+            assessment = f"{assessment} Stated gap: “{_short_quote(gap_facts[0])}”"
+            gaps.extend(f"{title}: “{_short_quote(f)}”" for f in dict.fromkeys(gap_facts))
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})
 
@@ -2013,20 +2024,29 @@ _PARAPHRASE_RETENTION_RATIO = 0.6
 
 def verify_document_coverage(
     knowledge_object: Dict[str, Any],
-    transcript_sentences: List[str],
+    transcript_sentences: List[Any],
     sentence_sections: Optional[Dict[str, str]] = None,
+    excluded: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
-    """Check every fact-bearing transcript sentence against the RENDERED
-    document and replace the knowledge-coverage summary with those counts.
+    """Check every fact the mapper classified against the RENDERED document,
+    record each in a ledger, and compute the knowledge-coverage summary from
+    that ledger.
 
     The summary built by append_coverage_matrix_section() is computed from
     the knowledge object before rendering, and its `lost` value was
     facts_identified - (mapped + deduplicated + unmapped) with
     facts_identified defined as that same sum -- zero by construction. On a
     real KT it reported "0 lost" while 30 of 101 sentences appeared nowhere
-    in the PDF. This measures the document itself. A sentence found in no
+    in the PDF. This measures the document itself. A fact found in no
     section is not reported and left missing: it is added to Additional
     Notes, and the summary says how many were recovered that way.
+
+    `transcript_sentences`: the facts, as strings or as dicts with text,
+    section_id, source (the spoken sentence), start, end and speaker.
+    `excluded`: statements left out before classification, with a reason.
+    Every fact ends in the ledger (knowledge_object["_facts_ledger"]) as
+    mapped, unmapped (Additional Notes), recovered or excluded with a reason,
+    so none is lost without a record.
     """
     from pdf_rendering import _block_strings, _norm_for_match
     from pdf_rendering import is_text_represented as _is_represented
@@ -2044,40 +2064,73 @@ def verify_document_coverage(
         (unmapped_norms if sid == UNMAPPED_FINDINGS_SECTION_ID else real_norms).extend(norms)
         section_words[sid] = {w for n in norms for w in n.split()}
 
-    def _paraphrased_in_own_section(text: str) -> bool:
+    def _paraphrased_in_own_section(text: str, sid: Optional[str]) -> bool:
         # With an LLM, a section's facts are often restated (week-by-week
         # rows, checklist items) rather than quoted. Such a sentence is not
         # missing: most of its content words appear in the section it was
         # classified into. Scoped to that one section, so a sentence cannot
         # pass merely because its words are scattered across the document.
-        sid = (sentence_sections or {}).get(_dedup_normalize(text))
         words = [w for w in _content_words(text)]
         if not sid or sid not in section_words or len(words) < _DEDUP_MIN_CONTENT_WORDS:
             return False
         own = section_words[sid]
         return sum(1 for w in words if w in own) / len(words) >= _PARAPHRASE_RETENTION_RATIO
 
-    facts: List[str] = []
+    section_norms: Dict[str, List[str]] = {}
+    for sec in rendered:
+        sid = sec.get("section_id")
+        if sid not in _DIGEST_SECTION_IDS and sid != UNMAPPED_FINDINGS_SECTION_ID:
+            section_norms.setdefault(sid, []).extend(_norm_for_match(s) for s in _block_strings(sec.get("blocks") or []))
+
+    ledger: List[Dict[str, Any]] = [
+        {"id": None, "text": item.get("text", ""), "section": None, "status": "excluded", "reason": item.get("reason")}
+        for item in excluded or [] if (item.get("text") or "").strip()
+    ]
+    facts: List[Dict[str, Any]] = []
     seen = set()
-    for text in transcript_sentences or []:
-        text = (text or "").strip()
-        if len(text.split()) < _MIN_UNMAPPED_SENTENCE_WORDS or _is_session_pleasantry(text):
+    for item in transcript_sentences or []:
+        record = dict(item) if isinstance(item, dict) else {"text": item}
+        text = (record.get("text") or "").strip()
+        if not text:
+            continue
+        section = record.get("section_id") or (sentence_sections or {}).get(_dedup_normalize(text))
+        entry = {"id": None, "text": text, "section": section, "source": record.get("source") or text,
+                 "start": record.get("start"), "end": record.get("end"), "speaker": record.get("speaker")}
+        if _is_session_pleasantry(text):
+            ledger.append(dict(entry, status="excluded", reason="greeting, closing or handover announcement"))
+            continue
+        # A fact can be three words ("Terraform manages infrastructure."); a
+        # short remark that names no tool or figure ("Okay, makes sense.") is
+        # not one.
+        if len(text.split()) < _MIN_UNMAPPED_SENTENCE_WORDS and not _has_content_signal(text):
+            ledger.append(dict(entry, status="excluded",
+                               reason=f"under {_MIN_UNMAPPED_SENTENCE_WORDS} words, no tool or figure"))
             continue
         key = _dedup_normalize(text)
         if key in seen:
+            ledger.append(dict(entry, status="excluded", reason="repeats an earlier statement"))
             continue
         seen.add(key)
-        facts.append(text)
+        facts.append(entry)
+        ledger.append(entry)
 
     mapped = unmapped = 0
     lost: List[str] = []
-    for text in facts:
-        if _is_represented(text, real_norms) or _paraphrased_in_own_section(text):
+    for entry in facts:
+        text = entry["text"]
+        entry["found_in"] = [sid for sid, norms in section_norms.items() if _is_represented(text, norms)]
+        entry["gap"] = bool(is_gap_statement(text))
+        if _is_represented(text, real_norms) or _paraphrased_in_own_section(text, entry["section"]):
             mapped += 1
+            entry["status"] = "mapped"
         elif _is_represented(text, unmapped_norms):
             unmapped += 1
+            entry["status"] = "unmapped"
         else:
             lost.append(text)
+            entry["status"] = "recovered"
+    for n, entry in enumerate(ledger, 1):
+        entry["id"] = f"F{n:03d}"
 
     if lost:
         unmapped_sec = next((s for s in rendered if s.get("section_id") == UNMAPPED_FINDINGS_SECTION_ID), None)
@@ -2098,7 +2151,12 @@ def verify_document_coverage(
         "recovered": len(lost),
         "lost": 0,
         "verified_against_document": True,
+        # Facts that say something is missing, undocumented or not decided:
+        # knowledge gaps the speaker stated, counted among the mapped ones.
+        "stated_gaps": sum(1 for e in facts if e.get("gap") and e.get("status") != "recovered"),
+        "excluded": sum(1 for e in ledger if e["status"] == "excluded"),
     }
+    knowledge_object["_facts_ledger"] = ledger
     coverage_section = _find_section(knowledge_object, KT_COVERAGE_SECTION_ID)
     if coverage_section is not None:
         coverage_section["_knowledge_coverage_summary"] = summary

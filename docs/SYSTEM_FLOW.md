@@ -24,10 +24,12 @@ MAPPER_PIPELINE.process(job_id, transcript, segments)     (main.py:218)
    │
    │  Stage 1   AudioSegment construction          (context_mapper.py:1811)
    │  Stage 1.5 clean segments                     (context_mapper.py:1823)
-   │  Stage 2   segment_sentences + semantic_chunk (context_mapper.py:1826, 145, 303)
+   │  Stage 2   segment_sentences → facts (fact_units.split_into_facts); only a question
+   │            and its answer are merged (each fact keeps source_id/source_text/source_span)
    │  Stage 3   ContextClassifier (embed+cross-enc+topic-mem) (context_mapper.py:1864-1973)
    │  Stage 3.5 apply_rule_overrides               (context_mapper.py:1976)  ← section_rules.py
-   │  Stage 3.6 policy gating (CONFIDENCE_ACCEPT_THRESHOLD=0.42)
+   │  Stage 3.6 rejoin_classified: facts of one sentence side by side in one section → one unit
+   │  Stage 3.7 policy gating (CONFIDENCE_ACCEPT_THRESHOLD=0.42)
    │  Stage 4   ContextRepair (grammar/glossary/LLM)        (context_mapper.py:2066)
    │  Stage 5   detect_gaps → TopicBlocks + SCS coverage    (context_mapper.py:2076, 1069)
    │  Stage 6   extract_urls_and_assets                     (context_mapper.py:2080)

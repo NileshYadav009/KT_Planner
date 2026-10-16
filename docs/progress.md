@@ -1401,3 +1401,59 @@ Results:
   - the 0.5B model (accepted only 8 of 20 rewrites);
   - the 1.5B in full precision (6 GB of RAM, 16 s a sentence);
   - bf16 (20x slower) and PyTorch int8 (garbage output).
+
+## Facts, not sentences, are what the mapper classifies (audit §9aah, 15 Oct)
+
+- **Root cause of misplaced and garbled content:** the mapper classified
+  spoken sentences, and merged ones that read alike before classifying them,
+  so a sentence holding facts for three sections went to one section whole.
+  Coverage counted those units, not facts.
+- **Each sentence is now cut into the facts it states** (`fact_units.py`):
+  only where each piece has its own subject and verb, and never where a piece
+  leans on the one before (a pronoun, "the fix is", a rule and its reason, a
+  condition, an answer to a question). Each fact keeps its source sentence.
+- **Nothing else is merged before classification**; a question still joins
+  its answer. Facts of one sentence that land side by side in one section are
+  shown as the spoken sentence; facts placed in different sections stay
+  apart.
+- **A ledger records every fact** with its source, section, where it appears
+  and its status (mapped, Additional Notes, recovered or left out with the
+  reason). The coverage figures come from it.
+- **Gaps:** each stated gap is listed under Knowledge Gaps; "not formally
+  documented" and "still missing" count as gaps; a stated gap no longer counts
+  as coverage of what it says is missing.
+- **Also fixed:** garbled Ownership rows; registry words in Security's hints;
+  peak periods missing from the Operational Calendar; coverage topics that
+  disagreed with the routing rules; deployment steps rendered as one bullet.
+- **Measured (no LLM):** tuning goldens 100% before and after; the user's
+  QuickBite KT 31/32 to 32/32; AWS, Azure, GCP and the ambiguous KT stay at
+  100% with every fact in the PDF. Blind holdouts 78 to 77 of 95 (one fact,
+  not inspected).
+- **Full suite (16 Oct):** 1,019 passed, 5 skipped, 1 xfailed, 1 failed. The
+  failure is h14's baseline floor, the holdout drop above; the floor is kept
+  until the user decides whether to accept 77 of 95.
+
+## Live Groq: accuracy with the LLM, batched vs one call (audit §9aai, 16 Oct)
+
+- **The rotated Groq key works** (model listing, no tokens).
+- **Accuracy with Groq:**
+  - Blind holdouts: 83 of 95 (87%) batched, against 77 of 95 (81%) with no
+    LLM.
+  - E2e KTs: every fact placed correctly in batched mode. QuickBite's two
+    flags are LLM rewordings; both were checked by hand and are correct.
+- **Batched vs one call (5 KTs):**
+  - Cost: 66 against 238 requests, 35k against 87k tokens, 9 against 19
+    minutes.
+  - Accuracy: batched equal or better on every checklist.
+  - One call made GCP errors, fixed below except one Secret Manager
+    sentence.
+  - Turning batching on by default is the user's call.
+- **Fixed:**
+  - A result clause ("..., and the results land in BigQuery") is no longer
+    cut from its step. Cut off, it was misfiled, and a flow was drawn that
+    the speaker never stated.
+  - No-LLM test and eval runs can no longer reach Groq through a key in
+    `.env`.
+  - Groq requests now stay within the account's 1,000 output tokens a
+    minute instead of retrying a request that cannot fit.
+- **Spent:** 346 requests, 147k tokens.

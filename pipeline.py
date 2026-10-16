@@ -644,9 +644,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             except Exception as exc:
                 _stage_failed(stage_errors, "Screen captures", exc, "Captured dashboards and links could not be placed in the document.")
 
-        # Final completeness check against the RENDERED document: every
-        # fact-bearing transcript sentence must appear somewhere in it, or be
-        # added to Additional Notes. See verify_document_coverage().
+        # Final completeness check against the RENDERED document: every fact
+        # the mapper classified must appear somewhere in it, or be added to
+        # Additional Notes, and each gets a ledger entry with its source and
+        # section. See verify_document_coverage().
         try:
             sentence_sections = {
                 re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", (sent.get("text") or "").lower())).strip(): sid
@@ -654,8 +655,15 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 for sent in (cov.get("sentences") or [])
                 if isinstance(sent, dict)
             }
+            fact_sections = kt.fact_sections or []
+            facts = [
+                {"text": s.text, "section_id": fact_sections[i] if i < len(fact_sections) else None,
+                 "source": s.source_text or s.raw_text or s.text, "start": s.start + time_offset,
+                 "end": s.end + time_offset, "speaker": s.speaker}
+                for i, s in enumerate(kt.facts if kt.facts is not None else (kt.sentences or []))
+            ]
             knowledge_object = verify_document_coverage(
-                knowledge_object, [s.text for s in (kt.sentences or [])], sentence_sections
+                knowledge_object, facts, sentence_sections, excluded=kt.excluded_statements
             )
         except Exception as exc:
             _stage_failed(stage_errors, "Completeness check", exc, "The completeness check did not run, so some transcript sentences may be missing from this document.")

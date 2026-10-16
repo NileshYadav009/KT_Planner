@@ -299,6 +299,28 @@ _DAILY_QUOTA_MARKERS = (
     "tokens per day", "requests per day", "(tpd)", "(rpd)", "per day", "perday", "per-day",
 )
 
+# Some tiers cap OUTPUT tokens per minute below what a call asks for as
+# max_tokens. Measured live 16 Oct on qwen/qwen3.8-27b (on_demand tier):
+# "Request too large ... on output tokens per minute (OTPM): Limit 1000,
+# Requested 1024". The same request retried can never fit (the copy edit asks
+# for 2048), so each retry only spends the day's request quota. The limit the
+# provider names in that refusal is kept, and every later request, the retry
+# included, asks for at most that many output tokens.
+_OUTPUT_LIMIT_RE = re.compile(r"output tokens per minute[^:]*:\s*limit\s+(\d+)", re.IGNORECASE)
+_learned_output_limit: Optional[int] = None
+
+
+def _note_output_limit(exc: BaseException) -> None:
+    global _learned_output_limit
+    match = _OUTPUT_LIMIT_RE.search(str(exc))
+    if match:
+        _learned_output_limit = int(match.group(1))
+
+
+def _fit_output_budget(max_tokens: int) -> int:
+    limit = _learned_output_limit
+    return min(max_tokens, limit) if limit else max_tokens
+
 
 def _is_daily_quota_error(exc: Exception) -> bool:
     """True when a 429 is a per-day quota exhaustion rather than a per-minute
@@ -582,7 +604,12 @@ class GroqProvider(LLMProvider):
             # opt-in, and the headers are still available on 429s where they
             # actually matter. Not worth the exposure for an off-by-default
             # feature.
-            return self.client.chat.completions.create(**completion_kwargs)
+            completion_kwargs["max_tokens"] = _fit_output_budget(max_tokens)
+            try:
+                return self.client.chat.completions.create(**completion_kwargs)
+            except Exception as exc:
+                _note_output_limit(exc)
+                raise
 
         estimated = estimate_tokens(
             completion_kwargs["messages"][0]["content"],

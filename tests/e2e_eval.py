@@ -63,7 +63,10 @@ _DURATION = re.compile(r"\b(\d+(?:\.\d+)?|" + "|".join(_NUM_WORDS) + r")[\s-]*(s
 # ("First 30-Day Ownership Plan", the numbered heading "06 Day-1 Survival Checklist").
 _TEMPLATE_DURATIONS = re.compile(r"first\s+30[\s-]day\s+ownership(?:\s+plan)?|\b\d{1,2}\s+day-1\b", re.IGNORECASE)
 # How a section tells the reader that something was not given.
-_GAP_MARKER = re.compile(r"not covered|not stated|no fix was stated|not documented|never been documented|"
+# Including the speaker's own words for it: "have not been formally
+# documented", "the runbook is still missing".
+_GAP_MARKER = re.compile(r"not covered|not stated|no fix was stated|not (?:been )?(?:\w+ly )?documented|"
+                         r"never been documented|(?:is|are) (?:still )?missing|"
                          r"can'?t remember|cannot remember|not discussed|confirm (?:\w+ )?with the outgoing owner",
                          re.IGNORECASE)
 _SUPERSCRIPT = re.compile(r"(?<=[A-Za-z.)”\"])\d{1,2}(?:,\d{1,2})*(?=\s|$)")
@@ -337,12 +340,16 @@ def run_dataset(ds: Dict[str, Any], job_prefix: str = "e2e") -> tuple:
 def run_all(datasets=None, out_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every dataset with no LLM (deterministic, no quota)."""
     import ai
+    import llm_provider
     import pipeline
     from context_mapper import ContextMappingPipeline
     from kt_schema_loader import SCHEMA
 
-    saved = (pipeline.get_llm_provider, ai.get_llm_provider, pipeline.record_candidates, pipeline.MAPPER_PIPELINE)
-    pipeline.get_llm_provider = ai.get_llm_provider = lambda: None
+    # llm_provider's own lookup too: the copy edit (copyedit.py) asks it
+    # directly, so a key in .env would otherwise still send requests.
+    saved = (pipeline.get_llm_provider, ai.get_llm_provider, llm_provider.get_llm_provider,
+             pipeline.record_candidates, pipeline.MAPPER_PIPELINE)
+    pipeline.get_llm_provider = ai.get_llm_provider = llm_provider.get_llm_provider = lambda: None
     pipeline.record_candidates = lambda *a, **k: None
     pipeline.MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA, llm_fallback_fn=None)
     try:
@@ -354,7 +361,8 @@ def run_all(datasets=None, out_dir: Optional[str] = None) -> List[Dict[str, Any]
             reports.append(evaluate(ds, result, pdf, mode="no-llm"))
         return reports
     finally:
-        pipeline.get_llm_provider, ai.get_llm_provider, pipeline.record_candidates, pipeline.MAPPER_PIPELINE = saved
+        (pipeline.get_llm_provider, ai.get_llm_provider, llm_provider.get_llm_provider,
+         pipeline.record_candidates, pipeline.MAPPER_PIPELINE) = saved
 
 
 def run_replay(recording_path: str, datasets=None, out_dir: Optional[str] = None) -> List[Dict[str, Any]]:

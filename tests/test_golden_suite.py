@@ -85,7 +85,7 @@ def test_contradictions_are_flagged(scores):
             assert scores[golden["id"]]["missing_conflicts"] == [], golden["id"]
 
 
-@pytest.mark.xfail(reason="Accuracy on unseen KTs is 82% (78 of 95 holdout facts; target 90%); five blind "
+@pytest.mark.xfail(reason="Accuracy on unseen KTs is 81% (77 of 95 holdout facts since 15 Oct; target 90%); five blind "
                           "rounds put it at about 84%. See scripts/golden_report.py", strict=False)
 def test_unseen_kts_meet_the_accuracy_target(scores):
     """Only the holdouts measure accuracy on a KT the rules were not tuned

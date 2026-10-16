@@ -1,7 +1,8 @@
 """End-to-end KT suite (tests/e2e_kts, scored by tests/e2e_eval.py).
 
 Four short synthetic handovers (AWS e-commerce, Azure payments, GCP data
-platform, an ambiguous incomplete KT), each run through the orchestration
+platform, an ambiguous incomplete KT) and the user's QuickBite KT (AWS food
+delivery, sentences that state several facts), each run through the orchestration
 POST /kt-from-transcript queues (pipeline.run_kt_pipeline) and the real PDF
 renderer, then checked on the PDF text: nothing the speaker said is lost,
 nothing they did not say is added, safety warnings reach Danger Zones,
@@ -27,12 +28,14 @@ DATASETS = load_datasets()
 IDS = [d["id"] for d in DATASETS]
 
 
-def test_four_datasets_of_100_to_180_words_with_no_secrets():
+def test_five_datasets_of_100_to_300_words_with_no_secrets():
     from e2e_eval import _SECRET
 
-    assert len(DATASETS) == 4
+    # E (QuickBite) is the user's own KT, added with the fact-level mapping
+    # change: sentences holding several facts for several sections.
+    assert len(DATASETS) == 5
     for ds in DATASETS:
-        assert 100 <= len(ds["transcript"].split()) <= 180, ds["id"]
+        assert 100 <= len(ds["transcript"].split()) <= 300, ds["id"]
         assert not _SECRET.search(ds["transcript"]), ds["id"]
 
 

@@ -35,15 +35,27 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         # Counts measured against the rendered document itself (see
         # knowledge_builder.verify_document_coverage), not the pre-render
         # knowledge object.
+        # Counted per fact: a sentence that states several facts was cut
+        # into them before mapping (fact_units.py).
         text = (
-            f"{summary.get('facts_identified', 0)} fact-bearing sentence(s) from the transcript were "
+            f"{summary.get('facts_identified', 0)} fact(s) from the transcript were "
             f"checked against this document: {summary.get('mapped', 0)} appear in a section and "
             f"{summary.get('unmapped', 0)} are listed under Additional Notes."
         )
+        if summary.get("stated_gaps"):
+            text += (
+                f" {summary['stated_gaps']} of them say that something is missing, undocumented or "
+                f"not decided; they are listed as knowledge gaps."
+            )
         if summary.get("recovered"):
             text += (
                 f" {summary['recovered']} did not appear anywhere and were added to Additional Notes "
                 f"by the final completeness check."
+            )
+        if summary.get("excluded"):
+            text += (
+                f" {summary['excluded']} statement(s) were left out as greetings, remarks about the "
+                f"session itself, repeats or short remarks with no content."
             )
         blocks.append(build_narrative_block("Knowledge coverage", [text]))
     elif summary:

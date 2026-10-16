@@ -34,6 +34,7 @@ from runtime_policy import load_policy
 from devops_transcription import clean_transcript
 from dialogue import merge_question_answers
 from entity_extractor import EntityExtractor
+from fact_units import split_into_facts
 from section_rules import (
     match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost,
     RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE,
@@ -48,10 +49,6 @@ _SENT_TRANS_SPEC = importlib.util.find_spec("sentence_transformers")
 # allow explicit opt-out via USE_REAL_EMBEDDINGS=0/false/no.
 _USE_REAL_EMBEDDINGS = bool(_SENT_TRANS_SPEC and os.getenv("USE_REAL_EMBEDDINGS", "1").lower() not in ("0", "false", "no"))
 _CROSS_ENCODER = None  # Lazy-loaded cross-encoder for reranking
-
-# Cache the semantic chunking model and util to avoid reloading repeatedly.
-_SEMANTIC_CHUNK_MODEL = None
-_SEMANTIC_CHUNK_UTIL = None
 
 # Fallback: simple token-set embedding + Jaccard similarity to avoid heavy deps at module import time
 if not _USE_REAL_EMBEDDINGS:
@@ -244,6 +241,13 @@ class Sentence:
     # Starts where a run-on was cut (split_run_on): never merged back into the
     # sentence before it.
     run_on_cut: bool = False
+    # The spoken sentence this fact was cut from (fact_units.split_into_facts):
+    # its position in the transcript, its text, and this fact's span in it.
+    # Facts of one sentence that land side by side in one section are shown as
+    # that sentence again (rejoin_facts).
+    source_id: Optional[int] = None
+    source_text: Optional[str] = None
+    source_span: Optional[Tuple[int, int]] = None
 
     def __post_init__(self):
         if self.segment_ids is None:
@@ -256,10 +260,12 @@ class Sentence:
 
 # One sentence can state two facts that belong in two sections: "Infrastructure
 # is written in Bicep, and all secrets are stored in Key Vault" went to
-# Security whole, the Bicep half with it. It is split at its one ", and" or
-# ";" only when the routing rules claim both halves, for different sections.
-# With one rule or none ("The symptom is slow checkout, and the fix is to
-# ..."), the halves may depend on each other, so the sentence stays whole.
+# Security whole, the Bicep half with it. Sentences are cut into their facts
+# by fact_units.split_into_facts (clauses with their own subject and verb).
+# This older rule still applies where that one finds no clause boundary: a
+# sentence is split at its one ", and" or ";" when the routing rules claim both
+# halves, for different sections ("Daily backups to S3, and never touch the
+# state bucket").
 _CLAUSE_BREAK_RE = re.compile(r",\s+and\s+|;\s+", re.IGNORECASE)
 
 
@@ -278,6 +284,18 @@ def split_two_topic_sentence(text: str) -> List[str]:
             return [text]
         sections.append(match.section_id)
     return [text] if sections[0] == sections[1] else [left, right]
+
+
+def split_facts(text: str) -> List[Tuple[int, int]]:
+    """The facts a sentence states, as character spans of `text`."""
+    spans = split_into_facts(text)
+    if len(spans) > 1:
+        return spans
+    halves = split_two_topic_sentence(text)
+    if len(halves) == 1:
+        return spans
+    right_start = text.rfind(halves[1])
+    return [(0, len(halves[0])), (right_start, right_start + len(halves[1]))]
 
 
 # Speech without pauses comes back from Whisper with few full stops: one
@@ -312,7 +330,8 @@ def _as_statement(clause: str) -> str:
 
 def segment_sentences(
     audio_segments: List[AudioSegment],
-    sentence_ending_pattern: str = r"[.!?]"
+    sentence_ending_pattern: str = r"[.!?]",
+    excluded: Optional[List[Dict[str, str]]] = None,
 ) -> List[Sentence]:
     """
     STAGE 2: Segment transcript into sentences.
@@ -383,19 +402,26 @@ def segment_sentences(
             continue
         refined_sentences.append((st, run_on, cut))
 
-    # (text, kind): a sentence cut out of a run-on ("run_on") or a clause
-    # split off a two-topic sentence ("clause") is cleaned into a statement
-    # of its own below.
+    # (text, kind, cut, source id, source sentence, span): a sentence cut out
+    # of a run-on ("run_on") or a fact cut out of a sentence ("clause") is
+    # cleaned into a statement of its own below. Every piece keeps the
+    # spoken sentence it came from.
     sentence_texts = []
-    for st, run_on, cut in refined_sentences:
-        halves = split_two_topic_sentence(st)
-        if len(halves) > 1:
-            sentence_texts.extend((half, "clause", cut and i == 0) for i, half in enumerate(halves))
+    for source_id, (st, run_on, cut) in enumerate(refined_sentences):
+        # An answer is about what was asked ("Security? All traffic is TLS,
+        # ..., and the services run with task roles ..."): kept whole, so the
+        # question's topic reaches all of it when merge_question_answers joins
+        # the two. Cut, only the first fact went with the question.
+        answers_question = source_id > 0 and refined_sentences[source_id - 1][0].rstrip().endswith("?")
+        spans = [(0, len(st))] if answers_question else split_facts(st)
+        if len(spans) > 1:
+            sentence_texts.extend((st[a:b], "clause", cut and i == 0, source_id, st, (a, b))
+                                  for i, (a, b) in enumerate(spans))
         else:
-            sentence_texts.append((st, "run_on" if run_on else None, cut))
+            sentence_texts.append((st, "run_on" if run_on else None, cut, source_id, st, (0, len(st))))
 
     current_pos = 0
-    for sent_text, kind, cut in sentence_texts:
+    for sent_text, kind, cut, source_id, source_text, span in sentence_texts:
         if not sent_text.strip():
             continue
 
@@ -405,6 +431,9 @@ def segment_sentences(
         # skipping one here doesn't disturb the char-position search for
         # whatever real sentence follows it in full_text.
         if is_kt_session_meta_commentary(sent_text):
+            if excluded is not None:
+                excluded.append({"text": re.sub(r"\s+", " ", sent_text.strip()),
+                                 "reason": "about the KT session itself, not the system"})
             continue
         
         # Locate in full text. Never drop a sentence because it can't be
@@ -449,6 +478,9 @@ def segment_sentences(
             segment_ids=list(range(start_seg, end_seg + 1)),
             split_clause=(kind == "clause"),
             run_on_cut=cut,
+            source_id=source_id,
+            source_text=source_text,
+            source_span=span,
         )
         sentences.append(sent)
     
@@ -456,16 +488,89 @@ def segment_sentences(
     # the question was mapped as a fact and the answer lost its topic
     # ("What is the RTO?" / "We never agreed one with the business."). See
     # dialogue.py.
-    sentences = merge_question_answers(sentences, lambda s: s.text, _merge_sentences)
-    return semantic_chunk_sentences(sentences)
+    #
+    # Nothing else is merged before classification. Sentences used to be
+    # merged when they read alike (semantic_chunk_sentences), and the merged
+    # unit got one section: a system's purpose went to System Overview with
+    # its request flow, and a scheduler with the build, deploy and rollback
+    # chain. Each fact is classified on its own, with the sentences around it
+    # as context; a sentence that depends on the one before ("The fix is
+    # to...") follows it by the continuation rules (section_rules.py), and
+    # consecutive facts of one section are shown together (TopicBlock).
+    return merge_question_answers(sentences, lambda s: s.text, _merge_sentences)
 
 
-def _semantic_similarity(a, b) -> float:
-    try:
-        similarity_util = _SEMANTIC_CHUNK_UTIL if _SEMANTIC_CHUNK_UTIL is not None else util
-        return float(similarity_util.cos_sim(a, b)[0][0])
-    except Exception:
-        return 0.0
+def _rejoin_pair(prev: Sentence, s: Sentence) -> Optional[Sentence]:
+    """`prev` and `s` as one unit when they are facts of one spoken sentence,
+    next to each other in it; else None."""
+    # Only facts next to each other in the sentence: what lies between them
+    # is a connective (", and", "; ", ", while"), not a fact that went
+    # elsewhere or was dropped.
+    if (s.source_id is None or prev.source_id != s.source_id
+            or not (prev.source_span and s.source_span) or prev.source_span[1] > s.source_span[0]
+            or len((s.source_text or "")[prev.source_span[1]:s.source_span[0]].strip(" ,;")) > 8):
+        return None
+    a, b = prev.source_span[0], s.source_span[1]
+    spoken = (s.source_text or "")[a:b]
+
+    def _unedited(x: Sentence) -> bool:
+        raw = re.sub(r"\s+", " ", (x.raw_text or "").strip())
+        return x.text.strip() in (raw, _as_statement(raw))
+
+    # Reworded since (the copy edit): kept as written, one after the other.
+    as_said = _unedited(prev) and _unedited(s)
+    text = _as_statement(spoken) if as_said and spoken else f"{prev.text.strip()} {s.text.strip()}"
+    words_prev, words_s = len(prev.text.split()), len(s.text.split())
+    return Sentence(
+        text=text,
+        start=min(prev.start, s.start),
+        end=max(prev.end, s.end),
+        speaker=prev.speaker if prev.speaker == s.speaker else (prev.speaker or s.speaker),
+        raw_text=spoken or text,
+        audio_confidence=(prev.audio_confidence * words_prev + s.audio_confidence * words_s)
+        / max(1, words_prev + words_s),
+        segment_ids=sorted(set(prev.segment_ids + s.segment_ids)),
+        explicit_evidence=list(prev.explicit_evidence) + list(s.explicit_evidence),
+        is_inferred=prev.is_inferred or s.is_inferred,
+        source_id=s.source_id,
+        source_text=s.source_text,
+        source_span=(a, b),
+    )
+
+
+def rejoin_facts(sentences: List[Sentence]) -> List[Sentence]:
+    """Facts of one spoken sentence that sit side by side in one section are
+    shown as that sentence ("Developers own the code, and Platform Engineering
+    owns EKS"), not as clipped statements. Each was classified on its own; this
+    only changes how a section reads."""
+    out: List[Sentence] = []
+    for s in sentences:
+        joined = _rejoin_pair(out[-1], s) if out else None
+        if joined is None:
+            out.append(s)
+        else:
+            out[-1] = joined
+    return out
+
+
+def rejoin_classified(classified: List["ClassifiedSentence"]) -> List["ClassifiedSentence"]:
+    """rejoin_facts() for classified facts: neighbours from one sentence with
+    the same section become one unit, keeping the stronger classification."""
+    out: List[ClassifiedSentence] = []
+    for cs in classified:
+        prev = out[-1] if out else None
+        same_section = (prev is not None and prev.primary_classification and cs.primary_classification
+                        and prev.primary_classification.section_id == cs.primary_classification.section_id)
+        joined = _rejoin_pair(prev.sentence, cs.sentence) if same_section else None
+        if joined is None:
+            out.append(cs)
+            continue
+        if cs.primary_classification.confidence > prev.primary_classification.confidence:
+            prev.primary_classification = cs.primary_classification
+        prev.sentence = joined
+        prev.is_unassigned = prev.is_unassigned and cs.is_unassigned
+        prev.multi_section_assignments = [prev.primary_classification.section_id]
+    return out
 
 
 def _merge_sentences(first: Sentence, second: Sentence) -> Sentence:
@@ -484,115 +589,6 @@ def _merge_sentences(first: Sentence, second: Sentence) -> Sentence:
         audio_confidence=float(combined_confidence),
         segment_ids=merged_segment_ids
     )
-
-
-def _get_semantic_chunk_model(model_name: str = "all-MiniLM-L6-v2"):
-    global _SEMANTIC_CHUNK_MODEL, _SEMANTIC_CHUNK_UTIL
-    if _SEMANTIC_CHUNK_MODEL is not None:
-        return _SEMANTIC_CHUNK_MODEL
-
-    if _SENT_TRANS_SPEC:
-        try:
-            from sentence_transformers import SentenceTransformer as ST, util as st_util
-            _SEMANTIC_CHUNK_MODEL = ST(model_name)
-            _SEMANTIC_CHUNK_UTIL = st_util
-            return _SEMANTIC_CHUNK_MODEL
-        except Exception:
-            pass
-
-    _SEMANTIC_CHUNK_MODEL = SentenceTransformer()
-    _SEMANTIC_CHUNK_UTIL = None
-    return _SEMANTIC_CHUNK_MODEL
-
-
-def _opens_with_question(text: str) -> bool:
-    first = re.match(r"[^.!?]*[.!?]", (text or "").strip())
-    return bool(first) and first.group(0).endswith("?")
-
-
-def semantic_chunk_sentences(
-    sentences: List[Sentence],
-    similarity_threshold: float = 0.45,
-    min_merge_length: int = 40
-) -> List[Sentence]:
-    """Merge adjacent sentences into semantic chunks.
-
-    This step prevents overly granular sentence splitting and preserves
-    paragraph-level meaning for KT mapping.
-    """
-    if len(sentences) <= 1:
-        return sentences
-
-    model = _get_semantic_chunk_model()
-    # One batched encode() call instead of N individual ones — same model,
-    # mathematically identical embeddings, but sentence-transformers batches
-    # the forward pass internally so per-call Python/tokenization overhead
-    # (dominant for short sentences on CPU) is paid once instead of once per
-    # sentence. Both the real model and the no-dependency SentenceTransformer
-    # fallback above already accept a list and return one embedding per item.
-    encodings = model.encode([s.text for s in sentences], convert_to_tensor=True)
-
-    # Two sentences the routing rules send to different sections are
-    # different topics, however similar their wording: "Do not delete the
-    # BigQuery raw dataset" and "VPC Service Controls protect BigQuery" were
-    # merged, and both went to Danger Zones.
-    def _rule_section(text: str) -> Optional[str]:
-        match = match_section_rules(text)
-        return match.section_id if match and match.confidence >= RULE_OVERRIDE_CONFIDENCE else None
-
-    rule_sections = [_rule_section(s.text) for s in sentences]
-    chunks: List[Sentence] = []
-    current = sentences[0]
-    current_emb = encodings[0]
-    current_rules = {rule_sections[0]} - {None}
-
-    for idx in range(1, len(sentences)):
-        candidate = sentences[idx]
-        candidate_emb = encodings[idx]
-        sim = _semantic_similarity(current_emb, candidate_emb)
-
-        should_merge = False
-        if sim >= similarity_threshold:
-            should_merge = True
-        elif len(current.text) < min_merge_length or len(candidate.text) < min_merge_length:
-            should_merge = sim >= (similarity_threshold - 0.15)
-        if should_merge and rule_sections[idx] and current_rules and rule_sections[idx] not in current_rules:
-            should_merge = False
-        # A prohibition starts its own unit: "All infrastructure is defined in
-        # Terraform." merged into "Never modify the Terraform state manually."
-        # was filed under Danger Zones, and Tribal Knowledge labelled "All
-        # infrastructure is defined..." safety-critical. A prohibition followed
-        # by its reason still merges.
-        if should_merge and rule_sections[idx] == "danger_zones" and "danger_zones" not in current_rules:
-            should_merge = False
-        # An opener or closer ("Let's start.", "That concludes the KT.") is
-        # dropped before mapping; merged into a neighbour it would be kept.
-        if should_merge and (_GREETING_ONLY_RE.match(candidate.text or "") or _GREETING_ONLY_RE.match(current.text or "")):
-            should_merge = False
-        # A new question opens a new topic, however alike it reads: "Anything
-        # unfinished? ... has no owner." and "And for me, starting out? Get
-        # added to the admins group first." were one chunk, and the first-day
-        # step was filed under Open Responsibilities.
-        if should_merge and _opens_with_question(candidate.text):
-            should_merge = False
-        # A boundary inferred in a run-on: merging across it rebuilt the
-        # 90-word "sentence", and a deployment rule took the system's
-        # business volume along with its build chain.
-        if should_merge and getattr(candidate, "run_on_cut", False):
-            should_merge = False
-
-        if should_merge:
-            current = _merge_sentences(current, candidate)
-            current_emb = model.encode(current.text, convert_to_tensor=True)
-            current_rules |= {rule_sections[idx]} - {None}
-        else:
-            chunks.append(current)
-            current = candidate
-            current_emb = candidate_emb
-            current_rules = {rule_sections[idx]} - {None}
-
-    chunks.append(current)
-    return chunks
 
 
 # ============================================================================
@@ -1839,7 +1835,7 @@ def detect_gaps(
                 block = TopicBlock(
                     section_id=current_block_section,
                     topic_title=None,  # Could infer from first sentence later
-                    sentences=current_block_sentences.copy(),
+                    sentences=rejoin_facts(current_block_sentences),
                     start_time=current_block_sentences[0].start,
                     end_time=current_block_sentences[-1].end,
                     confidence_score=block_confidence,
@@ -1866,7 +1862,7 @@ def detect_gaps(
         block = TopicBlock(
             section_id=current_block_section,
             topic_title=None,
-            sentences=current_block_sentences.copy(),
+            sentences=rejoin_facts(current_block_sentences),
             start_time=current_block_sentences[0].start,
             end_time=current_block_sentences[-1].end,
             confidence_score=block_confidence,
@@ -2092,6 +2088,13 @@ class StructuredKT:
     parent_job_id: Optional[str] = None  # For incremental KT (session 2+)
     cross_references: Optional[List[Dict[str, Any]]] = None
     topic_memory_contexts: Optional[List[Dict[str, Any]]] = None  # Topic memory context for each sentence
+    # The facts the transcript was cut into (`sentences` are the units shown:
+    # facts of one sentence in one section are one unit), the section each
+    # fact was placed in (None when it has none), and statements left out
+    # before classification, with why. See verify_document_coverage.
+    facts: Optional[List[Sentence]] = None
+    fact_sections: Optional[List[Optional[str]]] = None
+    excluded_statements: Optional[List[Dict[str, str]]] = None
 
 def assemble_kt(
     job_id: str,
@@ -2363,7 +2366,7 @@ def assemble_kt(
         overall_risk_score=float(overall_risk),
         timestamp=datetime.utcnow().isoformat() + "Z",
         cross_references=cross_refs or [],
-        topic_memory_contexts=topic_memory_contexts
+        topic_memory_contexts=topic_memory_contexts,
     )
 
 
@@ -2617,8 +2620,10 @@ class ContextMappingPipeline:
         # STAGE 1.5: Pre-clean transcript segments before sentence segmentation
         logger.info("Stage 1.5: Cleaned transcript segments before classification")
 
-        # STAGE 2: Segment sentences
-        sentences = segment_sentences(segments)
+        # STAGE 2: Segment the transcript into facts (a sentence holding
+        # several is cut into them; fact_units.py)
+        excluded: List[Dict[str, str]] = []
+        sentences = segment_sentences(segments, excluded=excluded)
         logger.info(f"Stage 2: Segmented into {len(sentences)} sentences")
 
         # STAGE 2.5: Spoken sentences rewritten as written English where a
@@ -2637,13 +2642,23 @@ class ContextMappingPipeline:
         texts = [s.text for s in sentences]
         embeddings = self.classifier._encode_texts(texts)
 
-        # Precompute context embeddings for overlapping sentence windows
+        # Precompute context embeddings: each fact with the spoken sentences
+        # around it, two either side. Counted in sentences, not facts: cut
+        # into three facts, one ownership sentence pushed the recovery
+        # sentence before it out of a neighbour's window, and "the failover
+        # runbook is still missing" was scored without its topic.
+        spoken = []
+        ordinal, last = -1, None
+        for s in sentences:
+            key = ("source", s.source_id) if s.source_id is not None else ("unit", id(s))
+            if key != last:
+                ordinal, last = ordinal + 1, key
+            spoken.append(ordinal)
+        window_size = 2
         context_texts = []
         for i, s in enumerate(sentences):
-            window_size = 2
-            start = max(0, i - window_size)
-            end = min(len(sentences), i + window_size + 1)
-            context_texts.append(" ".join([sentences[j].text for j in range(start, end)]))
+            context_texts.append(" ".join(
+                sentences[j].text for j in range(len(sentences)) if abs(spoken[j] - spoken[i]) <= window_size))
         context_embeddings = self.classifier._encode_texts(context_texts)
 
         # Initialize topic memory for semantic continuity
@@ -2816,6 +2831,16 @@ class ContextMappingPipeline:
         apply_rule_overrides(classified_sentences, self.classifier.section_metadata)
         logger.info("Stage 3.5: Applied section routing rules")
 
+        # Stage 3.6: every fact now has its section. The facts of one spoken
+        # sentence that sit side by side in one section are one unit from
+        # here on, shown as that sentence, so the section text, its fields
+        # and the renderers all read the same thing. Facts of one sentence in
+        # different sections stay apart. The ledger keeps the facts.
+        fact_sentences = [cs.sentence for cs in classified_sentences]
+        fact_sections = [cs.primary_classification.section_id if cs.primary_classification else None
+                         for cs in classified_sentences]
+        classified_sentences = rejoin_classified(classified_sentences)
+
         # Load runtime policy and enforce policies before repair
         policy = load_policy()
         CONFIDENCE_ACCEPT_THRESHOLD = float(policy.get("confidence_accept_threshold", 0.55))
@@ -2948,6 +2973,9 @@ class ContextMappingPipeline:
         
         # STAGE 7: Assemble KT
         kt = assemble_kt(job_id, transcript, classified_sentences, coverage, assets, repaired_map, topic_contexts)
+        kt.facts = fact_sentences
+        kt.fact_sections = fact_sections
+        kt.excluded_statements = excluded
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
         
         return kt

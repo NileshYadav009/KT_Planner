@@ -18,8 +18,8 @@
     {"id": "A11", "kind": "backup", "quote": "RDS takes daily backups that are kept for 30 days", "in": ["disaster_recovery"]},
     {"id": "A12", "kind": "backup", "quote": "we run a DR test every quarter", "in": ["disaster_recovery"]},
     {"id": "A13", "kind": "undocumented", "quote": "Our RTO and RPO have never been documented", "in": ["disaster_recovery"]},
-    {"id": "A14", "kind": "ownership", "quote": "Developers own the application code", "in": ["ownership_escalation"]},
-    {"id": "A15", "kind": "ownership", "quote": "Platform Engineering owns EKS and the deployment infrastructure", "in": ["ownership_escalation"]}
+    {"id": "A14", "kind": "ownership", "quote": "Developers own the application code", "in": ["ownership_escalation"], "terms": ["Developers", "application code"]},
+    {"id": "A15", "kind": "ownership", "quote": "Platform Engineering owns EKS and the deployment infrastructure", "in": ["ownership_escalation"], "terms": ["Platform Engineering", "EKS and the deployment infrastructure"]}
   ],
   "safety": ["A06"],
   "covered": ["system_overview", "architecture_reference", "monitoring_observability", "disaster_recovery", "deployment_and_rollback", "common_failures", "danger_zones", "ownership_escalation"],

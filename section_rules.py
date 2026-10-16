@@ -38,6 +38,22 @@ _DATA_COMPONENTS = _data_components()
 # Infrastructure-as-code tools, for "Infrastructure is written in Bicep".
 _IAC = r"(?:terraform|opentofu|bicep|pulumi|cloudformation|arm\s+templates?|(?:aws\s+)?cdk|crossplane|ansible)"
 
+# When the load rises: "demand increasing significantly during weekends and
+# dinner hours", "traffic peaks on Monday mornings". A load word, a rise and
+# a period of time; a bare rate ("300 requests a second at peak") is not a
+# period. Shared with coverage_topics.py, so the coverage report counts as
+# discussed what these rules file under the Operational Calendar.
+RISING_LOAD_PERIOD = (
+    r"\b(?:traffic|demand|load|volumes?|orders?|usage|requests?|activity|transactions?)\s+(?:\w+\s+){0,2}?"
+    r"(?:peak(?:s|ing)?|spik(?:es?|ing)|surg(?:es?|ing)|increas(?:es?|ing)|ris(?:es?|ing)|grow(?:s|ing)?|"
+    r"doubl(?:es?|ing)|(?:is|are)\s+(?:highest|heaviest|busiest))\b[^.]{0,40}?\b"
+    r"(?:during|on|at|in|over|around|every|before)\s+(?:the\s+)?(?:\w+\s+){0,3}?"
+    r"(?:weekends?|weekdays?|evenings?|mornings?|nights?|holidays?|dinner|lunch|breakfast|month-?ends?|"
+    r"quarter-?ends?|year-?ends?|christmas|festive|seasons?|mondays?|tuesdays?|wednesdays?|thursdays?|"
+    r"fridays?|saturdays?|sundays?|sales?|campaigns?|january|february|march|april|may|june|july|august|"
+    r"september|october|november|december)\b"
+)
+
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "danger_zones",
@@ -160,6 +176,7 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # an exception to them.
             r"\bdeployments?\s+(?:are|is)\s+(?:also\s+)?frozen\b",
             r"\b(?:deployment|change|code|release)\s+freezes?\b",
+            RISING_LOAD_PERIOD,
         ],
         0.96,
     ),

@@ -209,18 +209,23 @@ def run_golden(golden: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_all(goldens=None) -> List[Dict[str, Any]]:
     import ai
+    import llm_provider
     import pipeline
     from context_mapper import ContextMappingPipeline
     from kt_schema_loader import SCHEMA
 
-    saved = (pipeline.get_llm_provider, ai.get_llm_provider, pipeline.record_candidates, pipeline.MAPPER_PIPELINE)
-    pipeline.get_llm_provider = ai.get_llm_provider = lambda: None
+    # llm_provider's own lookup too: the copy edit (copyedit.py) asks it
+    # directly, so a key in .env would otherwise still send requests.
+    saved = (pipeline.get_llm_provider, ai.get_llm_provider, llm_provider.get_llm_provider,
+             pipeline.record_candidates, pipeline.MAPPER_PIPELINE)
+    pipeline.get_llm_provider = ai.get_llm_provider = llm_provider.get_llm_provider = lambda: None
     pipeline.record_candidates = lambda *a, **k: None
     pipeline.MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA, llm_fallback_fn=None)
     try:
         return [run_golden(g) for g in (goldens or load_goldens())]
     finally:
-        pipeline.get_llm_provider, ai.get_llm_provider, pipeline.record_candidates, pipeline.MAPPER_PIPELINE = saved
+        (pipeline.get_llm_provider, ai.get_llm_provider, llm_provider.get_llm_provider,
+         pipeline.record_candidates, pipeline.MAPPER_PIPELINE) = saved
 
 
 def baseline_from(scores: List[Dict[str, Any]]) -> Dict[str, Any]:

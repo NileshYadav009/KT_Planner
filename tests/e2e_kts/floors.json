@@ -2,5 +2,6 @@
   "e2e_a_aws_ecommerce": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 10},
   "e2e_b_azure_payments": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 11},
   "e2e_c_gcp_data_platform": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 10},
-  "e2e_d_ambiguous_handover": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 8}
+  "e2e_d_ambiguous_handover": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 8},
+  "e2e_e_quickbite_food_delivery": {"placement_accuracy": 1.0, "misplaced": 0, "max_pages": 12}
 }
