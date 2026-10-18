@@ -5113,6 +5113,191 @@ as said.
 - `test_copyedit.py`: a marker may go, but "mean" and "wait" as content may
   not.
 
+### 9aao. Core investigation, batch 1: invariants, reliability, probe (18 Oct)
+
+The user asked for a deep investigation of the core pipeline, fixed one root
+cause at a time, with targeted tests only and no Groq spend.
+
+**Baseline** (no LLM, before this batch):
+
+| Set | Result |
+|---|---|
+| Tuning | 534/534 |
+| Dev | 213/224, 1 false Covered, 1 false Missing |
+| Holdouts | 86/95 |
+| Blind b01-b03 | 95/114, 1 lost |
+| E2e | 100%, 0 problems |
+
+Four `test_field_populator` tests failed.
+
+**Fixed:**
+
+| ID | Root cause and evidence | Fix | Regression test |
+|---|---|---|---|
+| R1 | The Groq client used the OpenAI SDK defaults: a 600 s read timeout, retried twice. A stalled request could hold a KT about 30 min, and nothing capped a KT's total LLM time. Rate-limit retries could sleep 5 x 60 s per call. | `LLM_REQUEST_TIMEOUT_SECONDS` (60) on the Groq client. `LLM_KT_DEADLINE_SECONDS` (900) counts from the KT's first live call, so transcription does not count; past it, calls are skipped and call sites keep their rules-only result. No rate-limit retry sleeps past the limit. Measured Groq calls took at most about 4 s. | `test_llm_provider.py` (timeout, retry); `test_llm_cost_controls.py` (time limit, 0 = none) |
+| C1 | `coverage_topics` "Month-end windows" matched any "end of the month". On d02, "By the end of the month you should be doing the model releases on your own" (onboarding) made an undiscussed Operational Calendar Partial: a hidden gap. | A deadline ("by / before / until / within the end of the month") is not a window. "End of every / each month" now counts. | `test_coverage_topics.py` |
+| C2 | "Escalation path" needed the word "escalate". An escalation described as "if they do not answer in fifteen minutes, call Maria, the engineering manager" was reported "not discussed", directly below that sentence. | The topic also matches an unanswered page, a named manager or head to call, and second or third line. | `test_coverage_topics.py` |
+| M1 | No routing rule recognised escalation without the word, so the probe's escalation sentence went to Monitoring (PagerDuty, "breaks"). Annotated KTs file "call Raj Patel, the application manager" and "call Sam Achebe, he's the head of engineering" under Ownership, and alert paging under Monitoring. | Rule: an unanswered page ("if they do not answer", "if nobody acknowledges"). The contact rule also accepts a named person ("call Maria, the engineering manager") and "head of X", but never "the call centre". Paging alone stays Monitoring. | `test_section_rules.py` |
+| M2 | "Right now we run in one region" went to Ownership, on a near-tie and context. "Next quarter we plan to add a second region, but nobody has started on it" went to Disaster Recovery. All 6 annotated plans or unstarted works are Open Responsibilities. | Rules: "run(s) / deployed / hosted in N regions" is Architecture (standby and replica regions stay DR). "Nobody has started on it" and a plan for next quarter or year are Open Responsibilities ("next month you will own ..." is onboarding and is not matched). | `test_section_rules.py` |
+| T1 | The 4 failing `test_field_populator` tests exercise the one-call-per-field gap fill with its reply format. Batching has been the default since §9aai, and batched tagging is tested in `test_llm_batching.py`. | The 4 tests set `LLM_BATCH_CALLS=0` through a fixture. | (the 4 tests) |
+
+**Measured** (no LLM, all five sets after each step; holdout and blind
+aggregate only):
+
+| | Tuning | Dev | Holdouts | Blind | E2e |
+|---|---|---|---|---|---|
+| Baseline | 534/534 | 213/224, FC 1, FM 1 | 86/95 | 95/114, 1 lost | 100%, 0 |
+| After C1, M1, M2 region | 534/534 | 213/224, FC 0, FM 1 | 86/95 | 95/114, 1 lost | 100%, 0 |
+| After M2 plans, C2 | 534/534 | 213/224, FC 0, FM 1 | 86/95 | 95/114, 1 lost | 100%, 0 |
+
+FC is false Covered and FM is false Missing.
+
+**Adversarial probe** (`evaluation/adversarial.py`, 21 facts, written before
+any output was seen):
+
+- 17/21 before, 20/21 after. The remaining miss is a faithful table row
+  ("The ECS cluster | Platform team"), not a loss.
+- Ownership & Escalation went from "Escalation path: not discussed" to
+  "All 3 topics covered".
+- The fact ledger reported 0 lost throughout.
+
+**Tests run:**
+
+- New tests and their modules.
+- Neighbouring LLM-path modules: 101 passed, plus the 4 pre-existing failures.
+- Knowledge and coverage modules: 106 passed.
+- Field gap fill: 53 passed.
+
+**Investigated, not changed:**
+
+- **d03 false Missing (First 30 Days).** "First thing, get yourself access
+  ..., and maybe spend the first couple of weeks just watching the
+  dashboard" is one fact. `fact_units` never cuts between two commands, on
+  purpose, so a step keeps its fix ("check the lag, and restart the pod if
+  it's stuck"). Cutting commands would fix one dev fact and risk scattering
+  procedures. Open (L2).
+- **h04 false Missing.** Both facts are annotated as acceptable in Day-1 or
+  First 30 Days, and no 30-day plan is stated. The output is defensible;
+  nothing was changed.
+- **Structured extraction sees only a section's first 20 fragments.** A fact
+  past that is not lost: `verify_document_coverage` puts any classified fact
+  missing from the document back under Additional Notes, with a ledger
+  record.
+- **Custom templates.** `templates.py` has routes, but nothing mounts them.
+  The pipeline always uses `kt_schema_new.json`, and the routing rules and
+  prompts name its section ids. Supporting chosen templates is a product
+  decision (P1).
+- **Topic memory.** It can raise a second candidate above the chosen section
+  without swapping them. No placement effect: only multi-section mapping
+  reads the alternatives, and it is off (L5, closed; logs only).
+- **Correction across sentences.** "The limit is 500 ... Sorry, not 500, the
+  limit is 300 ..." still shows both values (L1). It needs a sentence merge
+  before classification.
+
+**Engineering record:**
+
+- `CLAUDE.md` (new) holds the invariants, the pipeline map, the LLM call
+  inventory (6 call sites, their contracts, checks and fallbacks), the
+  targeted test commands and constraints, and the issue ledger.
+- The accuracy harness moved from a session scratchpad into the repository
+  as `evaluation/`: dev and blind KTs, runner, diagnostics, adversarial
+  probe. It reproduces the scratchpad numbers exactly. Results and the model
+  cache are git-ignored.
+- `docs/TESTING.md` no longer claims the full suite takes minutes or
+  mentions the removed cross-encoder.
+
+**Open, needing a decision or Groq quota:**
+
+- L3: offer the LLM check 5 candidates with section descriptions (Groq A/B).
+- L4: repeats and unsourced lines with Groq on b01-b03.
+- P1: custom templates.
+
+### 9aap. Core investigation, batch 2: corrections, Groq A/B, repeats and sources (18 Oct)
+
+The user approved the Groq A/B and the next fixes ("go ahead and do it").
+
+**L1, fixed: a correction in the next sentence.** "The API rate limit is 500
+requests a minute per customer. Sorry, not 500, the limit is 300 ..." showed
+both values.
+
+- `devops_transcription.resolve_correction_across` and
+  `context_mapper.merge_spoken_corrections`, before the copy edit.
+- A sentence that only corrects a number in the one before it is merged into
+  that sentence, which shows the corrected value. It opens with "sorry",
+  "I mean", "correction" and the like, or "actually" followed by a number.
+- Merges only when:
+  - the speaker is the same;
+  - the correction adds nothing new;
+  - the number is one, unambiguous number of the sentence before.
+- The ledger records the correction as excluded, with its reason.
+- `knowledge/evidence.py` cites the correction with the sentence it
+  corrects. Without that, the shown "300" was unsourced: the first sentence
+  covered every word but not the number. A 300 said about something else
+  ("the burst limit is 300") is still no source.
+- Tests: `test_devops_transcription.py` (resolver and merge),
+  `test_evidence.py`.
+
+**L3, A/B on Groq (`qwen/qwen3.8-27b`, batched, copy edit off), dev KTs
+(224 facts):**
+
+| Arm | Strict | Lenient | Live requests | Live tokens |
+|---|---|---|---|---|
+| A: top 3, titles only (default) | 205 | 215 | 152 | about 86.7k |
+| B: top 5 and each section's one-line purpose | 206 | 216 | 30 (120 cached) | about 49.9k |
+
+Arm B is +1 fact (d05) with no regression. That is not enough evidence to
+change a core prompt and re-record the replay answers, and the holdout and
+blind confirmation needs more than the day's remaining quota (the account
+allows about 200k tokens a day). B stays available and off by default:
+
+- `LLM_VERIFY_CANDIDATES` (default 3);
+- `LLM_VERIFY_PURPOSE` (default 0), which reads the schema's new `purpose`
+  line. `purpose` is not part of a section's embedding text, so no-LLM
+  placement is unchanged.
+
+Next: both arms on h12-h14 and b01-b03, with fresh quota.
+
+**L4, fixed: Groq-mode repeats and unsourced facts.** On the dev KTs, arm A
+had 4 repeated lines (d01, d05, d06) and 2 unsourced facts (d04). Each was
+diagnosed with `evaluation/groq_diag.py`, which replays a run from the
+response cache and sends nothing.
+
+- **Repeats.** `knowledge_builder.enrich_operational_calendar` copied every
+  Cost Optimization lever into Operational Calendar. With an LLM, the
+  structured levers ("Auto-suspend", "Warehouse isolation", "Right-sizing")
+  were printed in both sections. Now only a lever tied to a time window
+  ("outside business hours", nights, weekends, off-peak) goes to the
+  calendar, as a pointer: "Outside business hours; see Cost Optimization".
+- **Unsourced.** A polished paragraph was matched as a whole. It stopped at
+  3 sources, or at one sentence that covered most of its words, so a
+  statement in it cited nothing ("Vaultline is the adapter ...", and the fix
+  "Restart the channel from the MQ console" under its symptom). Now each
+  sentence of a paragraph, and each statement cell of a table row (3 or more
+  content words), cites its own sentence as well. Which units count as
+  sourced is unchanged; only their citations are more complete.
+- Replayed after the fixes: 0 repeats and 0 unsourced on d01, d04, d05 and
+  d06.
+- Tests: `test_knowledge_builders.py` (the old test asserted the copy and
+  was replaced), `test_evidence.py` (paragraph and row).
+
+**No-LLM measurements after the batch** (all five sets):
+
+| Set | Result |
+|---|---|
+| Tuning | 534/534 |
+| Dev | 213/224, false Covered 0, false Missing 1 |
+| Holdouts | 86/95 |
+| Blind | 95/114 |
+| E2e | 100%, 0 problems |
+
+All unchanged. 229 targeted tests pass, including the end-to-end tests and
+the recorded Groq replay, with nothing skipped. The probe KT now shows only
+the corrected limit, sourced by both sentences.
+
+**Groq spent:** 182 live requests, about 136.6k tokens, no rate-limit errors.
+The new `evaluation/groq_eval.py` runs LLM-mode accuracy. It spends quota,
+`GROQ_BUDGET` caps it, and holdout and blind results stay aggregate only.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

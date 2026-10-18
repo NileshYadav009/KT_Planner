@@ -34,6 +34,9 @@ class LLMUsageTracker:
     def __init__(self, job_id: str = ""):
         self.job_id = job_id
         self.started = time.time()
+        # time.monotonic() of this KT's first live LLM call: its LLM time
+        # limit counts from here (llm/cached_provider.kt_seconds_left).
+        self.llm_first_call: Optional[float] = None
         self.provider: Optional[str] = None
         self.model: Optional[str] = None
         self._lock = threading.Lock()

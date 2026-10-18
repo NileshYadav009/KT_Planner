@@ -1,0 +1,270 @@
+{
+ "id": "d02_sparrow_gke_meeting",
+ "title": "Sparrow: GKE recommendations API, labelled three-person meeting",
+ "proves": "Speaker labels, interruptions, short turns, facts split across speakers.",
+ "transcript": "Priya: Okay, I think everyone's here. Marcus, this is the handover for Sparrow, since you're picking it up from Monday.\nMarcus: Great, thanks.\nPriya: So Sparrow is the product recommendations API for the online store. Every product page calls it, so if it's slow the whole page is slow.\nDan: And it drives about twelve percent of revenue through the \"you might also like\" carousel, so it matters.\nPriya: Right. It runs on GKE Autopilot. There's a Python FastAPI service that serves the recommendations, and a nightly training job on Vertex AI that rebuilds the model.\nDan: The features come from BigQuery, and the serving side keeps the latest recommendations in Memorystore Redis.\nMarcus: How do releases work?\nPriya: Cloud Build builds the image on every merge, and Argo CD syncs it to the cluster. For a rollback you just revert the commit in the config repo and Argo puts the old version back.\nDan: Model releases are separate. A new model only goes live if its offline click-through score beats the current one.\nMarcus: What environments are there?\nPriya: Dev and prod only. There's no staging, which honestly is a gap.\nMarcus: Monitoring?\nDan: Cloud Monitoring dashboards for latency and error rate, and we alert in Slack when p95 latency goes over two hundred milliseconds.\nPriya: The thing that goes wrong most is the training job failing because a BigQuery table schema changed upstream. When that happens the API keeps serving yesterday's recommendations, so it's not urgent, but you need to fix the query and rerun the job.\nDan: The other one is Redis evicting keys when memory fills up, and then latency spikes. Bump the Memorystore tier and it settles.\nMarcus: Backups?\nPriya: The models are versioned in a Cloud Storage bucket, so we can always redeploy an older model. BigQuery has time travel for seven days. We've never tested a full region failure.\nDan: Security wise, the service account only has read access to BigQuery, and the API sits behind Identity-Aware Proxy for the admin endpoints.\nPriya: Please don't delete the old model versions from the bucket, the rollback depends on them.\nMarcus: Who do I go to when things break?\nPriya: The personalisation team owns Sparrow. Escalate to Dan first, then to Grace Lim, the head of data science.\nDan: There's also an unfinished A/B test framework migration. We moved half the experiments to the new framework and the rest are still on the old one.\nPriya: For your first day, get added to the sparrow-oncall Slack group and the GCP project. By the end of the month you should be doing the model releases on your own.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Sparrow is the product recommendations API for the online store",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Every product page calls it, so if it's slow the whole page is slow",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "it drives about twelve percent of revenue",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "It runs on GKE Autopilot",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "a Python FastAPI service that serves the recommendations",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "a nightly training job on Vertex AI that rebuilds the model",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "The features come from BigQuery",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "the serving side keeps the latest recommendations in Memorystore Redis",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Cloud Build builds the image on every merge",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Argo CD syncs it to the cluster",
+   "alt": [
+    "ArgoCD syncs it to the cluster"
+   ],
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "revert the commit in the config repo",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "A new model only goes live if its offline click-through score beats the current one",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Dev and prod only",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "There's no staging",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Cloud Monitoring dashboards for latency and error rate",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "we alert in Slack when p95 latency goes over two hundred milliseconds",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "the training job failing because a BigQuery table schema changed upstream",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "the API keeps serving yesterday's recommendations",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "you need to fix the query and rerun the job",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Redis evicting keys when memory fills up, and then latency spikes",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Bump the Memorystore tier and it settles",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "The models are versioned in a Cloud Storage bucket",
+   "in": [
+    "disaster_recovery",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "BigQuery has time travel for seven days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "We've never tested a full region failure",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the service account only has read access to BigQuery",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "the API sits behind Identity-Aware Proxy for the admin endpoints",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "don't delete the old model versions from the bucket",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The personalisation team owns Sparrow",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Escalate to Dan first, then to Grace Lim, the head of data science",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "an unfinished A/B test framework migration",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "We moved half the experiments to the new framework and the rest are still on the old one",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "get added to the sparrow-oncall Slack group and the GCP project",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "By the end of the month you should be doing the model releases on your own",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization",
+  "known_bad_days"
+ ],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

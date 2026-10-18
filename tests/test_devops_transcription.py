@@ -443,3 +443,45 @@ def test_a_number_corrected_mid_sentence_keeps_only_the_corrected_one():
                  "The old one, sorry, the new one is in us-east-1.",
                  "Sorry, not 4000 but 2000."]:
         assert resolve_self_corrections(said) == said, said
+
+
+def test_a_correction_in_the_next_sentence_replaces_the_number_it_corrects():
+    from devops_transcription import resolve_correction_across as fix
+
+    previous = "The API rate limit is 500 requests a minute per customer."
+    assert fix(previous, "Sorry, not 500, the limit is 300 requests a minute per customer.") == \
+        "The API rate limit is 300 requests a minute per customer."
+    assert fix(previous, "Sorry, 300.") == "The API rate limit is 300 requests a minute per customer."
+    assert fix(previous, "I mean 300 requests a minute.") == "The API rate limit is 300 requests a minute per customer."
+    assert fix("The nightly job runs at 2 am.", "Actually, 3 am.") == "The nightly job runs at 3 am."
+    assert fix("We keep backups for thirty days.", "Sorry, not thirty, fourteen days.") == \
+        "We keep backups for fourteen days."
+    # Not a correction of a number the sentence before stated, or it says
+    # more than the sentence before: both stay as said.
+    for nxt in ["Sorry, not 500, it's 300, and partners get 1000.",
+                "Sorry, not 400, the limit is 300.",
+                "Sorry, I lost my train of thought.",
+                "Actually, the rollback takes 10 minutes.",
+                "The burst limit is 300."]:
+        assert fix(previous, nxt) is None, nxt
+    # Two numbers before it, and the correction does not say which.
+    assert fix("Staging has 2 nodes and production has 6 nodes.", "Sorry, 8.") is None
+
+
+def test_the_corrected_sentence_is_merged_and_the_correction_is_recorded():
+    from context_mapper import Sentence, merge_spoken_corrections
+
+    said = [Sentence(text="The API rate limit is 500 requests a minute per customer.", start=1.0, end=2.0, speaker="Kiran"),
+            Sentence(text="Sorry, not 500, the limit is 300 requests a minute per customer.", start=2.0, end=3.0,
+                     speaker="Kiran"),
+            Sentence(text="Deployments go through GitHub Actions.", start=3.0, end=4.0, speaker="Kiran")]
+    excluded = []
+    units, corrected = merge_spoken_corrections(said, excluded)
+    assert len(units) == 2
+    assert corrected == {0: "The API rate limit is 300 requests a minute per customer."}
+    # The unit keeps both sentences as said, for topics and sources.
+    assert "500" in units[0].text and "300" in units[0].raw_text and units[0].end == 3.0
+    assert excluded and "Sorry, not 500" in excluded[0]["text"]
+    # Another speaker's "sorry" is not the speaker correcting themselves.
+    other = [said[0], Sentence(text="Sorry, 300.", start=2.0, end=3.0, speaker="Nadia")]
+    assert len(merge_spoken_corrections(other, [])[0]) == 2

@@ -7,10 +7,12 @@
 ```
 
 Use `.venv-1` specifically — it's the environment with actual dependencies
-installed (`.venv` appears to lack `fastapi` and others). Full run takes
-several minutes: most of that is one-time embedding/cross-encoder model
-loading shared implicitly across the classification-heavy tests, not the
-assertions themselves.
+installed (`.venv` appears to lack `fastapi` and others). The full run takes
+hours on a CPU-only laptop, mostly in tests that run whole KTs through the
+embedding and entity models. Run it overnight. For day-to-day changes run
+the targeted commands in `CLAUDE.md` ("Testing"). Measure placement and
+coverage changes with `evaluation/accuracy.py` (`evaluation/README.md`). The
+ms-marco cross-encoder was removed in audit §9aam.
 
 ## What's covered
 

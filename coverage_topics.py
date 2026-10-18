@@ -123,7 +123,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"(?:is|are|was|were)\s+(?:the\s+|our\s+)?peak|the\s+peak\s+(?:is|was)|busiest|black\s+friday|(?:flash|summer|winter|holiday|seasonal|big)\s+sales?|"
          r"sales?\s+(?:events?|periods?|seasons?|days?|campaigns?)|holiday\w*|season\w*|"
          r"(?:high|peak)\s+traffic|traffic\s+(?:peaks?|spikes?)|market\s+open|volatility)\b|" + RISING_LOAD_PERIOD),
-        ("Month-end windows", ("month_end_windows",), r"\bmonth[\s-]end\b|\bend\s+of\s+(?:the\s+)?month\b|\bdays\s+of\s+the\s+month\b"),
+        # A window that recurs, not a deadline: "By the end of the month you
+        # should be doing the releases" (an onboarding milestone) marked an
+        # undiscussed calendar as covered under First 30 Days.
+        ("Month-end windows", ("month_end_windows",),
+         r"(?<!\bby\s)(?<!\bbefore\s)(?<!\buntil\s)(?<!\btill\s)(?<!\bwithin\s)\bmonth[\s-]end\b|"
+         r"(?<!\bby\sthe\s)(?<!\bbefore\sthe\s)(?<!\buntil\sthe\s)(?<!\btill\sthe\s)(?<!\bwithin\sthe\s)"
+         r"\bend\s+of\s+(?:the\s+|every\s+|each\s+)?month\b|\bdays\s+of\s+the\s+month\b"),
         # "Avoid production deployments during ...": a word may sit between.
         ("Change freezes", ("deployment_blackout_times",),
          r"\b(?:avoid\s+(?:\w+\s+)?(?:deploying|deployments?|releasing|releases?|changes)|no\s+(?:changes|deploys?|deployments)|"
@@ -135,7 +141,16 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     ],
     "ownership_escalation": [
         ("Owning teams", ("application_ownership", "infrastructure_ownership"), r"\bowns?\b|\bresponsible\s+for\b"),
-        ("Escalation path", ("escalation_chain",), r"\bescalat\w*"),
+        # Said without the word too: "if they do not answer in fifteen
+        # minutes, call Maria, the engineering manager" was reported as an
+        # escalation path not discussed, below that very sentence.
+        ("Escalation path", ("escalation_chain",),
+         r"\bescalat\w*|\b(?:second|third)\s+(?:line|tier)\b|"
+         r"\bif\s+(?:(?:they|he|she|the\s+(?:on-?call|primary)(?:\s+(?:engineer|person))?)\s+(?:does\s+not|do\s+not|"
+         r"doesn'?t|don'?t|did\s+not|didn'?t|fails?\s+to|can'?t|cannot)|nobody|no\s+one|no-one)\s+"
+         r"(?:answer|respond|reply|pick\s+up|acknowledge|ack)s?\b|"
+         r"\b(?:call|contact|ring)(?!\s+cent(?:re|er)\b)\s+(?:the\s+)?(?:[\w'-]+,?\s+){0,4}?"
+         r"(?:manager|lead|head\s+of\s+[\w-]+|director|duty\s+manager)\b"),
         ("On-call tool", ("oncall_tool",), r"\b(?:pagerduty|opsgenie|on-?call)\b"),
     ],
     "first_30_day_ownership": [

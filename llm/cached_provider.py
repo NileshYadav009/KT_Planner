@@ -56,6 +56,30 @@ def max_calls_per_kt() -> int:
         return 0
 
 
+def kt_deadline_seconds() -> float:
+    """LLM_KT_DEADLINE_SECONDS: how long one KT may spend on live LLM calls,
+    counted from its first one (0 = no limit; default 900). Past it, calls
+    are skipped and the call sites keep their rules-only results, so a slow
+    or rate-limited provider cannot hold a KT for hours. A KT measured about
+    4 s a call and about a minute of LLM time in all (audit 9aao)."""
+    try:
+        return max(0.0, float(os.getenv("LLM_KT_DEADLINE_SECONDS", "900") or 0))
+    except ValueError:
+        return 900.0
+
+
+def kt_seconds_left(tracker: Any = None) -> Optional[float]:
+    """Seconds the current KT may still spend on LLM calls; None without a
+    limit, outside a KT, or before its first call (time spent transcribing
+    does not count)."""
+    tracker = tracker if tracker is not None else current_tracker()
+    limit = kt_deadline_seconds()
+    first = getattr(tracker, "llm_first_call", None)
+    if not limit or first is None:
+        return None
+    return limit - (time.monotonic() - first)
+
+
 def _provider_name(provider: Any) -> str:
     return type(provider).__name__.replace("Provider", "").lower() or "llm"
 
@@ -107,6 +131,12 @@ class CachedLLMProvider:
         if limit and tracker is not None and tracker.live_calls() >= limit:
             tracker.record_skip(call_site, f"per-KT LLM call budget ({limit}) reached")
             raise LLMBudgetExhausted(f"LLM_MAX_CALLS_PER_KT={limit} reached for this KT")
+        left = kt_seconds_left(tracker)
+        if left is not None and left <= 0:
+            tracker.record_skip(call_site, f"per-KT LLM time limit ({kt_deadline_seconds():g}s) reached")
+            raise LLMBudgetExhausted(f"LLM_KT_DEADLINE_SECONDS={kt_deadline_seconds():g} reached for this KT")
+        if tracker is not None and getattr(tracker, "llm_first_call", None) is None:
+            tracker.llm_first_call = time.monotonic()
 
         reset_call_stats()
         started = time.time()

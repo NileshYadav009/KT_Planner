@@ -405,6 +405,41 @@ def test_per_minute_rate_limit_still_retries(monkeypatch):
     assert len(attempts) == 3
 
 
+def test_no_retry_sleeps_past_the_kts_llm_time_limit(monkeypatch):
+    """A retry wait longer than what is left of the KT's LLM time limit is
+    not taken: the call fails now and its call site keeps the rules-only
+    result."""
+    import llm.cached_provider as cp
+
+    monkeypatch.setattr(lp, "LLM_MAX_CALLS_PER_MINUTE", 100)
+    _clear_throttle_state()
+    clock = _patched_clock(monkeypatch)
+    monkeypatch.setattr(cp, "kt_seconds_left", lambda tracker=None: 30.0)
+    attempts = []
+
+    def _limited():
+        attempts.append(1)
+        raise _QuotaRateLimitError("Rate limit reached on tokens per minute (TPM): Limit 8000.",
+                                   headers={"retry-after": "45"})
+
+    with pytest.raises(Exception):
+        lp._call_with_rate_limit_retry(_limited, "Groq", 100)
+    assert len(attempts) == 1 and clock.sleeps == []
+
+
+def test_a_groq_request_has_a_bounded_timeout(monkeypatch):
+    """The OpenAI SDK waits up to 600 s for a response and retries twice: a
+    stalled Groq request could hold a KT for half an hour."""
+    if lp.OpenAI is None:
+        pytest.skip("openai SDK not installed")
+    monkeypatch.setattr(lp, "GROQ_API_KEY", "gsk_" + "x" * 52)
+    provider = lp.GroqProvider()
+    assert provider.client is not None
+    timeout = provider.client.timeout
+    read = getattr(timeout, "read", timeout)
+    assert read == lp.LLM_REQUEST_TIMEOUT_SECONDS <= 120
+
+
 def test_a_request_over_the_output_per_minute_limit_is_resent_within_it(monkeypatch):
     # Live 16 Oct: the account allows 1,000 output tokens a minute and calls
     # asked for 1,024 (structured extraction) or 2,048 (copy edit). Resent

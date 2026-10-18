@@ -8,6 +8,8 @@ text.
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from field_populator import (
@@ -187,6 +189,14 @@ def test_two_table_fields_in_one_section_do_not_get_identical_fallback_content()
     assert fields["recurring_responsibilities"]["source"] == "unfilled"
 
 
+@pytest.fixture
+def one_call_per_field(monkeypatch):
+    """The one-field-per-call gap fill (LLM_BATCH_CALLS=0), whose two-line
+    replies these stubs give. Batched gap fill, the default since audit
+    9aai, is tested in test_llm_batching.py."""
+    monkeypatch.setenv("LLM_BATCH_CALLS", "0")
+
+
 class _StubLLM:
     """Records every prompt it's called with and returns queued responses
     in order — lets a test assert both what the model was told and what
@@ -213,6 +223,7 @@ EXPLICIT_INFERRED_SCHEMA = [
 ]
 
 
+@pytest.mark.usefixtures("one_call_per_field")
 def test_llm_gap_fill_tags_explicit_basis_as_llm_explicit():
     # business_criticality's options ("high"/"medium"/"low") never appear
     # verbatim in the transcript, so pattern extraction misses it and this
@@ -238,6 +249,7 @@ def test_llm_gap_fill_tags_explicit_basis_as_llm_explicit():
     assert field["source"] == "llm_explicit"
 
 
+@pytest.mark.usefixtures("one_call_per_field")
 def test_llm_gap_fill_tags_inferred_basis_as_llm():
     coverage = {"system_overview": {"content": []}}
     section_content = {
@@ -256,6 +268,7 @@ def test_llm_gap_fill_tags_inferred_basis_as_llm():
     assert field["source"] == "llm"
 
 
+@pytest.mark.usefixtures("one_call_per_field")
 def test_llm_gap_fill_defaults_to_inferred_when_basis_line_missing():
     # If the model doesn't follow the two-line format, err on the safe
     # (pre-existing) side rather than silently treating an unparseable
@@ -312,6 +325,7 @@ def test_llm_gap_fill_prompt_keeps_paraphrase_leniency_for_open_ended_fields():
     assert "an actual URL" not in prompt
 
 
+@pytest.mark.usefixtures("one_call_per_field")
 def test_llm_gap_fill_prompt_lists_already_captured_sibling_values():
     # Only one real sentence exists, and its subject is staging (it only
     # mentions "production" as a comparison target). production_notes

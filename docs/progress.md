@@ -1550,3 +1550,40 @@ Results:
 - Not covered:
   - a correction across two sentences ("4000. Sorry, 2000.");
   - a corrected tool name.
+
+## Core investigation, batch 1 (audit §9aao, 18 Oct)
+
+- **Every job now finishes in bounded time.** A stalled Groq request could
+  hold a KT for about 30 minutes. Each request now times out after 60 s, and
+  a KT's LLM time is capped at 15 minutes from its first call. After that it
+  keeps the rules-only results.
+- **Two hidden or false gaps fixed in the coverage table:**
+  - "By the end of the month you should ..." no longer counts as an
+    Operational Calendar topic.
+  - An escalation described without the word "escalate" now counts as an
+    escalation path.
+- **Misfiled facts fixed** in an adversarial test KT (17 to 20 of 21):
+  - escalation steps are Ownership & Escalation;
+  - "we run in one region" is Architecture;
+  - planned, unstarted work is Open Responsibilities.
+- **No accuracy loss:** no-LLM accuracy is unchanged on every set, and dev
+  false Covered went from 1 to 0.
+- **Tests:** the 4 long-failing field tests now state the mode they test.
+- **Engineering record:** `CLAUDE.md` is new. The accuracy harness now lives
+  in the repo under `evaluation/`.
+
+## Core investigation, batch 2 (audit §9aap, 18 Oct)
+
+- **A number corrected in the next sentence** ("... 500 a minute. Sorry, not
+  500, the limit is 300 ...") now shows only the corrected value. Both
+  sentences are still quoted as its source.
+- **Groq trial of a richer section check** (5 candidates with a one-line
+  purpose for each section): +1 fact of 224 on the dev KTs. That is too
+  small to switch, so it stays off until a check on the unseen KTs with
+  fresh quota.
+- **Groq-mode repeats fixed** (4 to 0 on the dev KTs). Operational Calendar
+  no longer copies every cost lever.
+- **Groq-mode unsourced facts fixed** (2 to 0). Every sentence of a
+  paragraph, and every statement in a table row, now cites its own source.
+- **No accuracy loss:** no-LLM accuracy is unchanged on every set.
+- **Groq used:** 182 requests, about 137k tokens.

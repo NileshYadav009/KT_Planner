@@ -1,0 +1,304 @@
+{
+ "id": "b03_streamline_dataflow_noisy",
+ "title": "Pulse: GCP Dataflow streaming analytics, noisy speech-to-text with false starts",
+ "proves": "Repeated words, false starts, fillers, a topic dropped and picked up again.",
+ "transcript": "right so uh pulse. pulse is the the clickstream analytics thing, it takes every click from the website and the app and gives the product managers near real time dashboards, like how many people are in checkout right now. it's not customer facing but the growth team stares at it all day so they will notice in like five minutes if it's down.\n\nso the clicks come in through a small Go collector on Cloud Run, it publishes to Pub/Sub, and then uh a Dataflow streaming job does the sessionising and writes into BigQuery. the dashboards are Looker Studio on top of BigQuery. oh and there's a Bigtable table for the live counters because BigQuery was too slow for that.\n\ndeploying, so the Dataflow job is a Java Beam pipeline and we deploy it with a Cloud Build trigger, it does an update in place of the running job, um, unless the change isn't compatible, then you have to drain the old job and start a new one. the collector is just a normal Cloud Run deploy, and to roll back you send traffic back to the previous revision.\n\nwe have a dev project and a prod project. dev gets a one percent sample of the real clicks.\n\nmonitoring uh is Cloud Monitoring, we have alerts on the Dataflow system lag and on the Pub/Sub oldest unacked message age. they go to the data on-call in Opsgenie.\n\nproblems. the the big one is the Dataflow job falling behind after a traffic spike, system lag climbs and the dashboards go stale. usually it catches up by itself, if it doesn't, raise the max workers. and um the other thing is BigQuery streaming insert quota errors on sale days, we switched most tables to the storage write API but two old tables still use streaming inserts.\n\nbackups wise, BigQuery tables have seven days of time travel and the raw clicks are also archived to Cloud Storage as Avro files, so we can replay any day. we've, uh, we've never had to replay more than a day though.\n\nsecurity, the collector only accepts requests with a signed token from the app, and personal data, um, like IP addresses, is hashed before it's written anywhere.\n\nwhatever you do don't, don't delete the Pub/Sub subscription, the Dataflow job loses its position and you lose clicks.\n\ncost, Dataflow is the biggest line, it's on streaming engine with autoscaling, and we cap max workers at twenty so a spike can't blow the budget.\n\nthe busy days are Black Friday and the big summer sale, scale up before them, don't wait for the lag.\n\nowners, it's the data platform team, and the dashboards themselves belong to the growth analytics team. if it's on fire call me until friday and after that call Lena Fischer, she's the data platform lead.\n\noh, one thing left, those two old tables still need moving to the storage write API, it's on the backlog but nobody's picked it up.\n\nfor your first week get the BigQuery and Dataflow roles in both projects and join the Opsgenie schedule. in the first month try an update of the Dataflow job yourself in dev, then in prod with me.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "it takes every click from the website and the app and gives the product managers near real time dashboards",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "it's not customer facing but the growth team stares at it all day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the clicks come in through a small Go collector on Cloud Run",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "it publishes to Pub/Sub",
+   "alt": [
+    "it publishes to Pub Sub"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "a Dataflow streaming job does the sessionising and writes into BigQuery",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the dashboards are Looker Studio on top of BigQuery",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "there's a Bigtable table for the live counters",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "we deploy it with a Cloud Build trigger",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "it does an update in place of the running job",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "you have to drain the old job and start a new one",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "to roll back you send traffic back to the previous revision",
+   "alt": [
+    "to rollback you send traffic back to the previous revision"
+   ],
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "we have a dev project and a prod project",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "dev gets a one percent sample of the real clicks",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "we have alerts on the Dataflow system lag and on the Pub/Sub oldest unacked message age",
+   "alt": [
+    "alerts on the Dataflow system lag"
+   ],
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "they go to the data on-call in Opsgenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "the Dataflow job falling behind after a traffic spike",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "system lag climbs and the dashboards go stale",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "raise the max workers",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "BigQuery streaming insert quota errors on sale days",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "two old tables still use streaming inserts",
+   "in": [
+    "common_failures",
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "BigQuery tables have seven days of time travel",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "the raw clicks are also archived to Cloud Storage as Avro files",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "we've never had to replay more than a day though",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the collector only accepts requests with a signed token from the app",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "is hashed before it's written anywhere",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "delete the Pub/Sub subscription",
+   "alt": [
+    "delete the Pub Sub subscription"
+   ],
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Dataflow is the biggest line",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "we cap max workers at twenty so a spike can't blow the budget",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the busy days are Black Friday and the big summer sale",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "scale up before them, don't wait for the lag",
+   "alt": [
+    "vertical scaling before them, don't wait for the lag"
+   ],
+   "in": [
+    "known_bad_days",
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "it's the data platform team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "the dashboards themselves belong to the growth analytics team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "call Lena Fischer, she's the data platform lead",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "those two old tables still need moving to the storage write API",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "get the BigQuery and Dataflow roles in both projects and join the Opsgenie schedule",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "try an update of the Dataflow job yourself in dev, then in prod with me",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "cost_optimization",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6, blind (synthetic)",
+ "holdout": true
+}

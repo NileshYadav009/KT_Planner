@@ -725,6 +725,13 @@ def _field_value(section: Optional[Dict[str, Any]], *path: str) -> Optional[Any]
     return None
 
 
+_TIME_WINDOW_RE = re.compile(
+    r"\b(?:outside|after|during|before|in)\s+(?:of\s+)?(?:business|office|working|peak|off-peak)\s+hours\b|"
+    r"\bovernight\b|\b(?:at\s+)?nights?\b|\b(?:on\s+|at\s+|over\s+)?weekends?\b|\boff[\s-]?peak(?:\s+hours)?\b|"
+    r"\b(?:at|after|before|from)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:bank\s+)?holidays?\b|\bmonth[\s-]end\b",
+    re.IGNORECASE)
+
+
 def enrich_operational_calendar(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
     """Fold cost_optimization's already-populated levers into
     known_bad_days's section dict as `_cost_patterns`, so its renderer can
@@ -760,8 +767,19 @@ def enrich_operational_calendar(knowledge_object: Dict[str, Any]) -> Dict[str, A
             if len(parts) >= 2:
                 rows.append({"label": parts[0], "value": parts[1]})
 
-    if rows:
-        calendar_section["_cost_patterns"] = rows
+    # Only a lever tied to a time window is a calendar fact, and the calendar
+    # points to it rather than printing it again. Every lever used to be
+    # copied: with an LLM, "Auto-suspend after five minutes" and "Warehouse
+    # isolation" were printed under Cost and again here (audit 9aap).
+    cost_title = cost_section.get("title") or "Cost Optimization"
+    pointers = []
+    for row in rows:
+        window = _TIME_WINDOW_RE.search(f"{row['label']} {row['value']}")
+        if window:
+            phrase = window.group(0).strip()
+            pointers.append({"label": row["label"], "value": f"{phrase[:1].upper()}{phrase[1:]}; see {cost_title}"})
+    if pointers:
+        calendar_section["_cost_patterns"] = pointers
 
     return knowledge_object
 

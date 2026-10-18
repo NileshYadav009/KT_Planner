@@ -1,0 +1,269 @@
+{
+ "id": "d03_tollgate_lambda_noisy",
+ "title": "Tollgate: AWS Lambda toll events, speech-to-text noise",
+ "proves": "Fillers, run-on sentences, self-corrections, lowercase spoken style.",
+ "transcript": "um okay so yeah this is the KT for tollgate. so tollgate is basically the thing that takes the toll plaza events, like every car that goes through a gantry, and um turns them into charges on the customer's account. we're talking like two million events a day, more on bank holidays obviously.\n\nso architecture wise, the gantries send events to API Gateway, and then a Lambda function validates them and drops them onto a Kinesis stream. uh another set of Lambdas reads from Kinesis and writes the charges into DynamoDB. and there's a nightly batch on AWS Batch that builds the invoices and puts the PDFs in S3.\n\ndeployments, so we use the Serverless Framework, and um the GitHub Actions pipeline runs serverless deploy to staging when you merge, and then prod is a manual workflow run. if something's broken after a deploy you can just, you know, run the deploy again with the previous git tag, that's our rollback basically.\n\nenvironments we've got dev, staging and prod. staging uses recorded gantry traffic from last year so you can replay a busy day there.\n\nfor monitoring it's all CloudWatch. there's a dashboard called tollgate overview, and um the main alarm is the Kinesis iterator age, if that goes above five minutes it pages whoever's on call through Opsgenie.\n\nokay so what breaks. the big one is Lambda hitting the concurrency limit when there's a surge, like after a gantry comes back online and dumps its buffer. then events get throttled. what you do is raise the reserved concurrency for the ingest function, it's a setting in the serverless yaml. the other thing is DynamoDB hot partitions on the busiest plazas, you'll see throttled writes on just one or two plaza ids. we added write sharding for the worst ones but um not all of them.\n\nbackups, DynamoDB has point in time recovery on, and the S3 invoice bucket has versioning. honestly we haven't written down an RPO.\n\nuh security, the gantries authenticate with mutual TLS certificates, and the certs are rotated every year by the roadside team. don't ever, like ever, disable the duplicate check in the validator, we'd double charge people and that's a regulatory problem.\n\nowners, it's the road charging team, i'm the tech lead until friday and then it's you. if it's really bad call Sam Achebe, he's the head of engineering.\n\noh and one thing, there's a half finished migration from the old Node 14 runtime to Node 20, three functions are still on fourteen.\n\nfirst thing, get yourself access to the AWS prod account and the Opsgenie rota, and um maybe spend the first couple of weeks just watching the dashboard during the morning rush.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "takes the toll plaza events",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "turns them into charges on the customer's account",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "two million events a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "the gantries send events to API Gateway",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "a Lambda function validates them and drops them onto a Kinesis stream",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "another set of Lambdas reads from Kinesis and writes the charges into DynamoDB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "a nightly batch on AWS Batch that builds the invoices and puts the PDFs in S3",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "we use the Serverless Framework",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "runs serverless deploy to staging when you merge",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "prod is a manual workflow run",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "run the deploy again with the previous git tag",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "we've got dev, staging and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "staging uses recorded gantry traffic from last year",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "for monitoring it's all CloudWatch",
+   "alt": [
+    "it's all CloudWatch"
+   ],
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "a dashboard called tollgate overview",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "the main alarm is the Kinesis iterator age",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "it pages whoever's on call through Opsgenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Lambda hitting the concurrency limit when there's a surge",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "events get throttled",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "raise the reserved concurrency for the ingest function",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "DynamoDB hot partitions on the busiest plazas",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "we added write sharding for the worst ones",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "DynamoDB has point in time recovery on",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the S3 invoice bucket has versioning",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "we haven't written down an RPO",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "the gantries authenticate with mutual TLS certificates",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "the certs are rotated every year by the roadside team",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "disable the duplicate check in the validator",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "it's the road charging team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "call Sam Achebe, he's the head of engineering",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "a half finished migration from the old Node 14 runtime to Node 20",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "get yourself access to the AWS prod account and the Opsgenie rota",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "spend the first couple of weeks just watching the dashboard during the morning rush",
+   "in": [
+    "first_30_day_ownership",
+    "day1_survival_checklist"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization"
+ ],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

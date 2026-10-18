@@ -623,6 +623,60 @@ def resolve_self_corrections(text: str) -> str:
                 fixed = fixed[:at] + " " + unit + fixed[at:]
         text = fixed
     return text
+
+
+# A sentence that corrects a number in the one before it: "The API rate
+# limit is 500 requests a minute per customer. Sorry, not 500, the limit is
+# 300 requests a minute per customer." Both went into the document. Opening a
+# sentence, "actually" counts too, since it must be followed by the corrected
+# number or "not <number>".
+_LEADING_CORRECTION_RE = re.compile(
+    r"^\W*(?:(?:oh|no|um|uh)\W+)?(?:(?:" + _CORRECTION_MARKER + r"|actually" + _NOT_JOINED + r")\s*[,:]?\s*)+"
+    r"(?:(?:it'?s\s+|it\s+is\s+|that'?s\s+|that\s+is\s+)?not\s+(?P<old>" + _CORRECTED_VALUE + r")"
+    r"(?:\s+[A-Za-z]+)?\s*[,;]?\s*(?:but\s+)?)?"
+    r"(?P<rest>.*?)[\s.!?]*$",
+    re.IGNORECASE,
+)
+_RESTATEMENT_LIGHT = frozenset("""the a an and is are was were it it's its that that's this these those to of for
+in on at by per with not but so then i mean we our you your they them be been has have had do does just also""".split())
+
+
+def _number_key(value: str) -> str:
+    return re.sub(r"[,\s-]+", "", value.lower())
+
+
+def _restatement_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z][a-z'-]+", text.lower()) if w not in _RESTATEMENT_LIGHT}
+
+
+def resolve_correction_across(previous: str, correction: str) -> Optional[str]:
+    """`previous` with the number `correction` corrects, when `correction` is
+    only that correction ("Sorry, 300.", "Sorry, not 500, the limit is 300
+    requests a minute."); else None. None as well when it says anything the
+    sentence before did not, or when the number it corrects is not one,
+    unambiguous number of `previous`."""
+    m = _LEADING_CORRECTION_RE.match(correction or "")
+    if not m or not previous:
+        return None
+    rest = m.group("rest") or ""
+    new = re.search(_CORRECTED_VALUE, rest, re.IGNORECASE)
+    if not new:
+        return None
+    # A restatement, not a new fact: every content word of the correction is
+    # already in the sentence before ("..., and partners get 1000" is not).
+    said_after = (rest[:new.start()] + " " + rest[new.end():])
+    if not _restatement_words(said_after) <= _restatement_words(previous):
+        return None
+    values = list(re.finditer(_CORRECTED_VALUE, previous, re.IGNORECASE))
+    old = m.group("old")
+    if old:
+        targets = [v for v in values if _number_key(v.group(0)) == _number_key(old)]
+    else:
+        targets = values if len(values) == 1 else []
+    if len(targets) != 1 or _number_key(targets[0].group(0)) == _number_key(new.group(0)):
+        return None
+    target = targets[0]
+    return previous[:target.start()] + new.group(0) + previous[target.end():]
 # Spoken agreement carries no content anywhere, commas or not ("reached
 # 15,000 right so yep so we have"), with a "so" that follows it.
 _AGREEMENT_FILLER_RE = re.compile(

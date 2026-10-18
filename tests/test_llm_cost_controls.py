@@ -154,6 +154,46 @@ def test_per_kt_call_budget_stops_live_calls_but_not_cache_hits(monkeypatch):
     assert any("budget" in reason for reason in usage["stages"][0]["skip_reasons"])
 
 
+def test_per_kt_time_limit_counts_from_the_first_llm_call_and_then_skips(monkeypatch):
+    """A slow or rate-limited provider may not hold a KT for hours: past
+    LLM_KT_DEADLINE_SECONDS from the KT's first LLM call, calls are skipped
+    and the call sites keep their rules-only results."""
+    import llm.cached_provider as cp
+    from llm.cached_provider import LLMBudgetExhausted
+
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(cp.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setenv("LLM_KT_DEADLINE_SECONDS", "600")
+    inner = CountingProvider("reply")
+    provider = CachedLLMProvider(inner)
+    tracker = LLMUsageTracker("job")
+    with track_job(tracker):
+        # Transcription before the first call does not count.
+        assert cp.kt_seconds_left() is None
+        _polish_one(provider, "p1")
+        clock["now"] += 599
+        _polish_one(provider, "p2")
+        assert cp.kt_seconds_left() == pytest.approx(1)
+        clock["now"] += 2
+        with pytest.raises(LLMBudgetExhausted):
+            _polish_one(provider, "p3")
+        assert _polish_one(provider, "p1") == "reply"  # cached: costs nothing
+    assert inner.calls == 2
+    usage = tracker.summary()
+    assert usage["skipped"] == 1
+    assert any("time limit" in reason for reason in usage["stages"][0]["skip_reasons"])
+
+
+def test_per_kt_time_limit_zero_means_no_limit(monkeypatch):
+    import llm.cached_provider as cp
+
+    monkeypatch.setenv("LLM_KT_DEADLINE_SECONDS", "0")
+    tracker = LLMUsageTracker("job")
+    with track_job(tracker):
+        _polish_one(CachedLLMProvider(CountingProvider()), "p1")
+        assert cp.kt_seconds_left() is None
+
+
 def test_expired_entries_are_not_reused(monkeypatch):
     inner = CountingProvider()
     CachedLLMProvider(inner).generate("p")

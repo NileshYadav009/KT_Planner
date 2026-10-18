@@ -112,3 +112,43 @@ def test_the_infrastructure_as_code_tool_is_an_architecture_fact():
     assert match_section_rules("Never modify the Terraform state manually.").section_id == "danger_zones"
     rebuild = match_section_rules("The whole stack can be rebuilt in europe-west1 from Terraform.")
     assert rebuild is None or rebuild.section_id != "architecture_reference"
+
+
+def test_an_unanswered_page_and_a_named_contact_are_escalation_and_a_region_count_is_architecture():
+    """Audit 9aao adversarial probe: the escalation path was filed under
+    Monitoring and Ownership & Escalation reported it as not discussed."""
+    for text in ["If something breaks at night, page the on-call through PagerDuty, and if they do not answer "
+                 "in fifteen minutes, call Maria, the engineering manager.",
+                 "If nobody acknowledges within ten minutes, the page goes to the secondary.",
+                 "Out of hours, call Raj Patel, the application manager.",
+                 "If that fails, call Sam Achebe, he's the head of engineering."]:
+        rule = match_section_rules(text)
+        assert rule and rule.section_id == "ownership_escalation", (text, rule)
+    # Alert routing stays Monitoring; a call centre is not a contact.
+    for text in ["The burn-rate alert pages the on-call through PagerDuty.",
+                 "Patients book online or through the call centre team."]:
+        rule = match_section_rules(text)
+        assert rule is None or rule.section_id != "ownership_escalation", (text, rule)
+    for text in ["Right now we run in one region, us-east-1.", "The services are deployed in two AWS regions."]:
+        rule = match_section_rules(text)
+        assert rule and rule.section_id == "architecture_reference", (text, rule)
+    for text in ["We keep a warm standby in a second AWS region.", "There's no replica in another region."]:
+        rule = match_section_rules(text)
+        assert rule is None or rule.section_id != "architecture_reference", (text, rule)
+
+
+def test_planned_and_unstarted_work_is_an_open_responsibility():
+    """Every annotated plan or unstarted piece of work is Open
+    Responsibilities ("the scanner firmware upgrade is planned for next
+    quarter"); the probe's region plan went to Disaster Recovery."""
+    for text in ["Next quarter we plan to add a second region in eu-west-1, but nobody has started on it.",
+                 "The scanner firmware upgrade is planned for next quarter.",
+                 "Next year we will migrate the reports to Looker.",
+                 "We want to move off Jenkins, nobody has started on it yet."]:
+        rule = match_section_rules(text)
+        assert rule and rule.section_id == "open_responsibilities", (text, rule)
+    # An onboarding plan, and a recurring practice, are not open work.
+    for text in ["By the end of next month you will own the releases.",
+                 "Before Black Friday we plan to add more nodes."]:
+        rule = match_section_rules(text)
+        assert rule is None or rule.section_id != "open_responsibilities", (text, rule)

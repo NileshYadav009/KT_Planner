@@ -1,0 +1,324 @@
+{
+ "id": "b02_paybridge_logicapps_document",
+ "title": "PayBridge: Azure Logic Apps payroll integration, handover document read aloud in paragraphs",
+ "proves": "Written-document register in paragraphs, security and compliance stated as nouns.",
+ "transcript": "PayBridge transfers approved payroll data from the HR system, Workday, to the SAP payroll engine and returns payslips to employees. It serves around eleven thousand employees in four countries. A failure on payroll day means people are not paid on time, which is treated as a severity one incident.\n\nPayBridge consists of Azure Logic Apps workflows, an Azure Service Bus namespace for buffering employee changes, and an Azure SQL database that stores the mapping between Workday and SAP employee identifiers. Payslip PDFs are written to an Azure Storage account and shown to employees through the intranet. The integration with SAP uses the on-premises data gateway installed in the Frankfurt data centre.\n\nDeployments are made with Azure DevOps release pipelines from ARM templates kept in the PayBridge repository. Every release to production requires the approval of the payroll product owner and is performed outside the payroll window. A rollback is performed by re-running the previous release, which restores the earlier workflow definitions.\n\nThe integration has a development environment, a test environment connected to the SAP quality system, and production. The test environment contains synthetic employees only.\n\nApplication Insights and Log Analytics capture every workflow run. An alert is raised when more than five workflow runs fail within an hour, and alerts are sent to the integration support mailbox and to the on-call phone.\n\nThe most frequent incident is the on-premises data gateway losing its connection after Windows updates on the gateway server. All transfers then fail with a gateway error. Restarting the gateway service on the server resolves it. A second recurring incident is an employee record rejected by SAP because a mandatory field is empty in Workday; the failed message is moved to the dead-letter queue, and HR must correct the record before the message is resubmitted.\n\nThe Azure SQL database uses geo-replication to the paired region, and the Logic Apps definitions can be redeployed from the repository. The recovery point objective is one hour. A recovery test has not been performed since the move to the new subscription.\n\nAll secrets, including the SAP service user password, are stored in Azure Key Vault. Personal data in the payslip storage account is encrypted with customer-managed keys. Access to production is granted through Privileged Identity Management for a maximum of four hours.\n\nThe dead-letter queue must not be purged; it holds the only copy of rejected employee changes. The mapping table must not be edited manually.\n\nPayroll runs on the twentieth of each month, and the three working days before it are a change freeze.\n\nThe Logic Apps consumption plan is billed per action. Batching employee changes into groups of fifty reduced the monthly cost by roughly forty percent.\n\nPayBridge is owned by the HR technology team. Escalation goes first to the integration support lead, Amara Okafor, and then to the head of HR technology.\n\nThe replacement of the on-premises data gateway with a direct SAP API connection is scoped but has not been approved.\n\nOn the first day, the new owner should request Privileged Identity Management eligibility and access to the integration support mailbox. During the first month, the new owner should observe one payroll run and lead the next release with supervision.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "PayBridge transfers approved payroll data from the HR system, Workday, to the SAP payroll engine",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "returns payslips to employees",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "It serves around eleven thousand employees in four countries",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "A failure on payroll day means people are not paid on time",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "PayBridge consists of Azure Logic Apps workflows",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "an Azure Service Bus namespace for buffering employee changes",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "an Azure SQL database that stores the mapping between Workday and SAP employee identifiers",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Payslip PDFs are written to an Azure Storage account and shown to employees through the intranet",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "The integration with SAP uses the on-premises data gateway installed in the Frankfurt data centre",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Deployments are made with Azure DevOps release pipelines from ARM templates kept in the PayBridge repository",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Every release to production requires the approval of the payroll product owner",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "A rollback is performed by re-running the previous release",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "a test environment connected to the SAP quality system",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "The test environment contains synthetic employees only",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Application Insights and Log Analytics capture every workflow run",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "An alert is raised when more than five workflow runs fail within an hour",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "alerts are sent to the integration support mailbox and to the on-call phone",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "the on-premises data gateway losing its connection after Windows updates on the gateway server",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "All transfers then fail with a gateway error",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Restarting the gateway service on the server resolves it",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "an employee record rejected by SAP because a mandatory field is empty in Workday",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "HR must correct the record before the message is resubmitted",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "The Azure SQL database uses geo-replication to the paired region",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the Logic Apps definitions can be redeployed from the repository",
+   "in": [
+    "disaster_recovery",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "The recovery point objective is one hour",
+   "alt": [
+    "one hour"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "A recovery test has not been performed since the move to the new subscription",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "All secrets, including the SAP service user password, are stored in Azure Key Vault",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Personal data in the payslip storage account is encrypted with customer-managed keys",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Access to production is granted through Privileged Identity Management for a maximum of four hours",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "The dead-letter queue must not be purged",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "The mapping table must not be edited manually",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Payroll runs on the twentieth of each month",
+   "in": [
+    "known_bad_days",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "the three working days before it are a change freeze",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "The Logic Apps consumption plan is billed per action",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "Batching employee changes into groups of fifty reduced the monthly cost by roughly forty percent",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "PayBridge is owned by the HR technology team",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "hr technology team",
+    "paybridge"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "Escalation goes first to the integration support lead, Amara Okafor",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "The replacement of the on-premises data gateway with a direct SAP API connection is scoped but has not been approved",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "request Privileged Identity Management eligibility and access to the integration support mailbox",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "observe one payroll run and lead the next release with supervision",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6, blind (synthetic)",
+ "holdout": true
+}

@@ -108,3 +108,6 @@ data/continuum.sqlite*
 
 # End-to-end KT suite outputs (scripts/e2e_kts.py)
 e2e_out*/
+
+# Accuracy runs (evaluation/accuracy.py); its model-output memo is in evaluation/.cache/, ignored above
+evaluation/results/

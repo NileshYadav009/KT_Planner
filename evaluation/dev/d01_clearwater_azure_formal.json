@@ -1,0 +1,306 @@
+{
+ "id": "d01_clearwater_azure_formal",
+ "title": "Clearwater: Azure Functions reconciliation, formal monologue",
+ "proves": "Formal register, long sentences, cost and calendar discussed.",
+ "transcript": "Good afternoon. The purpose of this session is to transfer ownership of Clearwater, the payment reconciliation service used by the treasury department. Clearwater matches incoming bank statements against the ledger every night and flags any payment that cannot be matched. Roughly forty thousand transactions are reconciled each business day, and the treasury analysts rely on the morning exception report to release supplier payments.\n\nThe service is built on Azure Functions running in a Premium plan. Bank statement files arrive over SFTP into a Blob Storage container, which triggers the parsing function. Parsed transactions are written to Azure Cosmos DB, and the matching results are stored in Azure SQL Database. Treasury users read the exception report through a Power BI workspace.\n\nThere are three environments: development, test, and production. The test environment receives anonymised statement files from two of our banks, so it is safe to replay files there.\n\nReleases are performed with Azure DevOps. A pull request into the main branch runs the unit tests and publishes the function package. Promotion to production requires approval from the treasury systems lead. To roll back, redeploy the previous package from the release history; this completes in approximately five minutes.\n\nApplication Insights collects telemetry from every function. An alert fires when the nightly run has not completed by five in the morning, and the alert is routed to the on-call engineer through PagerDuty.\n\nThe most frequent incident is a bank changing its file format without notice, which causes the parser to reject the entire file. The remedy is to update the column mapping in the configuration table and re-trigger the parse for that file. A second recurring issue is Cosmos DB throttling during month-end volumes; increase the provisioned throughput temporarily and the backlog clears within an hour.\n\nCosmos DB has continuous backup with a seven day restore window, and Azure SQL keeps point in time restore for thirty five days. The recovery time objective is four hours. A full restore exercise was last performed in March.\n\nThe function apps use managed identities, and all bank credentials are held in Key Vault. Statement files are encrypted at rest.\n\nUnder no circumstances should the matching tolerance setting be changed without written approval from treasury, because it directly affects which payments are released.\n\nMonth-end and the first two business days of each month are the busiest period; no releases are permitted during that window.\n\nThe Premium plan is the largest cost item. We reduced the always-ready instances from three to one outside business hours, which saved roughly a third of the monthly bill.\n\nOwnership sits with the finance platform team. For escalation, contact Helen Oduya, the finance platform manager.\n\nOne item remains open: the onboarding of a fourth bank, which has been scoped but not started.\n\nIn your first week, obtain contributor access to the production subscription. Within the first month, you should lead one production release under supervision.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Clearwater, the payment reconciliation service used by the treasury department",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Clearwater matches incoming bank statements against the ledger every night",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Roughly forty thousand transactions are reconciled each business day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "the treasury analysts rely on the morning exception report to release supplier payments",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The service is built on Azure Functions running in a Premium plan",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Bank statement files arrive over SFTP into a Blob Storage container",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Parsed transactions are written to Azure Cosmos DB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "the matching results are stored in Azure SQL Database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Treasury users read the exception report through a Power BI workspace",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "There are three environments: development, test, and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "The test environment receives anonymised statement files from two of our banks",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Releases are performed with Azure DevOps",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "A pull request into the main branch runs the unit tests and publishes the function package",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Promotion to production requires approval from the treasury systems lead",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "redeploy the previous package from the release history",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Application Insights collects telemetry from every function",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "An alert fires when the nightly run has not completed by five in the morning",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "a bank changing its file format without notice, which causes the parser to reject the entire file",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "update the column mapping in the configuration table and re-trigger the parse for that file",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Cosmos DB throttling during month-end volumes",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "increase the provisioned throughput temporarily and the backlog clears within an hour",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Cosmos DB has continuous backup with a seven day restore window",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Azure SQL keeps point in time restore for thirty five days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "The recovery time objective is four hours",
+   "alt": [
+    "four hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "A full restore exercise was last performed in March",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "The function apps use managed identities",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "all bank credentials are held in Key Vault",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Statement files are encrypted at rest",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "should the matching tolerance setting be changed without written approval from treasury",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Month-end and the first two business days of each month are the busiest period",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "no releases are permitted during that window",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The Premium plan is the largest cost item",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "We reduced the always-ready instances from three to one outside business hours",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "Ownership sits with the finance platform team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "contact Helen Oduya, the finance platform manager",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "the onboarding of a fourth bank, which has been scoped but not started",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "obtain contributor access to the production subscription",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "you should lead one production release under supervision",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

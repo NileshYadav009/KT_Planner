@@ -153,3 +153,26 @@ def test_not_mentioned_in_both_columns_is_an_answer_not_a_discarded_value(monkey
                                  section_content=SECTION)
     assert result["system_overview"]["data_sensitivity"]["source"] == "unfilled"
     assert tracker.summary()["rejected"] == 0
+
+
+def test_the_check_offers_three_candidates_by_default_and_more_with_their_purpose_when_set(monkeypatch):
+    """Audit 9aap A/B: LLM_VERIFY_CANDIDATES and LLM_VERIFY_PURPOSE. The
+    default prompt is unchanged, so recorded answers still replay."""
+    prompts = []
+    clf = _classifier(lambda prompt, **kw: prompts.append(prompt) or "1: none")
+    clf.section_metadata = {"common_failures": {"title": "Common Failures", "purpose": "Recurring incidents and fixes."}}
+    secondary = [_cand(s, 0.19 - i / 100) for i, s in enumerate(
+        ["common_failures", "danger_zones", "security_controls", "environments"])]
+    items = [("Bump the limit and it catches up.", _cand("disaster_recovery", 0.20), secondary, "", False)]
+    clf.verify_in_batches(items)
+    offered = re.search(r"Candidates: (.*)$", prompts[-1], re.M).group(1)
+    assert offered.count(";") == 2 and "Recurring incidents" not in prompts[-1]
+    monkeypatch.setenv("LLM_VERIFY_CANDIDATES", "5")
+    monkeypatch.setenv("LLM_VERIFY_PURPOSE", "1")
+    clf.verify_in_batches(items)
+    offered = re.search(r"Candidates: (.*)$", prompts[-1], re.M).group(1)
+    assert offered.count(";") == 4 and "common_failures (Common Failures: Recurring incidents and fixes.)" in offered
+    # A pick among the extra candidates is applied.
+    clf.llm_fallback_fn = lambda prompt, **kw: "1: environments"
+    primary, _, note = clf.verify_in_batches(items)[0]
+    assert primary.section_id == "environments" and note

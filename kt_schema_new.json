@@ -45,6 +45,7 @@
     {
       "id": "system_overview",
       "title": "System Overview",
+      "purpose": "What the system is and does, who uses it, how much it handles and how critical it is.",
       "required": true,
       "sub_topics": [
         "system name",
@@ -158,6 +159,7 @@
     {
       "id": "architecture_reference",
       "title": "Architecture Reference",
+      "purpose": "The components, how they connect, where they run and how data flows between them.",
       "required": true,
       "fields_role": "metadata",
       "sub_topics": [
@@ -190,6 +192,7 @@
     {
       "id": "environments",
       "title": "Environments",
+      "purpose": "The environments (production, staging, test) and how they differ.",
       "required": false,
       "sub_topics": [
         "production characteristics",
@@ -228,6 +231,7 @@
     {
       "id": "monitoring_observability",
       "title": "Monitoring & Observability",
+      "purpose": "Dashboards, metrics, logs and alerts, and where the alerts go.",
       "required": true,
       "sub_topics": [
         "dashboards",
@@ -260,6 +264,7 @@
     {
       "id": "disaster_recovery",
       "title": "Disaster Recovery",
+      "purpose": "Backups, restores, failover, RTO and RPO, and recovery testing.",
       "required": true,
       "sub_topics": [
         "backup",
@@ -286,6 +291,7 @@
     {
       "id": "security_controls",
       "title": "Security",
+      "purpose": "Access control, secrets, encryption, scanning and compliance.",
       "required": true,
       "sub_topics": [
         "security scanning",
@@ -306,6 +312,7 @@
     {
       "id": "cost_optimization",
       "title": "Cost Optimization",
+      "purpose": "What the system costs and how the cost is kept down.",
       "tier": "conditional",
       "required": false,
       "sub_topics": [
@@ -327,6 +334,7 @@
     {
       "id": "day1_survival_checklist",
       "title": "Day-1 Survival Checklist",
+      "purpose": "Access and tools to get on day one, and the first safe things to do.",
       "required": true,
       "sub_topics": [
         "required access",
@@ -395,6 +403,7 @@
     {
       "id": "deployment_and_rollback",
       "title": "Deployment & Rollback",
+      "purpose": "How changes are built, released and rolled back.",
       "required": true,
       "sub_topics": [
         "normal deployment process",
@@ -458,6 +467,7 @@
     {
       "id": "common_failures",
       "title": "Common Failures & Fixes",
+      "purpose": "Incidents that recur: their symptoms, causes and fixes.",
       "required": true,
       "sub_topics": [
         "issue symptom",
@@ -488,6 +498,7 @@
     {
       "id": "known_bad_days",
       "title": "Operational Calendar",
+      "purpose": "Busy periods, month-end or audit windows, and change freezes.",
       "required": true,
       "sub_topics": [
         "high traffic periods",
@@ -513,6 +524,7 @@
     {
       "id": "danger_zones",
       "title": "Danger Zones (Do Not Touch)",
+      "purpose": "Actions or areas that must not be touched, and why.",
       "required": true,
       "sub_topics": [
         "area or action",
@@ -541,6 +553,7 @@
     {
       "id": "ownership_escalation",
       "title": "Ownership & Escalation",
+      "purpose": "Who owns what, who to contact and the escalation path.",
       "required": true,
       "sub_topics": [
         "component or area",
@@ -571,6 +584,7 @@
     {
       "id": "first_30_day_ownership",
       "title": "First 30-Day Ownership Plan",
+      "purpose": "What the new owner should do in their first weeks.",
       "tier": "conditional",
       "required": true,
       "sub_topics": [
@@ -602,6 +616,7 @@
     {
       "id": "open_responsibilities",
       "title": "Open Responsibilities & Transition Plan",
+      "purpose": "Unfinished, planned or unowned work being handed over.",
       "required": true,
       "sub_topics": [
         "rules",
@@ -681,6 +696,7 @@
     {
       "id": "handover_completion",
       "title": "Handover Completion Check",
+      "purpose": "Whether the new owner can operate the system safely on their own.",
       "tier": "conditional",
       "required": true,
       "sub_topics": [
@@ -723,6 +739,7 @@
     {
       "id": "signoff",
       "title": "Sign-off",
+      "purpose": "Sign-off of the document by the outgoing and incoming owners.",
       "required": true,
       "hints": ["outgoing owner", "incoming owner", "sign-off date", "approved"],
       "fields": [

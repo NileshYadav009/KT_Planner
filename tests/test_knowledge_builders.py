@@ -221,19 +221,40 @@ def test_append_unmapped_findings_section_drops_sentence_with_leading_discourse_
     assert "admin tool" in appended["coverage_content"][0]
 
 
-def test_enrich_operational_calendar_pulls_cost_optimization_levers():
+def test_enrich_operational_calendar_points_to_cost_levers_tied_to_a_time_window():
+    """Every lever used to be copied into the calendar: with an LLM, "Auto-suspend
+    after five minutes" and "Warehouse isolation" were printed twice, under Cost
+    and under Operational Calendar (audit 9aap). Only a lever tied to a time
+    window is a calendar fact, and the calendar points to it."""
     ko = {
         "sections": [
             _section("known_bad_days", "OPERATIONAL CALENDAR"),
             _section("cost_optimization", "COST OPTIMIZATION", _structured={
-                "levers": [{"lever": "Spot instances", "detail": "Used in non-production environment"}]
+                "levers": [{"lever": "Spot instances", "detail": "Used in non-production environment"},
+                           {"lever": "Auto-suspend", "detail": "Warehouses auto-suspend after five minutes"},
+                           {"lever": "Reduced always-ready instances",
+                            "detail": "Reduced from three to one outside business hours"}]
             }),
         ],
         "summary": {},
     }
     result = enrich_operational_calendar(ko)
     calendar = next(s for s in result["sections"] if s["id"] == "known_bad_days")
-    assert calendar["_cost_patterns"] == [{"label": "Spot instances", "value": "Used in non-production environment"}]
+    assert calendar["_cost_patterns"] == [{"label": "Reduced always-ready instances",
+                                           "value": "Outside business hours; see COST OPTIMIZATION"}]
+
+
+def test_enrich_operational_calendar_adds_nothing_without_a_time_window():
+    ko = {
+        "sections": [
+            _section("known_bad_days", "OPERATIONAL CALENDAR"),
+            _section("cost_optimization", "COST OPTIMIZATION", _structured={
+                "levers": [{"lever": "Spot instances", "detail": "Used in non-production environment"}]}),
+        ],
+        "summary": {},
+    }
+    calendar = next(s for s in enrich_operational_calendar(ko)["sections"] if s["id"] == "known_bad_days")
+    assert "_cost_patterns" not in calendar
 
 
 def test_enrich_operational_calendar_noop_when_sections_missing():

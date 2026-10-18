@@ -1,0 +1,308 @@
+{
+ "id": "d06_brightline_airflow_ramble",
+ "title": "Brightline: Airflow and Snowflake data pipeline, rambling talk with topic returns",
+ "proves": "Topics revisited out of order; failure stories told inside other topics.",
+ "transcript": "Alright, so Brightline. Brightline is our data pipeline that loads sales and inventory data from the stores into Snowflake, and the finance and merchandising teams build all their reports on top of it. If the morning load is late, the daily sales meeting has no numbers.\n\nSo the way it works, Airflow on Amazon MWAA runs the DAGs. The stores push CSV extracts to an S3 landing bucket overnight, then dbt models transform the raw tables into the reporting schema in Snowflake. Tableau dashboards read from the reporting schema.\n\nMonitoring, we have Airflow's own task alerts going to a Slack channel, and there's a Monte Carlo data quality check on the main tables. Actually that reminds me, the most annoying failure: a store sends an empty file, the load succeeds, and then the sales numbers for that store show as zero. Monte Carlo catches it as a volume anomaly. You re-request the file from the store's IT contact and rerun the DAG for that date.\n\nDeployments are pretty simple. The DAGs and dbt models live in one GitHub repo, a merge to main runs dbt tests in CI and then syncs the DAG folder to the MWAA bucket. If a model is wrong, revert the merge and rerun the affected models.\n\nWe have a dev Snowflake database and production, and dev is a zero-copy clone of production refreshed weekly.\n\nGoing back to failures, the other common one is the Snowflake warehouse queueing at seven in the morning when everyone opens Tableau at once. Scale the reporting warehouse up to large for an hour. It's in the runbook.\n\nCosts, Snowflake is most of it. The warehouses auto-suspend after five minutes, and we moved the heavy dbt runs to a separate warehouse so we can see what they cost.\n\nFor recovery, Snowflake time travel is set to thirty days on the reporting schema, and the raw files stay in S3 for a year, so we can always rebuild. We've never had to rebuild everything though.\n\nSecurity, access to Snowflake is through Okta single sign-on, and the store-level margin columns are masked for everyone outside finance.\n\nPlease never drop or replace the raw schema tables, the time travel there is only one day. And do not change the DAG start dates, Airflow will try to backfill years of data.\n\nYear-end stock take in the first week of January is the worst week, everything gets reloaded. Black Friday too.\n\nOwnership is the data engineering team, and the dbt models for finance are co-owned with the finance analytics team. For escalation go to Mei Tanaka, the data platform lead.\n\nUnfinished: the migration of the last ten legacy SQL scripts into dbt. They still run from a cron box under someone's desk, literally.\n\nOn day one, get Snowflake and MWAA access and join the alerts channel. For the first month, own the morning load check every day.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "loads sales and inventory data from the stores into Snowflake",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "the finance and merchandising teams build all their reports on top of it",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "If the morning load is late, the daily sales meeting has no numbers",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Airflow on Amazon MWAA runs the DAGs",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The stores push CSV extracts to an S3 landing bucket overnight",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "dbt models transform the raw tables into the reporting schema in Snowflake",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Tableau dashboards read from the reporting schema",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Airflow's own task alerts going to a Slack channel",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "a Monte Carlo data quality check on the main tables",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "a store sends an empty file, the load succeeds",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "the sales numbers for that store show as zero",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Monte Carlo catches it as a volume anomaly",
+   "in": [
+    "common_failures",
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "re-request the file from the store's IT contact and rerun the DAG for that date",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "The DAGs and dbt models live in one GitHub repo",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "a merge to main runs dbt tests in CI and then syncs the DAG folder to the MWAA bucket",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "revert the merge and rerun the affected models",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "We have a dev Snowflake database and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "dev is a zero-copy clone of production refreshed weekly",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "the Snowflake warehouse queueing at seven in the morning",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "Scale the reporting warehouse up to large for an hour",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Snowflake is most of it",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "The warehouses auto-suspend after five minutes",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "we moved the heavy dbt runs to a separate warehouse so we can see what they cost",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Snowflake time travel is set to thirty days on the reporting schema",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the raw files stay in S3 for a year",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "We've never had to rebuild everything",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "access to Snowflake is through Okta single sign-on",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the store-level margin columns are masked for everyone outside finance",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "never drop or replace the raw schema tables",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "do not change the DAG start dates",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Year-end stock take in the first week of January is the worst week",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Black Friday too",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Ownership is the data engineering team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "the dbt models for finance are co-owned with the finance analytics team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "go to Mei Tanaka, the data platform lead",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "the migration of the last ten legacy SQL scripts into dbt",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "They still run from a cron box under someone's desk",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "get Snowflake and MWAA access and join the alerts channel",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "own the morning load check every day",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

@@ -186,3 +186,57 @@ def test_an_acronym_is_sourced_by_its_full_name_said_aloud():
     sentences = transcript_sentences("", [{"start": 0.0, "end": 3.0, "text": "The recovery time objective is four hours."}])
     assert attach_evidence(ko, sentences)["unsourced"] == 0
     assert len(ko["rendered_sections"][0]["blocks"][0]["sources"][0]) == 1
+
+
+def test_a_corrected_number_is_sourced_by_the_sentence_and_its_correction():
+    """The document shows "300" (context_mapper.merge_spoken_corrections);
+    only the correction says it, and the first sentence says the rest."""
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [
+        "The API rate limit is 300 requests a minute per customer."]})
+    sentences = transcript_sentences("", [
+        {"start": 0.0, "end": 3.0, "text": "The API rate limit is 500 requests a minute per customer."},
+        {"start": 3.0, "end": 6.0, "text": "Sorry, not 500, the limit is 300 requests a minute per customer."}])
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    assert ko["rendered_sections"][0]["blocks"][0]["sources"][0] == [1, 2]
+    # A number said about something else is still no source: "the burst
+    # limit is 300" does not state that the rate limit is 300.
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [
+        "The API rate limit is 300 requests a minute per customer."]})
+    sentences = transcript_sentences("", [
+        {"start": 0.0, "end": 3.0, "text": "The API rate limit is 500 requests a minute per customer."},
+        {"start": 3.0, "end": 6.0, "text": "The burst limit is 300 requests a minute."}])
+    assert attach_evidence(ko, sentences)["unsourced"] == 1
+
+
+def test_each_statement_of_a_paragraph_cites_its_own_sentence():
+    """A polished paragraph matched as a whole stopped at three sources, or
+    at the one sentence that covered most of its words, and a statement in it
+    cited nothing (Groq dev run, audit 9aap)."""
+    said = ["Overview: Vaultline is the adapter between the mobile banking app and the core banking mainframe.",
+            "It translates REST calls into mainframe transactions.",
+            "It is used by about one point two million retail customers.",
+            "If it is down, customers cannot see balances or make transfers.",
+            "MQ channel stops after a mainframe restart.",
+            "Fix: restart the channel from the MQ console."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    shown = [said[0].replace("Overview: ", "") + " " + " ".join(said[1:4]),
+             said[4] + " " + said[5].replace("Fix: restart", "Restart")]
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": shown})
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    assert ko["rendered_sections"][0]["blocks"][0]["sources"] == [[1, 2, 3, 4], [5, 6]]
+
+
+def test_each_statement_cell_of_a_row_cites_its_own_sentence():
+    """An issue and its fix in one row cited only the symptom, and the fix
+    had no source (Groq dev run, audit 9aap)."""
+    said = ["Known problems.", "MQ channel stops after a mainframe restart.",
+            "Symptom is every transfer timing out.", "Fix: restart the channel from the MQ console."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    ko = _ko({"type": "DecisionTable", "title": "Failures", "columns": ["Issue", "Fix"], "rows": [
+        {"Issue": "MQ channel stops after a mainframe restart", "Fix": "Restart the channel from the MQ console"}]},
+        section_id="common_failures")
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    pairs = dict(evidence_pairs(ko))
+    quotes = pairs[next(iter(pairs))]
+    assert "Fix: restart the channel from the MQ console." in quotes and \
+        "MQ channel stops after a mainframe restart." in quotes

@@ -1,0 +1,304 @@
+{
+ "id": "b01_findit_opensearch_walkthrough",
+ "title": "FindIt: AWS OpenSearch product search, unlabelled screen-share walkthrough",
+ "proves": "No speaker names, no headings or questions; topics change without being named.",
+ "transcript": "So this is FindIt, the product search behind the shop's search box and the category pages. Every search a customer types goes through it, around four million queries a day, and when it's slow people just leave, so conversion drops almost immediately.\n\nWhat you're looking at here is the indexing side. Product updates come from the catalogue service as events on an SNS topic, a Lambda picks them up and writes the documents into Amazon OpenSearch Service. The query API is a Kotlin service on ECS that sits behind CloudFront and an Application Load Balancer. Synonyms and boosting rules are kept in a DynamoDB table that the merchandisers edit through an admin page.\n\nThis tab is CodePipeline. A merge to main builds the container, runs the relevance tests against a sample index, and then deploys to staging. Production is a manual approval step in the same pipeline. If the new version misbehaves, you approve the previous build again and it rolls back in a few minutes.\n\nWe have dev, staging and production. Staging has a full copy of the production index, refreshed every Sunday, so the relevance numbers there are realistic.\n\nHere's the CloudWatch dashboard. The two numbers that matter are p95 query latency and the zero-results rate. Both have alarms that go to PagerDuty, and the zero-results alarm also posts in the merchandising channel.\n\nOkay, the thing you'll get woken up for. A full reindex runs every night at two, and if a node runs out of disk the cluster goes yellow and the reindex stops halfway. You'll see the old index still serving, so customers don't notice, but new products are missing. Free up space by deleting the oldest index snapshot from the cluster, then restart the reindex job from the Step Functions console. The other one is a merchandiser adding a synonym that's too broad, like making shoes and boots the same word, and suddenly the results look wrong. Remove the synonym in the admin page and clear the query cache.\n\nSnapshots of the cluster go to S3 every hour and we keep fourteen days of them. In a real disaster we can rebuild the whole index from the catalogue in about six hours. We tried that once last year.\n\nThe OpenSearch domain is inside a VPC with no public endpoint. The admin page needs Okta login, and only the merchandising team has the editor role.\n\nPlease don't change the number of shards on the live index. It needs a full reindex and blue green alias switch to do safely, and getting it wrong takes search down.\n\nOpenSearch is by far the most expensive part. We moved the staging cluster to smaller instances and turned it off at weekends, which saved about a fifth.\n\nThe week before Christmas and the January sale are when we freeze changes, nothing goes to production then.\n\nThe search team owns FindIt. For anything about ranking or synonyms talk to the merchandising lead, Ines Duarte. If production is down, page the on-call and then the engineering manager, Tomasz Nowak.\n\nThe upgrade from OpenSearch 1.3 to 2.x is half planned. There's a ticket and a test cluster, but nobody has done the dry run.\n\nFirst day, ask for access to the AWS account, PagerDuty and the CloudWatch dashboard. Over the first few weeks, shadow two on-call shifts and run one reindex yourself with me watching.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the product search behind the shop's search box and the category pages",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "around four million queries a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "when it's slow people just leave, so conversion drops almost immediately",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Product updates come from the catalogue service as events on an SNS topic",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "a Lambda picks them up and writes the documents into Amazon OpenSearch Service",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "The query API is a Kotlin service on ECS that sits behind CloudFront and an Application Load Balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Synonyms and boosting rules are kept in a DynamoDB table",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "A merge to main builds the container, runs the relevance tests against a sample index",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Production is a manual approval step in the same pipeline",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "you approve the previous build again and it rolls back in a few minutes",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "We have dev, staging and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Staging has a full copy of the production index, refreshed every Sunday",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "The two numbers that matter are p95 query latency and the zero-results rate",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Both have alarms that go to PagerDuty",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "the zero-results alarm also posts in the merchandising channel",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "if a node runs out of disk the cluster goes yellow and the reindex stops halfway",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "new products are missing",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Free up space by deleting the oldest index snapshot from the cluster",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "restart the reindex job from the Step Functions console",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "a merchandiser adding a synonym that's too broad",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Remove the synonym in the admin page and clear the query cache",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Snapshots of the cluster go to S3 every hour and we keep fourteen days of them",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "we can rebuild the whole index from the catalogue in about six hours",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "We tried that once last year",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "The OpenSearch domain is inside a VPC with no public endpoint",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "The admin page needs Okta login",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "only the merchandising team has the editor role",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "don't change the number of shards on the live index",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "OpenSearch is by far the most expensive part",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "We moved the staging cluster to smaller instances and turned it off at weekends",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "The week before Christmas and the January sale are when we freeze changes",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The search team owns FindIt",
+   "in": [
+    "ownership_escalation"
+   ],
+   "terms": [
+    "search team",
+    "findit"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "talk to the merchandising lead, Ines Duarte",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "page the on-call and then the engineering manager, Tomasz Nowak",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "The upgrade from OpenSearch 1.3 to 2.x is half planned",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "nobody has done the dry run",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "ask for access to the AWS account, PagerDuty and the CloudWatch dashboard",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "shadow two on-call shifts and run one reindex yourself with me watching",
+   "in": [
+    "first_30_day_ownership",
+    "day1_survival_checklist"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "cost_optimization",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6, blind (synthetic)",
+ "holdout": true
+}

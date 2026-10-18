@@ -31,7 +31,7 @@ from policy import (
 )
 
 from runtime_policy import load_policy
-from devops_transcription import clean_transcript, resolve_self_corrections
+from devops_transcription import clean_transcript, resolve_correction_across, resolve_self_corrections
 from dialogue import merge_question_answers
 from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
@@ -573,6 +573,44 @@ def rejoin_classified(classified: List["ClassifiedSentence"]) -> List["Classifie
     return out
 
 
+def merge_spoken_corrections(
+    sentences: List[Sentence], excluded: List[Dict[str, str]]
+) -> Tuple[List[Sentence], Dict[int, str]]:
+    """A sentence that only corrects a number in the one before it ("The
+    API rate limit is 500 requests a minute per customer." "Sorry, not 500,
+    the limit is 300 ...") joins it: one unit whose text is both, as said,
+    for topics and sources, and {unit index: the sentence before with the
+    corrected number} to show. The correction is recorded in `excluded`, so
+    the fact ledger says where it went. Same speaker only."""
+    out: List[Sentence] = []
+    corrected: Dict[int, str] = {}
+    for s in sentences:
+        prev = out[-1] if out else None
+        fixed = None
+        if prev is not None and (prev.speaker or None) == (s.speaker or None):
+            fixed = resolve_correction_across(corrected.get(len(out) - 1, prev.text), s.text)
+        if not fixed:
+            out.append(s)
+            continue
+        out[-1] = Sentence(
+            text=f"{prev.text.strip()} {s.text.strip()}",
+            start=min(prev.start, s.start),
+            end=max(prev.end, s.end),
+            speaker=prev.speaker,
+            raw_text=f"{prev.raw_text} {s.raw_text}".strip(),
+            audio_confidence=prev.audio_confidence,
+            segment_ids=sorted(set(prev.segment_ids + s.segment_ids)),
+            explicit_evidence=list(prev.explicit_evidence) + list(s.explicit_evidence),
+            source_id=prev.source_id,
+            source_text=prev.source_text,
+            source_span=prev.source_span,
+        )
+        corrected[len(out) - 1] = fixed
+        excluded.append({"text": s.text.strip(),
+                         "reason": "corrects a number in the sentence before it; the corrected value is shown"})
+    return out, corrected
+
+
 def _merge_sentences(first: Sentence, second: Sentence) -> Sentence:
     merged_text = f"{first.text.strip()} {second.text.strip()}".strip()
     merged_start = min(first.start, second.start)
@@ -848,9 +886,35 @@ def _check_rule_decided(rule_decided: bool) -> bool:
     return True
 
 
+def _verify_candidate_count() -> int:
+    """LLM_VERIFY_CANDIDATES: sections offered to the LLM check (default 3,
+    at most the 5 the classifier keeps). 6 of the 21 unseen-KT classifier
+    errors had the right section outside the top 3, 4 of them inside the top
+    5 (audit 9aam)."""
+    try:
+        return max(2, min(5, int(os.getenv("LLM_VERIFY_CANDIDATES", "3") or 3)))
+    except ValueError:
+        return 3
+
+
+def _verify_with_purpose() -> bool:
+    """LLM_VERIFY_PURPOSE=1: each offered section is named with its
+    one-line purpose (the schema's "purpose"), not by its title alone."""
+    return os.getenv("LLM_VERIFY_PURPOSE", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _candidate_label(section_metadata: Optional[Dict[str, Dict[str, Any]]], candidate: "Classification") -> str:
+    """A section as the LLM check names it: its title, and with
+    LLM_VERIFY_PURPOSE its one-line purpose from the schema."""
+    purpose = ""
+    if _verify_with_purpose():
+        purpose = ((section_metadata or {}).get(candidate.section_id) or {}).get("purpose") or ""
+    return f"{candidate.section_title}: {purpose}" if purpose else candidate.section_title
+
+
 def _apply_verified(primary: "Classification", secondary: List["Classification"], verified_id: Optional[str]):
     """Make the LLM's pick the primary when it chose another of the offered candidates."""
-    verify_candidates = [primary] + secondary[:2]
+    verify_candidates = [primary] + secondary[:_verify_candidate_count() - 1]
     if not verified_id or verified_id == primary.section_id:
         return primary, secondary, None
     match = next((c for c in verify_candidates if c.section_id == verified_id), None)
@@ -952,7 +1016,10 @@ class ContextClassifier:
             self.section_metadata[sec_id] = {
                 "title": title,
                 "required": sec.get("required", False),
-                "description": description
+                "description": description,
+                # One line for the LLM check (LLM_VERIFY_PURPOSE); not part
+                # of the section's embedding text.
+                "purpose": sec.get("purpose", ""),
             }
         self._index_section_examples()
 
@@ -1139,7 +1206,7 @@ class ContextClassifier:
         if not _is_borderline(primary, secondary, self.similarity_threshold) or not _check_rule_decided(rule_decided):
             return primary, secondary, None
 
-        verify_candidates = [primary] + secondary[:2]
+        verify_candidates = [primary] + secondary[:_verify_candidate_count() - 1]
         verified_id = self._verify_classification_with_llm(sentence_text, verify_candidates, context_text)
         return _apply_verified(primary, secondary, verified_id)
 
@@ -1156,7 +1223,7 @@ class ContextClassifier:
         if not self.llm_fallback_fn:
             return results
         pending = [
-            (index, text, [primary] + secondary[:2], context)
+            (index, text, [primary] + secondary[:_verify_candidate_count() - 1], context)
             for index, (text, primary, secondary, context, rule_decided) in enumerate(items)
             if primary and _is_borderline(primary, secondary, self.similarity_threshold) and _check_rule_decided(rule_decided)
         ]
@@ -1180,7 +1247,7 @@ class ContextClassifier:
             trimmed = (context or "").strip()
             if trimmed and trimmed != text.strip():
                 entry += f"   Context (for reference only): \"{trimmed[:500]}\"\n"
-            entry += "   Candidates: " + "; ".join(f"{c.section_id} ({c.section_title})" for c in candidates)
+            entry += "   Candidates: " + "; ".join(f"{c.section_id} ({_candidate_label(getattr(self, 'section_metadata', None), c)})" for c in candidates)
             entries.append(entry)
         prompt = (
             "You are verifying knowledge-transfer sentences' section assignments.\n\n"
@@ -1224,7 +1291,7 @@ class ContextClassifier:
             return None
 
         candidate_ids = {c.section_id for c in candidates}
-        options = "\n".join(f"- {c.section_id}: {c.section_title}" for c in candidates)
+        options = "\n".join(f"- {c.section_id}: {_candidate_label(getattr(self, 'section_metadata', None), c)}" for c in candidates)
         # The classifier's own embedding scoring already sees a ±2-sentence
         # window around the target (ContextMappingPipeline.process()'s
         # context_embeddings) — a sentence like "It happens during flash
@@ -2684,12 +2751,15 @@ class ContextMappingPipeline:
         # The topics the speaker named are read from what was said: a copy
         # edit rewrites "Security, access to Snowflake is through Okta." as
         # "Access to Snowflake is through Okta.", and the named topic is gone.
-        said_texts = [s.text for s in sentences]
         # A number corrected mid-sentence keeps only the corrected one ("the
-        # limit is 4000 or sorry not 4000 but 2000"); the Sources appendix
-        # still quotes both. With or without a model.
-        for s in sentences:
-            s.text = resolve_self_corrections(s.text)
+        # limit is 4000 or sorry not 4000 but 2000"), and so does a sentence
+        # corrected by the next one ("... 500 requests a minute. Sorry, not
+        # 500, the limit is 300 ..."); the Sources appendix still quotes
+        # both. With or without a model.
+        sentences, corrected = merge_spoken_corrections(sentences, excluded)
+        said_texts = [s.text for s in sentences]
+        for i, s in enumerate(sentences):
+            s.text = resolve_self_corrections(corrected.get(i, s.text))
         try:
             import copyedit
             edited, self.copyedit_stats = copyedit.copyedit_sentences([s.text for s in sentences])

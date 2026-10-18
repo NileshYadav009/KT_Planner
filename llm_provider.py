@@ -67,6 +67,10 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # site at once without any of them needing to know rate limits exist.
 LLM_RETRY_MAX_ATTEMPTS = int(os.getenv("LLM_RETRY_MAX_ATTEMPTS", "5"))
 LLM_RETRY_MAX_DELAY_SECONDS = float(os.getenv("LLM_RETRY_MAX_DELAY_SECONDS", "60"))
+# Longest wait for one response. The OpenAI SDK's default is 600 s, retried
+# twice: a stalled Groq request could hold a KT for half an hour. Measured
+# Groq calls took about 4 s at most (audit 9aao).
+LLM_REQUEST_TIMEOUT_SECONDS = float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "60") or 60)
 
 # Retrying after a 429 (above) doesn't reduce how many requests were already
 # in flight — a single KT run's 15-25+ calls can burst well past a real
@@ -391,6 +395,15 @@ def _note_retry() -> None:
         data["retries"] = data.get("retries", 0) + 1
 
 
+def _kt_llm_seconds_left() -> Optional[float]:
+    """What is left of the current KT's LLM time limit, or None."""
+    try:
+        from llm import cached_provider
+        return cached_provider.kt_seconds_left()
+    except Exception:
+        return None
+
+
 def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: int = 0):
     """Call call_fn() (a zero-arg callable making the real API request),
     retrying on rate-limit errors with the provider's own suggested delay
@@ -430,6 +443,13 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: 
                 raise
             backoff = min(2 ** attempt, LLM_RETRY_MAX_DELAY_SECONDS)
             delay = min(_extract_retry_delay_seconds(exc, fallback=backoff), LLM_RETRY_MAX_DELAY_SECONDS)
+            left = _kt_llm_seconds_left()
+            if left is not None and delay >= left:
+                # The KT's LLM time limit would pass while waiting: fail now,
+                # and the caller keeps its rules-only result.
+                LOGGER.warning("%s rate-limited with %.0fs of this KT's LLM time left: not retrying. "
+                               "Provider said: %s", provider_label, max(left, 0.0), exc)
+                raise
             # The exception text is included deliberately: a bare
             # "rate-limited" line is un-diagnosable, and a whole session was
             # lost to inferring the wrong quota dimension from advertised
@@ -559,7 +579,8 @@ class GroqProvider(LLMProvider):
         self.client = None
         if OpenAI is not None and self.api_key:
             try:
-                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url,
+                                     timeout=LLM_REQUEST_TIMEOUT_SECONDS)
             except Exception as exc:
                 LOGGER.warning("Groq OpenAI client initialization failed: %s", exc)
                 self.client = None

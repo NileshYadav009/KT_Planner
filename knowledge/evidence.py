@@ -284,6 +284,21 @@ class _Index:
         # Data and Machine Learning sends messages via Pub/Sub" is stated by
         # the Pub/Sub sentence, not by the one that names the platform.
         self.system_name = re.compile(re.escape(system_name), re.IGNORECASE) if len(system_name or "") > 3 else None
+        # A sentence the next one corrects ("... 500 requests a minute per
+        # customer. Sorry, not 500, the limit is 300 ...") is stated with its
+        # correction: the document shows the corrected value, which only the
+        # correction says (context_mapper.merge_spoken_corrections).
+        from devops_transcription import resolve_correction_across
+        self.corrected_by: Dict[int, int] = {}
+        for i in range(len(sentences) - 1):
+            first, second = sentences[i], sentences[i + 1]
+            if (first.get("speaker") or None) == (second.get("speaker") or None) and \
+                    resolve_correction_across(first.get("quote") or "", second.get("quote") or ""):
+                self.corrected_by[i] = i + 1
+
+    def _with_corrections(self, chosen: List[int]) -> List[int]:
+        return chosen + [self.corrected_by[i] for i in chosen
+                         if i in self.corrected_by and self.corrected_by[i] not in chosen]
 
     def _strip(self, text: str) -> str:
         # The list's own numbering and a bold label ("1. **Trigger:** ...")
@@ -299,21 +314,23 @@ class _Index:
     def sources_for(self, text: str) -> List[int]:
         """Indexes of the sentences that state `text`, or [] if none do."""
         found = self._sources_for(text)
-        if found:
-            return found
-        # A paragraph of several sentences, none repeated word for word (a
-        # copy-edited paragraph, copyedit.py), finds too few sources as a
-        # whole: it is sourced when every sentence in it is.
+        # A paragraph of several sentences: each cites the sentence that
+        # states it. Matched as a whole, a polished paragraph stopped at
+        # MAX_SOURCES_PER_UNIT sentences, or at one sentence that covered
+        # most of its words, and a statement in it cited nothing ("Restart
+        # the channel from the MQ console" under its symptom; audit 9aap).
+        # A copy-edited paragraph, none of it word for word, is sourced only
+        # this way. It counts as sourced when every sentence in it is.
         parts = [p for p in _SENTENCE_SPLIT.split(text) if _content_keys(self._strip(p))]
         if len(parts) < 2:
-            return []
+            return found
         chosen: set = set()
         for part in parts:
             got = self._sources_for(part)
             if not got:
-                return []
+                return found
             chosen.update(got)
-        return sorted(chosen)
+        return sorted(chosen | set(found))
 
     def _sources_for(self, text: str) -> List[int]:
         text = self._strip(text)
@@ -325,8 +342,10 @@ class _Index:
             # A name or a two-word fact: the first sentence that says all of
             # it (where it is introduced), not the shortest that mentions it.
             for i, sent_keys in enumerate(self.keys):
-                if set(keys) <= sent_keys and numbers <= self.numbers[i]:
-                    return [i]
+                if set(keys) <= sent_keys:
+                    with_fix = self._with_corrections([i])
+                    if numbers <= set().union(*(self.numbers[j] for j in with_fix)):
+                        return with_fix if numbers - self.numbers[i] else [i]
             return []
         # A sentence the unit repeats word for word is always one of its
         # sources: "We release it with Jenkins. The Jenkins job builds the
@@ -360,6 +379,9 @@ class _Index:
         # A short statement needs every content word; a longer one most of them.
         required = STATED_COVERAGE if len(keys) >= 4 else 1.0
         said_numbers = set().union(*(self.numbers[i] for i in chosen)) if chosen else set()
+        if not numbers <= said_numbers:
+            chosen = self._with_corrections(chosen)
+            said_numbers = set().union(*(self.numbers[i] for i in chosen)) if chosen else set()
         if covered < required or not numbers <= said_numbers:
             return []
         return sorted(chosen)
@@ -376,7 +398,15 @@ class _Index:
             return []
         found = self.sources_for(" ".join(cells))
         if found:
-            return found
+            # A cell that is a statement of its own cites its sentence too.
+            # Matched as one, "MQ channel stops after a mainframe restart |
+            # Restart the channel from the MQ console" cited only the
+            # symptom, and the fix had no source (audit 9aap).
+            extra: set = set()
+            for cell in cells:
+                if len(_content_keys(self._strip(cell))) >= 3:
+                    extra.update(self.sources_for(cell))
+            return sorted(set(found) | extra)
         # A cell that is one sentence, as said (a quote column), is the source.
         quoted = set()
         for cell in cells:

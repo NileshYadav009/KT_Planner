@@ -132,8 +132,17 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # Who to go to: "Day-to-day questions go to Omar Haddad", "for
             # anything with invoices, contact the finance systems lead".
             r"\b(?:questions?|issues?|requests?|queries)\s+(?:about\s+[^.;]{1,30}?\s+)?(?:go(?:es)?|should\s+go|are\s+routed)\s+to\b",
-            r"\b(?:contact|reach\s+out\s+to|call)\s+(?:the\s+)?(?:[\w-]+\s+){0,4}?"
-            r"(?:lead|manager|owner|team|squad|service\s+desk|help\s*desk|dba|architect)\b",
+            # A named contact too: "call Raj Patel, the application manager",
+            # "call Sam Achebe, he's the head of engineering". Not "the call
+            # centre".
+            r"\b(?:contact|reach\s+out\s+to|call)(?!\s+cent(?:re|er)\b)\s+(?:the\s+)?(?:[\w'-]+,?\s+){0,4}?"
+            r"(?:lead|manager|owner|team|squad|service\s+desk|help\s*desk|dba|architect|head\s+of\s+[\w-]+)\b",
+            # The next step when a page goes unanswered: "if they do not
+            # answer in fifteen minutes, call Maria" went to Monitoring, and
+            # the escalation path was reported as not discussed.
+            r"\bif\s+(?:(?:they|he|she|the\s+(?:on-?call|primary)(?:\s+(?:engineer|person))?)\s+(?:does\s+not|do\s+not|"
+            r"doesn'?t|don'?t|did\s+not|didn'?t|fails?\s+to|can'?t|cannot)|nobody|no\s+one|no-one)\s+"
+            r"(?:answer|respond|reply|pick\s+up|acknowledge|ack)s?\b",
         ],
         0.97,
     ),
@@ -563,6 +572,14 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"(?:is\s+|has\s+)?(?:still\s+)?not\s+(?:yet\s+)?(?:been\s+)?(?:started|begun|scheduled|finished|completed?)\b",
             r"\b(?:upgrade|migration|move|rollout|roll-out|project|onboarding|replacement)\b[^.;]{0,50}?\b(?:is|are)\s+"
             r"(?:still\s+)?(?:waiting|blocked)\s+(?:on|for|by)\b",
+            # Work planned for a later quarter or year, or not begun ("Next
+            # quarter we plan to add a second region, but nobody has started
+            # on it" went to Disaster Recovery). Not "next month you will
+            # own the releases" (an onboarding plan).
+            r"\b(?:no\s*one|nobody)\s+(?:has\s+)?(?:started|begun|worked)\s+on\s+(?:it|this|that)\b",
+            r"\bnext\s+(?:quarter|year|fiscal\s+year|financial\s+year)\b[^.;]{0,40}?\b(?:plan|plans|planned|planning|"
+            r"will|going\s+to|intend)\b|\b(?:planned|scheduled)\s+for\s+(?:next\s+(?:quarter|year)|q[1-4]|later\s+"
+            r"this\s+year)\b",
         ],
         0.975,
     ),
@@ -663,6 +680,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"microservices|consumers?|workers?)\s+(?:all\s+)?(?:run|runs|are\s+running|is\s+running|are\s+hosted|"
             r"is\s+hosted)\s+on\s+(?:the\s+|our\s+|an?\s+)?(?:[\w-]+\s+){0,2}?(?:gke|eks|aks|kubernetes|k8s|ecs|fargate|"
             r"cloud\s+run|app\s+service|ec2|vms?|openshift)\b",
+            # How many regions it runs in ("Right now we run in one region"
+            # went to Ownership); a standby or replica region is DR.
+            r"\b(?:run|runs|running|deployed|hosted|live|lives)\s+(?:only\s+)?in\s+(?:one|a\s+single|two|three|four|"
+            r"\d+|multiple|several)\s+(?:[\w-]+\s+)?regions?\b",
             r"\b(?:publish\w*|writ(?:e|es|ten|ing)|stor(?:e|es|ed|ing)|archiv\w*|reads?|reading|send\w*|stream\w*|"
             r"push\w*|load\w*|ingest\w*|enqueue\w*)\b[^.;]{0,40}?\b(?:to|into|in|from|on)\s+(?:the\s+|a\s+|an\s+)?"
             r"(?:" + _DATA_COMPONENTS + r")\b",
