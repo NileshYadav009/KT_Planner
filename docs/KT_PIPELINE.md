@@ -52,6 +52,14 @@ continuation rules in `section_rules.py`, and each fact is scored with the
 spoken sentences around it (two either side, counted in sentences, not
 facts) as context.
 
+**A number corrected in the same sentence** keeps only the corrected one
+(`devops_transcription.resolve_self_corrections`, audit §9aan), before the
+copy edit and with or without a model: "the order limit is 4000 or sorry not
+4000 but 2000" becomes "the order limit is 2000". It needs a number on both
+sides of a marker that only means a correction ("sorry", "I mean", "or
+rather", "no wait", "correction"); "actually" and a bare "no" do not count.
+The Sources appendix still quotes the sentence as said.
+
 **Stage 3.6 — one unit per sentence and section** (`rejoin_classified`):
 once every fact has its section, the facts of one sentence that sit side by
 side in one section become one unit again, shown as the spoken sentence.

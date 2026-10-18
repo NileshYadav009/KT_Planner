@@ -564,7 +564,65 @@ _ANYWHERE_FILLER_RE = re.compile(
 # one, it corrects what was just said: "The RTO is four hours. Actually the
 # RTO is thirty minutes." lost its "Actually" and read as two contradictory
 # statements. So it is only removed mid-sentence (audit 9aam).
-_MID_SENTENCE_ACTUALLY_RE = re.compile(r"(?<=[\w,;]\s)actually" + _NOT_JOINED + r",?\s*", re.IGNORECASE)
+# Kept before a number, where it corrects one: "the RTO is four hours,
+# actually two hours" read as "four hours, two hours".
+_SPELLED_NUMBER_WORD = (r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen"
+                        r"|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy"
+                        r"|eighty|ninety|hundred|thousand|million|billion)")
+_MID_SENTENCE_ACTUALLY_RE = re.compile(
+    r"(?<=[\w,;]\s)actually" + _NOT_JOINED + r"(?!,?\s*(?:\d|" + _SPELLED_NUMBER_WORD + r"\b)),?\s*",
+    re.IGNORECASE)
+
+# A speaker correcting a number mid-sentence: "the order limit is 4000 or
+# sorry not 4000 but 2000" stated both numbers, and the document showed the
+# sentence as said, leaving the reader to work out which one holds. Only a
+# number corrected by a number, with a marker that only ever means a
+# correction ("sorry", "I mean", "or rather", "no wait", "correction"):
+# "sorry for the noise" and "rather than 300" have no number after them,
+# and "actually" or a bare "no" are not reliably corrections ("5 minutes,
+# actually 10 on a bad day", "9 to 5, no 24/7 support").
+_SPELLED_NUMBER = _SPELLED_NUMBER_WORD + r"(?:(?:\s+|-)(?:and\s+)?" + _SPELLED_NUMBER_WORD + r")*"
+_CORRECTED_VALUE = (r"(?<![\w.,-])(?:\d(?:[\d,.]*\d)?(?:%|(?:k|K|M|GB|MB|TB|ms)\b)?|" + _SPELLED_NUMBER + r")"
+                    + _NOT_JOINED)
+_CORRECTION_MARKER = (r"(?:sorry|i\s+mean|i\s+meant|no\s+wait|wait\s+no|no\s+sorry|rather|correction"
+                      r"|scratch\s+that|my\s+bad|my\s+mistake|oops|let\s+me\s+correct\s+(?:that|myself))" + _NOT_JOINED)
+# Words that end the unit after the withdrawn number ("four hours I mean").
+_NOT_A_UNIT = r"(?:or|and|but|not|no|sorry|i|wait|rather|correction|scratch|my|oops|let)\b"
+_SELF_CORRECTION_RE = re.compile(
+    r"(?P<old>" + _CORRECTED_VALUE + r")(?:\s+(?!" + _NOT_A_UNIT + r")(?P<unit>[A-Za-z]+))?"
+    r"\s*,?\s*(?:or\s+)?(?:" + _CORRECTION_MARKER + r"\s*[,:]?\s*)+"
+    # "... sorry, not 4000 but 2000" / "... I mean it's 2000"
+    r"(?:not\s+" + _CORRECTED_VALUE + r"(?:\s+[A-Za-z]+)?\s*,?\s*but\s+)?"
+    r"(?:it'?s\s+|it\s+is\s+|that'?s\s+|that\s+is\s+|make\s+(?:that|it)\s+)?"
+    r"(?=" + _CORRECTED_VALUE + r")",
+    re.IGNORECASE,
+)
+
+
+def resolve_self_corrections(text: str) -> str:
+    """A number the speaker corrected in the same sentence, replaced by the
+    corrected one: "the order limit is 4000 or sorry not 4000 but 2000" ->
+    "the order limit is 2000"; "four hours, I mean two" -> "two hours".
+    The withdrawn number stays in the transcript the Sources appendix
+    quotes."""
+    if not text:
+        return text
+    for _ in range(3):
+        m = _SELF_CORRECTION_RE.search(text)
+        if not m:
+            break
+        rest = text[m.end():]
+        fixed = text[:m.start()] + rest
+        unit = m.group("unit")
+        if unit:
+            # The unit was said only with the withdrawn number.
+            value = re.match(_CORRECTED_VALUE, rest, re.IGNORECASE)
+            after = rest[value.end():] if value else ""
+            if value and not re.match(r"\s+[A-Za-z]", after):
+                at = m.start() + value.end()
+                fixed = fixed[:at] + " " + unit + fixed[at:]
+        text = fixed
+    return text
 # Spoken agreement carries no content anywhere, commas or not ("reached
 # 15,000 right so yep so we have"), with a "so" that follows it.
 _AGREEMENT_FILLER_RE = re.compile(

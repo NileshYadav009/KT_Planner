@@ -5037,6 +5037,82 @@ unseen KTs.
 - `test_topic_segments.py`: the five best are kept on the threshold scale
   without a reranker.
 
+### 9aan. A number corrected mid-sentence (18 Oct)
+
+The user asked how "That the order limit is 4000 or sorry not 4000 but
+2000" is handled.
+
+**Before.** Run through `pipeline.run_kt_pipeline` with no LLM, the
+sentence went to System Overview, "Additional context", word for word.
+Nothing resolved or flagged the correction. With Groq, two of the three
+likely rewrites were refused, so the document showed the sentence as said:
+
+- Copy edit: even "The order limit is 2000, not 4000." was refused, because
+  "sorry" counted as a lost content word.
+- Polish: "The order limit is 2,000." was refused as a lost fact (4000 gone).
+  Only "2000, not 4000" would pass. The polish prompt says nothing about
+  self-corrections.
+
+No path ever showed 4000 alone as the limit. Corrections across two
+sentences were already handled, but only for single-value fields such as
+RTO and RPO (`conflicts.resolve_single_value`).
+
+**Fix:**
+
+1. `devops_transcription.resolve_self_corrections`, applied to each fact in
+   `ContextMappingPipeline.process` before the copy edit. It runs with or
+   without a model.
+   - It keeps the corrected number and drops the withdrawn one with its
+     marker.
+   - It needs a number on both sides of a marker that only means a
+     correction: sorry, I mean, or rather, no wait, correction, scratch
+     that, my bad.
+   - "actually" and a bare "no" do not count: "5 minutes, actually 10 on a
+     bad day" and "9 to 5, no 24/7 support" are not corrections.
+   - A unit said only with the withdrawn number moves to the corrected one:
+     "four hours, I mean two" becomes "two hours".
+   - The Sources appendix quotes the cleaned transcript, which still has
+     both numbers, so the reader can check.
+2. The cleaner keeps a mid-sentence "actually" when a number follows. "The
+   RTO is four hours, actually two hours" used to read "four hours, two
+   hours".
+3. Copy edit: correction-marker phrases are not content words, so "We use
+   Jenkins, sorry, GitHub Actions" may lose the "sorry". This works on the
+   phrase only, since "mean latency" and "wait five minutes" are content.
+
+**Result:**
+
+- On the sample KT, the document now says "That the order limit is 2000."
+  The source quote is still the sentence as said.
+- No LLM, copy edit off: unchanged on every set.
+
+| Set | Result |
+|---|---|
+| Tuning | 534/534 |
+| Dev | 213/224 |
+| Holdouts h12-h14 | 86/95, 0 false Missing |
+| Blind b01-b03 | 95/114 |
+| E2e | 100%, 0 problems |
+
+None of these transcripts has a number corrected by a number. The only
+"sorry" in the test transcripts opens a sentence, and the repair leaves it
+as said.
+
+**Not covered:**
+
+- A correction split across sentences, as in "The limit is 4000. Sorry,
+  2000." The two sentences are separate facts by then, and both are shown.
+- A corrected name, as in "Jenkins, sorry, GitHub Actions". The copy edit
+  still refuses a rewrite that drops a tool.
+
+**Tests:**
+
+- `test_devops_transcription.py`:
+  - 10 corrections resolved and 7 lookalikes left as said;
+  - "actually" kept before a number.
+- `test_copyedit.py`: a marker may go, but "mean" and "wait" as content may
+  not.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -411,3 +411,35 @@ def test_actually_is_kept_where_it_corrects_what_was_just_said():
         "The RTO is four hours. Actually the RTO is thirty minutes."
     assert clean_transcript("It was actually down for an hour.") == "It was down for an hour."
     assert clean_transcript("Um, okay, so, uh, this is the KT for Pulse.") == "This is the KT for Pulse."
+    # Before a number it corrects one, and stays.
+    assert clean_transcript("The RTO is four hours, actually two hours.") == \
+        "The RTO is four hours, actually two hours."
+
+
+def test_a_number_corrected_mid_sentence_keeps_only_the_corrected_one():
+    from devops_transcription import resolve_self_corrections
+
+    corrected = {
+        "That the order limit is 4000 or sorry not 4000 but 2000.": "That the order limit is 2000.",
+        "The order limit is 4,000, sorry, 2,000 per day.": "The order limit is 2,000 per day.",
+        "The RTO is four hours, I mean two hours.": "The RTO is two hours.",
+        # The unit was said only with the withdrawn number.
+        "The RTO is four hours, I mean two.": "The RTO is two hours.",
+        "We keep backups for 30 days, no wait, 14 days.": "We keep backups for 14 days.",
+        "Each pod gets 2GB or rather 4GB of memory.": "Each pod gets 4GB of memory.",
+        "Availability target is 99.9%, sorry, 99.95%.": "Availability target is 99.95%.",
+        "There are three hundred and fifty, sorry, four hundred tenants.": "There are four hundred tenants.",
+        "The limit is 4000, sorry I mean it's 2000.": "The limit is 2000.",
+        "Retries happen 5 times, correction, 3 times.": "Retries happen 3 times.",
+    }
+    for said, written in corrected.items():
+        assert resolve_self_corrections(said) == written, said
+    # No number corrected by a number: as said.
+    for said in ["We had 500 errors, sorry for the noise.",
+                 "We prefer 200 rather than 300 connections.",
+                 "It takes 5 minutes, actually 10 minutes on a bad day.",
+                 "Weekdays 9 to 5, no 24/7 support.",
+                 "Sorry, I should say the price lists come in from SAP.",
+                 "The old one, sorry, the new one is in us-east-1.",
+                 "Sorry, not 4000 but 2000."]:
+        assert resolve_self_corrections(said) == said, said

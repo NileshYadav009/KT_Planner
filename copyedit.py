@@ -112,6 +112,12 @@ _TENSE_WORDS = frozenset({"have", "has", "had", "was", "were", "been"})
 _TOPIC_STEMS = ("deploy", "releas", "rollb", "backup", "restor", "recover", "monitor", "alert", "dashboard",
                 "secur", "encrypt", "cost", "budget", "escalat", "owner", "owns", "incident", "outage", "fail",
                 "migrat", "access", "approv")
+# A speaker's correction marker is not content: "We use Jenkins, sorry, GitHub
+# Actions" may lose the "sorry". As a phrase only, since "mean latency" and
+# "wait five minutes" are content.
+_CORRECTION_MARKER_RE = re.compile(
+    r"\b(?:sorry|i\s+mean|i\s+meant|no\s+wait|wait\s+no|or\s+rather|correction|scratch\s+that|my\s+bad"
+    r"|my\s+mistake|oops)\b", re.IGNORECASE)
 _CHAT_RE = re.compile(r"^\s*(?:sure|certainly|here(?:'s|\s+is)|of\s+course)\b", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d[\d,.]*\d|\d")
 _MIN_CONTENT_KEPT = 0.85
@@ -186,7 +192,7 @@ def problems(source: str, rewrite: str) -> List[str]:
         out.append("lost " + ", ".join(lost))
     if gained:
         out.append("added " + ", ".join(gained))
-    stems, new_stems = _stems(source), _stems(rewrite)
+    stems, new_stems = _stems(_CORRECTION_MARKER_RE.sub(" ", source)), _stems(rewrite)
     if stems and len(stems & new_stems) / len(stems) < _MIN_CONTENT_KEPT:
         out.append(f"kept {len(stems & new_stems)}/{len(stems)} content words")
     # Words the speaker never said: "we can see the alerts end to end" became

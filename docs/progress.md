@@ -1535,3 +1535,18 @@ Results:
   - Topics are read from what was said, not from the copy-edited text.
   - Its cost on unseen KTs went to 0 (181 of 209 with it and without it).
 - **Cleaner:** a sentence-opening "Actually" (a correction) is kept.
+
+## A number corrected mid-sentence (audit §9aan, 18 Oct)
+
+- "The order limit is 4000 or sorry not 4000 but 2000" now reads "The order
+  limit is 2000" in the document. The Sources appendix still quotes the
+  sentence as said.
+- This runs before the copy edit, with or without an LLM. It needs a number
+  on both sides of a marker that only means a correction (sorry, I mean, or
+  rather, no wait, correction).
+- "Actually" before a number is no longer removed mid-sentence.
+- The copy edit may drop a correction marker.
+- No-LLM accuracy is unchanged on every set.
+- Not covered:
+  - a correction across two sentences ("4000. Sorry, 2000.");
+  - a corrected tool name.

@@ -226,3 +226,14 @@ def test_rewrites_that_change_who_said_it_its_tense_or_its_topic_are_refused():
     }
     for spoken, rewrite in accepted.items():
         assert copyedit.problems(spoken, rewrite) == [], rewrite
+
+
+def test_a_correction_marker_may_go_but_a_word_that_only_looks_like_one_may_not():
+    assert copyedit.problems("We use Jenkins, sorry, GitHub Actions for the builds.",
+                             "We use Jenkins, or rather GitHub Actions, for the builds.") == []
+    # Still refused: the corrected tool is a tool, and it is gone.
+    assert copyedit.problems("We use Jenkins, sorry, GitHub Actions for the builds.",
+                             "We use GitHub Actions for the builds.")
+    # "mean" and "wait" are content outside a marker.
+    assert copyedit.problems("The mean latency is 200 ms.", "The latency is 200 ms.")
+    assert copyedit.problems("Wait five minutes before retrying the job.", "Retry the job after five minutes.")

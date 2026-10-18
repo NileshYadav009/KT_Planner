@@ -31,7 +31,7 @@ from policy import (
 )
 
 from runtime_policy import load_policy
-from devops_transcription import clean_transcript
+from devops_transcription import clean_transcript, resolve_self_corrections
 from dialogue import merge_question_answers
 from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
@@ -2685,6 +2685,11 @@ class ContextMappingPipeline:
         # edit rewrites "Security, access to Snowflake is through Okta." as
         # "Access to Snowflake is through Okta.", and the named topic is gone.
         said_texts = [s.text for s in sentences]
+        # A number corrected mid-sentence keeps only the corrected one ("the
+        # limit is 4000 or sorry not 4000 but 2000"); the Sources appendix
+        # still quotes both. With or without a model.
+        for s in sentences:
+            s.text = resolve_self_corrections(s.text)
         try:
             import copyedit
             edited, self.copyedit_stats = copyedit.copyedit_sentences([s.text for s in sentences])
