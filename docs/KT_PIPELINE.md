@@ -63,9 +63,27 @@ are kept for the ledger (`StructuredKT.facts`, `fact_sections`).
 
 Each sentence is embedded (`BAAI/bge-large-en-v1.5` by default) and compared
 against every schema section's own embedding (built from its title/
-sub_topics/hints) via cosine similarity, then reranked with a cross-encoder
-(`ms-marco-MiniLM-L-6-v2`) for precision. Produces a primary classification
-plus (for genuinely close calls) secondary candidates.
+sub_topics/hints) and its labelled examples (`section_examples.json`) via
+cosine similarity; the five best are kept. Produces a primary
+classification plus (for genuinely close calls) secondary candidates. The
+cross-encoder reranker (`ms-marco-MiniLM-L-6-v2`) was removed in audit §9aam:
+against a section title it scored about -10 for nearly every pair and added
+nothing measurable. Scores keep the 0.4 scale its blend gave them
+(`CLASSIFIER_SCORE_SCALE`), which the thresholds were set on.
+
+**Topic segments** (`section_rules.segment_topics()`, audit §9aaj): every
+fact gets the topic the speaker last named, and that section gets
+`TOPIC_SEGMENT_BOOST` (0.04). A topic is named by a short question
+("What breaks most often?"), a heading read aloud ("Known problems."), a
+fronted phrase ("Costs, ...", "Security wise, ...", "Unfinished: ..."), or
+a sentence a routing rule decides at 0.94 or above. Before any topic is
+named, the topic is System Overview. The boost decides a sentence that says
+little by itself ("Only six clinics have it." after "Anything
+unfinished?"); a sentence with clear evidence of its own still goes
+elsewhere, and routing rules still decide over it. Disaster Recovery also
+loses `RECOVERY_WITHOUT_EVIDENCE_PENALTY` (0.03) for a sentence with no
+recovery word (`RECOVERY_EVIDENCE_RE`): its examples are full of durations,
+so a fix "for an hour" used to score closest to it.
 
 **Entity-affinity boost** (`section_rules.py`'s `entity_affinity_boost()`):
 sentences containing entities of a type strongly associated with a section

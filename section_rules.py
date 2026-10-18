@@ -160,6 +160,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # mornings" went to Disaster Recovery (archive logs, backups).
             r"\b(?:fill(?:s|ed|ing)?\s+(?:up\s+)?the|filled\s+up\s+the)\s+(?:disk|disks|volume|partition|drive)\b",
             r"\b(?:disk|disks|volume|partition)\s+(?:fills?|filling|filled|runs?\s+out|running\s+out)\b",
+            # A failure introduced by how often or how badly it bites: "The
+            # classic failure is scanners losing their session", "the most
+            # annoying failure: a store sends an empty file".
+            r"\b(?:classic|typical|usual|biggest|most\s+(?:common|frequent|annoying|painful))\s+"
+            r"(?:failure|problem|issue|incident|outage)\b",
         ],
         0.96,
     ),
@@ -213,6 +218,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bflux\s+(?:syncs?|deploys?|reconciles?|applies)\b",
             r"\b(?:builds?|built|building)\s+the\s+(?:container\s+|docker\s+)?images?\b",
             r"\bpush(?:es|ed|ing)?\s+(?:them|the\s+(?:container\s+)?images?)\s+to\b",
+            # What starts a build or a release: "Cloud Build deploys to Cloud
+            # Run on every merge to main", "Builds run in Cloud Build on every
+            # push to the release branch".
+            r"\bon\s+(?:every|each)\s+(?:push|merge|commit|pull\s+request|tag)\b",
         ],
         0.94,
     ),
@@ -361,6 +370,16 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # about a third" was filed under System Overview.
             r"\b(?:cut|cuts|reduc(?:e|es|ed)|lower(?:s|ed)?|halv(?:e|es|ed)|sav(?:e|es|ed))\s+(?:\w+\s+){0,3}"
             r"(?:bill|costs?|spend|invoice)\b",
+            # Where the money goes and what holds it down: "The Premium plan
+            # is the largest cost item", "auto-suspend after sixty seconds
+            # idle, which keeps the bill down", "We pay for a three-year
+            # savings plan", "The App Service plan is oversized."
+            r"\b(?:largest|biggest|main|major)\s+(?:cost|expense|spend|line\s+item)\b",
+            r"\bkeeps?\s+(?:the\s+)?(?:bill|costs?|spend)\s+down\b",
+            r"\b(?:savings\s+plans?|reserved\s+instances?|committed[\s-]use\s+discounts?)\b",
+            r"\bauto[\s-]?suspend\w*\b",
+            r"\bwe\s+(?:spend|pay)\s+(?:a\s+lot|the\s+most|too\s+much)\b",
+            r"\b(?:oversized|over-?provisioned|under-?utili[sz]ed|right-?siz\w+)\b",
         ],
         0.94,
     ),
@@ -400,6 +419,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\b30[\s-]?day\s+plan\b",
             r"\bobserve\s+(?:and\s+)?shadow\b",
             r"\bindependent\s+ownership\b",
+            # A milestone of the first month: "By week four you should be on
+            # the Airflow on-call", "By the end of the month you should lead a
+            # production release" (which went to the month-end calendar).
+            r"\bby\s+(?:the\s+end\s+of\s+(?:the\s+|your\s+)?(?:first\s+)?(?:month|week\s+\w+)|"
+            r"week\s+(?:two|three|four|[234]))\b[^.]{0,60}?\byou\s+(?:should|will|can|could|must)\b",
         ],
         0.94,
     ),
@@ -525,6 +549,20 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bneeds?\s+(?:moving|migrating|replacing|upgrading|rewriting|retiring|decommissioning)\b",
             r"\bneeds?\s+to\s+be\s+(?:moved|migrated|replaced|upgraded|rewritten|retired|decommissioned)\b",
             r"\bnot\s+assigned\s+to\s+anyone\b",
+            # Work left part-done: "a half finished migration from Node 14",
+            # "There's also an unfinished A/B test framework migration",
+            # "One item remains open: ...", "scoped but not started",
+            # "Kafka upgrade not started", "The TLS upgrade on the MQ
+            # channels is waiting on the mainframe team." Said of a piece of
+            # work, not of a port or a connection ("the port remains open").
+            r"\bhalf[\s-]?(?:finished|done|complete[d]?|migrated|built)\b",
+            r"\bunfinished\b",
+            r"\b(?:items?|tasks?|tickets?|actions?|questions?|work)\s+(?:still\s+)?(?:remains?|is\s+still|are\s+still)\s+open\b",
+            r"\b(?:scoped|planned|agreed|approved|budgeted)\s+but\s+(?:not|never)\s+(?:yet\s+)?(?:started|begun|done|finished|scheduled)\b",
+            r"\b(?:upgrade|migration|move|rollout|roll-out|project|onboarding|replacement|clean-?up|decommission\w*)\s+"
+            r"(?:is\s+|has\s+)?(?:still\s+)?not\s+(?:yet\s+)?(?:been\s+)?(?:started|begun|scheduled|finished|completed?)\b",
+            r"\b(?:upgrade|migration|move|rollout|roll-out|project|onboarding|replacement)\b[^.;]{0,50}?\b(?:is|are)\s+"
+            r"(?:still\s+)?(?:waiting|blocked)\s+(?:on|for|by)\b",
         ],
         0.975,
     ),
@@ -760,6 +798,134 @@ def question_topic(text: str) -> Optional[SectionRuleMatch]:
                             reason=f"question:{section_id}", matched_pattern=pattern)
 
 
+# ============================================================================
+# Topic segments
+# ============================================================================
+#
+# A KT moves through topics, and the speaker usually names each one: the
+# receiver asks ("What breaks most often?"), notes read aloud have headings
+# ("Known problems."), and a talk fronts the topic ("Costs, Snowflake is most
+# of it.", "Security wise, ..."). The sentences that follow are about that
+# topic even when they carry no signal of their own: "Only six clinics have
+# it." (after "Anything unfinished?"), "Spread the sends over an hour.",
+# "Run the purge job, it is safe in business hours." Scored alone, such a
+# sentence went to whichever section a stray word suggested (Disaster
+# Recovery for "an hour"). segment_topics() gives every unit the topic most
+# recently named; the classifier adds a small boost for it (context_mapper.
+# TOPIC_SEGMENT_BOOST), so a sentence with clear evidence of its own still
+# goes elsewhere, and routing rules still decide over it.
+
+# What a short question, heading or fronted phrase names, beyond the
+# question words above: "What is X?", "Where does it run?", "Overview.",
+# "Known problems.", "Calendar.", "First steps.", "Unfinished: ...".
+_SEGMENT_EXTRA_TOPICS = [
+    ("system_overview", r"\bwhat\s+is\b|\bwhat\s+does\s+(?:it|\w+)\s+do\b|\bwho\s+uses\b|\boverview\b|"
+                        r"\bhow\s+(?:many|much|big)\b|\bpurpose\b"),
+    ("architecture_reference", r"\barchitecture\b|\bwhere\s+does\s+(?:it|\w+)\s+run\b|\bbuilt\s+(?:on|with)\b|\bstack\b|"
+                               r"\bcomponents?\b|\bhow\s+does\s+(?:it|\w+)\s+work\b|\bmessaging\b|\binfrastructure\b|"
+                               r"\bdesign\b|\bdata\s+flow\b"),
+    ("common_failures", r"\b(?:known\s+)?(?:problems?|issues?|incidents?|failures?|outages?)\b|\bbreaks?\b|\bgoes\s+wrong\b"),
+    ("danger_zones", r"\bdo\s+not\s+touch\b|\bdon'?t\s+touch\b|\bnever\s+do\b|\bshould\s+(?:i\s+)?never\b|\bwatch\s+out\b"),
+    ("known_bad_days", r"\bcalendar\b|\bpeak\s+(?:season|times?)\b|\bbusy\b|\bblackout\b|\bchange\s+freeze\b"),
+    ("deployment_and_rollback", r"\brelease\s+process\b|\bpipeline\b"),
+    ("day1_survival_checklist", r"\bfirst\s+(?:steps?|week|things?)\b|\bonboarding\b|\baccess\b"),
+    ("open_responsibilities", r"\bopen\s+items?\b|\bpending\b|\bhalf\s+(?:done|finished)\b|\bin\s+(?:flight|progress)\b"),
+    ("ownership_escalation", r"\bowners?\b|\bownership\b|\bwho\s+do\s+i\s+go\s+to\b|\bcontacts?\b"),
+    ("security_controls", r"\bsecurity\b|\baccess\s+control\b|\bauth\w*\b"),
+    ("disaster_recovery", r"\bbackups?\b|\bdr\b|\brecovery\b"),
+    ("cost_optimization", r"\bcosts?\b"),
+]
+_SEGMENT_TOPIC_RES = _QUESTION_TOPIC_RES + [(sid, re.compile(rx, re.IGNORECASE)) for sid, rx in _SEGMENT_EXTRA_TOPICS]
+_SEGMENT_QUESTION_RE = re.compile(r"^([^?.!]{1,90})\?")
+# A heading is a short noun phrase on its own: "Release process.", "Do not
+# touch.", "Backups and DR." A short sentence with a verb or a subject
+# ("Secrets in CyberArk." passes; "Deployments are pretty simple." does not)
+# is a statement, not a heading.
+_SEGMENT_HEADING_RE = re.compile(r"^\W*([A-Za-z][\w &/'-]{0,40}?)\s*[.:]\s*$")
+_SEGMENT_NOT_HEADING_RE = re.compile(
+    r"^(?:the|a|an|it|we|you|i|they|there)\b|\b(?:is|are|was|were|be|been|has|have|had|does|do|did|owns?|runs?|"
+    r"goes|uses?|gets?|takes?|needs?|keeps?)\b", re.IGNORECASE)
+# A fronted topic: "Costs, ...", "Security wise, ...", "Going back to
+# failures, ...", "For recovery, ...", "Unfinished: ...".
+_SEGMENT_FRONTED_RE = re.compile(
+    r"^(?:(?:so|and|okay|ok|um+|uh+|right|now|alright|then)[\s,]+)*"
+    r"(?:(?:going\s+back\s+to|back\s+to|moving\s+on\s+to|on|for|in\s+terms\s+of|as\s+for|regarding)\s+)?"
+    r"((?:the\s+)?[A-Za-z][\w/&'-]*(?:\s+(?:and\s+)?[A-Za-z][\w/&'-]*){0,2}?)"
+    r"(?:\s+(?:wise|side))?\s*[,:]", re.IGNORECASE)
+
+
+def _segment_topic_of(phrase: str) -> Optional[str]:
+    hits = [(m.start(), sid) for sid, rx in _SEGMENT_TOPIC_RES for m in [rx.search(phrase)] if m]
+    return min(hits)[1] if hits else None
+
+
+def topic_anchor(text: str) -> Optional[Tuple[str, Optional[str]]]:
+    """(kind, section) when the unit names a topic: a short question, a
+    heading or a fronted topic. A question naming nothing ("Anything else?")
+    gives (\"question\", None): the topic carries on."""
+    label = _SPEAKER_PREFIX_RE.match(text or "")
+    if label:
+        # "Unfinished: the migration ..." reads like a speaker label; a
+        # label that names a topic is a fronted topic, not a person.
+        topic = _segment_topic_of(label.group(0).strip().rstrip(":"))
+        if topic:
+            return ("fronted", topic)
+    body = _SPEAKER_PREFIX_RE.sub("", text or "", count=1).strip()
+    match = _SEGMENT_QUESTION_RE.match(body)
+    if match and len(match.group(1).split()) <= 10:
+        return ("question", _segment_topic_of(match.group(1)))
+    match = _SEGMENT_HEADING_RE.match(body)
+    if match and len(match.group(1).split()) <= 4 and not _SEGMENT_NOT_HEADING_RE.search(match.group(1)):
+        topic = _segment_topic_of(match.group(1))
+        if topic:
+            return ("heading", topic)
+    match = _SEGMENT_FRONTED_RE.match(body)
+    if match and len(match.group(1).split()) <= 4:
+        topic = _segment_topic_of(match.group(1))
+        if topic:
+            return ("fronted", topic)
+    return None
+
+
+# What a statement about recovery says: backups, restores, failover,
+# replicas, retention, RTO/RPO, rebuilding. Disaster Recovery's examples
+# are full of durations ("RTO is four hours", "kept for 35 days"), so a fix
+# "for an hour" or a job "safe in business hours" scored closest to it with
+# none of these words. Over 90% of the annotated recovery facts use one.
+RECOVERY_EVIDENCE_RE = re.compile(
+    r"\b(?:backups?|backs?\s+up|backed\s+up|restor\w*|recover\w*|disaster|dr|rto|rpo|failover|fail(?:s|ed)?\s+over|"
+    r"replica\w*|replicat\w*|snapshots?|point[\s-]in[\s-]time|pitr|retention|retain\w*|versioning|versioned|"
+    r"time\s+travel|second\s+(?:site|region|data\s*cent(?:re|er))|cross[\s-]region|multi[\s-]region|regions?|"
+    r"standby|active[\s-](?:passive|active)|geo[\s-]\w+|archiv\w*|rebuil[dt]|recreat\w*|drills?|data\s+loss|"
+    r"lost\s+(?:\w+\s+){0,2}(?:data|changes|transactions|writes|events)|cop(?:y|ies|ied)\s+to|rman|"
+    r"(?:kept|stays?|stored)\s+(?:\w+\s+){0,3}for\s+(?:a|one|\d+|\w+)\s+(?:years?|months?|days?))\b",
+    re.IGNORECASE,
+)
+
+# Before any topic is named, a KT is saying what the system is.
+SEGMENT_OPENING_TOPIC: Optional[str] = "system_overview"
+# A unit a routing rule claims at or above this confidence (the override
+# level, RULE_OVERRIDE_CONFIDENCE) also moves the topic there ("The thing
+# that goes wrong most is ..."). None: only named topics move it.
+SEGMENT_RULE_ANCHOR_MIN: Optional[float] = 0.94
+
+
+def segment_topics(texts: List[str]) -> List[Optional[str]]:
+    """For each unit, the topic most recently named at or before it."""
+    topics: List[Optional[str]] = []
+    current: Optional[str] = SEGMENT_OPENING_TOPIC
+    for text in texts:
+        anchor = topic_anchor(text)
+        if anchor is not None and anchor[1] is not None:
+            current = anchor[1]
+        elif anchor is None and SEGMENT_RULE_ANCHOR_MIN is not None:
+            rule = match_section_rules(text)
+            if rule is not None and rule.confidence >= SEGMENT_RULE_ANCHOR_MIN:
+                current = rule.section_id
+        topics.append(current)
+    return topics
+
+
 def match_section_rules(text: str) -> Optional[SectionRuleMatch]:
     """Return the best rule-based section match for a sentence, if any."""
     if not text or not text.strip():
@@ -992,7 +1158,7 @@ _ENUMERATION_HEAD_RE = re.compile(
     re.IGNORECASE,
 )
 _DEPENDENT_CONTINUATION_RE = re.compile(
-    r"^\s*(?:the\s+(?:\w+\s+)?(?:reason|root\s+cause|cause|symptom|fix|remediation|"
+    r"^\s*(?:the\s+(?:\w+\s+)?(?:reason|root\s+cause|cause|symptom|fix|remediation|remedy|resolution|solution|"
     r"corrective\s+action|workaround|mitigation)\b|(?:this|that)\s+(?:was|is)\s+because\b)",
     re.IGNORECASE,
 )

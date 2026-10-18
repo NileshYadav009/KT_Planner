@@ -4627,6 +4627,416 @@ Files: `fact_units.py`, `llm_provider.py`, `tests/conftest.py`,
   **Known issue:** with no LLM, one covered section of h14 is reported
   Missing. With Groq batched, the holdouts show none.
 
+### 9aaj. Topic segments: the topic the speaker named decides close calls (17 Oct)
+
+The user asked to focus on accuracy and section placement, target 90%.
+Everything here runs without an LLM, copy edit off.
+
+**Measured first.** The tuning set was at 100% and h12-h14 had to stay
+blind, so neither could show what fails. Six new development KTs were
+written before any change (scratchpad, not in the suite; 224 facts). They
+cover a formal monologue, a labelled three-person meeting, speech-to-text
+noise, notes read aloud, the incoming owner asking questions, and a
+rambling talk. The current code placed **185 of 224 (82.6%)**, the same
+level as the holdouts (81%).
+
+**Root cause.**
+
+- Most wrong facts carry little signal of their own: "Only six clinics
+  have it.", "Spread the sends over an hour.", "Reset the tunnel from the
+  Azure portal."
+- The classifier's scores barely separate sections: every section scored
+  0.48-0.65 against such a sentence.
+- The ms-marco cross-encoder scores a sentence against a section *title*.
+  Its raw scores of about -10 become about 0 after the sigmoid, so it adds
+  almost nothing.
+- `TopicMemory` raised the confidence of the active topic's candidates but
+  never changed which section was primary.
+- Disaster Recovery took 11 of the 36 errors. Its examples are full of
+  durations ("RTO is four hours"), so "for an hour" or "safe in business
+  hours" scored closest to it.
+- A trained classifier on the same embeddings (logistic regression,
+  leave-one-KT-out) did not help on the new KTs: 82-84% for every variant.
+
+**What changed:**
+
+1. **Topic segments** (`section_rules.segment_topics`, `topic_anchor`):
+   - Every unit gets the topic the speaker last named. A topic is named by:
+     - a short question ("What breaks most often?", "Anything unfinished?");
+     - a heading read aloud ("Known problems.", "Backups and DR.");
+     - a fronted phrase ("Costs, ...", "Security wise, ...", "Going back to
+       failures, ...", "Unfinished: ...");
+     - a sentence a routing rule decides at 0.94 or above.
+   - A question that names nothing ("Anything else?") keeps the topic.
+     Before any topic is named, the topic is System Overview.
+   - `context_mapper.TOPIC_SEGMENT_BOOST = 0.04` is added to that section's
+     score.
+   - A sentence with clear evidence of its own still goes elsewhere, and
+     routing rules still decide over it.
+2. **Recovery evidence** (`section_rules.RECOVERY_EVIDENCE_RE`): Disaster
+   Recovery loses `RECOVERY_WITHOUT_EVIDENCE_PENALTY = 0.03` for a sentence
+   with no recovery word. Covered words include backup, restore, failover,
+   replica, retention, RTO/RPO, rebuilt, "copied to", "lost ... changes"
+   and "stay ... for a year". 74 of 74 annotated recovery facts use one.
+3. **The boost never empties a section**
+   (`context_mapper.restore_sections_emptied_by_topic`):
+   - If a sentence's pick without the boost is a section no sentence ended
+     up in, it goes back there. Only one sentence per section moves, and
+     only if the section it leaves keeps another sentence.
+   - Routing rules, continuations and LLM checks are not reconsidered.
+   - It only ever restores what the code did before the boost, so the
+     coverage page cannot report less than before.
+   - Found when h13's `false_missing` floor failed (see below).
+4. **Rules for general phrasings that matched nothing:**
+   - Unfinished work: "half finished", "unfinished", "item remains open",
+     "scoped but not started", "upgrade not started", "upgrade ... is
+     waiting on ...". "The port remains open" and "if the service has not
+     started" do not match.
+   - Cost: "largest cost item", "keeps the bill down", savings plans,
+     reserved instances, auto-suspend, "we spend a lot", oversized or
+     right-sized.
+   - Failures introduced by how often or how badly they bite: "the classic
+     failure", "the most annoying problem".
+   - Release triggers: "on every merge/push/commit".
+   - First-month milestones: "By week four you should ...", "By the end of
+     the month you should ...".
+   - "The remedy/resolution/solution is ..." continues the sentence before
+     it, like "The fix is ...".
+5. Tried and dropped, because they gave no gain:
+   - comparing the ±2-sentence context with the labelled examples;
+   - an extra boost for the sentence that names the topic.
+
+**How the values were chosen.**
+
+- `scratchpad/acc90/insitu.py` runs the real mapper on every tuning golden
+  leave-one-KT-out: section examples are rebuilt without that KT's facts,
+  so its own examples cannot answer for it. It also runs the six new KTs.
+- Model outputs are memoised on disk (`enccache.py`), so a variant takes
+  about 25 s instead of about 40 min.
+
+Mapper level, units:
+
+| | tuning (leave one out) | new KTs |
+|---|---|---|
+| Before | 97.0% | 83.2% |
+| Topic boost 0.04 | 97.0% | 90.8% |
+| + opening topic + rule anchors + new rules | 99.2% | 93.9% |
+| + recovery penalty (shipped) | 99.4% | 94.9% |
+
+Boosts of 0.06 and 0.08 scored higher on the new KTs but lowered the tuning
+set, so 0.04 was kept.
+
+**Results, full pipeline, rendered document:**
+
+| | Before (9abd97d) | After |
+|---|---|---|
+| Tuning goldens | 534/534 | 534/534 (no floor lowered) |
+| E2e KTs (5) | 100%, 0 problems | 100%, 0 problems |
+| New development KTs | 185/224 (82.6%) | 212/224 (94.6%)\* |
+| **Holdouts h12-h14 (blind, aggregate)** | 77/95 (81.1%), 1 false Missing | **86/95 (90.5%), 0 false Missing** |
+| **Fresh blind set b01-b03 (aggregate)** | 87/114 (76.3%) | **95/114 (83.3%)** |
+| Both blind sets | 164/209 (78.5%) | 181/209 (86.6%) |
+
+\* Includes three annotation fixes: "front end" is cleaned to "frontend",
+and two ownership facts render as table rows.
+
+**b01-b03.** Three blind KTs were written after the changes were fixed in
+code and before anything was seen of them: an unlabelled screen-share
+walkthrough, a handover document read in paragraphs, and noisy speech with
+false starts. They are scored only in aggregate and kept outside the suite
+so the next round can use them. They put this round's general accuracy on
+unseen KTs at about **83-87% without an LLM**. h12-h14 now clear 90%, but
+that is not yet true of unseen KTs in general.
+`test_unseen_kts_meet_the_accuracy_target` stays a non-strict xfail with
+both figures.
+
+**h13.** After the first version, the full suite failed one floor:
+`test_no_golden_gets_worse_than_its_baseline[h13_...]`. Only pass/fail per
+dimension was read, nothing per fact. The failing dimension was
+`false_missing`; accuracy and wrong were within their floors. Toggling each
+mechanism showed the topic boost caused it. That led to change 3, and h13
+now passes. Across h12-h14, false Missing went from 1 to 0.
+
+**Tests.**
+
+- `tests/test_topic_segments.py` (new, 10 tests): questions, headings,
+  fronted topics and speaker labels; the opening topic and rule anchors;
+  the new rules and their non-matches; the recovery words; the boost
+  deciding a near tie but not a clear call (stand-in embeddings, no
+  models); the guard.
+- `tests/test_section_rules.py`: one assertion narrowed.
+  "Everything is in Terraform, and Cloud Build deploys to Cloud Run on
+  every merge to main." was expected to match no rule. It now matches the
+  release-trigger rule; the test still checks that the
+  infrastructure-as-code rule does not decide it.
+- Full suite, before the guard: 1034 passed, 5 failed, 1 xfailed, in 11 h
+  22 min on this laptop.
+  - Four of the failures are the known `test_field_populator` gap-fill
+    tests broken by the batching default (§9aai). Not touched: awaiting
+    the user.
+  - The fifth was h13, fixed by change 3.
+
+**Not fixed, said plainly:**
+
+- Remaining wrong facts on the new KTs are mostly security stated through
+  architecture nouns:
+  - "the service account only has read access to BigQuery";
+  - "the API sits behind Identity-Aware Proxy";
+  - "the certs are rotated every year by the roadside team" (went to
+    Ownership).
+- The cleaner rewrites "scale up before them" as "vertical scaling before
+  them" (a vocabulary correction that changes the words said).
+- LLM mode was not measured; Groq was not called.
+
+Files: `context_mapper.py`, `section_rules.py`, `tests/test_topic_segments.py`,
+`tests/test_section_rules.py`, `tests/test_golden_suite.py` (xfail reason
+and docstring), `docs/KT_PIPELINE.md`.
+
+### 9aak. The document may not reverse or rewrite what was said (17 Oct)
+
+These are the two trust items from the 16 Oct audit, done first on the
+user's "start".
+
+**1. A rewrite could turn a statement into its opposite.**
+
+- The section polish (`ai.polish_coverage_sections`) rejected a rewrite
+  that dropped content words or added specifics. It ignored "not / never /
+  no / must" on purpose, because "must not be changed" -> "never change" is
+  a fair rewrite.
+- So the LLM could return "Restart the consumers" for "Do not restart the
+  consumers", "Deploy on Fridays" for "Never deploy on Fridays", or "The RTO
+  has been documented" for "has not been documented", and it was accepted.
+- The sentence repair (`context_mapper._is_faithful_repair`) had the same
+  hole: same length, no new words.
+
+Fix (`grounding.NEGATION_RE`, `negation_changed`, `negations_flipped`):
+
+- For each source sentence that carries a negation, the line of the rewrite
+  that restates it (at least half its content words) must carry one too.
+- A line of the rewrite with a negation must restate at least one sentence
+  that had one.
+- "Avoid", "prohibited", "forbidden" and "refrain" count as negations, and
+  so does "dont" without the apostrophe (speech to text).
+- A failed check keeps the speaker's words, as a dropped fact already does.
+  The polish records it with `record_llm_rejected("section_polish", ...)`.
+- The sentence repair is refused when a negation appears or disappears.
+
+**2. The cleaner rewrote correct wording.**
+
+`devops_vocabulary.py` lists, per term, "the ways Whisper mis-transcribes
+it". About 120 of its multi-word variants are not mishearings but what
+people say, and the fuzzy corrector rewrote them:
+
+- "scale out the web tier" -> "horizontal scaling the web tier";
+- "The recovery time objective is four hours" -> "The rto is four hours";
+- "feature toggle" -> "feature flag";
+- "Entra ID" -> "azure active directory" (the retired name);
+- "certificate manager" -> "cert-manager" (a different product);
+- "alert routing" -> "alerting";
+- "tagging strategy" -> "resource tagging".
+
+Of 256 variants that differ from their term, 81 were actually rewritten.
+
+Fix:
+
+- `devops_vocabulary.KEEP_AS_SAID` lists the correct wording: full names of
+  acronyms, product names as people say them, and real phrases.
+- `get_canonical_key_map` maps those to themselves, and the fuzzy
+  corrector never corrects towards them, so "scaled out" stays "scaled out".
+- Genuine mishearings are still fixed: "coffee for a" -> Kafka, "promo
+  theus" -> Prometheus, "argo seedy" -> ArgoCD, "neo four j" -> neo4j.
+- Side effect, fixed: the Disaster Recovery line "RTO (Recovery Time
+  Objective): four hours" lost its source link, because the transcript now
+  says "recovery time objective" rather than "rto". `knowledge/evidence.py`
+  now treats the keep-as-said phrases as spellings of their short form when
+  matching sources, as it already did for product names.
+
+**Measured (no LLM):** unchanged everywhere.
+
+- Tuning: 534/534.
+- New development KTs: 212/224.
+- Holdouts: 86/95.
+- b01-b03: 95/114.
+- E2e: 100%, 0 problems.
+- Unsourced: 0 everywhere, after the evidence fix.
+
+**Tests:**
+
+- `tests/test_polish_integrity.py` (+4): reversals and added negations are
+  caught; fair rewrites ("must not" -> "never", "do not" -> "avoid", two
+  sentences merged) pass; the polish keeps the speaker's words when the
+  rewrite reverses one (it fails without the fix); the repair may not
+  change a negation.
+- `tests/test_devops_transcription.py` (+1): correct wording survives and
+  mishearings are still fixed.
+- `tests/test_evidence.py` (+1): "RTO" is sourced by "recovery time
+  objective" said aloud.
+
+Files: `grounding.py`, `ai.py`, `context_mapper.py`, `devops_vocabulary.py`,
+`devops_transcription.py`, `knowledge/evidence.py`, and the three test files.
+
+### 9aal. Groq after §9aaj/§9aak: about 94% on unseen KTs (17-18 Oct)
+
+The run was approved by the user ("start" after the roadmap named it). It was
+Groq batched (`qwen/qwen3.8-27b`), with copy edit off and scratch state, and
+it reused the 16 Oct LLM cache. The blind sets were scored in aggregate only.
+
+**Strict scoring** (golden_eval: the verbatim quote or an `alt` must
+appear in an allowed section):
+
+| | No LLM | Groq batched |
+|---|---|---|
+| h12-h14 (95 facts) | 86 correct, 9 wrong, 0 lost | 86 correct, 4 wrong, 5 lost |
+| b01-b03 (114 facts) | 95 correct, 18 wrong, 1 lost | 95 correct, 7 wrong, 12 lost |
+| E2e (5 KTs) | 100%, 0 problems | every fact retained, 0 problems |
+
+Groq fixes most misplacements (27 wrong down to 11). The strict score does
+not move, because the section polish rewords sentences and a reworded fact
+no longer contains its quote.
+
+**Lenient scoring** (`scratchpad/acc90/lenient.py`): a fact is present when
+one rendered sentence restates at least 75% of its content words. It was
+checked first without the LLM, where it gives exactly the strict counts on
+every set (212, 95, 86), so it does not inflate them.
+
+| | Groq batched, lenient |
+|---|---|
+| h12-h14 | **91 of 95 (95.8%)**, 4 wrong, 0 missing |
+| b01-b03 | **106 of 114 (93.0%)**, 7 wrong, 1 missing |
+| Both blind sets | **197 of 209 (94.3%)** |
+
+So with Groq, about 94% of facts on KTs never seen are in the document and
+in the right section. Without an LLM it is about 87%. Caveat: a paraphrase
+could in principle match the wrong sentence. This was not checked per fact,
+because the sets are blind.
+
+**Seen in the runs:**
+
+- The negation guard (§9aak) fired once on a holdout: the polish of an
+  Operational Calendar section changed a negation, and the speaker's words
+  were kept. It was not inspected; the set is blind.
+- With Groq, b01-b03 show 4 repeated sentences and 2 unsourced facts; no
+  LLM shows 0. Worth a look on non-blind KTs.
+
+**Spend:** 101 new requests (holdouts 18, b01-b03 75, e2e 8), about 69.5k
+input and 7.3k output tokens. The lenient re-scoring was served entirely
+from cache (0 requests).
+
+### 9aam. Core review: section mapping and sentence correction (18 Oct)
+
+The user asked to "go to the core level" of section mapping and sentence
+correction. Each building block was measured, not patched with rules.
+
+**Where unseen errors come from.** Mapper level, blind sets h12-h14 and
+b01-b03, no LLM, counts only:
+
+| Decided by | Right | Wrong |
+|---|---|---|
+| Routing rules (>= 0.94) | 43 | 1 |
+| Embedding classifier | 106 | 21 |
+
+The rules are about 98% right on KTs they were not written for. Of the 22
+errors, 21 are the classifier's.
+
+**Classifier ablation.** `scratchpad/acc90/insitu.py`, real mapper,
+leave-one-KT-out examples, accuracy on the facts the classifier decides:
+
+| | Tuning | Dev KTs |
+|---|---|---|
+| Current | 99.0% | 94.9% |
+| Cross-encoder carrying no information | 99.0% | 95.7% |
+| Hints off / multi-word hints only | 98.6% | 94.9% |
+| Examples weighted 0.7 / 0.85 | 99.0% / 97.1% | 93.5% / 92.0% |
+| Top-1 / top-3 examples | 99.0% / 98.6% | 94.9% / 93.5% |
+| Context weight 0.5 / 0.15 | 97.6% / 99.0% | 92.0% / 92.0% |
+| Topic boost 0.06 | 97.1% | 94.2% |
+| Dev KTs added as examples | 99.0% | 94.9% |
+
+The settings are at their best on every visible set, while the same
+classifier is 83% on the blind sets. That gap is overfitting to what was
+tuned on, and no hyperparameter closes it.
+
+Of the classifier's 21 blind errors:
+
+- 18 are borderline, so in LLM mode they are already sent to the LLM.
+- For 15 of them, the right section is among the 3 candidates the LLM is
+  offered.
+- Of the other 6, the right section is in the top 5 for 4.
+
+So in LLM mode the lever is offering 5 candidates instead of 3. That is not
+done: it changes every check prompt and needs a Groq run to measure and to
+re-record the replay fixture. Without an LLM, the 18 borderline errors have
+nothing to check them. The local Qwen model already on disk (copy edit) is
+a candidate for that, not yet tried.
+
+**Changed:**
+
+1. **Cross-encoder removed** (`context_mapper.ContextClassifier`).
+   - `ms-marco-MiniLM-L-6-v2` scored each fact against a section title. It
+     is a passage-retrieval model, and against a two-word title it gave
+     about -10 to nearly every pair, so its share of the blend was about
+     zero and it only reordered close calls.
+   - Measured without it: same accuracy everywhere, one more dev fact
+     right, a faster evaluation (175 s against 289 s), one model fewer to
+     load, and one model fewer in `scripts/fetch_models.py`.
+   - Scores keep the 0.4 scale its blend gave them
+     (`CLASSIFIER_SCORE_SCALE`). The review threshold, coverage confidence
+     and the LLM's borderline test were set on that scale.
+2. **Topics are read from what was said.**
+   - The copy edit runs before classification and removed the named topic:
+     "Security, access to Snowflake is through Okta" became "Access to
+     Snowflake is through Okta", and "Monitoring, we have ..." became
+     "Monitoring includes ...".
+   - `segment_topics` now reads the units as they were before the copy
+     edit.
+3. **The copy edit may not change who said it, its tense or its topic**
+   (`copyedit.problems`). Found by reviewing every rewrite the local model
+   made on the dev KTs:
+   - "No changes in the last week of December." -> "There have been no
+     changes ...": a rule became history. "No ..." now joins "Never ..." as
+     a rule that is never reworded, and added tense words ("have been",
+     "was") are refused.
+   - "Nadia: And my first week? Owen: Get access ..." -> "Nadia: My first
+     week involves getting access ...": the speaker labels must stay as
+     they were.
+   - "Java Spring Boot services on Red Hat OpenShift ..." -> "... services
+     are deployed on ...": it added "deployed", and the fact went to
+     Deployment. Words that name a KT topic (deploy, backup, alert, cost,
+     owner, failure, ...) may not be added.
+   - Exactly these three of 30 rewrites are now refused; the other 27 are
+     unchanged.
+4. **A self-correction keeps its "Actually"** (`devops_transcription`).
+   - The cleaner deleted "actually" everywhere, so "The RTO is four hours.
+     Actually the RTO is thirty minutes." read as two contradictory
+     statements.
+   - Opening a sentence, it is now kept; inside one ("it was actually
+     down") it is still removed.
+
+**Cleaner audit.** Every edit `clean_transcript` makes was listed across
+39 transcripts: 118 edits, 57 distinct, nearly all fillers and product
+names. "data flow" -> "Dataflow" was checked and is already limited to
+Google Cloud KTs.
+
+**Measured:**
+
+| | No LLM, copy edit off | No LLM, copy edit on (local Qwen) |
+|---|---|---|
+| Dev KTs (224) | 213 (was 212) | 212, 12 wrong (209, 15 wrong before fixes 2-3) |
+| Blind h12-h14 + b01-b03 (209) | 181, 27 wrong, 1 lost | 181, 26 wrong, 2 lost (lenient) |
+| Tuning | 534/534 | - |
+| E2e | 100%, 0 problems | - |
+
+With these fixes the copy edit's grammar improvements cost no placement on
+unseen KTs.
+
+**Tests:**
+
+- `test_copyedit.py`: speaker, tense and topic changes are refused; fair
+  rewrites pass.
+- `test_devops_transcription.py`: "Actually" is kept as a correction.
+- `test_topic_segments.py`: the five best are kept on the threshold scale
+  without a reranker.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

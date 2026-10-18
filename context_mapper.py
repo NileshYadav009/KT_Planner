@@ -37,7 +37,7 @@ from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
 from section_rules import (
     match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost,
-    RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE,
+    RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE, segment_topics, RECOVERY_EVIDENCE_RE,
 )
 from llm.usage import record_skip as record_llm_skip
 from llm.batching import llm_batch_calls_enabled
@@ -605,6 +605,9 @@ class Classification:
     reason: str  # Why this section was chosen
     similarity_score: float
     entities: Optional[Dict[str, List[str]]] = None  # Extracted entities (tool, environment, owner, etc.)
+    # The part of `confidence` that is the topic-segment boost (scaled with
+    # it by the cross-encoder blend), so the pick without it can be found.
+    topic_boost: float = 0.0
 
 
 @dataclass
@@ -795,6 +798,21 @@ _SECTION_EXAMPLES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__))
 # k=1 did worse).
 SECTION_EXAMPLE_WEIGHT = 0.5
 SECTION_EXAMPLE_TOP_K = 2
+# Classifier scores are multiplied by this before they are compared with a
+# rule's confidence or any threshold: the scale the removed cross-encoder
+# blend left them on (see ContextClassifier._rerank_candidates).
+CLASSIFIER_SCORE_SCALE = 0.4
+# Added to the topic the speaker last named (section_rules.segment_topics):
+# enough to decide a sentence that says little by itself ("Only six clinics
+# have it." after "Anything unfinished?"), not enough to outweigh one that
+# clearly belongs elsewhere. Chosen leave-one-KT-out on the tuning goldens
+# plus six new development KTs (mapper level): 0.02-0.06 all helped, 0.08
+# and above started pulling clear statements into the topic.
+TOPIC_SEGMENT_BOOST = 0.04
+# Taken off Disaster Recovery for a sentence with no recovery word at all
+# (section_rules.RECOVERY_EVIDENCE_RE): its examples are full of durations,
+# so "Spread the sends over an hour." scored closest to it.
+RECOVERY_WITHOUT_EVIDENCE_PENALTY = 0.03
 
 
 def load_section_examples(path: str = _SECTION_EXAMPLES_PATH) -> Dict[str, List[str]]:
@@ -857,22 +875,20 @@ class ContextClassifier:
     
     Flow:
     1. Embed sentence and sections (BAAI/bge-large-en-v1.5)
-    2. Find top 5 candidates by cosine similarity
-    3. Use cross-encoder to rerank top 5 and select best match
+    2. Score every section (section text, labelled examples, context,
+       hints, topic) and keep the top 5 candidates
     """
-    
+
     def __init__(
         self,
         model_name: str = "BAAI/bge-large-en-v1.5",
         similarity_threshold: float = 0.15,
-        use_cross_encoder: bool = True,
         llm_fallback_fn=None
     ):
         """
         Args:
             model_name: HuggingFace model for embeddings (upgraded to BAAI/bge-large-en-v1.5)
             similarity_threshold: Minimum cosine similarity for assignment
-            use_cross_encoder: Whether to use cross-encoder for reranking (default True)
             llm_fallback_fn: Optional fn(prompt: str, **kwargs) -> str, used to verify
                 genuinely borderline classifications (see classify_sentence). Same
                 hook shape as ContextRepair's llm_fallback_fn — typically LLMProvider.generate.
@@ -885,8 +901,6 @@ class ContextClassifier:
                 globals()['np'] = _np
                 globals()['SentenceTransformer'] = st.SentenceTransformer
                 globals()['util'] = st.util
-                if use_cross_encoder:
-                    globals()['CrossEncoder'] = st.CrossEncoder
             except Exception:
                 # Fall back to lightweight implementations only if import fails
                 pass
@@ -898,17 +912,7 @@ class ContextClassifier:
         self._example_embeddings = None  # labelled section examples, set by index_schema
         self._example_sections: List[str] = []
         self._section_hints = {}  # Initialize for keyword matching
-        
-        # Initialize cross-encoder for reranking if available
-        self.cross_encoder = None
-        if use_cross_encoder:
-            try:
-                if 'CrossEncoder' in globals() and globals()['CrossEncoder']:
-                    self.cross_encoder = globals()['CrossEncoder']("cross-encoder/ms-marco-MiniLM-L-6-v2")
-                    logger.info("Loaded cross-encoder for reranking")
-            except Exception as e:
-                logger.warning(f"Failed to load cross-encoder: {e}. Classification will proceed without reranking.")
-        
+
         # Initialize entity extractor for GLiNER-based entity extraction
         self.entity_extractor = EntityExtractor()
 
@@ -1272,8 +1276,10 @@ class ContextClassifier:
         neighbor_embeddings: List = None,
         alpha: float = 0.7,
         beta: float = 0.3,
+        topic_section: Optional[str] = None,
     ) -> Tuple[List[Classification], Any, Optional[Any]]:
-        """Score a sentence against all sections before cross-encoder reranking."""
+        """Score a sentence against all sections before cross-encoder reranking.
+        `topic_section`: the topic the speaker last named (segment_topics)."""
         extracted_entities = self.entity_extractor.get_context_entities(sentence.text)
 
         if sent_embedding is None:
@@ -1282,6 +1288,7 @@ class ContextClassifier:
         classifications = []
         sent_text_lower = (sentence.text or "").lower()
         example_sims = self._example_similarities(sent_embedding)
+        no_recovery_words = not RECOVERY_EVIDENCE_RE.search(sentence.text or "")
 
         for sec_id, sec_embedding in self.section_embeddings.items():
             base_sim = float(util.cos_sim(sent_embedding, sec_embedding)[0][0])
@@ -1313,16 +1320,22 @@ class ContextClassifier:
                     keyword_boost += boost
             keyword_boost = min(0.35, keyword_boost)
 
-            overview_penalty = 0.0
+            penalty = 0.0
             if sec_id == "system_overview":
                 specialized = find_overview_reassignment(sentence.text)
                 if specialized:
-                    overview_penalty = 0.25
+                    penalty = 0.25
+            elif sec_id == "disaster_recovery" and no_recovery_words:
+                penalty = RECOVERY_WITHOUT_EVIDENCE_PENALTY
 
             entity_boost, entity_note = entity_affinity_boost(sec_id, extracted_entities, sentence.text)
 
-            combined = float(alpha * base_sim + beta * context_sim + keyword_boost + entity_boost - overview_penalty)
+            topic_boost = TOPIC_SEGMENT_BOOST if topic_section and sec_id == topic_section else 0.0
+            combined = float(alpha * base_sim + beta * context_sim + keyword_boost + entity_boost + topic_boost
+                             - penalty)
             reason = f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}"
+            if topic_boost:
+                reason += f", Topic=+{topic_boost:.2f}"
             if example_sim is not None:
                 reason += f", Examples={example_sim:.3f}"
             if entity_boost:
@@ -1334,7 +1347,8 @@ class ContextClassifier:
                 confidence=combined,
                 similarity_score=base_sim,
                 reason=reason,
-                entities=extracted_entities if extracted_entities else None
+                entities=extracted_entities if extracted_entities else None,
+                topic_boost=topic_boost,
             ))
 
         rule_match = match_section_rules(sentence.text)
@@ -1357,43 +1371,31 @@ class ContextClassifier:
         sentence_text: str,
         classifications: List[Classification],
         rule_match=None,
-        cross_scores=None,
     ) -> List[Classification]:
-        """Apply cross-encoder reranking to an existing candidate list."""
+        """Keep the five best candidates, on the scale the thresholds use.
+
+        A cross-encoder (ms-marco-MiniLM-L-6-v2) used to rerank these five
+        against each section's TITLE. It is a passage-retrieval model, and
+        against a two-word title it scored about -10 for nearly every pair,
+        so its share of the blend (0.6 x sigmoid(score)) was about zero
+        and only reordered close calls at random. Removing it lost nothing
+        and gained a fact, leave-one-KT-out (audit 9aam), and saves five
+        model calls per fact. The blend also put every score at 0.4 x the
+        combined score. The review threshold (policy.json), the coverage
+        confidence and the LLM's borderline test were all set on that
+        scale, so the scale stays (CLASSIFIER_SCORE_SCALE).
+
+        Only these five are kept: the tail has no comparable score, and an
+        unscaled tail entry once outranked the real winner."""
         top_candidates = classifications[:5]
-        if self.cross_encoder and len(top_candidates) > 0:
-            try:
-                if cross_scores is None:
-                    pairs = [(sentence_text, c.section_title) for c in top_candidates]
-                    cross_scores = self.cross_encoder.predict(pairs)
-                for i, c in enumerate(top_candidates):
-                    if c.reason and c.reason.startswith("Rule match:"):
-                        continue
-                    cross_score = float(cross_scores[i])
-                    normalized_cross = 1.0 / (1.0 + np.exp(-cross_score))
-                    c.confidence = 0.4 * c.confidence + 0.6 * normalized_cross
-                    c.reason = f"Embedding={c.similarity_score:.3f}, CrossEncoder={cross_score:.3f}, Blended={c.confidence:.3f}"
-                top_candidates.sort(key=lambda x: x.confidence, reverse=True)
-                # Keep ONLY the reranked candidates. The tail was never
-                # reranked, so it still carries raw embedding scores while
-                # these carry blended ones — and blending against a
-                # strongly-negative cross-encoder score pushes a genuine
-                # match DOWN (0.65 embedding -> 0.26 blended), so an
-                # un-reranked tail entry routinely shows a higher number
-                # than the real winner. Measured live: secondary candidates
-                # scoring 2.18x the primary, which is meaningless — they are
-                # not on the same scale.
-                #
-                # Concatenating the two made `secondary_classifications` a
-                # mix of both scales, and because `filtered` accepts anything
-                # above threshold*0.6, a raw tail entry could even overtake a
-                # blended primary that dipped just below it. Candidates the
-                # cross-encoder never judged have no comparable score, and
-                # embeddings already ranked them below these five.
-                classifications = top_candidates
-                logger.debug(f"Cross-encoder reranking applied. Top match: {classifications[0].section_title} ({classifications[0].confidence:.3f})")
-            except Exception as e:
-                logger.warning(f"Cross-encoder reranking failed: {e}. Using embedding scores only.")
+        for c in top_candidates:
+            if c.reason and c.reason.startswith("Rule match:"):
+                continue
+            c.confidence *= CLASSIFIER_SCORE_SCALE
+            c.topic_boost *= CLASSIFIER_SCORE_SCALE
+            c.reason += f", Scaled={c.confidence:.3f}"
+        top_candidates.sort(key=lambda x: x.confidence, reverse=True)
+        classifications = top_candidates
 
         if rule_match:
             meta = self.section_metadata.get(rule_match.section_id, {})
@@ -1429,6 +1431,10 @@ def _is_faithful_repair(original: str, repaired: Optional[str], context_text: st
     if not repaired or "\n" in repaired:
         return False
     if not (0.6 <= len(repaired) / max(1, len(original)) <= 1.4):
+        return False
+    # "Do not restart X" -> "Restart X" keeps every word and the length.
+    from grounding import negation_changed
+    if negation_changed(original, repaired):
         return False
     known = set(_REPAIR_WORD_RE.findall((original + " " + context_text).lower()))
     new_words = [w for w in _REPAIR_WORD_RE.findall(repaired.lower()) if w not in known and len(w) > 3]
@@ -2572,6 +2578,52 @@ class TopicMemory:
 # Main Pipeline Orchestrator
 # ============================================================================
 
+def restore_sections_emptied_by_topic(classified_sentences: List["ClassifiedSentence"],
+                                      unboosted_picks: List[Optional[Tuple["Classification", float]]]) -> None:
+    """The topic boost (TOPIC_SEGMENT_BOOST) settles close calls in favour
+    of the topic being discussed. It must not be why a section ends up with
+    nothing in it: the coverage page would then report a topic the KT did
+    discuss as Missing. So when a sentence's pick without the boost is a
+    section no sentence ended up in, that sentence goes back to it (the
+    strongest such sentence, one per section, and only if the section it
+    leaves keeps another sentence). Only the classifier's own picks are
+    reconsidered; routing rules, continuations and LLM checks stand.
+    Without the boost these sentences would have been placed there anyway,
+    so this never reports less than before the boost existed."""
+    counts: Dict[str, int] = {}
+    for cs in classified_sentences:
+        if cs.primary_classification:
+            sid = cs.primary_classification.section_id
+            counts[sid] = counts.get(sid, 0) + 1
+    best: Dict[str, Tuple[float, int]] = {}
+    for i, (cs, pick) in enumerate(zip(classified_sentences, unboosted_picks)):
+        primary, log = cs.primary_classification, cs.explainability_log
+        if pick is None or primary is None or log is None or log.action != "classify":
+            continue
+        if "LLM verification" in (log.reasoning or ""):
+            continue
+        section = pick[0].section_id
+        if section == primary.section_id or counts.get(section):
+            continue
+        if section not in best or pick[1] > best[section][0]:
+            best[section] = (pick[1], i)
+    for section, (_, i) in sorted(best.items(), key=lambda kv: -kv[1][0]):
+        cs = classified_sentences[i]
+        old = cs.primary_classification.section_id
+        if counts.get(section) or counts.get(old, 0) <= 1:
+            continue
+        restored = unboosted_picks[i][0]
+        cs.secondary_classifications = [cs.primary_classification] + [
+            c for c in (cs.secondary_classifications or []) if c.section_id != section]
+        cs.primary_classification = restored
+        cs.explainability_log.section_id = section
+        cs.explainability_log.reasoning = (
+            (cs.explainability_log.reasoning or "")
+            + f" | topic boost undone: {section} would otherwise be empty")
+        counts[old] -= 1
+        counts[section] = 1
+
+
 class ContextMappingPipeline:
     """Orchestrates all 7 stages of context mapping."""
     
@@ -2629,6 +2681,10 @@ class ContextMappingPipeline:
         # STAGE 2.5: Spoken sentences rewritten as written English where a
         # model is available and the rewrite keeps every fact (copyedit.py).
         # raw_text keeps the speaker's sentence.
+        # The topics the speaker named are read from what was said: a copy
+        # edit rewrites "Security, access to Snowflake is through Okta." as
+        # "Access to Snowflake is through Okta.", and the named topic is gone.
+        said_texts = [s.text for s in sentences]
         try:
             import copyedit
             edited, self.copyedit_stats = copyedit.copyedit_sentences([s.text for s in sentences])
@@ -2679,6 +2735,9 @@ class ContextMappingPipeline:
                         related.append(other_id)
             related_sections_map[sec_id] = related
 
+        # The topic the speaker last named, for every unit (a question, a
+        # heading, a fronted "Costs, ..."; section_rules.segment_topics).
+        topics = segment_topics(said_texts)
         sentence_candidates = []
         sentence_rule_matches = []
         extracted_entities_cache = []
@@ -2686,49 +2745,18 @@ class ContextMappingPipeline:
             classifications, extracted_entities, rule_match = self.classifier._score_sentence_candidates(
                 s,
                 sent_embedding=embeddings[i],
-                context_embedding=context_embeddings[i]
+                context_embedding=context_embeddings[i],
+                topic_section=topics[i],
             )
             sentence_candidates.append(classifications)
             sentence_rule_matches.append(rule_match)
             extracted_entities_cache.append(extracted_entities)
 
-        batch_cross_scores = []
-        batch_pairs = []
-        batch_offsets = []
-        if self.classifier.cross_encoder:
-            for i, classifications in enumerate(sentence_candidates):
-                top_candidates = classifications[:5]
-                batch_offsets.append(len(batch_pairs))
-                batch_pairs.extend([(sentences[i].text, c.section_title) for c in top_candidates])
-            if batch_pairs:
-                try:
-                    batch_cross_scores = self.classifier.cross_encoder.predict(batch_pairs)
-                except Exception as e:
-                    logger.warning(f"Cross-encoder batch reranking failed: {e}. Using embedding scores only.")
-                    batch_cross_scores = []
-
         prepared = []
+        unboosted_picks = []  # per unit: (its pick without the topic boost, score) when that differs
         for i, s in enumerate(sentences):
-            classifications = sentence_candidates[i]
             rule_match = sentence_rule_matches[i]
-            top_candidates = classifications[:5]
-            if batch_cross_scores is not None and len(batch_cross_scores) > 0:
-                start_idx = batch_offsets[i]
-                end_idx = start_idx + len(top_candidates)
-                relevant_scores = batch_cross_scores[start_idx:end_idx]
-                classifications = self.classifier._rerank_candidates(
-                    s.text,
-                    classifications,
-                    rule_match=rule_match,
-                    cross_scores=relevant_scores
-                )
-            else:
-                classifications = self.classifier._rerank_candidates(
-                    s.text,
-                    classifications,
-                    rule_match=rule_match,
-                    cross_scores=None
-                )
+            classifications = self.classifier._rerank_candidates(s.text, sentence_candidates[i], rule_match=rule_match)
 
             # Recreate the final ClassifiedSentence from the reranked candidates
             filtered = [c for c in classifications if c.confidence >= (self.classifier.similarity_threshold * 0.6)]
@@ -2746,6 +2774,11 @@ class ContextMappingPipeline:
                 or (rule_match is not None and getattr(rule_match, "confidence", 0) >= RULE_OVERRIDE_CONFIDENCE)
             )
             prepared.append((classifications, primary, secondary, rule_decided))
+            unboosted = max(classifications, key=lambda c: c.confidence - c.topic_boost) if classifications else None
+            unboosted_picks.append(
+                (unboosted, unboosted.confidence - unboosted.topic_boost)
+                if unboosted is not None and primary is not None and unboosted.section_id != primary.section_id
+                else None)
 
         # With LLM_BATCH_CALLS on (the default) the borderline checks go out
         # in batches (P1-12) instead of one call per sentence; =0 is one call
@@ -2830,6 +2863,7 @@ class ContextMappingPipeline:
         # Stage 3.5: deterministic routing overrides and overview cleanup
         apply_rule_overrides(classified_sentences, self.classifier.section_metadata)
         logger.info("Stage 3.5: Applied section routing rules")
+        restore_sections_emptied_by_topic(classified_sentences, unboosted_picks)
 
         # Stage 3.6: every fact now has its section. The facts of one spoken
         # sentence that sit side by side in one section are one unit from

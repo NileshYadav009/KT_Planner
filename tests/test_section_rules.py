@@ -99,10 +99,13 @@ def test_the_infrastructure_as_code_tool_is_an_architecture_fact():
     # decided the section for the other facts too.
     chain = "Terraform manages the infrastructure, GitHub Actions builds the images, and ArgoCD deploys them to GKE."
     assert match_section_rules(chain).section_id == "deployment_and_rollback"
-    for text in ["Everything is in Terraform, and Cloud Build deploys to Cloud Run on every merge to main.",
-                 "The infrastructure is in Terraform, applied from Cloud Build. Application releases go through Cloud Deploy.",
+    for text in ["The infrastructure is in Terraform, applied from Cloud Build. Application releases go through Cloud Deploy.",
                  "GKE is used for Kubernetes workloads. Terraform manages infrastructure."]:
         assert match_section_rules(text) is None, text
+    # Its release trigger ("on every merge", audit 9aaj) is a deployment fact;
+    # the infrastructure-as-code rule still does not decide it.
+    chained = match_section_rules("Everything is in Terraform, and Cloud Build deploys to Cloud Run on every merge to main.")
+    assert chained is None or chained.section_id != "architecture_reference"
     # Rebuilding from it is DR, and its state is a Danger Zone.
     assert match_section_rules("For disaster recovery, Terraform is used to recreate infrastructure.").section_id \
         == "disaster_recovery"

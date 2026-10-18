@@ -43,7 +43,7 @@ except ImportError:
         HAS_TEXTDISTANCE = False
 
 import glossary
-from devops_vocabulary import DEVOPS_VOCABULARY
+from devops_vocabulary import DEVOPS_VOCABULARY, KEEP_AS_SAID
 
 # ============================================================================
 # DevOps Terminology Corrections Dictionary
@@ -149,6 +149,10 @@ def get_canonical_key_map() -> Dict[str, str]:
     # can never be "corrected" away from its own correct spelling.
     for canonical in DEVOPS_VOCABULARY:
         mapping[canonical.lower()] = canonical.lower()
+    # Correct wording ("scale out", "recovery time objective", "Entra ID")
+    # is already as it should be: leave it as said.
+    for phrase in KEEP_AS_SAID:
+        mapping[phrase] = phrase
 
     _CANONICAL_KEY_MAP_CACHE = mapping
     _CANONICAL_KEY_MAP_CACHE_GLOSSARY_ID = id(current_glossary)
@@ -536,7 +540,7 @@ _NOT_JOINED = r"(?![\w-])"
 # "Like the previous incident, ..."), so at sentence start they only count
 # as filler when a comma sets them off; the rest are fillers there either way.
 _LEADING_FILLER_RE = re.compile(
-    r"(?:^|(?<=[.!?]\s))(?:(?:(?:okay|so|well|um+|uh+|basically|actually|you know)"
+    r"(?:^|(?<=[.!?]\s))(?:(?:(?:okay|so|well|um+|uh+|basically|you know)"
     + _NOT_JOINED + r"[,.]?|(?:right|like)" + _NOT_JOINED + r"[,.])\s+)+",
     re.IGNORECASE,
 )
@@ -553,9 +557,14 @@ _TRAILING_TAG_RE = re.compile(
 )
 # Hesitation sounds and pure hedges carry no content in any position.
 _ANYWHERE_FILLER_RE = re.compile(
-    _NOT_IN_WORD + r"(?:um+|uh+|basically|actually)" + _NOT_JOINED + r",?\s*",
+    _NOT_IN_WORD + r"(?:um+|uh+|basically)" + _NOT_JOINED + r",?\s*",
     re.IGNORECASE,
 )
+# "Actually" inside a sentence is emphasis ("it was actually down"); opening
+# one, it corrects what was just said: "The RTO is four hours. Actually the
+# RTO is thirty minutes." lost its "Actually" and read as two contradictory
+# statements. So it is only removed mid-sentence (audit 9aam).
+_MID_SENTENCE_ACTUALLY_RE = re.compile(r"(?<=[\w,;]\s)actually" + _NOT_JOINED + r",?\s*", re.IGNORECASE)
 # Spoken agreement carries no content anywhere, commas or not ("reached
 # 15,000 right so yep so we have"), with a "so" that follows it.
 _AGREEMENT_FILLER_RE = re.compile(
@@ -594,6 +603,7 @@ def remove_fillers(text: str) -> str:
         previous = cleaned
         cleaned = _ASIDE_FILLER_RE.sub(" ", cleaned)
     cleaned = _LEADING_FILLER_RE.sub("", cleaned)
+    cleaned = _MID_SENTENCE_ACTUALLY_RE.sub("", cleaned)
     cleaned = re.sub(r"\s+,", ",", cleaned)
     cleaned = re.sub(r",\s*([.!?])", r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
@@ -907,6 +917,10 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
             best_term = None
             best_score = 0.0
             for target in candidates_for_ngram(terms_by_word_count, n, phrase):
+                if target in KEEP_AS_SAID:
+                    # Real wording, not a term to correct towards: "scaled
+                    # out" is not a mishearing of "scale out".
+                    continue
                 target_words = target.split()
                 score = jaro_winkler_similarity(phrase, target)
                 if score <= best_score:

@@ -85,14 +85,16 @@ def test_contradictions_are_flagged(scores):
             assert scores[golden["id"]]["missing_conflicts"] == [], golden["id"]
 
 
-@pytest.mark.xfail(reason="Accuracy on unseen KTs is 81% (77 of 95 holdout facts since 15 Oct; target 90%); five blind "
-                          "rounds put it at about 84%. See scripts/golden_report.py", strict=False)
+@pytest.mark.xfail(reason="Holdouts h12-h14: 90.5% (86 of 95) since 17 Oct (topic segments, audit 9aaj), but a fresh "
+                          "blind set written that day (b01-b03, 114 facts, outside the suite) scored 83%: the 90% "
+                          "target is not yet met on unseen KTs in general. See scripts/golden_report.py", strict=False)
 def test_unseen_kts_meet_the_accuracy_target(scores):
     """Only the holdouts measure accuracy on a KT the rules were not tuned
-    on. Blind rounds so far: 84% (h01-h02), 83% (h03-h05; 86% once their
-    ownership rows were annotated), 89.9% (h06-h08, 89 of 99 facts), 79%
-    (h09-h11, 84 of 106), 82% (h12-h14, 78 of 95): 365 of 437 blind facts
-    in all, about 84%."""
+    on. Blind rounds so far, each at first sight: 84% (h01-h02), 83%
+    (h03-h05; 86% once their ownership rows were annotated), 89.9% (h06-h08,
+    89 of 99 facts), 79% (h09-h11, 84 of 106), 82% (h12-h14, 78 of 95),
+    83% (b01-b03, 95 of 114, 17 Oct): 460 of 551 blind facts in all, about
+    84%. h12-h14 went from 77 to 86 of 95 with the 17 Oct changes."""
     holdouts = [s for s in scores.values() if s["holdout"]]
     total = sum(len(s["facts"]) for s in holdouts)
     correct = sum(sum(f["status"] == "correct" for f in s["facts"]) for s in holdouts)

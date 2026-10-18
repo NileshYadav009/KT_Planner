@@ -1463,3 +1463,75 @@ Results:
   - h14's baseline floor was rewritten and accepted by the user. Besides
     the one fact, it accepts one covered section shown as Missing with no
     LLM; with Groq there are none. h14 stays blind.
+
+## Accuracy: the topic the speaker named decides close calls (audit §9aaj, 17 Oct)
+
+- **Why facts were misplaced:** sentences that say little by themselves
+  ("Only six clinics have it.") were classified alone. Section scores
+  barely differ, and Disaster Recovery attracted any duration ("for an
+  hour").
+- **Fix:**
+  - Every fact gets the topic the speaker last named, by a question, a
+    heading read aloud, a fronted "Costs, ..." or a decided rule, and a
+    small boost for it.
+  - Disaster Recovery needs a recovery word to win a close call.
+  - The boost may never leave a discussed section empty.
+  - New general rules: unfinished work, cost, release triggers, first-month
+    milestones.
+- **Measured (no LLM):**
+  - Blind holdouts h12-h14: 77 to **86 of 95 (90.5%)**; false Missing 1
+    to 0.
+  - A fresh blind set (b01-b03, 114 facts): 87 to **95 (83%)**.
+  - New development KTs: 82.6% to 94.6%.
+  - Tuning 534/534 and e2e 100% unchanged.
+  - Honest read: about 87% on unseen KTs without an LLM. h12-h14 clear 90%;
+    unseen KTs in general do not yet.
+- **Open:**
+  - LLM-mode measurement (needs Groq; not called).
+  - Whether to add the new KTs to the golden suite (needs new
+    `baseline.json` entries and a `section_examples.json` rebuild).
+  - The four `test_field_populator` failures from §9aai.
+
+## The document may not reverse or rewrite what was said (audit §9aak, 17 Oct)
+
+- **A rewrite could turn a statement into its opposite.** The polish and
+  sentence-repair checks ignored negations, so "Do not restart the
+  consumers" could come back as "Restart the consumers" and be accepted.
+  Both now refuse a rewrite that loses or adds a negation, and keep the
+  speaker's words.
+- **The cleaner rewrote correct wording.** About 120 vocabulary "variants"
+  were real phrases ("scale out", "recovery time objective", "Entra ID",
+  "certificate manager"), and 81 were rewritten, some wrongly ("Entra ID" ->
+  the retired "azure active directory"). They are now kept as said. Real
+  mishearings ("coffee for a" -> Kafka) are still fixed.
+- **Measured (no LLM):** accuracy unchanged on every set; unsourced 0.
+
+## Groq after the round-6 changes (audit §9aal, 17-18 Oct)
+
+- **With Groq, about 94% on unseen KTs:** 197 of 209 blind facts are
+  present and correctly placed (h12-h14 95.8%, b01-b03 93.0%). This counts
+  a reworded fact as present. Strict quote matching undercounts LLM mode
+  because the polish rewords sentences. Without an LLM it is about 87%.
+- E2e KTs: every fact retained, 0 problems.
+- The negation guard caught one real reversal by the polish.
+- Cost: 101 requests, about 77k tokens.
+- To look at: with Groq, a few repeated sentences and 2 unsourced facts on
+  the new blind set.
+
+## Core review of mapping and sentence correction (audit §9aam, 18 Oct)
+
+- **Routing rules are about 98% right on unseen KTs.** 21 of 22 remaining
+  errors come from the embedding classifier. Its settings are already at
+  their best on everything we can see, so the next gain needs a better
+  judge for close calls, not tuning. Next options: offer the LLM 5
+  candidates instead of 3 (needs a Groq run), or use the local model for
+  close calls without an LLM.
+- **Removed:** the cross-encoder. It added nothing measurable, cost five
+  model calls per fact and one model to load.
+- **Copy edit:**
+  - It may no longer change who said something, a sentence's tense, or add
+    a topic word.
+  - "No ..." rules are never reworded.
+  - Topics are read from what was said, not from the copy-edited text.
+  - Its cost on unseen KTs went to 0 (181 of 209 with it and without it).
+- **Cleaner:** a sentence-opening "Actually" (a correction) is kept.

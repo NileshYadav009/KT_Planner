@@ -34,7 +34,7 @@ except Exception:
     pass
 
 from field_populator import find_source_sentence_index
-from grounding import ground_structured, added_specifics
+from grounding import ground_structured, added_specifics, negations_flipped
 from llm.usage import record_rejected as record_llm_rejected
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 import contextvars
@@ -545,6 +545,14 @@ def polish_coverage_sections(
                 # a dropped fact below: keep the speaker's own words.
                 logger.warning("Polish for %s added unsupported specifics %s; keeping raw text instead", sid, added[:5])
                 record_llm_rejected("section_polish", f"{sid}: added {', '.join(added[:5])}")
+                return _local_cleanup_list(_all_fragments(section))
+            flipped = negations_flipped(section["fragments"], cleaned_text)
+            if flipped:
+                # Every word kept, the meaning reversed: "Do not restart the
+                # consumers" came back as "Restart the consumers". The words
+                # checks cannot see it (grounding.NEGATION_RE).
+                logger.warning("Polish for %s changed a negation; keeping raw text instead", sid)
+                record_llm_rejected("section_polish", f"{sid}: negation changed")
                 return _local_cleanup_list(_all_fragments(section))
             dropped = _fragments_missing_from(section["fragments"], cleaned_text)
             if dropped:

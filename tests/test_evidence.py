@@ -175,3 +175,14 @@ def test_a_numbered_labelled_step_is_linked_to_the_sentence_it_repeats():
         "1. **Trigger:** Alerts go to PagerDuty, and the on-call rotation is weekly."]})
     stats = attach_evidence(ko, transcript_sentences("", SEGMENTS))
     assert (stats["stated"], stats["unsourced"]) == (1, 0)
+
+
+def test_an_acronym_is_sourced_by_its_full_name_said_aloud():
+    """The cleaner now leaves "recovery time objective" as said (audit 9aak);
+    the document's "RTO (Recovery Time Objective): four hours" must still
+    point to it."""
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [
+        "RTO (Recovery Time Objective): four hours"]}, section_id="disaster_recovery")
+    sentences = transcript_sentences("", [{"start": 0.0, "end": 3.0, "text": "The recovery time objective is four hours."}])
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    assert len(ko["rendered_sections"][0]["blocks"][0]["sources"][0]) == 1

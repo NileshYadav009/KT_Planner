@@ -377,3 +377,37 @@ def test_a_transcribed_piece_is_closed_when_the_next_one_opens_a_sentence():
                                     "and we have", "The rollout history."]) == \
         ["everything in dev is moved on to production.", "Then we can see the health",
          "and we have", "The rollout history."]
+
+
+def test_correct_wording_is_left_as_said_and_mishearings_are_still_fixed():
+    """The vocabulary listed real phrases as if they were mishearings, so
+    "scale out the web tier" became "horizontal scaling the web tier", "The
+    recovery time objective" became "The rto" and "Entra ID" became the
+    retired "azure active directory" (audit 9aak)."""
+    from devops_transcription import clean_transcript
+
+    for text, phrase in [
+        ("We scale out the web tier before the sale.", "scale out"),
+        ("Scale up the database before the sale.", "scale up the database"),
+        ("We scaled out the web tier last year.", "scaled out"),
+        ("The recovery time objective is four hours.", "recovery time objective"),
+        ("We use a feature toggle and a canary release.", "feature toggle and a canary release"),
+        ("Staff sign in with Entra ID.", "entra id"),
+        ("The certificate manager renews the certs.", "certificate manager"),
+        ("Alert routing sends pages to the on-call phone.", "alert routing"),
+        ("Pods run on Azure Kubernetes Service and Google Cloud.", "azure kubernetes service and google cloud"),
+    ]:
+        assert phrase in clean_transcript(text).lower(), text
+    assert "Kafka" in clean_transcript("coffee for a handles the order events.")
+    assert "Prometheus" in clean_transcript("promo theus scrapes the metrics.")
+    assert "neo4j" in clean_transcript("The neo four j cluster.").lower()
+
+
+def test_actually_is_kept_where_it_corrects_what_was_just_said():
+    """Opening a sentence it marks a correction; inside one it is emphasis."""
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("The RTO is four hours. Actually the RTO is thirty minutes.") == \
+        "The RTO is four hours. Actually the RTO is thirty minutes."
+    assert clean_transcript("It was actually down for an hour.") == "It was down for an hour."
+    assert clean_transcript("Um, okay, so, uh, this is the KT for Pulse.") == "This is the KT for Pulse."

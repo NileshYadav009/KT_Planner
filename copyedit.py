@@ -95,7 +95,23 @@ you your we our they them this that these those what which whatever with from in
 been being will would could should able also more much many some such than when where while
 about after before again even ever going gonna want wanna thing things stuff kind sort""".split())
 _POLARITY = ("never", "not", "no", "cannot", "must", "always", "only", "still", "without", "until", "unless")
-_SAFETY_RE = re.compile(r"^\s*(?:never|do\s+not|don't|always|must|avoid)\b", re.IGNORECASE)
+# A rule is never reworded. "No changes in the last week of December." came
+# back as "There have been no changes in the last week of December.": the
+# rule became a statement about the past.
+_SAFETY_RE = re.compile(r"^\s*(?:never|do\s+not|don't|always|must|avoid|no)\b", re.IGNORECASE)
+# "Nadia: And my first week? Owen: Get access to ..." came back as "Nadia: My
+# first week involves getting access to ...": Owen's answer became Nadia's.
+_SPEAKER_LABEL_RE = re.compile(r"(?:^|(?<=[.?!]\s))([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)?)\s*:\s")
+# Tense the speaker did not use: "No changes ..." -> "There have been no
+# changes ..." turns a rule into history.
+_TENSE_WORDS = frozenset({"have", "has", "had", "was", "were", "been"})
+# Words that name a KT topic. The section a sentence goes to is decided on
+# the rewritten sentence, so a word the speaker did not say moves it: "Java
+# Spring Boot services on Red Hat OpenShift" came back as "... services are
+# deployed on Red Hat OpenShift" and read as a deployment fact.
+_TOPIC_STEMS = ("deploy", "releas", "rollb", "backup", "restor", "recover", "monitor", "alert", "dashboard",
+                "secur", "encrypt", "cost", "budget", "escalat", "owner", "owns", "incident", "outage", "fail",
+                "migrat", "access", "approv")
 _CHAT_RE = re.compile(r"^\s*(?:sure|certainly|here(?:'s|\s+is)|of\s+course)\b", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d[\d,.]*\d|\d")
 _MIN_CONTENT_KEPT = 0.85
@@ -182,6 +198,16 @@ def problems(source: str, rewrite: str) -> List[str]:
     n_src, n_new = len(source.split()), len(rewrite.split())
     if n_new < 0.5 * n_src or n_new > 1.5 * n_src + 4:
         out.append("length changed")
+    if _SPEAKER_LABEL_RE.findall(source) != _SPEAKER_LABEL_RE.findall(rewrite):
+        out.append("speakers changed")
+    tense = sorted((new_words & _TENSE_WORDS) - src_words)
+    if tense:
+        out.append("tense changed: " + ", ".join(tense))
+    said = re.findall(r"[a-z]+", source.lower())
+    topics = sorted({stem for w in re.findall(r"[a-z]+", rewrite.lower()) for stem in _TOPIC_STEMS
+                     if w.startswith(stem) and not any(s.startswith(stem) for s in said)})
+    if topics:
+        out.append("added topic words: " + ", ".join(topics))
     return out
 
 

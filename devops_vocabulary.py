@@ -650,3 +650,44 @@ DEVOPS_VOCABULARY = {
     "cockroachdb": ["cockroachdb", "cockroach db", "cockroach d b"],
     "victoriametrics": ["victoriametrics", "victoria metrics"],
 }
+
+# Variants above that are not mishearings but correct wording: the full
+# name of an acronym, a product's own name as people say it, or a real
+# phrase. They stay known terms but are never rewritten, and nothing is
+# corrected towards them. Rewriting them changed what the speaker said:
+# "scale out the web tier" became "horizontal scaling the web tier", "The
+# recovery time objective is four hours" became "The rto is four hours",
+# "Entra ID" became the retired "azure active directory", "certificate
+# manager" became the Kubernetes tool cert-manager, and "alert routing"
+# became "alerting" (audit 9aak).
+KEEP_AS_SAID = frozenset({
+    # Full names of acronyms
+    "amazon web services", "google cloud platform", "elastic compute cloud", "simple storage service",
+    "relational database service", "elastic container service", "elastic kubernetes service",
+    "identity and access management", "virtual private cloud", "simple queue service",
+    "simple notification service", "elastic container registry", "elastic block store", "elastic file system",
+    "key management service", "web application firewall", "security token service", "simple email service",
+    "azure kubernetes service", "azure resource manager template", "google kubernetes engine",
+    "content delivery network", "transport layer security", "json web token", "role based access control",
+    "multi factor authentication", "security information and event management", "java virtual machine",
+    "site reliability engineer", "service level indicator", "service level objective", "service level agreement",
+    "recovery time objective", "recovery point objective", "managed streaming for kafka",
+    "kubernetes in docker", "cloud development kit", "cdk for terraform", "application performance monitoring",
+    "border gateway protocol", "mean time to recovery", "mean time to repair", "mean time to acknowledge",
+    "mean time between failures", "virtual network", "control group",
+    # Products named as people name them
+    "google cloud", "microsoft azure", "aws lambda", "s3 glacier", "aws aurora", "aws secrets manager",
+    "aws step functions", "azure function", "azure blob storage", "azure ad", "entra id", "azure cosmos db",
+    "key vault", "app gateway", "gcp cloud run", "gcp cloud functions", "google cloud storage", "gcp cloud sql",
+    "gcp cloud build", "flux cd", "chef infra", "apache pulsar", "oracle database", "hashicorp vault",
+    "certificate manager", "ms teams", "python pip", "aws amplify", "aws cognito", "amazon neptune",
+    "aws direct connect", "aws control tower", "aws service catalog", "aws cost explorer", "app service",
+    "service bus", "event hubs", "data factory", "synapse analytics", "log analytics", "front door",
+    "traffic manager", "google cloud monitoring", "terraform atlantis", "cortex metrics", "aws security hub",
+    "kong gateway", "artifact registry", "nexus repository", "sonatype nexus", "jfrog artifactory",
+    "aws bedrock", "amazon opensearch",
+    # Real phrases
+    "helm chart", "docker image", "alert routing", "event streaming", "secrets management",
+    "git version control", "slack channel", "scale out", "scale up", "feature toggle", "canary release",
+    "kubernetes operator", "tagging strategy", "configuration drift", "tech debt",
+})

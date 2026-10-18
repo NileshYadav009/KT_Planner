@@ -83,3 +83,58 @@ def test_danger_zones_are_never_reworded(monkeypatch):
     out = ai.polish_coverage_sections({"danger_zones": {"title": "Danger Zones", "fragments": [warning]}})
     assert out["danger_zones"] == [warning]
     assert stub.prompts == []
+
+
+def test_a_rewrite_that_reverses_a_statement_is_caught():
+    """Every content word kept, the meaning reversed: the word checks passed
+    "Do not restart the consumers" -> "Restart the consumers" (audit 9aak)."""
+    from grounding import negations_flipped
+
+    cases = [
+        (["Do not restart the consumers during the nightly reindex."], "- Restart the consumers during the nightly reindex."),
+        (["Never deploy to production on Fridays."], "Deploy to production on Fridays."),
+        (["The RTO has not been formally documented."], "The RTO has been formally documented."),
+        (["dont purge the dead letter queue, it holds the failed events."], "Purge the dead letter queue, it holds the failed events."),
+    ]
+    for sources, rewrite in cases:
+        assert negations_flipped(sources, rewrite) == sources, rewrite
+    # A negation the speaker never said.
+    added = negations_flipped(["Failover was tested in March.", "Backups run nightly."],
+                              "- Failover was not tested in March.\n- Backups run nightly.")
+    assert added == ["- Failover was not tested in March."]
+
+
+def test_a_fair_rewrite_of_a_negation_is_accepted():
+    from grounding import negations_flipped
+
+    assert negations_flipped(FRAGMENTS, "- Never change production Kubernetes configuration manually.\n"
+                                        "- Never modify Bicep-managed infrastructure without coordinating with "
+                                        "the platform engineering team.") == []
+    assert negations_flipped(["Do not deploy during the month-end close."],
+                             "Avoid deploying during the month-end close.") == []
+    assert negations_flipped(["Staging has no payment integration.", "Staging mirrors production."],
+                             "Staging mirrors production but has no payment integration.") == []
+
+
+def test_the_polish_keeps_the_speakers_words_when_the_rewrite_reverses_one(monkeypatch):
+    import ai
+
+    class Reverser:
+        model = "stub"
+
+        def generate(self, prompt, **kwargs):
+            return "- Roll back by redeploying the previous release from the pipeline history.\n" \
+                   "- Merge to main during the month-end close."
+
+    monkeypatch.setattr(ai, "get_llm_provider", lambda: Reverser())
+    fragments = ["Roll back by redeploying the previous release from the pipeline history.",
+                 "Never merge to main during the month-end close."]
+    out = ai.polish_coverage_sections({"deployment_and_rollback": {"title": "Deployment", "fragments": fragments}})
+    assert "Never merge to main during the month-end close" in " ".join(out["deployment_and_rollback"])
+
+
+def test_a_sentence_repair_may_not_change_a_negation():
+    from context_mapper import _is_faithful_repair
+
+    assert not _is_faithful_repair("Do not restart the consumer.", "Restart the consumer.", "")
+    assert _is_faithful_repair("Dont restart the consumr.", "Don't restart the consumer.", "")

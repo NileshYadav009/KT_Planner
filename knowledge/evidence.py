@@ -116,6 +116,18 @@ def _aliases() -> Tuple[Dict[str, str], Any]:
                 names.setdefault(_spelling_key(name), name)
         except Exception:
             pass
+        try:
+            from devops_vocabulary import DEVOPS_VOCABULARY, KEEP_AS_SAID
+
+            # Wording the cleaner leaves as said ("The recovery time
+            # objective is four hours") states the document's short form
+            # ("RTO (Recovery Time Objective): four hours").
+            for canonical, spellings in DEVOPS_VOCABULARY.items():
+                for spelling in spellings:
+                    if spelling.lower() in KEEP_AS_SAID:
+                        names.setdefault(_spelling_key(spelling), canonical)
+        except Exception:
+            pass
         parts = sorted(names, key=len, reverse=True)
         pattern = re.compile(r"(?<![\w.\-])(" + "|".join(r"[\s\-]+".join(map(re.escape, p.split(" "))) for p in parts)
                              + r")(?![\w\-])", re.IGNORECASE) if parts else None

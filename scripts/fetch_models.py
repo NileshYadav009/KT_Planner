@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # repo id -> commit. Update deliberately, then re-run the golden suite.
 MODELS = {
     "BAAI/bge-large-en-v1.5": "d4aa6901d3a41ba39fb536a557fa166f842b0e09",          # section classifier
-    "cross-encoder/ms-marco-MiniLM-L-6-v2": "233902d25c440f23af6f7d6e94d2946bac0bee0a",  # reranker
     "sentence-transformers/all-MiniLM-L6-v2": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",  # chunking, field mapping
     "urchade/gliner_multi": "b5720abb5b8c575e626e54a7c1001761db8b08db",              # entity extraction
     "microsoft/mdeberta-v3-base": "a0484667b22365f84929a935b5e50a51f71f159d",         # GLiNER's tokenizer
@@ -116,12 +115,11 @@ def verify() -> int:
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     from faster_whisper import WhisperModel
-    from sentence_transformers import CrossEncoder, SentenceTransformer
+    from sentence_transformers import SentenceTransformer
 
     loaded = {
         "BAAI/bge-large-en-v1.5": SentenceTransformer("BAAI/bge-large-en-v1.5"),
         "all-MiniLM-L6-v2": SentenceTransformer("all-MiniLM-L6-v2"),
-        "ms-marco-MiniLM-L-6-v2": CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2"),
     }
     WhisperModel("small", device="cpu", compute_type="int8")
     try:

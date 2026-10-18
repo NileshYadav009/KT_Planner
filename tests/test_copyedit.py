@@ -201,3 +201,28 @@ def test_without_a_model_nothing_changes(monkeypatch):
     text = ["so yeah the service Runs on EKS right"]
     edited, stats = copyedit.copyedit_sentences(text)
     assert edited == text and stats["model"] is None and stats["rewritten"] == 0
+
+
+def test_rewrites_that_change_who_said_it_its_tense_or_its_topic_are_refused():
+    """Seen on the local model (audit 9aam): each kept every content word."""
+    refused = {
+        # A rule became history.
+        "No changes in the last week of December.":
+            "There have been no changes in the last week of December.",
+        # Owen's answer became Nadia's.
+        "Nadia: And my first week? Owen: Get access to the Azure subscription and the on-prem jump host.":
+            "Nadia: My first week involves getting access to the Azure subscription and the on-prem jump host.",
+        # "deployed" was not said, and moved the fact to Deployment.
+        "Java Spring Boot services on Red Hat OpenShift in our two data centres.":
+            "Java Spring Boot services are deployed on Red Hat OpenShift in two data centers.",
+    }
+    for spoken, rewrite in refused.items():
+        assert copyedit.problems(spoken, rewrite), rewrite
+    accepted = {
+        "For a rollback you just revert the commit in the config repo and Argo puts the old version back.":
+            "For a rollback, you revert the commit in the config repo, and Argo puts the old version back.",
+        "Nadia: How will I know something is wrong? Owen: Azure Monitor alerts on failed bookings.":
+            "Nadia: How can I know if something is wrong? Owen: Azure Monitor alerts on failed bookings.",
+    }
+    for spoken, rewrite in accepted.items():
+        assert copyedit.problems(spoken, rewrite) == [], rewrite

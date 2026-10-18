@@ -275,3 +275,65 @@ def added_specifics(rewrite: str, sources: Iterable[str]) -> List[str]:
     """Specifics a polish rewrite introduced that none of its source
     fragments contain."""
     return ungrounded(rewrite, "\n".join(s for s in sources if isinstance(s, str)))
+
+
+# A negation turns a statement into its opposite, and the word checks
+# (ungrounded, ai._fragments_missing_from) ignore it on purpose: "must not be
+# changed" -> "never change" is a fair rewrite. So a rewrite that dropped one
+# kept every content word and was accepted: "Do not restart the consumers"
+# came back as "Restart the consumers", "Never deploy on Fridays" as "Deploy
+# on Fridays", "The RTO has not been documented" as "The RTO has been
+# documented". Saying the same thing as a prohibition ("avoid", "prohibited")
+# counts as keeping it.
+NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without|avoid\w*|prohibit\w*|forbid\w*|"
+    r"refrain\w*)\b|n't\b|"
+    # Speech-to-text often drops the apostrophe: "dont restart it".
+    r"\b(?:dont|doesnt|didnt|cant|wont|isnt|arent|wasnt|werent|hasnt|havent|shouldnt|couldnt|wouldnt|mustnt)\b",
+    re.IGNORECASE,
+)
+_CONTENT_RE = re.compile(r"[a-z0-9]+")
+_POLARITY_FILLER = frozenset(
+    "a an and are as at be been but by for from had has have if in into is it its of on or so that the their then "
+    "there these this to was were when which while with you your we our they must do does should would will can "
+    "also".split())
+# Share of a source sentence's content words a line must restate to be
+# taken as its rewrite.
+_RESTATES = 0.5
+
+
+def _content(text: str) -> Set[str]:
+    words = (w for w in _CONTENT_RE.findall((text or "").lower().replace("n't", " not")))
+    return {w[:5] for w in words if w not in _POLARITY_FILLER and not NEGATION_RE.fullmatch(w)}
+
+
+def negation_changed(source: str, rewrite: str) -> bool:
+    """Whether a one-sentence rewrite gained or lost a negation."""
+    return bool(NEGATION_RE.search(source or "")) != bool(NEGATION_RE.search(rewrite or ""))
+
+
+def negations_flipped(sources: Iterable[str], rewrite: str) -> List[str]:
+    """Statements a rewrite of several sentences turned into their opposite:
+    a source sentence with a negation whose restating line has none, and a
+    line with a negation that only restates sentences without one."""
+    lines = [line for line in re.split(r"\n+|(?<=[.!?])\s+", rewrite or "") if line.strip()]
+    if not lines:
+        return []
+    line_words = [_content(line) for line in lines]
+    sources = [(s, _content(s), bool(NEGATION_RE.search(s))) for s in sources if isinstance(s, str)]
+    sources = [(s, words, negated) for s, words, negated in sources if len(words) >= 2]
+    flipped = []
+    for source, words, negated in sources:
+        if not negated:
+            continue
+        overlap = [len(words & lw) / len(words) for lw in line_words]
+        best = max(range(len(lines)), key=overlap.__getitem__)
+        if overlap[best] >= _RESTATES and not NEGATION_RE.search(lines[best]):
+            flipped.append(source)
+    for line, lw in zip(lines, line_words):
+        if not NEGATION_RE.search(line):
+            continue
+        restated = [negated for _, words, negated in sources if len(words & lw) / len(words) >= _RESTATES]
+        if restated and not any(restated):
+            flipped.append(line)
+    return flipped
