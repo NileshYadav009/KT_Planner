@@ -1587,3 +1587,43 @@ Results:
   paragraph, and every statement in a table row, now cites its own source.
 - **No accuracy loss:** no-LLM accuracy is unchanged on every set.
 - **Groq used:** 182 requests, about 137k tokens.
+
+## Adversarial KT testing (audit §9aaq, 18 Oct)
+
+- **A test set of 46 tricky KTs** (`evaluation/matrix/`): corrections,
+  guesses, plans, contradictions, numbers, steps, noisy speech-to-text.
+  Before the fixes, 25 of the first 35 produced a fully correct document;
+  now all 46 do.
+- **Corrections:**
+  - "2000K, no, sorry, it's 3000K" now shows only 3000K.
+  - A value corrected later ("Actually, production is now on PostgreSQL 16",
+    or "I was wrong about the backups earlier") is never shown on its own
+    any more: it stays next to its correction.
+- **Plans and guesses:** "We plan to migrate to Kubernetes" no longer lists
+  Kubernetes as part of the system.
+- **Procedures:** "Then ...", "After that ..." steps stay with their
+  procedure.
+- **Conflicts:** two different counts or values for the same thing, with no
+  correction, are now flagged to confirm.
+- **Smaller fixes:** names like "orders-api" and "kubectl" keep their
+  spelling; spelled-out acronyms and call chatter are handled.
+- **No accuracy change** on any test set. No LLM quota used.
+- **Still open:** contradictions of meaning ("developers approve" versus
+  "only the release manager approves") are shown but not flagged; that needs
+  an LLM check.
+
+## Groq session: option B and a conflict check (audit §9aar, 19 Oct)
+
+- **Option B confirmed, small gain:** 199 vs 198 of 209 facts on the unseen
+  KTs, +1 on dev too, never worse. It costs about 25% more tokens in the
+  section check and needs a replay re-record, so it stays off until you
+  decide.
+- **The section check alone** takes the unseen KTs from 87% to 95%.
+- **Contradictions of meaning are now flagged when Groq is on:** "Developers
+  own deployment approvals" against "Only the release manager can approve",
+  "public" against "only private subnets", "hourly" against "every six
+  hours". One small call per KT (about 400 tokens). No false flags on the
+  test KTs.
+- **Fewer false conflict warnings:** an older rule flagged unrelated
+  "allowed" and "never" sentences in half the dev KTs; now 0.
+- **Groq used:** 65 live requests, about 81k tokens (77k in, 3k out): option B 19 requests and 51k, the conflict check 46 requests and 30k (the rejected first design included).

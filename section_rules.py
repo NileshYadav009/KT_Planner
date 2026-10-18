@@ -1180,7 +1180,11 @@ _ENUMERATION_HEAD_RE = re.compile(
 )
 _DEPENDENT_CONTINUATION_RE = re.compile(
     r"^\s*(?:the\s+(?:\w+\s+)?(?:reason|root\s+cause|cause|symptom|fix|remediation|remedy|resolution|solution|"
-    r"corrective\s+action|workaround|mitigation)\b|(?:this|that)\s+(?:was|is)\s+because\b)",
+    r"corrective\s+action|workaround|mitigation)\b|(?:this|that)\s+(?:was|is)\s+because\b"
+    # When or how often it happens: "Redis evicts sessions under memory
+    # pressure. That happens during peak traffic." (adversarial matrix B05).
+    r"|(?:this|that|it)\s+(?:usually\s+|mostly\s+|only\s+|typically\s+|normally\s+|often\s+|always\s+|also\s+)?"
+    r"(?:happens|happened|occurs|occurred|tends\s+to\s+happen|shows\s+up|kicks\s+in)\b)",
     re.IGNORECASE,
 )
 # How far back an ordinal item may look for its enumeration head.
@@ -1190,6 +1194,40 @@ _ENUMERATION_WINDOW = 6
 _CONTINUATION_YIELDS_TO_SECTIONS = frozenset({"danger_zones"})
 # Openers that mark a clause cut from a longer sentence.
 _FRAGMENT_START_RE = re.compile(r"^(?:and|or|but|then|so|while|which|whereas|nor|plus)\b", re.IGNORECASE)
+# A procedure said one step per sentence ("To roll back, first pause the
+# sync." "Then revert the image tag." "After that, resume the sync and watch
+# the error rate."): a step opens with a sequence word and gives an
+# instruction, and goes where the step before it went. Classified alone, the
+# last step of a rollback went to Disaster Recovery (adversarial matrix I02).
+_STEP_OPENER_RE = re.compile(
+    r"^\W*(?:and\s+)?(?:then|next|after\s+(?:that|this)|afterwards|finally|lastly|second(?:ly)?|third(?:ly)?"
+    r"|(?:once|when)\s+(?:that|this|it)(?:'s|\s+is|\s+has\s+been)?\s+(?:done|finished|complete|completed|back|up))"
+    r"\b[\s,]*", re.IGNORECASE)
+_FIRST_STEP_RE = re.compile(
+    r"(?<!\bthe\s)(?<!\ba\s)\b(?:first(?:ly)?|step\s+(?:one|1))\b[\s,]+(?:you\s+)?(?P<word>[a-z]+)", re.IGNORECASE)
+# Words that do not open an instruction: "Then the backups run nightly",
+# "Next, we have the monitoring side".
+_NOT_AN_INSTRUCTION = frozenset("""the a an this that these those there here it its our their my his her we i they
+he she is are was were has have had of for time thing step one""".split())
+
+
+def _gives_instruction(text: str) -> bool:
+    words = re.findall(r"[A-Za-z']+", text or "")
+    if words and words[0].lower() == "you":
+        words = words[1:]
+    return bool(words) and words[0].lower() not in _NOT_AN_INSTRUCTION
+
+
+def _is_step(text: str) -> bool:
+    """`text` is a step of a procedure: an instruction, the first step of
+    one ("To roll back, first pause ..."), or a step that follows one."""
+    from fact_units import _is_imperative
+
+    opener = _STEP_OPENER_RE.match(text or "")
+    if opener and _gives_instruction(text[opener.end():]):
+        return True
+    first = _FIRST_STEP_RE.search(text or "")
+    return bool(first and first.group("word").lower() not in _NOT_AN_INSTRUCTION) or _is_imperative(text or "")
 
 
 def _inherit_section(cs, source, idx, reason, Classification, ExplainabilityLog, datetime) -> None:
@@ -1237,6 +1275,20 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
         # from the list it belongs to.
         if own_rule and own_rule.section_id in _CONTINUATION_YIELDS_TO_SECTIONS:
             continue
+
+        opener = _STEP_OPENER_RE.match(text)
+        if opener and idx > 0 and _gives_instruction(text[opener.end():]):
+            prev = classified_sentences[idx - 1]
+            if prev.primary_classification and _is_step((prev.sentence.text or "").strip()):
+                # Recorded as a continuation even when it is already there
+                # (by the topic boost): restore_sections_emptied_by_topic()
+                # reconsiders only the classifier's own picks, and took the
+                # last step of a rollback away to an empty section.
+                _inherit_section(
+                    cs, prev, idx, "Continuation: the next step of the procedure before it",
+                    Classification, ExplainabilityLog, datetime,
+                )
+                continue
 
         if _ORDINAL_ITEM_RE.search(text):
             # Anchor to the enumeration HEAD ("There are several open

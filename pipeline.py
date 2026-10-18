@@ -40,10 +40,12 @@ from knowledge import (
     reconcile_linked_fields,
     verify_document_coverage,
     apply_conflicts,
+    apply_llm_conflict_check,
     attach_conflict_warnings,
     dedupe_rendered_sections,
     attach_elsewhere_mentions,
 )
+from conflicts import llm_conflict_check_enabled
 from knowledge.evidence import attach_evidence, transcript_sentences
 from kt_schema_loader import SCHEMA
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
@@ -581,6 +583,20 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             _stage_failed(stage_errors, "Conflict detection", exc,
                           "Corrections and contradictions in the session could not be checked; review single-valued facts (RTO, owners, tools).")
+
+        # Contradictions of meaning ("Developers own deployment approvals" /
+        # "Only the release manager can approve production deployments"):
+        # one batched LLM call per KT, when an LLM is configured and allowed.
+        # Optional: a failure leaves the deterministic checks as they are.
+        if llm_conflict_check_enabled() and MAPPER_PIPELINE is not None:
+            conflict_provider = get_llm_provider()
+            if conflict_provider is not None:
+                try:
+                    knowledge_object = apply_llm_conflict_check(
+                        knowledge_object, coverage, conflict_provider.generate,
+                        MAPPER_PIPELINE.classifier._encode_texts)
+                except Exception as exc:
+                    logger.warning("LLM conflict check skipped: %s", exc)
 
         # Surface sentences the classifier never confidently placed in any
         # real section instead of letting them vanish silently (see

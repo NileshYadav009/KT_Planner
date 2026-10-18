@@ -22,6 +22,7 @@ STAGE_LABELS = {
     "section_polish": "Section polish",
     "structured_extraction": "Structured extraction",
     "field_fill": "Field fill",
+    "conflict_check": "Conflict check",
     "other": "Other",
 }
 

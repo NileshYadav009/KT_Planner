@@ -333,6 +333,11 @@ PHRASE_CORRECTIONS = {
     # corrupted unrelated words). This is exact and 1:1, same class of fix
     # as "trevi" -> "Trivy" below.
     r"graphana\b": "Grafana",
+    # Speech-to-text splits names it does not know ("graph ana", "post gres
+    # sql"; adversarial matrix L02).
+    r"\bgraph\s+ann?a\b": "Grafana",
+    r"\bpost\s*gres\s*(?:sql|q\s*l)\b": "PostgreSQL",
+    r"\bpost\s+gres\b": "Postgres",
     r"pager[\s-]?duty": "PagerDuty",
     # Product names said in lowercase show in the document as written
     # ("cloud storage", "Cloud monitoring", "Artifact registry"). Casing
@@ -590,13 +595,29 @@ _CORRECTION_MARKER = (r"(?:sorry|i\s+mean|i\s+meant|no\s+wait|wait\s+no|no\s+sor
 _NOT_A_UNIT = r"(?:or|and|but|not|no|sorry|i|wait|rather|correction|scratch|my|oops|let)\b"
 _SELF_CORRECTION_RE = re.compile(
     r"(?P<old>" + _CORRECTED_VALUE + r")(?:\s+(?!" + _NOT_A_UNIT + r")(?P<unit>[A-Za-z]+))?"
-    r"\s*,?\s*(?:or\s+)?(?:" + _CORRECTION_MARKER + r"\s*[,:]?\s*)+"
+    # A comma, a dash or a pause before the marker, and "no" before it:
+    # "2000K—no, sorry, it's 3000K".
+    r"\s*(?:,|—|–|--?|\.\.\.|…)?\s*(?:or\s+)?(?:no\s*,?\s*)?(?:" + _CORRECTION_MARKER + r"\s*[,:]?\s*)+"
     # "... sorry, not 4000 but 2000" / "... I mean it's 2000"
     r"(?:not\s+" + _CORRECTED_VALUE + r"(?:\s+[A-Za-z]+)?\s*,?\s*but\s+)?"
     r"(?:it'?s\s+|it\s+is\s+|that'?s\s+|that\s+is\s+|make\s+(?:that|it)\s+)?"
+    # The words before the withdrawn number said again ("every 30 minutes,
+    # sorry, every 30 seconds"). resolve_self_corrections() checks that they
+    # are those words: "200 rather than 300" is not a correction.
+    r"(?P<again>(?:(?!" + _SPELLED_NUMBER_WORD + r"\b)[A-Za-z']+\s+){1,4}?)?"
     r"(?=" + _CORRECTED_VALUE + r")",
     re.IGNORECASE,
 )
+
+
+def _says_again_what_led_to(text: str, m: "re.Match") -> bool:
+    """The words a correction repeats are the ones just before the number it
+    withdraws."""
+    again = (m.group("again") or "").lower().split()
+    if not again:
+        return True
+    before = re.findall(r"[A-Za-z']+", text[:m.start()].lower())
+    return before[-len(again):] == again
 
 
 def resolve_self_corrections(text: str) -> str:
@@ -607,10 +628,14 @@ def resolve_self_corrections(text: str) -> str:
     quotes."""
     if not text:
         return text
-    for _ in range(3):
-        m = _SELF_CORRECTION_RE.search(text)
+    pos = 0
+    for _ in range(6):
+        m = _SELF_CORRECTION_RE.search(text, pos)
         if not m:
             break
+        if not _says_again_what_led_to(text, m):
+            pos = m.start() + 1
+            continue
         rest = text[m.end():]
         fixed = text[:m.start()] + rest
         unit = m.group("unit")
@@ -677,6 +702,87 @@ def resolve_correction_across(previous: str, correction: str) -> Optional[str]:
         return None
     target = targets[0]
     return previous[:target.start()] + new.group(0) + previous[target.end():]
+
+
+# A sentence that replaces a value of the one before it but says more than
+# the new value: "We use PostgreSQL 14. Actually, the upgrade is complete;
+# production is now on PostgreSQL 16." It cannot be rewritten into the
+# sentence before (resolve_correction_across), and shown apart, in another
+# paragraph or section, "We use PostgreSQL 14" read as current. The mapper
+# keeps the two together, as said (context_mapper.segment_sentences).
+_REPLACES_LEADING_RE = re.compile(
+    r"^\W*(?:(?:oh|no|um|uh|okay|ok)\W+)?(?:sorry(?!\s+(?:for|about)\b)|i\s+mean|i\s+meant|no\s+wait|wait"
+    r"|correction|scratch\s+that|my\s+(?:bad|mistake)|oops|to\s+correct\s+(?:that|myself)"
+    r"|let\s+me\s+correct\s+(?:that|myself)|forget\s+(?:what\s+i\s+said|that)|ignore\s+(?:what\s+i\s+said|that)"
+    r"|i\s+was\s+wrong)" + _NOT_JOINED, re.IGNORECASE)
+_REPLACES_ANYWHERE_RE = re.compile(
+    r"\b(?:that'?s|that\s+(?:is|was)|this\s+is)\s+(?:old|outdated|out\s+of\s+date|stale|wrong|not\s+right"
+    r"|no\s+longer\s+(?:true|right|correct))\b|\bforget\s+what\s+i\s+said\b|\bi\s+was\s+wrong\b"
+    r"|\buse\s+the\s+latter\b|\bthe\s+(?:correct|right)\s+(?:value|number|figure|one)\s+is\b", re.IGNORECASE)
+# Opening a sentence, "actually" also adds a fact ("Actually, the rollback
+# takes 10 minutes"); it replaces a value only with a word of change.
+_ACTUALLY_LEADING_RE = re.compile(r"^\W*(?:(?:oh|no|um|uh|okay|ok)\W+)?actually" + _NOT_JOINED, re.IGNORECASE)
+_CHANGE_WORD_RE = re.compile(
+    r"\b(?:now|currently|these\s+days|no\s+longer|anymore|instead|upgraded?|migrated|moved|changed|switched"
+    r"|replaced|updated|bumped|raised|lowered|increased|decreased|reduced)\b", re.IGNORECASE)
+_VALUE_LIGHT = frozenset("""is are was were be been being am the a an of to at on in for by from with now currently
+set about around roughly approximately every each per it its it's that's we we've we're our you your they their this
+that there changed change version v up down only just still also then and or but so has have had""".split())
+
+
+def _value_kinds(text: str) -> List[Tuple[str, set]]:
+    """(value, {what it measures}) for each number in `text`: the unit after
+    it ("days", the K of 2000K) and the word naming it before it ("port",
+    "PostgreSQL"), as "unit:..." and "of:..." keys."""
+    out = []
+    for m in re.finditer(_CORRECTED_VALUE, text, re.IGNORECASE):
+        value = m.group(0)
+        kinds = set()
+        suffix = re.search(r"(?<=\d)(%|[A-Za-z]+)$", value)
+        if suffix:
+            kinds.add("unit:" + suffix.group(1).lower())
+        after = re.match(r"\s+([A-Za-z]+)", text[m.end():])
+        if after and after.group(1).lower() not in _VALUE_LIGHT:
+            word = after.group(1).lower()
+            kinds.add("unit:" + (word[:-1] if len(word) > 3 and word.endswith("s") else word))
+        before = [w for w in re.findall(r"[A-Za-z][\w'-]*", text[:m.start()].lower())[-4:] if w not in _VALUE_LIGHT]
+        if before:
+            kinds.add("of:" + before[-1])
+        out.append((_number_key(value), kinds))
+    return out
+
+
+def replaces_value_before(previous: str, sentence: str) -> bool:
+    """`sentence` says that a value `previous` stated is no longer right and
+    gives another of the same kind, in more words than the new value
+    (resolve_correction_across rewrites those)."""
+    if not previous or not sentence or resolve_correction_across(previous, sentence):
+        return False
+    strong = _REPLACES_LEADING_RE.match(sentence) or _REPLACES_ANYWHERE_RE.search(sentence)
+    if not strong and not (_ACTUALLY_LEADING_RE.match(sentence) and _CHANGE_WORD_RE.search(sentence)):
+        return False
+    old, new = _value_kinds(previous), _value_kinds(sentence)
+    return any(a != b and ka & kb for a, ka in old for b, kb in new)
+
+
+# A correction of something said further back names what it corrects: "I was
+# wrong about the backups earlier, they are kept for 35 days now", "Forget
+# what I said earlier about the freeze, ...".
+_POINTS_BACK_RE = re.compile(
+    r"\b(?:i\s+was\s+wrong|forget\s+what\s+i\s+said|ignore\s+what\s+i\s+said|what\s+i\s+(?:said|told\s+you))"
+    r"(?:\s+(?:earlier|before|at\s+the\s+start))?\s+about\s+(?:the\s+|our\s+|that\s+|those\s+)?"
+    r"(?P<topic>[A-Za-z][\w-]*(?:\s+[A-Za-z][\w-]*)?)", re.IGNORECASE)
+
+
+def points_back_to(earlier: str, sentence: str) -> bool:
+    """`sentence` corrects a value `earlier` stated, further back in the
+    session, and names its topic ("I was wrong about the backups ...")."""
+    m = _POINTS_BACK_RE.search(sentence or "")
+    if not m or not replaces_value_before(earlier, sentence):
+        return False
+    stems = {w[:5] for w in re.findall(r"[a-z][a-z'-]+", m.group("topic").lower())
+             if len(w) > 2 and w not in _VALUE_LIGHT and w not in ("earlier", "before")}
+    return bool(stems & {w[:5] for w in re.findall(r"[a-z][a-z'-]+", earlier.lower())})
 # Spoken agreement carries no content anywhere, commas or not ("reached
 # 15,000 right so yep so we have"), with a "so" that follows it.
 _AGREEMENT_FILLER_RE = re.compile(
@@ -770,6 +876,28 @@ _TYPOGRAPHIC_QUOTES = str.maketrans({"‘": "'", "’": "'", "‛": "'", "′": 
                                      "“": '"', "”": '"', "‟": '"', "″": '"'})
 
 
+# An acronym spelled out letter by letter ("r d s", "e k s", "s q s"): joined
+# when the letters are an acronym the glossary knows, so "a b test" and
+# "plan b" stay as said.
+_SPELLED_LETTERS_RE = re.compile(r"(?<![\w'-])((?:[a-z]\s){1,4}[a-z])(?![\w'-])", re.IGNORECASE)
+_KNOWN_ACRONYMS: Optional[Set[str]] = None
+
+
+def join_spelled_acronyms(text: str) -> str:
+    global _KNOWN_ACRONYMS
+    if _KNOWN_ACRONYMS is None:
+        terms = glossary.DEFAULT_GLOSSARY.get("terms") or []
+        acronyms = glossary.DEFAULT_GLOSSARY.get("acronyms") or {}
+        _KNOWN_ACRONYMS = ({t.upper() for t in terms if t.isupper() and t.isalnum()}
+                           | {a.upper() for a in acronyms if a.isalnum() and not a.isdigit()})
+
+    def _join(m: "re.Match") -> str:
+        letters = re.sub(r"\s", "", m.group(1)).upper()
+        return letters if letters in _KNOWN_ACRONYMS else m.group(0)
+
+    return _SPELLED_LETTERS_RE.sub(_join, text or "")
+
+
 def clean_transcript(text: str) -> str:
     """Normalize transcript before semantic classification.
 
@@ -800,6 +928,7 @@ def clean_transcript(text: str) -> str:
     normalized = re.sub(r"[\r\n\t]+", " ", text)
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
+    normalized = join_spelled_acronyms(normalized)
     normalized, _ = apply_devops_corrections(normalized)
     normalized = remove_fillers(normalized)
     normalized = remove_repeated_words(normalized)
@@ -828,9 +957,28 @@ def clean_transcript(text: str) -> str:
     # handles...", "Can affect", "Before proceeding") are dictation
     # artifacts; they were copied into the document as said.
     normalized = _MIDSENTENCE_CAPITAL_RE.sub(lambda m: m.group(1) + m.group(2).lower(), normalized)
-    normalized = re.sub(r"(\.\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), normalized)
-    normalized = re.sub(r"^([a-z])", lambda m: m.group(1).upper(), normalized)
+    normalized = re.sub(r"(\.\s+)([a-z])(?!" + _KEEPS_ITS_CASE + r")",
+                        lambda m: m.group(1) + m.group(2).upper(), normalized)
+    normalized = re.sub(r"^([a-z])(?!" + _KEEPS_ITS_CASE + r")", lambda m: m.group(1).upper(), normalized)
     return normalized
+
+
+# A name opening a sentence keeps its spelling: "orders-api handles checkout
+# requests" became "Orders-api ...", "iOS" became "IOS" and "kubectl"
+# "Kubectl" (adversarial matrix L01). After the first letter: a capital
+# inside the word, a service name joined by - or _ ("payments_worker"; not
+# "on-call"), or a command that is always written in lower case.
+_KEEPS_ITS_CASE = (
+    r"[a-z0-9]*[A-Z]"
+    r"|[\w]*[-_](?:[\w-]*[-_])?(?:api|svc|service|worker|workers|db|ui|app|job|jobs|queue|cache|proxy|gateway"
+    r"|consumer|producer|scheduler|cron|bot|cli|sdk|server|client|web|frontend|backend|ingest|sync)\b"
+    r"|(?:ubectl|ubeadm|ubelet|tcd|ontainerd|ystemd|pm|npm|cloud|sql|rontab)\b")
+
+
+def capitalise_sentence_start(text: str) -> str:
+    """`text` with its first letter upper-cased, unless it opens a name that
+    keeps its spelling ("orders-api", "iOS", "kubectl")."""
+    return re.sub(r"^([a-z])(?!" + _KEEPS_ITS_CASE + r")", lambda m: m.group(1).upper(), text or "")
 
 
 _GCP_CONTEXT_RE = re.compile(r"\b(?:GCP|Google\s+Cloud|BigQuery|Pub/Sub|Vertex\s+AI|GKE|Cloud\s+Run)\b", re.IGNORECASE)

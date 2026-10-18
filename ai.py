@@ -156,8 +156,8 @@ def _local_cleanup(text: str) -> str:
     # Only punctuation that ends a word: "The .NET services" kept its space
     # (it printed as "The.NET services").
     text = re.sub(r'\s+([,.;:!?])(?![\w])', r'\1', text)
-    if text and text[0].islower():
-        text = text[0].upper() + text[1:]
+    from devops_transcription import capitalise_sentence_start
+    text = capitalise_sentence_start(text)   # not "Orders-api", "Kubectl"
     if text and text[-1] not in '.!?':
         # A clause cut from a longer sentence ends in a comma; appending a
         # period produced "...platform,." in the document.

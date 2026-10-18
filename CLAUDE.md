@@ -2,8 +2,10 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aao is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
-detail. `docs/progress.md` is the plain-language log.
+(§9aar is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
+and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
+table. `docs/progress.md` is the plain-language log.
 
 ## What must hold on every KT
 
@@ -33,8 +35,8 @@ set. With Groq it was about 94% (audit §9aal).
 |---|---|
 | Upload, queue | `api/routes.py`, `job_queue.py`, `worker.py` |
 | Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` |
-| Sentences, facts | `context_mapper.segment_sentences`, `fact_units.split_into_facts` |
-| Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `copyedit.copyedit_sentences` |
+| Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`), `fact_units.split_into_facts` |
+| Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `merge_spoken_corrections`, `copyedit.copyedit_sentences` |
 | Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments) |
 | Close calls to the LLM | `ContextClassifier.verify_in_batches` |
 | Routing rules | `section_rules.SECTION_RULES`, `apply_rule_overrides` |
@@ -63,6 +65,7 @@ tenant "no external LLM" policy.
 | `section_polish` | `ai._polish_one` (`llm/prompts.SECTION_POLISH_PROMPTS`, 7 sections plus a default) | A section's fragments as formatted text | Added specifics, flipped negations, dropped fragments | Raw fragments kept |
 | `structured_extraction` | `ai._extract_structured_section` (`SECTION_STRUCTURED_PROMPTS`, 7 sections, JSON, first 20 fragments) | Table and field values | `_extract_json_response`, then `ground_structured` drops unsupported values | Plain sentences |
 | `field_fill` | `field_populator._fill_deferred_gaps` (one call per section, the default) or one call per field (`LLM_BATCH_CALLS=0`) | Value plus EXPLICIT / INFERRED, or NOT_MENTIONED | Grounding; structural types need a literal value | Field left unfilled |
+| `conflict_check` | `conflicts._check_conflicts_with_llm` via `knowledge_builder.apply_llm_conflict_check` (one call per KT: the numbered statements that have a close neighbour by meaning in another unit, at most 40; `LLM_CONFLICT_CHECK=0` turns it off). Its prompt says the statements are data. | The contradicting pairs, as "i-j" lines, or NONE | A pair must be two listed statements from different units; one the rules already flagged is not added twice | No flag |
 
 ## Testing
 
@@ -81,7 +84,14 @@ overnight and only when asked. Use targeted runs, from the repo root with
 
 Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
 (about 4 min; see `evaluation/README.md`). Every placement or coverage change
-is measured on all five sets. The LLM-mode version is
+is measured on all five sets.
+
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (46 short KTs,
+about 3 min). Each case targets one failure (corrections, hedges,
+contradictions, numbers, order, noise, PDF text) with exact checks on the
+rendered document. A new failure gets a case there first, then a unit test.
+`python evaluation/matrix_report.py BEFORE AFTER` rewrites
+`docs/ADVERSARIAL_MATRIX.md`. The LLM-mode version is
 `evaluation/groq_eval.py`. It spends Groq quota, so run it only when agreed;
 `GROQ_BUDGET` caps its live requests.
 
@@ -113,7 +123,17 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | T1 | Low | 4 field-populator tests assumed one call per field after batching became the default | Fixed, §9aao |
 | L1 | Med | A correction split across sentences ("The limit is 500. Sorry, not 500, ... 300.") shows both values | Fixed, §9aap (`merge_spoken_corrections`; sources quote both sentences) |
 | L2 | Med | A sentence of two commands ("get access ..., and spend the first weeks watching ...") is one fact, so its second topic is unplaced | Open: only 2 more such sentences in the visible KTs, both correct unsplit; splitting commands risks scattering procedures |
-| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Dev A/B +1/224 (§9aap). Off by default (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1`). Next: confirm on holdouts and blind with fresh quota, then switch and re-record the replay. |
+| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Measured twice, +1 each time, no loss: dev +1/224 (§9aap); holdouts and blind with only the section check live, 199 vs 198 of 209 (§9aar). Costs about 25% more tokens in the check. Off by default (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1`); switching needs a replay re-record. The user's call. |
 | L4 | Med | With Groq: repeated lines and unsourced facts | Fixed, §9aap. The calendar copied every cost lever; a paragraph or row cited too few sources. Dev 4 to 0 and 2 to 0, by replay. |
 | L5 | Low | Topic memory can raise a second candidate above the chosen section without swapping them | Closed: logs only. Alternatives are read only by multi-section mapping, which is off (`ENABLE_MULTI_SECTION_MAPPING`). |
 | P1 | Product | Custom templates are not supported (routes not mounted; rules and prompts name the default section ids) | Needs a product decision |
+| X1 | High | A same-sentence correction after a dash, "no, sorry", or with its lead-in said again ("every 30 minutes, sorry, every 30 seconds") kept both values | Fixed, §9aaq (`resolve_self_corrections`) |
+| X2 | High | A next-sentence correction that says more than the number ("Actually, the upgrade is complete; production is now on PostgreSQL 16") left the old value on its own, often in another section | Fixed, §9aaq: kept whole with the sentence it corrects (`replaces_value_before`) |
+| X3 | High | A correction further back ("I was wrong about the backups earlier, ...") left the old value standing | Fixed, §9aaq (`points_back_to`; up to 20 sentences back, one-fact sentences only) |
+| X4 | High | A technology named only in a plan or a guess ("planning to migrate to Kubernetes", "might be using Redis Cluster") was listed as current in the Technology summary and Architecture Knowledge | Fixed, §9aaq (`field_populator.current_tool_mentions`) |
+| X5 | Med | The last step of a procedure said one step per sentence ("After that, resume the sync ...") went to another section; the topic restore also undid placements the continuation rules left in place | Fixed, §9aaq (step rule in `apply_continuation_rules`) |
+| X6 | Med | Two counts of one thing, or one setting with two values, with no correction, were shown apart with no flag | Fixed, §9aaq (`conflicts.find_value_conflicts`). No flag on any of the five corpora. |
+| X7 | Low | Names opening a sentence lost their spelling ("Orders-api", "Kubectl", "IOS"); spelled-out acronyms ("r d s") and split names ("post gres", "graph ana") were kept; call chatter ("my connection dropped") became a fact; "That happens during peak traffic" left its antecedent; a connection quoted a corrected sentence without its correction | Fixed, §9aaq |
+| X8 | Med | Contradictions of meaning ("Developers own deployment approvals" / "Only the release manager can approve production deployments"; "The service is public" / "Only private subnets can reach it"; "hourly" / "every six hours") are shown but not flagged | Fixed with an LLM, §9aar (`conflict_check`, one call per KT, about 400 tokens). Matrix D02-D04 flagged; no false flag on 8 matrix controls or the 11 dev and e2e KTs. Without an LLM they are still not flagged. Recall on real KTs is unmeasured: no visible KT has such a contradiction. |
+| X9 | Low | No LLM prompt says that transcript text is data, not instructions | Partly: the new `conflict_check` prompt says it. The others don't yet. Their outputs are checked (a section answer must be one of its candidates; polish and extraction values are grounded; a polish that drops a fragment is reverted), which limits an injection. Add the line to them at the next replay re-record, since a prompt change invalidates it. |
+| X10 | Med | The permit/forbid rule flagged any "allowed" and "forbidden" sentences with two shared words: false "Possible conflict" warnings in 3 of the 6 dev KTs ("we can always redeploy an older model" / "don't delete the old model versions") | Fixed, §9aar: the permitting sentence must name the forbidden action (its verb and two thirds of its words). Dev false flags 3 to 0; g07's Fridays rule still flagged. |

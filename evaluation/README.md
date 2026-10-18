@@ -45,10 +45,12 @@ Each set reports:
 |---|---|
 | `kodiag.py KT_ID SECTION[,...]` | One dev or tuning KT: what a section contains and why the coverage table rates it so. Refuses holdout and blind KTs. |
 | `adversarial.py` | A probe KT with distinctions the goldens under-test, listed below. |
+| `matrix.py LABEL [IDS] [--dump]` | The adversarial matrix: short KTs in `matrix/cases.json`, one per failure (corrections, ambiguity, hedges, contradictions, several facts in a sentence, duplicates, negation, numbers, order, coverage, injection, noise, PDF text), each with exact checks on the rendered document. `must` checks are a wrong document; `should` checks are behaviour not promised yet. About 2 to 6 minutes for all cases. Results: `results/matrix-LABEL.json`. |
 | `trace.py MODULE.VAR [FILTER]` | Mapper decision path per fact for a probe transcript, e.g. `adversarial_text.TRANSCRIPT`. |
 | `dev_kts.py OUTDIR` / `blind_kts.py OUTDIR` | Regenerate the dev and blind JSON and check every quote is in its transcript. |
 | `groq_diag.py KT_ID` | Replays a dev KT's LLM run from the response cache, sending nothing, and shows its repeated, unsourced, wrong and lost facts. Use the settings of the run being diagnosed. |
-| `groq_eval.py LABEL dev,holdout,blind2` | The same sets with the LLM. It spends Groq quota and must be agreed first. `GROQ_BUDGET` (default 150) caps live requests. Unchanged prompts are answered from `evaluation/.cache/llm_cache.sqlite`. Scoring is strict and lenient (`lenient.py`), and holdout and blind results are aggregate only. |
+| `groq_eval.py LABEL dev,holdout,blind2` | The same sets with the LLM. It spends Groq quota and must be agreed first. `GROQ_BUDGET` (default 150) caps live requests. Unchanged prompts are answered from `evaluation/.cache/llm_cache.sqlite`. Scoring is strict and lenient (`lenient.py`), and holdout and blind results are aggregate only. `GROQ_EVAL_ONLY=classify` sends only the section check (polish, extraction and field fill run without the LLM): an A/B of that check costs a fraction of a full run, and scoring is exact. |
+| `conflict_eval.py LABEL matrix,dev,e2e` | The LLM conflict check alone, after a no-LLM pipeline run: the matrix's contradiction cases and controls (a flag on a control, or a wrong pair, is a false flag), and every flag on the dev and e2e KTs. Spends quota; `GROQ_BUDGET` (default 40) caps it. About 400 tokens a KT. |
 
 The adversarial probe covers:
 

@@ -31,7 +31,10 @@ from policy import (
 )
 
 from runtime_policy import load_policy
-from devops_transcription import clean_transcript, resolve_correction_across, resolve_self_corrections
+from devops_transcription import (
+    capitalise_sentence_start, clean_transcript, points_back_to, replaces_value_before, resolve_correction_across,
+    resolve_self_corrections,
+)
 from dialogue import merge_question_answers
 from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
@@ -208,6 +211,17 @@ _KT_META_COMMENTARY_PATTERNS = [
                r"(?:quick\s+|short\s+)?tour\b[^.!?]{0,40}[.!?]?\s*$", re.IGNORECASE),
     re.compile(r"^\W*this\s+is\s+(?:just\s+)?(?:a|the)\s+(?:small|quick|short|brief|high[\s-]level)\s+overview[.!?]?\s*$",
                re.IGNORECASE),
+    # The call itself ("Hi, it's Hal again, sorry, my connection dropped.",
+    # "Can you hear me now?"): it went under Common Failures as a fact
+    # (adversarial matrix L03). First person or "you", and the whole
+    # sentence: "the database connection dropped" is about the system.
+    re.compile(r"^\W*(?:[\w']+\W+){0,6}?(?:my\s+(?:connection|internet|wi-?fi|audio|mic(?:rophone)?|video|laptop)"
+               r"\s+(?:dropped(?:\s+out)?|cut\s+out|froze|died|crashed|went\s+down|is\s+(?:bad|lagging|unstable))"
+               r"|i\s+(?:got|was|have\s+been)\s+(?:disconnected|dropped|kicked\s+out)|i\s+lost\s+(?:my\s+)?connection)"
+               r"\W*$", re.IGNORECASE),
+    re.compile(r"^\W*(?:[\w']+\W+){0,3}?(?:can|could)\s+(?:you|everyone|everybody|you\s+all)\s+(?:hear|see)\s+"
+               r"(?:me|us|my\s+screen)(?:\s+(?:now|okay|ok|clearly|properly))?\W*$", re.IGNORECASE),
+    re.compile(r"^\W*(?:[\w']+\W+){0,3}?(?:you'?re|you\s+are)\s+(?:on\s+mute|muted)\W*$", re.IGNORECASE),
 ]
 
 
@@ -325,7 +339,7 @@ def _as_statement(clause: str) -> str:
     clause = clause.strip().rstrip(",;").strip()
     if clause and clause[-1] not in ".!?":
         clause += "."
-    return clause[:1].upper() + clause[1:]
+    return capitalise_sentence_start(clause)
 
 
 def segment_sentences(
@@ -402,6 +416,30 @@ def segment_sentences(
             continue
         refined_sentences.append((st, run_on, cut))
 
+    # A sentence that replaces a value of the one before it ("We use
+    # PostgreSQL 14. Actually, the upgrade is complete; production is now on
+    # PostgreSQL 16.") is kept whole with it, as said: one unit, one section.
+    # Apart, the first read as current wherever it landed. A correction that
+    # only restates the value is rewritten instead (merge_spoken_corrections).
+    # One that points further back ("I was wrong about the backups earlier,
+    # they are kept for 35 days now") takes the sentence it corrects along,
+    # when that sentence states nothing else.
+    joined_sentences = []   # [text, run_on, cut, kept whole]
+    for st, run_on, cut in refined_sentences:
+        if joined_sentences and replaces_value_before(joined_sentences[-1][0], st):
+            prev = joined_sentences[-1]
+            joined_sentences[-1] = [f"{prev[0]} {st}", prev[1] or run_on, prev[2], True]
+            continue
+        earlier = next((j for j in range(len(joined_sentences) - 2, max(-1, len(joined_sentences) - 21), -1)
+                        if points_back_to(joined_sentences[j][0], st)), None)
+        if earlier is not None and len(split_facts(joined_sentences[earlier][0])) == 1:
+            st = f"{joined_sentences.pop(earlier)[0]} {st}"
+            joined_sentences.append([st, run_on, cut, True])
+            continue
+        joined_sentences.append([st, run_on, cut, False])
+    kept_whole = {i for i, entry in enumerate(joined_sentences) if entry[3]}
+    refined_sentences = [tuple(entry[:3]) for entry in joined_sentences]
+
     # (text, kind, cut, source id, source sentence, span): a sentence cut out
     # of a run-on ("run_on") or a fact cut out of a sentence ("clause") is
     # cleaned into a statement of its own below. Every piece keeps the
@@ -413,7 +451,7 @@ def segment_sentences(
         # question's topic reaches all of it when merge_question_answers joins
         # the two. Cut, only the first fact went with the question.
         answers_question = source_id > 0 and refined_sentences[source_id - 1][0].rstrip().endswith("?")
-        spans = [(0, len(st))] if answers_question else split_facts(st)
+        spans = [(0, len(st))] if answers_question or source_id in kept_whole else split_facts(st)
         if len(spans) > 1:
             sentence_texts.extend((st[a:b], "clause", cut and i == 0, source_id, st, (a, b))
                                   for i, (a, b) in enumerate(spans))
@@ -440,10 +478,21 @@ def segment_sentences(
         # located: the position only feeds timestamps, while dropping the
         # text loses a fact outright. Fall back to the current position.
         start_pos = full_text.find(sent_text, current_pos)
+        end_pos = start_pos + len(sent_text)
+        if start_pos == -1:
+            # Sentences kept whole above are joined with a space, and one
+            # taken along from further back is not next to its correction:
+            # located by their own first and last sentence.
+            parts = re.split(r"(?<=[.!?])\s+", sent_text.strip())
+            last = full_text.find(parts[-1], current_pos) if len(parts) > 1 else -1
+            if last != -1:
+                first = full_text.find(parts[0], current_pos)
+                start_pos = first if 0 <= first <= last else last
+                end_pos = last + len(parts[-1])
         if start_pos == -1:
             logger.debug("segment_sentences: could not locate chunk; keeping it with approximate timing")
             start_pos = min(current_pos, max(0, len(full_text) - 1))
-        end_pos = start_pos + len(sent_text)
+            end_pos = start_pos + len(sent_text)
         current_pos = end_pos
         
         # Get segment range
@@ -1654,9 +1703,7 @@ class ContextRepair:
     def _basic_grammar_fix(self, text: str) -> str:
         """Apply basic grammar normalization."""
         # Capitalize first letter if sentence
-        result = text.strip()
-        if result and result[0].islower():
-            result = result[0].upper() + result[1:]
+        result = capitalise_sentence_start(text.strip())
         
         # Add missing period (after dropping a trailing comma left by a
         # clause split, which otherwise produced "...platform,.")

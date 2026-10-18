@@ -416,6 +416,32 @@ def test_actually_is_kept_where_it_corrects_what_was_just_said():
         "The RTO is four hours, actually two hours."
 
 
+def test_spelled_out_acronyms_and_spaced_tool_names_are_joined():
+    """Adversarial matrix L02: speech-to-text wrote "r d s", "post gres" and
+    "graph ana", and the document kept them."""
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("it runs on e k s and messages go to s q s") == "It runs on EKS and messages go to SQS"
+    assert clean_transcript("the post gres database runs on r d s") == "The Postgres database runs on RDS"
+    assert clean_transcript("we use post gres sql, and the dashboards are in graph ana") == \
+        "We use PostgreSQL, and the dashboards are in Grafana"
+    # Letters that are not a known acronym, and ordinary single letters.
+    for said in ["We ran an a b test on the checkout page.", "I am the owner of the queue.", "Plan b is a rollback."]:
+        assert clean_transcript(said) == said, said
+
+
+def test_a_name_opening_a_sentence_keeps_its_spelling():
+    """Adversarial matrix L01: "orders-api handles checkout requests" became
+    "Orders-api ...", and "iOS" became "IOS"."""
+    from devops_transcription import clean_transcript
+
+    said = ("This is the handover. orders-api handles checkout requests. kubectl rollout restart fixes it. "
+            "iOS clients call it. payments_worker drains the queue. on-call engineers get paged. the queue is SQS.")
+    assert clean_transcript(said) == (
+        "This is the handover. orders-api handles checkout requests. kubectl rollout restart fixes it. "
+        "iOS clients call it. payments_worker drains the queue. On-call engineers get paged. The queue is SQS.")
+
+
 def test_a_number_corrected_mid_sentence_keeps_only_the_corrected_one():
     from devops_transcription import resolve_self_corrections
 
@@ -445,6 +471,32 @@ def test_a_number_corrected_mid_sentence_keeps_only_the_corrected_one():
         assert resolve_self_corrections(said) == said, said
 
 
+def test_a_correction_after_a_dash_or_restating_its_lead_in_keeps_only_the_corrected_value():
+    """Adversarial matrix A01, A04: a dash before the marker, "no, sorry",
+    and the words before the number said again ("every 30 minutes, sorry,
+    every 30 seconds") left both values in the document."""
+    from devops_transcription import resolve_self_corrections
+
+    corrected = {
+        "The cache limit is 2000K—no, sorry, it's 3000K.": "The cache limit is 3000K.",
+        "Restart the service every 30 minutes—sorry, every 30 seconds—until it reports healthy.":
+            "Restart the service every 30 seconds—until it reports healthy.",
+        "The limit is 4000 -- sorry, 2000.": "The limit is 2000.",
+        "We keep backups for 30 days, sorry, for 14 days.": "We keep backups for 14 days.",
+        "The limit is 4000, sorry, the limit is 2000.": "The limit is 2000.",
+        "The timeout is 30 seconds, no, sorry, 45 seconds.": "The timeout is 45 seconds.",
+    }
+    for said, written in corrected.items():
+        assert resolve_self_corrections(said) == written, said
+    # The words after the marker are not the ones before the number, or no
+    # number follows: as said.
+    for said in ["Restart every 30 minutes, sorry, every pod restarts in 30 seconds.",
+                 "We keep backups for 30 days, sorry, within 14 days of a release.",
+                 "The window is 2 hours—sorry for the delay—and it starts at 9.",
+                 "Keep 3 replicas, no, sorry, I meant the staging cluster."]:
+        assert resolve_self_corrections(said) == said, said
+
+
 def test_a_correction_in_the_next_sentence_replaces_the_number_it_corrects():
     from devops_transcription import resolve_correction_across as fix
 
@@ -466,6 +518,64 @@ def test_a_correction_in_the_next_sentence_replaces_the_number_it_corrects():
         assert fix(previous, nxt) is None, nxt
     # Two numbers before it, and the correction does not say which.
     assert fix("Staging has 2 nodes and production has 6 nodes.", "Sorry, 8.") is None
+
+
+def test_a_sentence_that_replaces_a_value_of_the_one_before_is_recognised():
+    """Adversarial matrix A02, A03, A05, A09: the next sentence replaces the
+    value but says more than the number, so it cannot be rewritten into the
+    sentence before; shown apart, the old value read as current."""
+    from devops_transcription import replaces_value_before as replaces
+
+    assert replaces("We use PostgreSQL 14.",
+                    "Actually, the upgrade is complete; production is now on PostgreSQL 16.")
+    assert replaces("The service runs on port 8080.", "Correction, the actual production port is 8443.")
+    assert replaces("The database backup retention is 7 days.",
+                    "Wait, that's old information; we've changed it to 30 days.")
+    assert replaces("The upload size limit is 2000K.", "The upload size limit is 3000K; use the latter.")
+    # No correction signal, an apology, "actually" adding a fact, a value of
+    # another kind, or a plain number correction (resolve_correction_across).
+    for previous, nxt in [
+            ("Staging has 2 nodes.", "Production has 6 nodes."),
+            ("Retention is 7 days.", "Sorry for the noise, the logs are kept 30 days."),
+            ("The deploy takes 5 minutes.", "Actually, the rollback takes 10 minutes."),
+            ("We use PostgreSQL 14.", "Sorry, the cache is Redis 7."),
+            ("Backups are kept for 7 days.", "Sorry, I lost my train of thought."),
+            ("The API rate limit is 500 requests a minute per customer.",
+             "Sorry, not 500, the limit is 300 requests a minute per customer.")]:
+        assert not replaces(previous, nxt), nxt
+
+
+def test_a_replaced_value_is_kept_whole_with_the_sentence_that_replaces_it():
+    from context_mapper import AudioSegment, segment_sentences
+
+    said = ("The billing API runs on Amazon ECS. We use PostgreSQL 14. Actually, the upgrade is complete; "
+            "production is now on PostgreSQL 16. Deploys go through Jenkins.")
+    units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert "We use PostgreSQL 14. Actually, the upgrade is complete; production is now on PostgreSQL 16." in units
+    assert not any(u.startswith("We use PostgreSQL 14") and "16" not in u for u in units)
+    assert "The billing API runs on Amazon ECS." in units and "Deploys go through Jenkins." in units
+
+
+def test_a_value_corrected_much_later_is_shown_with_its_correction():
+    """Adversarial matrix A11: "I was wrong about the backups earlier" seven
+    sentences on; the 14 days stood alone in Disaster Recovery."""
+    from context_mapper import AudioSegment, segment_sentences
+
+    said = ("Backups of the staging tables are kept for 14 days. The finance team reads Looker every morning. "
+            "Snowflake costs about four thousand dollars a month. If the nightly load fails, rerun the task. "
+            "Oh, and I was wrong about the backups earlier, they are kept for 35 days now. Deploys run on Fridays.")
+    units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert ("Backups of the staging tables are kept for 14 days. Oh, and I was wrong about the backups earlier, "
+            "they are kept for 35 days now.") in units
+    assert units.index("The finance team reads Looker every morning.") == 0
+    assert units[-1] == "Deploys run on Fridays."
+    # Not about what the earlier sentence measured, or no pointer back.
+    for later in ["Oh, and I was wrong about the dashboards earlier, they refresh every 35 days now.",
+                  "Logs are kept for 35 days now."]:
+        units = [s.text for s in segment_sentences([AudioSegment(
+            text=f"Backups are kept for 14 days. Snowflake runs the warehouse. {later}",
+            start=0.0, end=9.0, avg_logprob=-0.2)])]
+        assert units[0] == "Backups are kept for 14 days.", later
 
 
 def test_the_corrected_sentence_is_merged_and_the_correction_is_recorded():

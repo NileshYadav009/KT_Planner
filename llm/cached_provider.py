@@ -23,6 +23,7 @@ _CALL_SITES = {
     "_extract_structured_section": "structured_extraction",
     "_populate_fields_recursive": "field_fill",
     "_fill_deferred_gaps": "field_fill",
+    "_check_conflicts_with_llm": "conflict_check",
 }
 
 

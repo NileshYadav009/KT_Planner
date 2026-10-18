@@ -5298,6 +5298,260 @@ the corrected limit, sourced by both sentences.
 The new `evaluation/groq_eval.py` runs LLM-mode accuracy. It spends quota,
 `GROQ_BUDGET` caps it, and holdout and blind results stay aggregate only.
 
+### 9aaq. Adversarial KT matrix: corrections, plans, procedures, conflicts (18 Oct)
+
+The user asked for adversarial KT testing with autonomous repair: build
+realistic failure cases, run them through the real pipeline, fix verified
+root causes one at a time with regression tests, and keep a ledger. No LLM
+was called (no quota spent); every run was the deterministic pipeline.
+
+**The matrix.** `evaluation/matrix/cases.json` holds 46 short KTs written
+before any output was seen, one failure each. The categories are:
+
+- corrections (same sentence, next sentence, far back, no marker);
+- ambiguity, and uncertainty versus fact;
+- contradictions;
+- several facts in one sentence, and duplicates;
+- negation and exceptions;
+- numbers, units, addresses and versions;
+- step order;
+- coverage, prompt injection, noise, and PDF text.
+
+`evaluation/matrix.py` runs each through `run_kt_pipeline` and checks the
+rendered document (and, for three cases, the PDF text without its Sources
+appendix) with exact checks:
+
+- `shows`, `verbatim`, `absent`;
+- `never_alone`: a withdrawn or hedged value never appears in a document unit
+  without its correction or hedge;
+- `in_section`, `order`, `flagged`, `coverage`.
+
+`must` checks are a wrong document; `should` checks are behaviour not
+promised yet. `docs/ADVERSARIAL_MATRIX.md` is the case table (expected,
+before, after, regression test).
+
+| Run | Cases | Must | Should |
+|---|---|---|---|
+| Baseline, first 35 cases | 25 of 35 all-must pass | 77/89 | 2/6 |
+| After fixes, first 35 cases | 35 of 35 | 89/89 | 3/6 |
+| First run of the 11 later cases (after the first fixes) | 10 of 11 | 28/29 | 4/8 |
+| After all fixes, all 46 cases | 46 of 46 | 118/118 | 11/14 |
+
+Four first-run failures were the harness's and were corrected:
+
+- D02 expected a sentence the document shows as an ownership row;
+- I02 expected "Argo CD" where the project writes "ArgoCD";
+- the A01 and A05 PDF checks read only up to the cover's list of sections.
+
+**Fixes** (each with a unit test that failed first):
+
+- **X1, same-sentence correction.** "2000K—no, sorry, it's 3000K" and
+  "every 30 minutes—sorry, every 30 seconds" kept both values.
+  - `resolve_self_corrections` now accepts a dash or a pause before the
+    marker, and "no," before it.
+  - It also accepts the words before the number said again, but only when
+    they are those words: "200 rather than 300" and "for 30 days, sorry,
+    within 14 days of a release" stay as said.
+- **X2, next-sentence correction with new wording.** "We use PostgreSQL 14.
+  Actually, the upgrade is complete; production is now on PostgreSQL 16."
+  cannot be rewritten into the first sentence (§9aap refuses, rightly).
+  Shown apart, "We use PostgreSQL 14." read as current in Architecture.
+  - `replaces_value_before` recognises the pair. It needs a correction
+    signal ("sorry", "correction", "wait", "that's old", "use the latter";
+    an opening "actually" only with a word of change), and a value of the
+    same kind (the same unit or the same word naming it) with a different
+    value.
+  - `segment_sentences` keeps the two whole, as one unit shown as said.
+  - The connection table rejoined such a pair before quoting it.
+- **X3, correction further back.** "I was wrong about the backups earlier,
+  they are kept for 35 days now", seven sentences after "14 days".
+  - `points_back_to` needs the pointer, the named topic in the earlier
+    sentence, and the same value kind.
+  - The earlier sentence, when it states nothing else and is at most 20
+    sentences back, moves next to its correction.
+  - A unit made of sentences from two places is located in the transcript
+    by its first and last sentence, so later timestamps are not shifted.
+- **X4, a plan or a guess as current state.** "We are planning to migrate
+  to Kubernetes next quarter" put Kubernetes in the Technology summary and
+  Architecture Knowledge as current compute.
+  - `field_populator.current_tool_mentions` drops a technology named after a
+    plan or a hedge in its own clause ("planning to", "will migrate/move/
+    adopt", "next quarter", "might", "probably", "I think").
+  - It keeps the one being moved off ("move from RabbitMQ to Kafka"). A bare
+    "will" is not a plan ("Argo CD will sync the changes").
+  - Used for the component inventory and the tool fields. The sentence itself
+    is still shown as said.
+- **X5, procedure steps.** "To roll back, first pause the sync." "Then revert
+  the image tag." "After that, resume the sync and watch the error rate."
+  The last step went to Disaster Recovery, and the incident card listed two
+  steps.
+  - A step rule in `apply_continuation_rules`: a sentence opening with a
+    sequence word and an instruction follows the step before it, when that
+    is a step too.
+  - The step was already in place (topic boost), so its log still said
+    "classify", and `restore_sections_emptied_by_topic` gave it to the empty
+    Disaster Recovery section (its pick without the boost, at 0.24). The
+    step rule now records the decision as a continuation, which the restore
+    leaves alone, as its docstring intends.
+- **X6, unflagged conflicts.** `conflicts.find_value_conflicts` pairs:
+  - two counts of one thing ("two availability zones" ... "three
+    availability zones");
+  - one setting with two values ("The upload size limit is 2000K." ...
+    "3000K.").
+
+  It skips different environments, different named parts ("orders API" /
+  "payments API"), a value with a condition ("800 ms during peak"), volumes,
+  past values, plans and corrections. Shown with the existing "Possible
+  conflict" warning. It raised no flag on any of the five corpora (about
+  77,000 characters).
+- **X7, smaller defects.**
+  - Names opening a sentence kept their spelling (`capitalise_sentence_start`
+    in the cleaner, clause statements, polish cleanup, quick reference and
+    dialogue). "Orders-api", "Kubectl" and "IOS" were printed.
+  - Spelled-out acronyms that the glossary knows ("r d s", "e k s") are
+    joined, and "post gres" and "graph ana" are corrected.
+  - Call chatter ("my connection dropped", "can you hear me") is excluded as
+    session talk.
+  - "That happens during peak traffic" follows the sentence it refers to.
+
+**Checks after the fixes:**
+
+| Set (no LLM) | Before | After |
+|---|---|---|
+| Tuning | 534/534 | 534/534 (unchanged) |
+| Dev | 213/224, false Covered 0, false Missing 1 | 213/224, false Covered 0, false Missing 1 (unchanged) |
+| Holdouts | 86/95 | 86/95 (unchanged) |
+| Blind | 95/114 | 95/114 (unchanged) |
+| E2e | 100%, 0 problems | 100%, 0 problems (unchanged) |
+
+Targeted tests, all passing:
+
+- 360 in one run: knowledge builders, fact units, dialogue, conflicts (with its pipeline test), grounding, evidence, renderer sections, mapper hints, session framing, audit regressions, clause split, multi-section mapping, and end-to-end with the recorded Groq replay.
+- 71 for section rules, topic segments, audit regressions and clause split, after the last change.
+- 56 for the cleaner and copy edit.
+- 117 for the LLM controls, batching and fields.
+- 42 for routing, coverage topics and grounding.
+
+**Commands and resources.**
+
+- Matrix runs: `python evaluation/matrix.py baseline` (6 min, models loaded
+  cold), then `fix1-5`, `fix1-6`, `batch2` and `after` (1 to 3 minutes each,
+  with the encoder cache warm).
+- Accuracy: `python evaluation/accuracy.py adv1|adv2
+  tuning,dev,holdout,blind2,e2e` (5 to 15 minutes; slower when tests ran at
+  the same time).
+- Each fix's tests were run alone before and after the change. The full
+  suite was not run (hours on this laptop).
+- No LLM was called; 0 Groq tokens.
+- Two harness slips cost one re-run each: the PDF cut at the cover, and a
+  heredoc collapsing `\\`. Script files fixed both.
+
+**Not fixed, and why:**
+
+- **X8, contradictions of meaning.** Matrix D02, D03 and D04 are shown but
+  not flagged: "Developers own deployment approvals" / "Only the release
+  manager can approve production deployments"; "public" / "only private
+  subnets"; "hourly" / "every six hours". More patterns would be fragile
+  here: this needs an LLM check or typed facts.
+- **X9, prompt injection.** No prompt says that transcript text is data.
+  The outputs are checked against candidates and the transcript, which
+  limits an injection. The line belongs with the next replay re-record (L3),
+  because a prompt change invalidates the replay.
+- **M, dynamic templates.** Still P1, a product decision.
+- **K, malformed model output.** This is already covered by `test_grounding`
+  (invented and malformed values), `test_llm_batching` (an answer outside its
+  candidates), `test_llm_provider` (timeouts, retries, rate limits) and
+  `test_llm_cost_controls` (budgets).
+
+### 9aar. Groq session: option B confirmed, a conflict check for contradictions of meaning (19 Oct)
+
+The user approved the session proposed after §9aaq ("do it"): confirm option
+B on the unseen KTs, and check contradictions of meaning (X8) with an LLM.
+
+**L3, option B on the holdouts and blind KTs.** `evaluation/groq_eval.py`
+gained `GROQ_EVAL_ONLY=classify`: only the mapper's calls (the section check
+and a sentence repair) are sent, and polish, extraction and field fill run
+without the LLM. The two arms then differ only where the check does, scoring
+is exact, and a run costs a fraction of a full one.
+
+| Arm | Holdouts | Blind | Total | Live requests | Tokens |
+|---|---|---|---|---|---|
+| None (no LLM) | 86/95 | 95/114 | 181/209 | 0 | 0 |
+| A: top 3, ids and titles (default) | 91/95 | 107/114 | 198/209 | 4 (11 from the cache) | about 8.8k |
+| B: top 5 with each section's purpose | 91/95 | 108/114 | 199/209 | 15 | about 41.4k |
+
+- With the dev result (+1 of 224, §9aap), B is +1 twice, with no fact lost
+  either time.
+- Its check prompts are about 25% longer, and switching changes the prompt,
+  which invalidates the recorded replay.
+- Kept off; switching is the user's call.
+- The section check alone takes the unseen KTs from 86.6% to 94.7%.
+
+**X8, contradictions of meaning.** "Developers own deployment approvals" /
+"Only the release manager can approve production deployments", "The service
+is public" / "Only private subnets are permitted to reach it", and "Backups
+run hourly" / "every six hours" share no number or permit/forbid wording.
+
+- **The design.** `conflicts.find_conflicts_with_llm`, called from
+  `knowledge_builder.apply_llm_conflict_check` after the rules, makes one
+  call per KT when an LLM is configured.
+  - It lists the statements that have a close neighbour by meaning (bge-large,
+    already loaded) in another unit, at most 40.
+  - The model answers `i-j` lines or NONE, and may only name listed
+    statements from different units.
+  - A pair the rules already flagged is not added twice. Any failure flags
+    nothing. `LLM_CONFLICT_CHECK=0` turns it off.
+  - The system prompt says the statements are data and instructions in them
+    are ignored (X9, for this prompt).
+- **The first design was rejected on evidence.** Asked pair by pair (`N:
+  CONFLICT|OK` for the 30 closest pairs), the model found D02-D04. But in
+  D01 and A14, where the rules had already flagged the real pair and it was
+  not sent, it flagged a wrong pair to express that contradiction. It
+  flagged "three availability zones" against "Deployments go out through
+  Jenkins", because "two availability zones" was in another pair.
+  - Asked to name pairs among listed statements, it names the real pair,
+    which is then a duplicate and dropped.
+- **Measured with `evaluation/conflict_eval.py`**, the no-LLM pipeline
+  followed by the conflict call only:
+
+| Set | Result |
+|---|---|
+| Matrix contradictions D01-D04, A14 | all flagged: D02, D03 and D04 by the LLM, with the right pair; D01 and A14 by the rules, with no LLM flag added |
+| Matrix controls A06, A12, A13, B03, C03, E03, F01, G01 (environments, corrections, exceptions, hedges, look-alike values) | 0 flags |
+| Dev KTs (6) and e2e KTs (5) | 0 LLM flags |
+| Cost | 23 requests, about 9.1k tokens, so about 400 tokens a KT |
+
+- **Limits.** Recall on real KTs is unmeasured: no visible KT has a
+  contradiction of meaning. The check sees only statements with a close
+  neighbour (18 to 31 statements on the dev KTs).
+
+**X10, false conflicts from the permit/forbid rule.** Run on the dev KTs, the
+existing rule (`find_contradictions`, P0-5) flagged a "Possible conflict" in
+three of six KTs, all false:
+
+- "so we can always redeploy an older model" / "don't delete the old model
+  versions";
+- "Run the purge job, it is safe in business hours" / "Never run the Oracle
+  purge with the full flag";
+- a time-travel setting / "never drop or replace the raw schema tables".
+
+Two shared words were enough. Now the permitting sentence must name the
+forbidden action: the verb of the forbidden clause and two thirds of its
+words. Dev false flags went from 3 to 0. g07's "Fridays" rule (the only
+golden that expects a flag) is still flagged, at accuracy 1.0. Test:
+`test_conflicts.py`.
+
+**Checks:**
+
+- 146 passed: end-to-end with the recorded Groq replay (the new conflict call is unrecorded, so it is skipped, never sent), knowledge builders, grounding.
+- 18 passed in test_conflicts.py after the last change, including its pipeline test.
+- 47 passed earlier for the LLM cost controls and batching.
+- Matrix without an LLM: 118/118 required, unchanged. D02-D04 are flagged only with an LLM, as measured above.
+- Golden g07: its conflict is still flagged, accuracy 1.0.
+- The accuracy sets were not re-run after X10. It only changes conflict warnings, which the scoring leaves out.
+
+**Groq spent on 19 Oct:** 65 live requests, about 81k tokens (77k in, 3k out): option B 19 requests and 51k, the conflict check 46 requests and 30k (the rejected first design included).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

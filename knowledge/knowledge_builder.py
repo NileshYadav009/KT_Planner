@@ -6,7 +6,9 @@ from .evidence import build_evidence
 from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
-from field_populator import PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, smart_title
+from field_populator import (
+    PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, current_tool_mentions, smart_title,
+)
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
 from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap,
@@ -524,6 +526,22 @@ def _is_duplicate_of_mapped_content(sentence_text: str, mapped_chunks: List[str]
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _with_their_corrections(sentences: List[str]) -> List[str]:
+    """`sentences` with a sentence that corrects the one before it joined to
+    it again: "We use PostgreSQL 14. Actually, ... production is now on
+    PostgreSQL 16." was quoted as "We use PostgreSQL 14." for a connection
+    (context_mapper.segment_sentences keeps the two as one unit)."""
+    from devops_transcription import points_back_to, replaces_value_before
+
+    out: List[str] = []
+    for sentence in sentences:
+        if out and (replaces_value_before(out[-1], sentence) or points_back_to(out[-1], sentence)):
+            out[-1] = f"{out[-1]} {sentence}"
+        else:
+            out.append(sentence)
+    return out
 # Share of a transcript sentence's content words that must appear somewhere
 # in the mapped document for it to count as retained. Lower than the
 # deduplication ratio on purpose: this answers the much weaker question
@@ -823,11 +841,11 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
     - tools the speaker says were replaced ("we moved off PagerDuty") are
       replaced by the current one in tool-valued fields and the technology
       summary;
-    - pairs of statements that permit and forbid the same thing are stored
-      on knowledge_object["_conflicts"] for the section and the coverage
-      page to show.
+    - pairs of statements that permit and forbid the same thing, or give one
+      thing two counts, are stored on knowledge_object["_conflicts"] for the
+      section and the coverage page to show.
     """
-    from conflicts import find_contradictions, find_superseded_tools
+    from conflicts import find_contradictions, find_superseded_tools, find_value_conflicts
 
     sentence_section: Dict[str, str] = {}
     texts: List[str] = []
@@ -860,9 +878,39 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
             _walk(section.get("fields"))
         knowledge_object["_superseded_tools"] = list(superseded.values())
 
+    # Rules that permit and forbid the same thing, and two counts of one
+    # thing ("two availability zones" ... "three availability zones").
     knowledge_object["_conflicts"] = [
-        {"section_id": sentence_section.get(a), "a": a, "b": b} for a, b in find_contradictions(texts)
+        {"section_id": sentence_section.get(a), "a": a, "b": b}
+        for a, b in find_contradictions(texts) + find_value_conflicts(texts)
     ]
+    return knowledge_object
+
+
+def apply_llm_conflict_check(knowledge_object: Dict[str, Any], coverage: Dict[str, Any], generate,
+                             encode) -> Dict[str, Any]:
+    """Contradictions of meaning the rules above cannot see ("Developers own
+    deployment approvals" / "Only the release manager can approve production
+    deployments"): one batched LLM call labels the closest pairs of
+    statements (conflicts.find_conflicts_with_llm). Each pair it calls a
+    conflict joins knowledge_object["_conflicts"] like the others, marked
+    "source": "llm". A failure adds nothing."""
+    from conflicts import find_conflicts_with_llm
+
+    units: List[str] = []
+    sentence_section: Dict[str, str] = {}
+    for sid, cov in (coverage or {}).items():
+        for s in (cov or {}).get("sentences") or []:
+            text = ((s or {}).get("text", "") if isinstance(s, dict) else "").strip()
+            if not text:
+                continue
+            units.append(text)
+            for part in re.split(r"(?<=[.!?])\s+", text):
+                if part.strip():
+                    sentence_section.setdefault(part.strip(), sid)
+    existing = knowledge_object.setdefault("_conflicts", [])
+    for a, b in find_conflicts_with_llm(units, generate, encode, exclude=[(c["a"], c["b"]) for c in existing]):
+        existing.append({"section_id": sentence_section.get(a), "a": a, "b": b, "source": "llm"})
     return knowledge_object
 
 
@@ -921,7 +969,7 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
             # coverage_content) clearly name real tools — fall back to the
             # same tools regex directly against the raw text rather than
             # losing this data whenever the LLM path doesn't fire.
-            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(_raw_text(monitoring_section)))
+            found.extend(current_tool_mentions(_raw_text(monitoring_section)))
 
     # The architecture component inventory (built just before this, see
     # pipeline.py's ordering note) is the most complete list of what the
@@ -938,7 +986,7 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
         if isinstance(scan_config, str) and scan_config.strip():
             found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(scan_config))
         else:
-            found.extend(m for m in PATTERN_EXTRACTORS["tools"].findall(_raw_text(security_section)))
+            found.extend(current_tool_mentions(_raw_text(security_section)))
 
     if not found:
         return knowledge_object
@@ -1133,13 +1181,16 @@ def enrich_architecture_knowledge(
             return
         matches = tools_pattern.findall(text)
         if matches:
-            found.extend(matches)
+            # A component named only in a plan or a guess ("planning to
+            # migrate to Kubernetes", "might be using Redis") is not one yet.
+            found.extend(current_tool_mentions(text))
             if describes_architecture:
                 descriptive_sentences.append(text)
             for match in matches:
                 spellings.setdefault(_canonicalize_component_term(match).lower(), set()).add(match.lower())
             for part in split_bullet_blob([text]) or [text]:
-                connection_sentences.extend(p.strip() for p in _SENTENCE_SPLIT_RE.split(part) if p.strip())
+                connection_sentences.extend(_with_their_corrections(
+                    [p.strip() for p in _SENTENCE_SPLIT_RE.split(part) if p.strip()]))
 
     if section_content:
         for sc_id, sc in section_content.items():
@@ -1781,8 +1832,8 @@ def _qr_key(text: str) -> str:
 
 def _tidy(text: str) -> str:
     """Drop a spoken lead-in ("And …", "So …") and start with a capital."""
-    text = _QR_LEAD_RE.sub("", text.strip())
-    return text[:1].upper() + text[1:] if text else text
+    from devops_transcription import capitalise_sentence_start
+    return capitalise_sentence_start(_QR_LEAD_RE.sub("", text.strip()))
 
 
 def _clause(text: str) -> str:

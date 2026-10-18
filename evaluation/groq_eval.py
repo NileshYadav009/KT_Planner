@@ -13,6 +13,12 @@ cost nothing. Scratch database and assets; copy edit off, like every other
 accuracy figure; throttled under the account's tokens-per-minute limit. The
 key is read by llm_provider from .env and never printed. Lenient scoring
 counts a fact the polish reworded (lenient.py).
+
+GROQ_EVAL_ONLY=classify sends only the mapper's calls (the section check and
+a sentence repair); polish, structured extraction and field fill run without
+the LLM. For an A/B of the section check alone: the arms then differ only
+where the check does, scoring is exact (strict equals lenient), and the cost
+is a fraction of a full run.
 """
 import json
 import os
@@ -46,6 +52,11 @@ sys.path[:0] = [REPO, os.path.join(REPO, "tests"), HERE]
 os.chdir(REPO)
 sys.stdout.reconfigure(encoding="utf-8")
 
+if os.environ.get("NO_ENC_CACHE") != "1":
+    import enccache  # noqa: E402
+    enccache.install(os.path.join(HERE, ".cache", "enc_cache.sqlite"))
+
+import ai  # noqa: E402
 import golden_eval  # noqa: E402
 import llm_provider  # noqa: E402
 import pipeline  # noqa: E402
@@ -61,6 +72,11 @@ print(f"provider={llm_provider.LLM_PROVIDER_NAME} model={llm_provider.GROQ_MODEL
       f"budget={BUDGET}", flush=True)
 pipeline.MAPPER_PIPELINE = ContextMappingPipeline(SCHEMA, llm_fallback_fn=provider.generate)
 pipeline.record_candidates = lambda *a, **k: None
+ONLY = os.environ.get("GROQ_EVAL_ONLY", "")
+if ONLY == "classify":
+    # The mapper holds the provider itself; every later stage looks it up.
+    pipeline.get_llm_provider = ai.get_llm_provider = llm_provider.get_llm_provider = lambda: None
+print(f"stages={'mapper only' if ONLY == 'classify' else 'all'}", flush=True)
 
 USAGE = ("llm_calls", "cache_hits", "skipped", "failed", "rejected", "input_tokens", "output_tokens", "retries",
          "llm_seconds")
@@ -75,8 +91,8 @@ goldens = golden_eval.load_goldens()
 docs = {"dev": load_dir(os.path.join(HERE, "dev")),
         "holdout": [g for g in goldens if g.get("holdout")],
         "blind2": load_dir(os.path.join(HERE, "blind"))}
-out = {"label": label, "budget": BUDGET, "variant": {k: os.environ.get(k) for k in
-                                                     ("LLM_VERIFY_CANDIDATES", "LLM_VERIFY_PURPOSE")}}
+out = {"label": label, "budget": BUDGET, "only": ONLY, "variant": {k: os.environ.get(k) for k in
+                                                                   ("LLM_VERIFY_CANDIDATES", "LLM_VERIFY_PURPOSE")}}
 sent = 0
 t0 = time.time()
 for name in sets:

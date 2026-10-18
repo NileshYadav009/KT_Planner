@@ -499,6 +499,38 @@ PATTERN_EXTRACTORS = {
 # it was; see component_catalog.ToolMatcher.
 PATTERN_EXTRACTORS["tools"] = ToolMatcher(PATTERN_EXTRACTORS["tools"])
 
+# A technology named in a plan or a guess is not part of the system yet: "We
+# are planning to migrate to Kubernetes next quarter" listed Kubernetes as
+# current compute in the Technology summary (adversarial matrix C02). A plan
+# or a hedge before the name, in its clause, governs it. "will" alone does
+# not: "Argo CD will sync the changes" describes what runs today.
+_NOT_YET_RE = re.compile(
+    r"\b(?:plan(?:s|ning|ned)?\s+(?:to|on)|(?:will|'ll|going\s+to)\s+(?:be\s+)?(?:migrat|mov|switch|add|introduc|"
+    r"replac|adopt|start\s+using|roll\s+out|onboard|bring\s+in)\w*|want\s+to|would\s+like\s+to|hope\s+to|"
+    r"intend\s+to|aim\s+to|consider(?:s|ing|ed)?|evaluat(?:e|es|ing)|propos(?:e|ed|al)|roadmap|eventually|"
+    r"someday|in\s+the\s+future|next\s+(?:quarter|year|month)|later\s+this\s+(?:year|quarter)|"
+    r"might|maybe|probably|perhaps|i\s+think|i\s+believe|not\s+sure|i\s+guess)\b",
+    re.IGNORECASE)
+# ... except the one being moved off: "move from RabbitMQ to Kafka".
+_MOVED_OFF_RE = re.compile(r"\b(?:from|off|away\s+from|replac(?:e|es|ing)|instead\s+of)\s+(?:the\s+|our\s+|an?\s+)?$",
+                           re.IGNORECASE)
+_CLAUSE_START_RE = re.compile(r"[.;!?]\s+|,\s+(?:and|but|while|whereas|so)\s+|\s+but\s+", re.IGNORECASE)
+
+
+def current_tool_mentions(text: str) -> List[str]:
+    """The technologies `text` names as part of the system now: PATTERN_
+    EXTRACTORS["tools"] matches, less those named after a plan or a guess in
+    their clause ("planning to migrate to X", "might be using X")."""
+    text = text or ""
+    out = []
+    for start, _, name in PATTERN_EXTRACTORS["tools"].spans(text):
+        head = text[:start]
+        lead = head[max((m.end() for m in _CLAUSE_START_RE.finditer(head)), default=0):]
+        if _NOT_YET_RE.search(lead) and not _MOVED_OFF_RE.search(lead):
+            continue
+        out.append(name)
+    return out
+
 # Minimum cosine similarity (BAAI/bge-large-en-v1.5, normalized embeddings)
 # between a field's query text and a sentence before that sentence may fill
 # the field. bge's baseline similarity between unrelated English sentences is
@@ -876,7 +908,7 @@ def _extract_by_pattern(
             return audience
 
     if field_id != "oncall_tool" and ("tool" in field_id or "technolog" in field_id or "stack" in field_id):
-        tools = PATTERN_EXTRACTORS["tools"].findall(section_text)
+        tools = current_tool_mentions(section_text)
         if tools:
             return ", ".join(dict.fromkeys(tools))
 

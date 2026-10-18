@@ -10,6 +10,7 @@ from .knowledge_builder import (
     reconcile_linked_fields,
     verify_document_coverage,
     apply_conflicts,
+    apply_llm_conflict_check,
     attach_conflict_warnings,
     attach_elsewhere_mentions,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "reconcile_linked_fields",
     "verify_document_coverage",
     "apply_conflicts",
+    "apply_llm_conflict_check",
     "attach_conflict_warnings",
     "dedupe_rendered_sections",
     "attach_elsewhere_mentions",

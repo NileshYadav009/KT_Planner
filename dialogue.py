@@ -173,7 +173,8 @@ def strip_greeting(text: str) -> str:
         rest = out[match.end():] if match else ""
         if not match or not rest.strip():
             break
-        out = rest[:1].upper() + rest[1:]
+        from devops_transcription import capitalise_sentence_start
+        out = capitalise_sentence_start(rest)
     return out
 
 
@@ -209,7 +210,8 @@ def without_framing(sentence: str) -> str:
         # Nothing removed: the value stays exactly as it was ("thirty minutes
         # (replaces four hours ...)" was printed as "Thirty minutes ...").
         return text
-    return text[:1].upper() + text[1:]
+    from devops_transcription import capitalise_sentence_start
+    return capitalise_sentence_start(text)
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")

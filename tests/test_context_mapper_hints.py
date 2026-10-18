@@ -64,6 +64,12 @@ def test_boost_weight_higher_for_multi_word_hints():
 # Overview's Customer Reach field with tool self-promotion / scene-setting
 # filler instead of real content, because nothing else claimed them.
 META_COMMENTARY_EXAMPLES = [
+    # Call chatter (adversarial matrix L03): shown under Common Failures.
+    "Hi, it's Hal again, sorry, my connection dropped.",
+    "Sorry, I got disconnected.",
+    "Can you hear me now?",
+    "Can everyone see my screen?",
+    "Sorry, you're on mute.",
     "Today this KT is about DevOps.",
     "This is a small overview of the planned work, and it serves as a small sample KT using the Continuum application as the first KT planner.",
     "Continuum is a good application.",
@@ -97,6 +103,9 @@ def test_transition_sentences_with_real_trailing_content_are_not_flagged():
         assert not is_kt_session_meta_commentary(text), f"should NOT be flagged (has real content): {text!r}"
 
 REAL_CONTENT_EXAMPLES = [
+    "When the queue is full, the connection dropped.",
+    "The database connection dropped during the failover.",
+    "Clients get disconnected when the load balancer recycles.",
     "All services run on Amazon EKS.",
     "The staging environment closely mirrors production.",
     "Never modify Terraform state files manually.",

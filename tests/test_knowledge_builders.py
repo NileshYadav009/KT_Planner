@@ -360,6 +360,55 @@ def test_enrich_architecture_knowledge_pulls_components_from_any_section():
     }
 
 
+def test_a_technology_named_only_in_a_plan_or_a_guess_is_not_a_current_component():
+    """Adversarial matrix C01, C02: "We are planning to migrate to Kubernetes
+    next quarter" listed Kubernetes as current compute in the Technology
+    summary and Architecture Knowledge."""
+    ko = {
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE", coverage_content=[
+                "Today the booking service runs on two Amazon EC2 virtual machines behind a load balancer.",
+                "We are planning to migrate to Kubernetes next quarter.",
+                "I think production might be using Redis Cluster.",
+                "We will move from RabbitMQ to Kafka later this year.",
+                "Argo CD will sync the changes to the cluster."]),
+            _section("system_overview", "SYSTEM OVERVIEW"),
+        ],
+        "summary": {},
+    }
+    result = enrich_technology_summary(enrich_architecture_knowledge(ko))
+    arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
+    components = {c.lower() for c in arch["_architecture_components"]}
+    assert "kubernetes" not in components and "kafka" not in components
+    assert not any("redis" in c for c in components)
+    # Moved off, not yet: still current. A "will" describing what a tool
+    # does is not a plan.
+    assert {"amazon ec2", "rabbitmq", "argocd"} <= components
+    overview = next(s for s in result["sections"] if s["id"] == "system_overview")
+    assert "Kubernetes" not in overview["fields"]["key_technologies"]["value"]
+    # The sentence itself still says what was planned.
+    assert "We are planning to migrate to Kubernetes next quarter." in arch["_architecture_sentences"]
+
+
+def test_a_connection_is_quoted_with_the_correction_of_its_sentence():
+    """Adversarial matrix A02: "Connections stated in the KT" quoted "We use
+    PostgreSQL 14." alone, out of the unit that corrects it."""
+    ko = {
+        "system_name": "Billing",
+        "sections": [
+            _section("architecture_reference", "ARCHITECTURE REFERENCE", coverage_content=[
+                "The billing API is a Java service on Amazon ECS.",
+                "We use PostgreSQL 14. Actually, the upgrade is complete; production is now on PostgreSQL 16."]),
+            _section("system_overview", "SYSTEM OVERVIEW"),
+        ],
+        "summary": {},
+    }
+    arch = next(s for s in enrich_architecture_knowledge(ko)["sections"] if s["id"] == "architecture_reference")
+    quotes = [str(c) for c in arch.get("_architecture_connections") or []]
+    assert quotes, "the test needs a connection to the database"
+    assert not any("PostgreSQL 14" in q and "PostgreSQL 16" not in q for q in quotes), quotes
+
+
 def test_enrich_architecture_knowledge_dedupes_case_insensitively():
     ko = {
         "sections": [

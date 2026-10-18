@@ -59,6 +59,9 @@ def test_local_cleanup_keeps_the_space_before_a_dotted_name():
 
     assert _local_cleanup("our AKS cluster . The .NET services use SQL , Redis .") == \
         "Our AKS cluster. The .NET services use SQL, Redis."
+    # A name opening the text keeps its spelling (adversarial matrix L01).
+    assert _local_cleanup("orders-api handles checkout requests") == "orders-api handles checkout requests."
+    assert _local_cleanup("kubectl rollout restart fixes it") == "kubectl rollout restart fixes it."
 
 
 def test_danger_zones_are_never_reworded(monkeypatch):

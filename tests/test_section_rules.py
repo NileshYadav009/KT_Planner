@@ -152,3 +152,85 @@ def test_planned_and_unstarted_work_is_an_open_responsibility():
                  "Before Black Friday we plan to add more nodes."]:
         rule = match_section_rules(text)
         assert rule is None or rule.section_id != "open_responsibilities", (text, rule)
+
+def test_the_steps_of_a_procedure_stay_with_its_first_step():
+    """Adversarial matrix I02: "To roll back, first pause the sync." "Then
+    revert the image tag ..." "After that, resume the sync ..." The last step
+    went to Disaster Recovery, cutting the procedure in two."""
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, Sentence
+    from section_rules import apply_continuation_rules
+
+    def classified(text, section_id):
+        primary = Classification(section_id=section_id, section_title=section_id, confidence=0.6, reason="",
+                                 similarity_score=0.6)
+        return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0), primary_classification=primary,
+                               is_unassigned=False, explainability_log=None)
+
+    steps = [classified("To roll back, first pause the ArgoCD sync.", "deployment_and_rollback"),
+             classified("Then revert the image tag in the deploy repo.", "common_failures"),
+             classified("After that, resume the sync and watch the error rate for ten minutes.", "disaster_recovery"),
+             classified("Finally, tell the release channel.", "ownership_escalation")]
+    apply_continuation_rules(steps, {})
+    assert [s.primary_classification.section_id for s in steps] == ["deployment_and_rollback"] * 4
+    # Not a step: after a statement, or a sequence word starting a new topic.
+    others = [classified("Grafana shows queue depth.", "monitoring_observability"),
+              classified("Then the backups run every night.", "disaster_recovery"),
+              classified("Restart the consumer when lag grows.", "common_failures"),
+              classified("Next, the on-call rota is in PagerDuty.", "ownership_escalation")]
+    apply_continuation_rules(others, {})
+    assert [s.primary_classification.section_id for s in others] == [
+        "monitoring_observability", "disaster_recovery", "common_failures", "ownership_escalation"]
+
+def test_a_sentence_about_when_that_happens_stays_with_what_happens():
+    """Adversarial matrix B05: "Redis evicts sessions under memory pressure.
+    That happens during peak traffic." The second went to another section."""
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, Sentence
+    from section_rules import apply_continuation_rules
+
+    def classified(text, section_id):
+        primary = Classification(section_id=section_id, section_title=section_id, confidence=0.6, reason="",
+                                 similarity_score=0.6)
+        return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0), primary_classification=primary,
+                               is_unassigned=False, explainability_log=None)
+
+    pair = [classified("Redis evicts sessions under memory pressure.", "common_failures"),
+            classified("That happens during peak traffic.", "known_bad_days"),
+            classified("It usually occurs after a deployment.", "deployment_and_rollback")]
+    apply_continuation_rules(pair, {})
+    assert [s.primary_classification.section_id for s in pair] == ["common_failures"] * 3
+    # A sentence with its own subject keeps its place.
+    other = [classified("Redis evicts sessions under memory pressure.", "common_failures"),
+             classified("Peak traffic happens on Fridays.", "known_bad_days")]
+    apply_continuation_rules(other, {})
+    assert other[1].primary_classification.section_id == "known_bad_days"
+
+def test_a_step_already_with_its_procedure_is_not_taken_back_by_the_topic_restore():
+    """Adversarial matrix I02, in the pipeline: the last step was already in
+    Deployment (topic boost), so the step rule changed nothing, and
+    restore_sections_emptied_by_topic then gave it to Disaster Recovery, its
+    pick without the boost, because that section was empty."""
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, ExplainabilityLog, Sentence, restore_sections_emptied_by_topic
+    from section_rules import apply_continuation_rules
+
+    def classified(text, section_id, confidence=0.6):
+        primary = Classification(section_id=section_id, section_title=section_id, confidence=confidence, reason="",
+                                 similarity_score=confidence)
+        log = ExplainabilityLog(action="classify", timestamp="", sentence_id=0, section_id=section_id,
+                                reasoning="", confidence=confidence)
+        return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0), primary_classification=primary,
+                               secondary_classifications=[], is_unassigned=False, explainability_log=log)
+
+    steps = [classified("To roll back, first pause the ArgoCD sync.", "deployment_and_rollback"),
+             classified("Then revert the image tag in the deploy repo.", "deployment_and_rollback"),
+             classified("After that, resume the sync and watch the error rate.", "deployment_and_rollback", 0.33)]
+    unboosted = [None, None, (Classification(section_id="disaster_recovery", section_title="disaster_recovery",
+                                             confidence=0.24, reason="", similarity_score=0.24), 0.24)]
+    apply_continuation_rules(steps, {})
+    restore_sections_emptied_by_topic(steps, unboosted)
+    assert [s.primary_classification.section_id for s in steps] == ["deployment_and_rollback"] * 3

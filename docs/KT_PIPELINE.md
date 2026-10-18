@@ -60,6 +60,15 @@ sides of a marker that only means a correction ("sorry", "I mean", "or
 rather", "no wait", "correction"); "actually" and a bare "no" do not count.
 The Sources appendix still quotes the sentence as said.
 
+**A value corrected by a later sentence** is never shown on its own. A
+sentence that only restates the number is rewritten into the one before
+(`merge_spoken_corrections`, §9aap). One that says more ("Actually, the
+upgrade is complete; production is now on PostgreSQL 16") is kept whole with
+the sentence it corrects, as one unit, and one that points back ("I was wrong
+about the backups earlier, ...") takes the sentence it corrects along
+(`segment_sentences`, §9aaq). The rules, and what counts as a correction, are
+in `docs/CORRECTIONS.md`.
+
 **Stage 3.6 — one unit per sentence and section** (`rejoin_classified`):
 once every fact has its section, the facts of one sentence that sit side by
 side in one section become one unit again, shown as the spoken sentence.
