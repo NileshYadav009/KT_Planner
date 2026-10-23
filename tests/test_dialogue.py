@@ -32,6 +32,22 @@ def test_stated_gaps_are_told_apart_from_rules_and_facts(text, gap):
     assert is_gap_statement(text) is gap
 
 
+def test_a_statement_before_a_hedged_change_is_not_a_stated_gap():
+    """Adversarial matrix A18: "The backup retention is seven days. I think we
+    changed it to thirty days, but I'm not sure." (one unit, kept whole)
+    made Disaster Recovery Missing, "stated as not in place": only the
+    hedged clause before "but" was read."""
+    from dialogue import states_something
+
+    assert states_something("The backup retention is seven days. I think we changed it to thirty days, "
+                            "but I'm not sure.")
+    assert states_something("Cosmos has continuous backup turned on, but we have never tried a restore.")
+    for gap in ["Is it backed up? I think so, but I have never checked.",
+                "The RTO and RPO have not been documented.",
+                "What is the RTO? We never agreed one with the business."]:
+        assert not states_something(gap), gap
+
+
 def test_questions_are_merged_with_their_answers():
     texts = ["Is there a staging environment?", "Not really, we test in production.",
              "Who owns billing?", "What about alerts?", "Datadog pages us."]
@@ -101,3 +117,47 @@ def test_quick_reference_does_not_quote_a_gap_as_guidance(dialogue_result):
     rendered = json.dumps([s for s in dialogue_result["knowledge_object"]["rendered_sections"]
                            if s["section_id"] == "quick_reference"])
     assert "not sure anymore" not in rendered
+
+def test_speaker_labels_are_names_that_open_turns_not_headings():
+    """KT-taker audit (dev d05, matrix T01/T02): every turn of a pasted
+    transcript carries its speaker ("Owen: Merge to main ..."), and the
+    document printed them, with the questions, as facts."""
+    from dialogue import speaker_labels, without_speaker_labels
+
+    said = ("Nadia: How do I deploy? Owen: Merge to main. Nadia: Costs? Owen: The plan is oversized. "
+            "Backups: nightly to S3. Fix: restart the pod. Sam Lee: Hello. Sam Lee: Quill is a Go service.")
+    labels = speaker_labels(said)
+    assert labels == {"Nadia", "Owen", "Sam Lee"}
+    assert without_speaker_labels("Nadia: How do I deploy? Owen: Merge to main.", labels) == \
+        "How do I deploy? Merge to main."
+    # A heading said once keeps its word: it says what the value is.
+    assert without_speaker_labels("Backups: nightly to S3.", labels) == "Backups: nightly to S3."
+    # A name opening one turn of a conversation is a speaker too; in a
+    # monologue a single "Name:" is not enough.
+    assert "Ana Ruiz" in speaker_labels("Sam Lee: Hi. Sam Lee: Quill runs on Cloud Run. Ana Ruiz: What happens? "
+                                        "Sam Lee: It scales.")
+    assert speaker_labels("Backups: nightly to S3. The API runs on ECS.") == set()
+
+
+def test_a_question_is_dropped_only_when_its_answer_says_it_all():
+    from dialogue import without_redundant_question as drop
+
+    assert drop("How do I deploy? Merge to main and GitHub Actions deploys to a staging slot.") == \
+        "Merge to main and GitHub Actions deploys to a staging slot."
+    assert drop("What should I never do? Never run a schema change during clinic hours.") == \
+        "Never run a schema change during clinic hours."
+    assert drop("What breaks most often? The printer queue backs up when a warehouse goes offline.") == \
+        "The printer queue backs up when a warehouse goes offline."
+    assert drop("What happens at month end? Volume triples at month end, so scale Cloud Run to twenty instances.") == \
+        "Volume triples at month end, so scale Cloud Run to twenty instances."
+    assert drop("Anything else? Twilio rejects messages when we hit the rate limit.") == \
+        "Twilio rejects messages when we hit the rate limit."
+    # The question names what the answer does not, the answer leans on it,
+    # or the answer is not a statement: kept whole.
+    for kept in ["Costs? The App Service plan is oversized.",
+                 "What is the RTO? We never agreed one with the business.",
+                 "Where does it run? It's hybrid.",
+                 "Which environments do we have? Dev, staging and production.",
+                 "How many bookings is that? Around eight thousand a day, and Mondays are the busiest.",
+                 "Is it encrypted at rest? Yes, with KMS keys we manage."]:
+        assert drop(kept) == kept, kept

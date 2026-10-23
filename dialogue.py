@@ -84,6 +84,20 @@ _HEDGE_RE = re.compile(r"\b(?:i\s+think|i\s+believe|i\s+guess|probably|maybe|per
                        re.IGNORECASE)
 
 
+def states_something(text: str) -> bool:
+    """True when some sentence of `text` states something on its own: not a
+    question, not a gap and not hedged ("The backup retention is seven days.
+    I think we changed it to thirty days, but I'm not sure."), or the gap is
+    only in a contrasting clause (states_something_before_gap)."""
+    for part in re.split(r"(?<=[.!])\s+", text or ""):
+        # Judged with its question: "Is there a staging environment? Not
+        # really, ..." is a gap only read whole.
+        answer = part.split("?")[-1]
+        if len(answer.split()) >= 4 and not is_gap_statement(part) and not _HEDGE_RE.search(answer):
+            return True
+    return states_something_before_gap(text)
+
+
 def states_something_before_gap(text: str) -> bool:
     """True when the gap is only in a contrasting clause ("..., but we have
     never tested it") and the clause before it states something on its own:
@@ -239,7 +253,7 @@ def is_handover_announcement(text: str) -> bool:
 def is_field_candidate(text: str) -> bool:
     """A sentence that may fill a document field: not a bare question and
     not a statement that the thing is missing."""
-    return not (is_question(text) or (is_gap_statement(text) and not states_something_before_gap(text)))
+    return not (is_question(text) or (is_gap_statement(text) and not states_something(text)))
 
 
 def merge_question_answers(sentences: List[T], text_of: Callable[[T], str],
@@ -260,3 +274,86 @@ def merge_question_answers(sentences: List[T], text_of: Callable[[T], str],
         out.append(current)
         i += 1
     return out
+
+
+# A pasted transcript carries its speaker on every turn ("Owen: Merge to main
+# ..."), and a question-and-answer KT merges each question with its answer
+# (merge_question_answers). The document printed both as facts: "Nadia: How
+# do I deploy?" was a deployment step (KT-taker audit, dev d05; matrix T01).
+# A speaker label is a name of one to three capitalised words that opens at
+# least two turns; a heading said once ("Backups: nightly to S3") is not one.
+_LABEL_RE = re.compile(r"(?:^|(?<=[.!?]\s))([A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}):\s")
+_HEADING_WORDS = frozenset("""note notes step steps warning warnings example examples update updates important tip
+tips error errors status summary action actions todo fix fixes escalation backups backup security cost costs
+monitoring deployment rollback risk risks question answer topic agenda next unfinished overview owner owners
+""".split())
+
+
+def speaker_labels(text: str) -> set:
+    """The speaker labels of a transcript: names that open two or more turns."""
+    from collections import Counter
+
+    counts = Counter(_LABEL_RE.findall(text or ""))
+    names = {label: n for label, n in counts.items() if label.split()[0].lower() not in _HEADING_WORDS}
+    # In a conversation (someone opens two or more turns), a name that opens
+    # one turn is a speaker too ("Ana Ruiz: What happens at month end?").
+    if not any(n >= 2 for n in names.values()):
+        return set()
+    return set(names)
+
+
+def without_speaker_labels(text: str, labels) -> str:
+    """`text` without the speaker labels that open its turns."""
+    if not labels or not text:
+        return text
+    names = "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
+    return re.sub(r"(?:^|(?<=[.!?]\s))(?:" + names + r"):\s+", "", text)
+
+
+# The answer stands alone when it is a statement or an instruction, does not
+# lean on the question ("We never agreed one", "It's hybrid", "Yes, ..."),
+# and names what the question asked about ("How do I deploy?" / "... deploys
+# to a staging slot"). Otherwise the question stays: "Costs? The App Service
+# plan is oversized." says what the plan's size is about.
+_LEANS_ON_QUESTION_RE = re.compile(
+    r"\b(?:it|its|it's|that|this|these|those|they|them|their|one|ones|there|here|same|yes|no|yeah|nope)\b"
+    r"|\bnot\s+really\b", re.IGNORECASE)
+_QUESTION_LIGHT = frozenset("""what which who whom how where when why should would could can do does did is are was
+were am i we you my our your the a an to of for in on at with me us about anything else other more and so okay ok
+also any there have has had know will if something wrong exactly that this it be been tell me thing things happen
+happens happening break breaks most often usually typically normally""".split())
+
+
+# An answer that opens like a fragment needs its question: "Around eight
+# thousand a day" (of what?), "Every night", "Dev, staging and production".
+_FRAGMENT_ANSWER_RE = re.compile(
+    r"^\W*(?:around|about|roughly|approximately|nearly|almost|over|under|every|each|in|on|at|for|from|by|with"
+    r"|through|via|since|until|only|just|maybe|probably|mostly|usually|dev|staging|prod|production"
+    r"|\d|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|thousand)\b",
+    re.IGNORECASE)
+
+
+def _question_stems(text: str) -> set:
+    return {w.rstrip("s")[:5] for w in re.findall(r"[a-z][a-z'-]+", (text or "").lower())
+            if w not in _QUESTION_LIGHT and len(w) > 2}
+
+
+def without_redundant_question(text: str) -> str:
+    """"How do I deploy? Merge to main and GitHub Actions deploys to a staging
+    slot." -> the answer alone, when it says everything the question asked."""
+    m = re.match(r"^\s*(?P<q>[^?]*\?)\s+(?P<a>[^?]+)$", text or "")
+    if not m:
+        return text
+    question, answer = m.group("q"), m.group("a").strip()
+    if len(answer.split()) < 4 or _LEANS_ON_QUESTION_RE.search(answer) or _FRAGMENT_ANSWER_RE.match(answer):
+        return text
+    if _question_stems(question) - _question_stems(answer):
+        return text
+    return answer
+
+
+def display_text(text: str, labels) -> str:
+    """A fact as the document shows it: no speaker labels, and no question its
+    answer makes redundant."""
+    return without_redundant_question(without_speaker_labels(text, labels))
+

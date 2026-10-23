@@ -4,21 +4,23 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6 after2`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2 b4final`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `after2`.
+brackets). After: run `b4final`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
 (“Deployment approvals | Developers”); I02 expected “Argo CD” where the
 document uses the project's spelling, “ArgoCD” (I02 also had a real
-defect: the last step went to another section); and the PDF checks of A01
-and A05 read the PDF text only up to the cover's list of sections.
+defect: the last step went to another section); the PDF checks of A01
+and A05 read the PDF text only up to the cover's list of sections; and in
+the first run of T01 and T02 the title check errored (the harness gained it
+after that run started), so it counts as failed there.
 
 | ID | Category | Scenario | Expected | Before | After | Regression test |
 |---|---|---|---|---|---|---|
@@ -68,9 +70,21 @@ and A05 read the PDF text only up to the cover's list of sections.
 | L02 | L noisy | Speech-to-text mishearings of tool names | the job completes; shows “kubectl apply” (should); shows “PagerDuty” (should); shows “Grafana” (should) | 1/1 must, 2/3 should (fix1-6) | 1/1 must, 3/3 should | tests/test_devops_transcription.py::test_spelled_out_acronyms_and_spaced_tool_names_are_joined |
 | L03 | L noisy | A repeated introduction after a dropped connection | shows “Kafka with 12 partitions per topic”; never shows “my connection dropped” (should) | 1/1 must, 0/1 should (fix1-6) | 1/1 must, 1/1 should | tests/test_context_mapper_hints.py::test_meta_commentary_sentences_are_flagged |
 | N01 | N PDF | Addresses and a corrected value in the PDF text | shows “20 minutes”; never shows “15 minutes”; PDF shows “10.20.0.0/16”; PDF shows “https://api.example.com/healthz” | 6/6 must (fix1-6) | 6/6 must | tests/test_devops_transcription.py::test_a_number_corrected_mid_sentence_keeps_only_the_corrected_one |
+| A16 | A correction | A change stated as news, no correction marker ('We upgraded production to ... last night') | shows “PostgreSQL 16”; never shows alone “PostgreSQL 14” (without “PostgreSQL 16”) | 1/2 must (b3base) | 2/2 must | matrix only |
+| A17 | A minimal pair | Two environments in one sentence: both kept, no conflict | exactly “Staging uses 2000K, while production uses 3000K”; does not flag “2000K / 3000K” | 1/2 must (b3base) | 2/2 must | matrix only |
+| A18 | A correction / C uncertainty | A hedged change: 'I think we changed it to thirty days, but I'm not sure' | never shows alone “seven days” (without “thirty days”); never shows alone “thirty days” (without “not sure” or “I think”); flags “seven days / thirty days” (should); coverage of “disaster_recovery” is not Missing | 1/2 must, 0/1 should (b3base) | 3/3 must, 1/1 should | matrix only |
+| A19 | A correction / scope | Ownership corrected by scope: application vs cluster | shows one of “application ownership belongs to Payments / application payments”; shows one of “Platform owns the cluster / cluster platform”; never shows alone “owned by Platform Engineering” (without “Payments” or “cluster”); never shows “^(service|application|payments service)[^a-z]{0,3}platform engineering\b” | 3/4 must (b3base) | 4/4 must | matrix only |
+| B06 | B giver realism | Indian English: 'we are having', 'prod only', 'the same is monitored' | shows “three Kafka brokers in prod only”; shows “monitored in Grafana”; in “Consumer lag alerts are going to the ops-alerts Slack channel” in monitoring_observability (should) | 2/2 must, 1/1 should (b3base) | 2/2 must, 1/1 should | matrix only |
+| B07 | B giver realism | Indian English: 'kindly do the needful' around a real instruction with a threshold | shows “restart the consumer pods if lag is more than 10k”; exactly “10k”; in “restart the consumer pods if lag is more than 10k” in common_failures, monitoring_observability (should) | 2/2 must, 1/1 should (b3base) | 2/2 must, 1/1 should | matrix only |
+| B08 | B giver realism | Fronted object and odd word order | in “Deployment we are doing through Jenkins only” in deployment_and_rollback; shows “don't hardcode it anywhere”; in “Prod DB password we are keeping in Vault” in security_controls, danger_zones (should) | 2/2 must, 1/1 should (b3base) | 2/2 must, 1/1 should | matrix only |
+| B09 | L noisy / E multi-fact | Speech-to-text run-on with no punctuation, four facts | the job completes; shows “redis for cache”; in “does the deployment from github” in deployment_and_rollback (should) | 2/2 must, 0/1 should (b3base) | 2/2 must, 0/1 should | matrix only |
+| T01 | T KT taker | Question-and-answer handover with a speaker label on every turn | title names “Tern”; never shows “^[a-z]+: ”; never shows “^[^.!]*\?$”; in “Clear the queue from the admin page” in common_failures; never shows “deployment & rollback.*not discussed:[^|]*rollback procedure”; never shows “system overview.*not discussed:[^|]*volume”; never shows “common failures & fixes.*not discussed:[^|]*fixes or workarounds”; never shows “\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\?” (should) | 0/7 must, 0/1 should (b3fix2) | 7/7 must, 0/1 should | matrix only |
+| T02 | T KT taker | Two-word speaker names on every turn | title names “Quill”; never shows “^[a-z]+(?: [a-z]+)?: ”; shows “Volume triples at month end” | 1/3 must (b3fix2) | 3/3 must | matrix only |
 
 ## Still failing after the fixes
 
 - **D02** (should) flagged “developers own deployment approvals / release manager can approve”: []
 - **D03** (should) flagged “backups run hourly / every six hours”: []
 - **D04** (should) flagged “the service is public / only private subnets”: []
+- **B09** (should) in_section “does the deployment from github”: ["system_overview"]
+- **T01** (should) absent_re “\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\?”: ["system_overview: How many labels a day? About twelve thousand a day."]

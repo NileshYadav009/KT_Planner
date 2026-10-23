@@ -151,6 +151,19 @@ def _extract_json_response(text: str):
     return None
 
 
+# A template label the polish could not fill: "**Rollback trigger:** Not
+# specified", "**Window:** N/A", "- **Target time:** not mentioned". The
+# coverage page already lists what was not discussed; in the section it is
+# filler. Only a label line whose whole value is a placeholder.
+_PLACEHOLDER_LINE_RE = re.compile(
+    r"^[ \t]*(?:[-*•][ \t]*)?\*\*[^*\n]{1,60}:\*\*[ \t]*(?:n/?a|none|unknown|not[ \t]+(?:specified|mentioned"
+    r"|provided|stated|discussed|given|available))[ \t]*\.?[ \t]*$\n?", re.IGNORECASE | re.MULTILINE)
+
+
+def _without_placeholder_lines(text: str) -> str:
+    return _PLACEHOLDER_LINE_RE.sub("", text or "").strip()
+
+
 def _local_cleanup(text: str) -> str:
     text = ' '.join(text.split())
     # Only punctuation that ends a word: "The .NET services" kept its space
@@ -300,7 +313,7 @@ PRIORITY_COVERAGE_SECTION_IDS = [
     'common_failures'
 ]
 
-from llm.prompts import SECTION_STRUCTURED_PROMPTS, SECTION_POLISH_PROMPTS
+from llm.prompts import POLISH_SYSTEM_PROMPT, SECTION_STRUCTURED_PROMPTS, SECTION_POLISH_PROMPTS
 
 
 def _build_polish_inputs(
@@ -530,12 +543,9 @@ def polish_coverage_sections(
                 temperature=0.2,
                 max_output_tokens=1024,
                 stop_sequences=[],
-                system_prompt=(
-                    "You are a senior technical writer for a Knowledge Transfer document. "
-                    "Follow the formatting instructions exactly and do not invent facts."
-                ),
+                system_prompt=POLISH_SYSTEM_PROMPT,
             )
-            cleaned_text = response.strip() if isinstance(response, str) else ""
+            cleaned_text = _without_placeholder_lines(response) if isinstance(response, str) else ""
             if not cleaned_text:
                 return _local_cleanup_list(_all_fragments(section))
             added = added_specifics(cleaned_text, list(section["fragments"]) + [prompt])

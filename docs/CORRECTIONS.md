@@ -3,7 +3,7 @@
 How the pipeline decides which value a KT document shows when the speaker
 gave more than one. All of it is deterministic: it runs with or without an
 LLM, before the copy edit, and the Sources appendix always quotes what was
-said. Evidence and history: `docs/REPOSITORY_AUDIT.md` §9aan, §9aap, §9aaq.
+said. Evidence and history: `docs/REPOSITORY_AUDIT.md` §9aan, §9aap, §9aaq, §9aar, §9aas.
 Cases: `evaluation/matrix/cases.json` (categories A and D), run by
 `python evaluation/matrix.py LABEL`. Unit tests:
 `tests/test_devops_transcription.py` (same sentence, next sentence, further
@@ -34,6 +34,10 @@ back), `tests/test_conflicts.py` (conflicts), `tests/test_knowledge_builders.py`
 | A number corrected in the same sentence: "the limit is 4000, sorry, 2000"; "2000K—no, sorry, it's 3000K"; "every 30 minutes—sorry, every 30 seconds" | The corrected value only: "the limit is 2000" | `devops_transcription.resolve_self_corrections` |
 | The next sentence only restates the number: "The limit is 500 requests a minute. Sorry, not 500, the limit is 300 requests a minute." | The first sentence with the corrected number. Both sentences are cited, and the ledger records the correction as excluded, with its reason. | `resolve_correction_across`, `context_mapper.merge_spoken_corrections` |
 | The next sentence replaces the value and says more: "We use PostgreSQL 14. Actually, the upgrade is complete; production is now on PostgreSQL 16." | Both sentences together, as said, as one unit in one section. The old value is never on its own. | `replaces_value_before`, `context_mapper.segment_sentences` |
+| The next sentence states a change, with no marker: "The database is PostgreSQL 14. We upgraded production to PostgreSQL 16 last night."; "It is now 40 connections." | Both together, as said (as above). | `replaces_value_before` (a change verb with "to", "is now") |
+| The next sentence corrects a statement with no number: "The service is owned by Platform Engineering. Actually, application ownership belongs to Payments, but Platform owns the cluster." | Both together, as said. It opens with a correction marker or "actually" (not "actually, that reminds me") and shares a content word with the sentence before. | `corrects_statement_before` |
+| A change said with a hedge: "The backup retention is seven days. I think we changed it to thirty days, but I'm not sure." | Both together, an "Unconfirmed change — confirm with the outgoing owner" warning, and a knowledge-gap line. The section still counts as discussed. | `conflicts.find_unconfirmed_changes` |
+| One value compared across environments in one sentence: "Staging uses 2000K, while production uses 3000K." | One statement, not cut into two facts; no conflict. | `compares_one_value` in `context_mapper.split_facts` |
 | A later sentence points back: "I was wrong about the backups earlier, they are kept for 35 days now." | The earlier sentence is moved next to the correction and shown with it. Only when the earlier sentence states nothing else, is about the named topic, and is at most 20 sentences back. | `points_back_to`, `segment_sentences` |
 | A tool replaced: "we moved off PagerDuty to Opsgenie" | Tool fields and the Technology summary name the new tool | `conflicts.find_superseded_tools`, `knowledge_builder.apply_conflicts` |
 | A single-valued field stated twice (RTO, RPO, an owner) | The corrected value, with what it replaces; with no correction marker, "Conflicting values stated" to confirm | `conflicts.resolve_single_value`, `field_populator.extract_rto_rpo` |

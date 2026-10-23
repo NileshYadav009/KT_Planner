@@ -24,7 +24,9 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:this\s+(?:kt|handover)\s+(?:is\s+for|covers)|handing\s+over|taking\s+over|responsible\s+for|"
          r"handles|processes|sends|lets|allows|serves|takes|authori[sz]es|powers|is\s+(?:the|our)\s+\w+)\b"),
         ("Users and reach", ("users", "customer_reach", "who_affected"),
-         r"\b(?:used\s+by|customers?|users|clients|travell?ers|hospitals|businesses|teams?\s+use)\b"),
+         r"\b(?:used\s+by|customers?|users|clients|travell?ers|hospitals|businesses|teams?\s+use"
+         r"|patients|clinics|stores|shops|branches|members|staff|employees|students|drivers|riders|merchants"
+         r"|sellers|buyers|tenants|subscribers|agents)\b"),
         ("Business criticality and impact",
          ("business_criticality", "business_impact", "worst_case", "what_breaks", "business_dependency", "critical_time"),
          r"\b(?:critical|if\s+(?:it|the\s+\w+)\s+(?:is|goes)\s+down|unavailable|outage|depend\w*|revenue|cannot|can't)\b"),
@@ -34,7 +36,11 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:\d[\d,.]*|thousand|million|billion|hundred)\s+(?:\w+\s+)?(?:orders|events|requests|transactions|"
          r"messages|alerts|users|travell?ers|bookings|invoices|calls|businesses|readings|records|jobs|files)\b"
          r"|\b\d[\d,.]*\s*(?:tb|gb|pb|terabytes?|gigabytes?|petabytes?)\b"
-         r"|\b(?:processes|handles|serves|ingests|receives)\b[^.]*\b(?:per|a|each|every)\s+(?:second|minute|hour|day|month)\b"),
+         r"|\b(?:processes|handles|serves|ingests|receives)\b[^.]*\b(?:per|a|each|every)\s+(?:second|minute|hour|day|month)\b"
+         # A large number per period, said as an answer: "About twelve
+         # thousand a day", "8000 bookings a day". Not "3 times a day".
+         r"|\b(?:\d{3,}[\d,.]*|\d+(?:k|m)|thousand|million|billion|hundred)\s+(?:\w+\s+){0,2}?"
+         r"(?:a|per|each|every)\s+(?:second|minute|hour|day|week|month)\b"),
         ("Technology stack", ("key_technologies",), None),
     ],
     "architecture_reference": [
@@ -99,7 +105,8 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|weekends?|window|freeze|blackout|mornings?|"
          r"evenings?|business\s+hours)\b"),
         ("Rollback procedure", ("rollback_scenarios", "rollback_trigger"),
-         r"\b(?:roll\s?back|revert\w*|redeploy\s+the\s+previous|previous\s+(?:version|revision|task\s+definition))\b"),
+         r"\b(?:roll\s?back|revert\w*|redeploy\s+the\s+previous|previous\s+(?:version|revision|task\s+definition)"
+         r"|(?:swap|switch|go)\s+back)\b"),
         ("Rollback time and approval", ("rollback_time", "rollback_approval"),
          r"\b(?:roll\s?back|redeploy|revert)\w*\b[^.]*\b(?:minutes?|hours?|takes|approv\w*)\b"),
         ("Repository and pipeline links", ("repo_link", "pipeline_link"), r"https?://|\bwww\."),
@@ -109,9 +116,11 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "common_failures": [
         ("Known failures", (),
          r"\b(?:problem|issue|failure|fail(?:s|ed|ing)?|error|outage|incident|backlog|lag|throttl\w*|timeout|crash\w*|"
-         r"exhaust\w*|leak\w*|stuck|down)\b"),
+         r"exhaust\w*|leak\w*|stuck|down|offline|unavailable|reject\w*|hang\w*|stall\w*|drops|dropped"
+         r"|backs\s+up\s+when|backed\s+up)\b"),
         ("Fixes or workarounds", (),
-         r"\b(?:fix\w*|resolv\w*|workaround|restart\w*|renew\w*|rotat\w*|switch\w*|drain\w*|redeploy\w*|scal\w+)\b"),
+         r"\b(?:fix\w*|resolv\w*|workaround|restart\w*|renew\w*|rotat\w*|switch\w*|drain\w*|redeploy\w*|scal\w+"
+         r"|clear\w*|reset\w*|purge\w*|flush\w*|spread\w*|retr(?:y|ies|ied)|re-?run\w*|reboot\w*|fail\s*over\w*)\b"),
     ],
     "known_bad_days": [
         # Sales EVENTS, not a sales team: "Finance and sales operations use

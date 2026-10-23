@@ -360,6 +360,35 @@ def test_enrich_architecture_knowledge_pulls_components_from_any_section():
     }
 
 
+def test_a_kt_is_named_after_its_system_not_a_pronoun_phrase():
+    """KT-taker audit (dev d05, matrix T01): "What is Fernhill exactly? It's
+    the appointment booking system ..." titled the document "It's the
+    Appointment Booking"."""
+    from knowledge.knowledge_builder import _infer_system_name
+
+    coverage = {"system_overview": {"content": [
+        "Nadia: What is Fernhill exactly? Owen: It's the appointment booking system for our forty clinics.",
+        "Escalate to Laura Pike, the clinical systems manager, and call Laura Pike if the VPN is down."]},
+        "ownership_escalation": {"content": ["The patient access team owns Fernhill.",
+                                             "Alerts go to the Teams channel and Azure Monitor pages the on-call."]}}
+    assert _infer_system_name(coverage) == "Fernhill"
+    # No name said twice: the description, without the pronoun.
+    coverage = {"system_overview": {"content": ["It's the appointment booking system for our forty clinics."]}}
+    assert _infer_system_name(coverage) == "Appointment Booking"
+
+
+def test_a_value_kept_with_its_hedged_correction_still_covers_its_topic():
+    """Adversarial matrix A18: the unit "The backup retention is seven days. I
+    think we changed it to thirty days, but I'm not sure." was read as one
+    stated gap, and Disaster Recovery was reported Missing."""
+    unit = "The backup retention is seven days. I think we changed it to thirty days, but I'm not sure."
+    ko = {"sections": [{"id": "disaster_recovery", "title": "DISASTER RECOVERY", "fields": {}}], "summary": {}}
+    schema = [{"id": "disaster_recovery", "title": "DISASTER RECOVERY", "fields": []}]
+    result = append_coverage_matrix_section(ko, {"disaster_recovery": _cov(unit)}, schema)
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Coverage"] != "Missing", row
+
+
 def test_a_technology_named_only_in_a_plan_or_a_guess_is_not_a_current_component():
     """Adversarial matrix C01, C02: "We are planning to migrate to Kubernetes
     next quarter" listed Kubernetes as current compute in the Technology
@@ -949,7 +978,9 @@ def test_build_knowledge_object_system_name_fallback_keeps_contraction_intact():
     coverage = {"system_overview": {"content": ["It's the old claims system, been around forever."]}}
     ko = build_knowledge_object("job1", coverage, [], {})
     assert not ko["system_name"].lower().startswith("s the")
-    assert ko["system_name"].lower().startswith("it")
+    # Not "It's the Old Claims" either: a KT title is never a pronoun
+    # phrase (KT-taker audit, matrix T01).
+    assert ko["system_name"] == "Old Claims"
 
 
 def test_build_knowledge_object_system_name_fallback_trims_leading_verb_filler():

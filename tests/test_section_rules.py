@@ -234,3 +234,39 @@ def test_a_step_already_with_its_procedure_is_not_taken_back_by_the_topic_restor
     apply_continuation_rules(steps, {})
     restore_sections_emptied_by_topic(steps, unboosted)
     assert [s.primary_classification.section_id for s in steps] == ["deployment_and_rollback"] * 3
+
+def test_a_fix_said_right_after_its_failure_stays_with_it():
+    """KT-taker audit (dev d05, matrix T01): "The printer queue backs up when a
+    warehouse goes offline." "Clear the queue from the admin page, and if that
+    doesn't help, call the warehouse IT team." The fix went to Ownership for
+    its "call ... team", and Common Failures reported no fix."""
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, Sentence
+    from section_rules import apply_continuation_rules
+
+    def classified(text, section_id):
+        primary = Classification(section_id=section_id, section_title=section_id, confidence=0.6, reason="",
+                                 similarity_score=0.6)
+        return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0), primary_classification=primary,
+                               is_unassigned=False, explainability_log=None)
+
+    for failure, fix in [
+            ("The printer queue backs up when a warehouse goes offline.",
+             "Clear the queue from the admin page, and if that doesn't help, call the warehouse IT team."),
+            ("The VPN tunnel drops, and then every booking fails with a database timeout.",
+             "Reset the tunnel from the Azure portal; if it doesn't come back, call the network team.")]:
+        pair = [classified(failure, "common_failures"), classified(fix, "ownership_escalation")]
+        apply_continuation_rules(pair, {})
+        assert pair[1].primary_classification.section_id == "common_failures", fix
+    # Not a fix (an escalation), not after a failure, or a safety rule.
+    for previous, nxt, section in [
+            ("The printer queue backs up when a warehouse goes offline.",
+             "Escalate to Laura Pike, the clinical systems manager.", "ownership_escalation"),
+            ("Grafana shows queue depth.", "Restart the consumer when lag grows.", "ownership_escalation"),
+            ("The VPN tunnel drops during deploys.", "Never restart the primary database during trading hours.",
+             "danger_zones")]:
+        pair = [classified(previous, "common_failures" if "drops" in previous or "backs" in previous
+                           else "monitoring_observability"), classified(nxt, section)]
+        apply_continuation_rules(pair, {})
+        assert pair[1].primary_classification.section_id == section, nxt

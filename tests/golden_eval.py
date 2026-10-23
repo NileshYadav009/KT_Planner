@@ -59,7 +59,7 @@ def norm(text: str) -> str:
 def _quotes_on_purpose(block: Dict[str, Any]) -> bool:
     title = str(block.get("title") or "")
     return (block.get("type") in ("ImageBlock", "DiagramBlock") or title in _QUOTING_TITLES
-            or (block.get("type") == "WarningBlock" and title.startswith("Possible conflict")))
+            or (block.get("type") == "WarningBlock" and title.startswith(("Possible conflict", "Unconfirmed change"))))
 
 
 def _block_strings(block: Dict[str, Any]) -> List[str]:

@@ -16,6 +16,23 @@
         <div><span>Date</span><strong>{{ date_str }}</strong></div>
         <div><span>Job ID</span><strong>{{ job_id[:8].upper() }}</strong></div>
       </div>
+      {% if glance %}
+      <div class="glance">
+        <p class="glance-title">At a glance</p>
+        <div class="glance-grid">
+          <div class="glance-tile tile-strong"><strong>{{ glance.strong }}</strong><span>sections covered well</span></div>
+          <div class="glance-tile tile-partial"><strong>{{ glance.partial }}</strong><span>partly covered</span></div>
+          <div class="glance-tile tile-missing"><strong>{{ glance.missing }}</strong><span>not covered</span></div>
+          <div class="glance-tile tile-confirm"><strong>{{ glance.follow_ups }}</strong><span>to confirm with the outgoing owner{% if glance.conflicts %}, incl. {{ glance.conflicts }} possible conflict{{ 's' if glance.conflicts != 1 }}{% endif %}</span></div>
+        </div>
+        {% if 'quick_reference' in section_ids or 'kt_coverage' in section_ids %}
+        <p class="glance-note">
+          {% if 'quick_reference' in section_ids %}During an incident: <a class="page-ref" href="#quick_reference">Quick Reference</a>. {% endif %}
+          {% if 'kt_coverage' in section_ids %}Before sign-off: <a class="page-ref" href="#kt_coverage">KT Coverage &amp; Knowledge Gaps</a>.{% endif %}
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if warnings %}
       <div class="degraded-banner">
         <p class="degraded-title">Review before relying on this document</p>

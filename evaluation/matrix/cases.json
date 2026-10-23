@@ -1,5 +1,5 @@
 {
-  "about": "Adversarial KT matrix. Written 18 Oct before any output was seen. Each case is a short transcript run through the real pipeline (no LLM) by evaluation/matrix.py. Checks: shows / shows_any (normalised text visible somewhere in the document), absent / absent_re (not visible outside conflict warnings), never_alone (every document unit naming `text` also names `with`, so a superseded or hedged value is never shown on its own), verbatim (exact characters), in_section, order (same section, in order), flagged (shown in a conflict or gap warning), coverage, completes. level: must = a wrong final document; should = a desirable behaviour the product does not promise yet.",
+  "about": "Adversarial KT matrix. Written 18 Oct before any output was seen. Each case is a short transcript run through the real pipeline (no LLM) by evaluation/matrix.py. Checks: shows / shows_any (normalised text visible somewhere in the document), absent / absent_re (not visible outside conflict warnings), never_alone (every document unit naming `text` also names `with`, so a superseded or hedged value is never shown on its own), verbatim (exact characters), in_section, order (same section, in order), flagged (shown in a conflict or gap warning), not_flagged (no conflict warning names both), coverage, completes. level: must = a wrong final document; should = a desirable behaviour the product does not promise yet.",
   "cases": [
     {
       "id": "A01", "category": "A correction", "title": "Same-sentence correction with a dash and 'no, sorry, it's'",
@@ -655,6 +655,149 @@
         {"check": "pdf_shows", "text": "https://api.example.com/healthz", "level": "must"}
       ],
       "pdf": true
+    },
+    {
+      "id": "A16", "category": "A correction", "title": "A change stated as news, no correction marker ('We upgraded production to ... last night')",
+      "transcript": [
+        "Raj: This is the handover for the reporting API.",
+        "The reporting API is a Python service on Amazon ECS.",
+        "The database is PostgreSQL 14. We upgraded production to PostgreSQL 16 last night."
+      ],
+      "expect": [
+        {"check": "shows", "text": "PostgreSQL 16", "level": "must"},
+        {"check": "never_alone", "text": "PostgreSQL 14", "with": "PostgreSQL 16", "level": "must"}
+      ]
+    },
+    {
+      "id": "A17", "category": "A minimal pair", "title": "Two environments in one sentence: both kept, no conflict",
+      "transcript": [
+        "Sita: This is the handover for the image cache.",
+        "The image cache is Redis on Azure.",
+        "Staging uses 2000K, while production uses 3000K.",
+        "The cache is warmed after every deployment."
+      ],
+      "expect": [
+        {"check": "verbatim", "text": "Staging uses 2000K, while production uses 3000K", "level": "must"},
+        {"check": "not_flagged", "texts": ["2000K", "3000K"], "level": "must"}
+      ]
+    },
+    {
+      "id": "A18", "category": "A correction / C uncertainty", "title": "A hedged change: 'I think we changed it to thirty days, but I'm not sure'",
+      "transcript": [
+        "Tariq: This is the handover for the customer database.",
+        "The customer database is MySQL on Amazon RDS.",
+        "The backup retention is seven days. I think we changed it to thirty days, but I'm not sure."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "seven days", "with": "thirty days", "level": "must"},
+        {"check": "never_alone", "text": "thirty days", "with": ["not sure", "I think"], "level": "must"},
+        {"check": "flagged", "texts": ["seven days", "thirty days"], "level": "should"},
+        {"check": "coverage", "section": "disaster_recovery", "not": ["Missing"], "level": "must"}
+      ]
+    },
+    {
+      "id": "A19", "category": "A correction / scope", "title": "Ownership corrected by scope: application vs cluster",
+      "transcript": [
+        "Uma: This is the handover for the payments service.",
+        "The payments service runs on Kubernetes.",
+        "The service is owned by Platform Engineering. Actually, application ownership belongs to Payments, but Platform owns the cluster."
+      ],
+      "expect": [
+        {"check": "shows_any", "texts": ["application ownership belongs to Payments", "application payments"], "level": "must"},
+        {"check": "shows_any", "texts": ["Platform owns the cluster", "cluster platform"], "level": "must"},
+        {"check": "never_alone", "text": "owned by Platform Engineering", "with": ["Payments", "cluster"], "level": "must"},
+        {"check": "absent_re", "pattern": "^(service|application|payments service)[^a-z]{0,3}platform engineering\\b", "level": "must"}
+      ]
+    },
+    {
+      "id": "B06", "category": "B giver realism", "title": "Indian English: 'we are having', 'prod only', 'the same is monitored'",
+      "transcript": [
+        "Vikram: Today I will give the KT for the order streaming platform.",
+        "We are having three Kafka brokers in prod only, and the same is monitored in Grafana.",
+        "Consumer lag alerts are going to the ops-alerts Slack channel."
+      ],
+      "expect": [
+        {"check": "shows", "text": "three Kafka brokers in prod only", "level": "must"},
+        {"check": "shows", "text": "monitored in Grafana", "level": "must"},
+        {"check": "in_section", "text": "Consumer lag alerts are going to the ops-alerts Slack channel", "sections": ["monitoring_observability"], "level": "should"}
+      ]
+    },
+    {
+      "id": "B07", "category": "B giver realism", "title": "Indian English: 'kindly do the needful' around a real instruction with a threshold",
+      "transcript": [
+        "Vikram: This is the handover for the order consumers.",
+        "The consumers run on Kubernetes and read from Kafka.",
+        "Kindly do the needful and restart the consumer pods if lag is more than 10k."
+      ],
+      "expect": [
+        {"check": "shows", "text": "restart the consumer pods if lag is more than 10k", "level": "must"},
+        {"check": "verbatim", "text": "10k", "level": "must"},
+        {"check": "in_section", "text": "restart the consumer pods if lag is more than 10k", "sections": ["common_failures", "monitoring_observability"], "level": "should"}
+      ]
+    },
+    {
+      "id": "B08", "category": "B giver realism", "title": "Fronted object and odd word order",
+      "transcript": [
+        "Neha: This is the handover for the billing portal.",
+        "Deployment we are doing through Jenkins only, no other way is there.",
+        "Prod DB password we are keeping in Vault, don't hardcode it anywhere."
+      ],
+      "expect": [
+        {"check": "in_section", "text": "Deployment we are doing through Jenkins only", "sections": ["deployment_and_rollback"], "level": "must"},
+        {"check": "shows", "text": "don't hardcode it anywhere", "level": "must"},
+        {"check": "in_section", "text": "Prod DB password we are keeping in Vault", "sections": ["security_controls", "danger_zones"], "level": "should"}
+      ]
+    },
+    {
+      "id": "B09", "category": "L noisy / E multi-fact", "title": "Speech-to-text run-on with no punctuation, four facts",
+      "transcript": [
+        "Arun: this is the handover for the shop backend",
+        "so basically the app is on eks and the db is rds postgres then we have redis for cache and argo cd does the deployment from github"
+      ],
+      "expect": [
+        {"check": "completes", "level": "must"},
+        {"check": "shows", "text": "redis for cache", "level": "must"},
+        {"check": "in_section", "text": "does the deployment from github", "sections": ["deployment_and_rollback"], "level": "should"}
+      ]
+    },
+    {
+      "id": "T01", "category": "T KT taker", "title": "Question-and-answer handover with a speaker label on every turn",
+      "transcript": [
+        "Priya: Can you walk me through Tern before you leave?",
+        "Sam: Sure. Tern is the parcel label service for our warehouses.",
+        "Priya: How do I deploy it?",
+        "Sam: Merge to main and Azure DevOps deploys to the staging slot. Check the smoke tests, then swap the slot into production. If it goes wrong, swap back.",
+        "Priya: What breaks most often?",
+        "Sam: The printer queue backs up when a warehouse goes offline. Clear the queue from the admin page, and if that doesn't help, call the warehouse IT team.",
+        "Priya: How many labels a day?",
+        "Sam: About twelve thousand a day.",
+        "Priya: Who owns it?",
+        "Sam: The logistics platform team owns Tern."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "Tern", "level": "must"},
+        {"check": "absent_re", "pattern": "^[a-z]+: ", "level": "must"},
+        {"check": "absent_re", "pattern": "^[^.!]*\\?$", "level": "must"},
+        {"check": "in_section", "text": "Clear the queue from the admin page", "sections": ["common_failures"], "level": "must"},
+        {"check": "absent_re", "pattern": "deployment & rollback.*not discussed:[^|]*rollback procedure", "level": "must"},
+        {"check": "absent_re", "pattern": "system overview.*not discussed:[^|]*volume", "level": "must"},
+        {"check": "absent_re", "pattern": "common failures & fixes.*not discussed:[^|]*fixes or workarounds", "level": "must"},
+        {"check": "absent_re", "pattern": "\\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\\?", "level": "should"}
+      ]
+    },
+    {
+      "id": "T02", "category": "T KT taker", "title": "Two-word speaker names on every turn",
+      "transcript": [
+        "Sam Lee: This is the handover for Quill, our invoice generator.",
+        "Sam Lee: Quill is a Go service on Google Cloud Run, and invoices are stored in Cloud Storage.",
+        "Ana Ruiz: What happens at month end?",
+        "Sam Lee: Volume triples at month end, so scale Cloud Run to twenty instances on the last working day."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "Quill", "level": "must"},
+        {"check": "absent_re", "pattern": "^[a-z]+(?: [a-z]+)?: ", "level": "must"},
+        {"check": "shows", "text": "Volume triples at month end", "level": "must"}
+      ]
     }
   ]
 }

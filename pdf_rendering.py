@@ -263,6 +263,35 @@ def render_sources_appendix(sources: list) -> str:
             f"<p class=\"sources-intro\">{intro}</p><ol class=\"sources-list\">{''.join(items)}</ol></section>")
 
 
+_COVERAGE_STATUS = {"Strong": "strong", "Partial": "partial", "Missing": "missing", "After review": "after-review"}
+_MARKDOWN_STRUCTURE_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s|\*\*|#")
+
+
+def _reads_as_fact_list(paragraphs: list) -> bool:
+    """Three or more short, plain statements (no line breaks, lists, bold
+    labels or headings of their own, as a polished section has)."""
+    items = [p for p in paragraphs or [] if isinstance(p, str) and p.strip()]
+    return len(items) >= 3 and len(items) == len(paragraphs) and all(
+        "\n" not in p.strip() and len(p) <= 320 and not _MARKDOWN_STRUCTURE_RE.search(p) for p in items)
+
+
+def handover_glance(knowledge_object: dict):
+    """The cover's summary: sections covered well, partly and not at all, and
+    what to confirm with the outgoing owner. None without a coverage matrix."""
+    sections = knowledge_object.get("sections") or []
+    coverage = next((s for s in sections if s.get("id") == "kt_coverage"), None) or {}
+    rows = coverage.get("_coverage_rows") or []
+    if not rows:
+        return None
+    counts = {"Strong": 0, "Partial": 0, "Missing": 0}
+    for row in rows:
+        if row.get("Coverage") in counts:
+            counts[row["Coverage"]] += 1
+    return {"strong": counts["Strong"], "partial": counts["Partial"], "missing": counts["Missing"],
+            "follow_ups": len(coverage.get("_knowledge_gaps") or []),
+            "conflicts": len(knowledge_object.get("_conflicts") or [])}
+
+
 def render_section_blocks(rendered_sections: list) -> str:
     html = []
     for idx, section in enumerate(rendered_sections, start=1):
@@ -286,8 +315,17 @@ def render_section_blocks(rendered_sections: list) -> str:
             if raw_block_title.strip().lower() != raw_section_title.strip().lower():
                 html.append(f"<h3 class=\"block-title\">{html_escape(raw_block_title)}</h3>")
             if block_type == "NarrativeBlock":
-                for i, p in enumerate(block.get("paragraphs", [])):
-                    html.append(f"<div class=\"narrative-para\">{_with_refs(_render_paragraph_text(p), _refs(block, i))}</div>")
+                paragraphs = block.get("paragraphs", [])
+                if _reads_as_fact_list(paragraphs):
+                    # Three or more short facts read as a list, not a wall of
+                    # one-line paragraphs (PDF review, 23 Oct).
+                    html.append("<ul class=\"fact-list\">")
+                    for i, p in enumerate(paragraphs):
+                        html.append(f"<li>{_with_refs(_render_paragraph_text(p), _refs(block, i))}</li>")
+                    html.append("</ul>")
+                else:
+                    for i, p in enumerate(paragraphs):
+                        html.append(f"<div class=\"narrative-para\">{_with_refs(_render_paragraph_text(p), _refs(block, i))}</div>")
             elif block_type == "ChecklistBlock":
                 html.append("<ul>")
                 for i, item in enumerate(block.get("items", [])):
@@ -344,6 +382,12 @@ def render_section_blocks(rendered_sections: list) -> str:
                         if by_number and c == len(columns) - 1 and _source_ids(block, i):
                             links = ", ".join(f"<a href=\"#src-{n}\">{n}</a>" for n in _source_ids(block, i))
                             html.append(f"<td class=\"sentence-ref\">sentence {links}</td>")
+                        elif col == "Coverage" and str(cell_value).strip() in _COVERAGE_STATUS:
+                            # Strong / Partial / Missing as a coloured badge, so
+                            # the gaps stand out in the coverage matrix.
+                            status = str(cell_value).strip()
+                            html.append(f"<td><span class=\"status status-{_COVERAGE_STATUS[status]}\">"
+                                        f"{html_escape(status)}</span>{refs}</td>")
                         elif isinstance(cell_value, str) and cell_value.strip():
                             html.append(f"<td>{_render_inline_text(cell_value)}{refs}</td>")
                         else:
@@ -381,7 +425,7 @@ def load_template_environment():
 
 def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
                     warnings: list = None, notices: list = None, sources: list = None,
-                    show_toc: bool = True) -> str:
+                    show_toc: bool = True, glance: dict = None) -> str:
     """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
     degraded document never looks like a complete one; `notices` are
     informational (e.g. built without an LLM). `sources` are the transcript
@@ -408,6 +452,8 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
         date_str=date_str,
         toc_sections=toc_sections,
         show_toc=show_toc,
+        glance=glance,
+        section_ids={s.get("section_id") for s in rendered_sections},
         content_html=content_html,
         style_css=style_css,
         warnings=[w for w in (warnings or []) if w],
@@ -773,6 +819,7 @@ def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
             notices=job.get("notices"),
             sources=knowledge_object.get("sources"),
             show_toc=show_toc,
+            glance=handover_glance(knowledge_object),
         )
 
     # A contents page for a few pages of content is a page of its own for

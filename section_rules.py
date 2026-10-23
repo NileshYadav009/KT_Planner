@@ -1211,6 +1211,21 @@ _NOT_AN_INSTRUCTION = frozenset("""the a an this that these those there here it 
 he she is are was were has have had of for time thing step one""".split())
 
 
+# A fix said right after the failure it fixes ("The printer queue backs up
+# when a warehouse goes offline." "Clear the queue from the admin page, and
+# if that doesn't help, call the warehouse IT team."): its "call ... team"
+# sent it to Ownership, and Common Failures reported no fix (KT-taker audit,
+# dev d05; matrix T01). An instruction that opens with a remedy verb.
+_REMEDY_START_RE = re.compile(
+    r"^\W*(?:(?:then|so|just|first)\W+)?(?:clear|reset|restart|rerun|re-run|retry|purge|flush|spread|drain|scale"
+    r"|fail\s+over|failover|roll\s+back|revert|redeploy|reboot|kill|delete|increase|raise|bump|rotate|renew|swap"
+    r"|switch|resubmit|replay|reprocess|requeue|free|clean|recreate|rebuild|restore|check|run|stop|disable|enable)\b",
+    re.IGNORECASE)
+_FAILURE_RE = re.compile(
+    r"\b(?:fail\w*|error\w*|outage|time\s?outs?|crash\w*|down|drops|dropped|backs\s+up|backed\s+up|offline|stuck"
+    r"|hang\w*|reject\w*|lag\w*|exhaust\w*|leak\w*|slow|break\w*|broken|problem|issue)\b", re.IGNORECASE)
+
+
 def _gives_instruction(text: str) -> bool:
     words = re.findall(r"[A-Za-z']+", text or "")
     if words and words[0].lower() == "you":
@@ -1288,6 +1303,17 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
                     cs, prev, idx, "Continuation: the next step of the procedure before it",
                     Classification, ExplainabilityLog, datetime,
                 )
+                continue
+
+        if idx > 0 and _REMEDY_START_RE.match(text):
+            prev = classified_sentences[idx - 1]
+            if (prev.primary_classification and prev.primary_classification.section_id == "common_failures"
+                    and _FAILURE_RE.search(prev.sentence.text or "")):
+                if getattr(cs.primary_classification, "section_id", None) != "common_failures":
+                    _inherit_section(
+                        cs, prev, idx, "Continuation: the fix for the failure before it",
+                        Classification, ExplainabilityLog, datetime,
+                    )
                 continue
 
         if _ORDINAL_ITEM_RE.search(text):

@@ -1627,3 +1627,40 @@ Results:
 - **Fewer false conflict warnings:** an older rule flagged unrelated
   "allowed" and "never" sentences in half the dev KTs; now 0.
 - **Groq used:** 65 live requests, about 81k tokens (77k in, 3k out): option B 19 requests and 51k, the conflict check 46 requests and 30k (the rejected first design included).
+
+## KT giver and KT taker audit (audit §9aas, 23 Oct)
+
+- **Corrections the way people really say them:**
+  - "We upgraded production to PostgreSQL 16 last night", and a correction
+    without a number ("Actually, application ownership belongs to Payments,
+    but Platform owns the cluster"), now stay with what they correct.
+  - "I think we changed it to thirty days, but I'm not sure" is shown with
+    the old value and flagged "Unconfirmed change — confirm".
+  - "Staging uses 2000K, while production uses 3000K" stays one statement.
+- **Question-and-answer KTs read like documentation:**
+  - no speaker names before every line;
+  - no "How do I deploy?" listed as a deployment step;
+  - the right title ("Fernhill", not "It's the Appointment Booking").
+- **Fewer false gaps:** "swap back", "twelve thousand a day", "goes offline",
+  "clear the queue" and "patients" now count as discussed.
+- **A fix said right after its failure** stays in Common Failures.
+- **No accuracy loss:** dev 213 to 214 of 224, all other sets unchanged. No
+  LLM quota used.
+
+## Groq prompt trial and PDF review (audit §9aat, 23 Oct)
+
+- **Polish prompt improved and tested on Groq:**
+  - no more "Window: N/A" or "Rollback trigger: Not specified" lines;
+  - the polish keeps the speaker's wording, so four more facts read exactly
+    as said, with nothing lost;
+  - no extra call, and answers are about 14% shorter;
+  - Groq used: 54 live requests, about 24k tokens (trial A 26 requests and 14.9k, B 14 and 4.8k, C 14 and 4.4k).
+- **PDF:**
+  - the cover shows the handover at a glance (sections covered well, partly,
+    not at all, and what to confirm), with page links;
+  - coverage status is colour-coded;
+  - short facts are lists;
+  - spacing is tighter (15 to 14 pages on your KT);
+  - a heading can no longer be split across pages.
+- **Your call:** move the Quick Reference to the front, bundle a font, and
+  re-record the replay answers (about 35k tokens).

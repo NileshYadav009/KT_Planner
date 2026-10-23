@@ -14,7 +14,7 @@ accuracy figure; throttled under the account's tokens-per-minute limit. The
 key is read by llm_provider from .env and never printed. Lenient scoring
 counts a fact the polish reworded (lenient.py).
 
-GROQ_EVAL_ONLY=classify sends only the mapper's calls (the section check and
+GROQ_EVAL_KTS=d04,d05 runs only those dev KTs. GROQ_EVAL_ONLY=classify sends only the mapper's calls (the section check and
 a sentence repair); polish, structured extraction and field fill run without
 the LLM. For an A/B of the section check alone: the arms then differ only
 where the check does, scoring is exact (strict equals lenient), and the cost
@@ -100,7 +100,12 @@ for name in sets:
            "false_covered": 0, "lenient_correct": 0, "lenient_lost": 0, "kts": 0}
     usage = {k: 0 for k in USAGE}
     detail = []
+    # GROQ_EVAL_KTS=d04,d05: only those dev KTs (by id prefix), for a small
+    # test that spends little quota.
+    only_kts = [k for k in os.environ.get("GROQ_EVAL_KTS", "").split(",") if k]
     for g in docs[name]:
+        if only_kts and name == "dev" and not any(g["id"].startswith(k) for k in only_kts):
+            continue
         if sent >= BUDGET:
             print(f"budget reached; {name}: stopping before {g['id'] if name == 'dev' else 'a KT'}", flush=True)
             break

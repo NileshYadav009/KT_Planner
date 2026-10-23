@@ -189,6 +189,24 @@ def test_a_conflict_the_llm_finds_is_shown_like_the_others():
     assert rendered[0]["blocks"][0]["title"].startswith("Possible conflict") and b in rendered[0]["blocks"][0]["warnings"][0]
 
 
+def test_a_change_said_with_a_hedge_is_flagged_for_confirmation():
+    """Adversarial matrix A18: "The backup retention is seven days. I think we
+    changed it to thirty days, but I'm not sure." The value in force is
+    unknown: shown together, and flagged to confirm."""
+    from knowledge.knowledge_builder import apply_conflicts, attach_conflict_warnings
+
+    old, hedged = "The backup retention is seven days.", "I think we changed it to thirty days, but I'm not sure."
+    sure = "We changed the log retention to thirty days."
+    coverage = {"disaster_recovery": {"sentences": [{"text": f"{old} {hedged}"}]},
+                "monitoring_observability": {"sentences": [{"text": f"Logs are kept for seven days. {sure}"}]}}
+    ko = apply_conflicts({"sections": []}, coverage)
+    assert ko["_conflicts"] == [{"section_id": "disaster_recovery", "a": old, "b": hedged, "kind": "unconfirmed"}]
+    rendered = [{"section_id": "disaster_recovery", "blocks": []}]
+    attach_conflict_warnings(rendered, ko)
+    block = rendered[0]["blocks"][0]
+    assert block["title"].startswith("Unconfirmed change") and old in block["warnings"][0] and hedged in block["warnings"][0]
+
+
 def test_the_llm_conflict_check_is_labelled_for_usage():
     from llm.cached_provider import _CALL_SITES
 

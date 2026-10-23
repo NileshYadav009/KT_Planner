@@ -192,3 +192,49 @@ def test_build_rendered_sections_keeps_conditional_section_with_real_content():
     ]}
     rendered = build_rendered_sections(knowledge_object)
     assert len(rendered) == 1
+
+
+def test_a_block_of_short_facts_is_a_list_and_prose_stays_prose():
+    """PDF review: a section of many one-line facts printed as a wall of
+    separate paragraphs, hard to scan."""
+    facts = {"section_id": "monitoring_observability", "section_title": "Monitoring", "blocks": [{
+        "type": "NarrativeBlock", "title": "Monitoring",
+        "paragraphs": ["Prometheus scrapes the pods.", "Grafana shows the dashboards.", "PagerDuty pages the on-call."]}]}
+    html = render_section_blocks([facts])
+    assert '<ul class="fact-list">' in html and html.count("<li>") == 3
+    polished = {"section_id": "common_failures", "section_title": "Common Failures", "blocks": [{
+        "type": "NarrativeBlock", "title": "Common Failures",
+        "paragraphs": ["**Issue:** Lag\n**Fix:** Restart the consumer.", "Second.", "Third one here."]}]}
+    assert "fact-list" not in render_section_blocks([polished])
+    two = {"section_id": "security_controls", "section_title": "Security", "blocks": [{
+        "type": "NarrativeBlock", "title": "Security", "paragraphs": ["Secrets live in Vault.", "TLS everywhere."]}]}
+    assert "fact-list" not in render_section_blocks([two])
+
+
+def test_coverage_status_is_a_coloured_badge():
+    """PDF review: Strong, Partial and Missing were plain words in the
+    coverage matrix, so the gaps did not stand out."""
+    section = {"section_id": "kt_coverage", "section_title": "KT Coverage", "blocks": [{
+        "type": "DecisionTable", "title": "Coverage matrix", "columns": ["Domain", "Coverage", "Assessment"],
+        "rows": [{"Domain": "Security", "Coverage": "Missing", "Assessment": "Not covered in the KT session."},
+                 {"Domain": "Monitoring", "Coverage": "Strong", "Assessment": "All 3 topics covered."}]}]}
+    html = render_section_blocks([section])
+    assert '<span class="status status-missing">Missing</span>' in html
+    assert '<span class="status status-strong">Strong</span>' in html
+
+
+def test_the_cover_shows_the_handover_at_a_glance():
+    """PDF review: the cover held a title, a date and a job id; how complete
+    the handover is was on page 13 of 15."""
+    from pdf_rendering import handover_glance, render_pdf_html
+
+    ko = {"_conflicts": [{"a": "x", "b": "y"}],
+          "sections": [{"id": "kt_coverage", "_knowledge_gaps": ["a", "b", "c"], "_coverage_rows": [
+              {"Domain": "A", "Coverage": "Strong"}, {"Domain": "B", "Coverage": "Strong"},
+              {"Domain": "C", "Coverage": "Partial"}, {"Domain": "D", "Coverage": "Missing"},
+              {"Domain": "E", "Coverage": "After review"}]}]}
+    glance = handover_glance(ko)
+    assert glance == {"strong": 2, "partial": 1, "missing": 1, "follow_ups": 3, "conflicts": 1}
+    html = render_pdf_html("Fernhill", "job-1", [], {}, "23 October 2026", glance=glance)
+    assert "At a glance" in html and "sections covered well" in html and "1 possible conflict" in html
+    assert handover_glance({"sections": []}) is None

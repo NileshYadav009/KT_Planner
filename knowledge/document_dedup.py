@@ -29,7 +29,7 @@ _QUOTING_BLOCK_TYPES = frozenset({"ImageBlock", "DiagramBlock", "CodeBlock"})
 _QUOTING_BLOCK_TITLES = frozenset({"Connections stated in the KT", "Mentioned elsewhere in the KT"})
 # Conflict warnings quote two statements from their section; Danger Zones'
 # own warning block is that section's content, not a quote.
-_QUOTING_WARNING_PREFIX = "Possible conflict"
+_QUOTING_WARNING_PREFIX = ("Possible conflict", "Unconfirmed change")
 WHERE_COLUMN = "Where it is"
 
 _MIN_WORDS = 5

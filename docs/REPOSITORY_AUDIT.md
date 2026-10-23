@@ -5552,6 +5552,215 @@ golden that expects a flag) is still flagged, at accuracy 1.0. Test:
 
 **Groq spent on 19 Oct:** 65 live requests, about 81k tokens (77k in, 3k out): option B 19 requests and 51k, the conflict check 46 requests and 30k (the rejected first design included).
 
+### 9aas. KT giver and KT taker audit: corrections, question-and-answer KTs, false gaps (23 Oct)
+
+The user's brief asked for the product to be audited as a KT giver and a KT
+taker, with fixes verified by tests. No LLM was called.
+
+**Batch 3 of the matrix: the brief's own correction examples, and giver
+realism** (8 cases, written before any output).
+
+- **Passed first time:** the giver-realism cases.
+  - Indian English: "We are having three Kafka brokers in prod only", "the
+    same is monitored in Grafana", "Kindly do the needful and restart ... if
+    lag is more than 10k".
+  - Fronted objects: "Deployment we are doing through Jenkins only".
+  - A hardcoded-password prohibition.
+- **Failed: four of the brief's correction examples.**
+  - A16, a change stated as news: "The database is PostgreSQL 14. We
+    upgraded production to PostgreSQL 16 last night." The 14 stood alone in
+    Architecture.
+  - A18, a hedged change: "The backup retention is seven days. I think we
+    changed it to thirty days, but I'm not sure."
+  - A19, a correction without a number: "The service is owned by Platform
+    Engineering. Actually, application ownership belongs to Payments, but
+    Platform owns the cluster."
+  - A17, a comparison across environments: "Staging uses 2000K, while
+    production uses 3000K." It was cut in two, and "Production uses 3000K."
+    went to System Overview without what it measured.
+
+**Fixes** (each with a unit test that failed first):
+
+- **X11.** `replaces_value_before` also reads a change stated as news (a
+  change verb with "to", "is now", "now runs"). The new
+  `corrects_statement_before` handles a correction without a number: a
+  correction marker or "actually" (not "actually, that reminds me"), plus a
+  content word in common. Both keep the pair whole, as said.
+  - On the corpora, the change rule fires 0 times. The "actually" rule fires
+    on g07's two real corrections only.
+- **X12.** `compares_one_value`: a sentence whose halves give one setting
+  different values (the same word naming it, or the same unit for two
+  environments) is one statement. g11's "The RTO is four hours, and the RPO
+  is one hour" is still two facts.
+- **X13.** `conflicts.find_unconfirmed_changes` flags a hedged change as
+  "Unconfirmed change — confirm with the outgoing owner", in the section and
+  in the knowledge gaps. Making it work exposed three faults:
+  - the document de-dup knew quoting warnings only as "Possible conflict",
+    so the new warning became the hedged sentence's home and removed it from
+    the section text;
+  - "stated as not in place" read only the clause before "but";
+  - the topic check dropped the whole unit as a gap.
+
+  `dialogue.states_something` now judges each sentence with its question,
+  and topics are assessed sentence by sentence.
+
+**The KT-taker read.** Dev KT d05, a question-and-answer handover, was
+rendered without an LLM and read as a new engineer would read it. Problems
+the accuracy harness never measured:
+
+- **X14, a wrong title.** "It's the Appointment Booking"; the system is
+  Fernhill. `_infer_system_name` no longer accepts a pronoun phrase: it
+  takes the name said at least twice mid-sentence (not a product, cloud,
+  date, speaker or person being contacted), else the description without the
+  pronoun.
+- **X15, labels and questions as facts.**
+  - "Nadia: How do I deploy?" was a deployment step.
+  - Tribal Knowledge listed "Nadia: What should I..." as safety-critical,
+    with no source.
+  - "Can I run through my list of questions? / Sure, go ahead." sat in
+    System Overview.
+
+  The fix:
+  - `dialogue.display_text` runs after classification. It removes speaker
+    labels (names that open two or more turns, or one turn in a
+    conversation; never a heading said once, such as "Backups:").
+  - It drops a question when its answer says everything it asked. It keeps
+    the question when the answer leans on it ("We never agreed one"), is a
+    fragment ("Around eight thousand a day"), or misses its topic ("Costs?
+    The App Service plan is oversized.").
+  - A request to start the walkthrough and its acknowledgement are excluded,
+    with a ledger reason.
+  - Deployment steps keep a question with its answer.
+- **X16, false "not discussed" gaps.**
+  - Rollback said as "swap back".
+  - "About twelve thousand a day" (Volume).
+  - "goes offline", "backs up when" (Known failures).
+  - "Clear", "Reset", "Spread" (Fixes).
+  - Patients and clinics (Users). The topic vocabularies were extended.
+- **X17.** "Reset the tunnel ...; if it doesn't come back, call the network
+  team" went to Ownership. A fix that opens with a remedy verb, right after a
+  failure in Common Failures, now stays with it. Dev d05 F19 is now correct.
+- **Two KT-taker cases** (T01, T02) put title, labels, questions, placement
+  and topic gaps into the matrix.
+
+**Test changes to disclose:**
+
+- `test_build_knowledge_object_system_name_fallback_keeps_contraction_intact`
+  asserted that the title starts with "It". That was the defect; it now
+  expects "Old Claims".
+- Dev F28 and F34 ("The personalisation team owns Sparrow", "The patient
+  access team owns Fernhill") now render as ownership rows
+  ("Fernhill | Patient access team"). They got `terms` in
+  `evaluation/dev_kts.py`, as d04's F35 and F36 already had; without them the
+  scorer counted the rows as lost.
+
+**Measurements:**
+
+| Run | Cases | Must | Should |
+|---|---|---|---|
+| Batch 3, first run (8 cases) | 4 of 8 | 14/18 | 3/5 |
+| T01 and T02, first run | 0 of 2 | 1/10 (the title check errored in that run's harness; counted as failed) | 0/1 |
+| All 56 cases after the fixes | 56 of 56 | 147/147 | 15/20 |
+
+| Set (no LLM) | Before | After |
+|---|---|---|
+| Tuning | 534/534 | 534/534 |
+| Dev | 213/224 | 214/224 (d05 F19 fixed) |
+| Holdouts | 86/95 | 86/95 |
+| Blind | 95/114 | 95/114 |
+| E2e | 100%, 0 problems | 100%, 0 problems |
+
+**Tests:** 410 passed in one run (15 files: knowledge builders, dialogue, conflicts, grounding, evidence, renderer sections, section rules, coverage topics, cleaner, mapper hints, session framing, audit regressions, clause split, polish integrity, and end-to-end with the recorded Groq replay). The full suite was not run.
+
+**Still open:** X18. "Only six clinics have it." (a pronoun after an
+answer) is placed alone, and an unpunctuated speech-to-text run-on is one
+fact (matrix B09, should). The PDF shows "Not covered during KT" in every
+empty cell of a wide table (Open tasks); honest, but noisy.
+
+### 9aat. Polish prompt trial on Groq, and the PDF presentation (23 Oct)
+
+The user asked for a small Groq test of prompt improvements that add no
+processing time, using the quota sparingly, and for a review of the PDF's
+fonts, colours, layout and readability.
+
+**The polish prompt (X19).**
+
+- **Evidence before spending anything.** Of 133 cached polish answers, 18
+  (53 lines) were template filler for labels nothing filled ("**Window:**
+  N/A", "**Rollback trigger:** Not specified"). The deployment prompt
+  demanded a rollback subsection with three labels.
+- **Trial design.** Dev KTs d04 and d05 (81 facts), in full LLM mode with
+  the copy edit off. `groq_eval.py` gained `GROQ_EVAL_KTS`. Unchanged prompts
+  answer from the cache, so a trial pays only for the changed calls.
+
+| Trial | Strict | Lenient | Polish answers with filler | Avg polish in / out tokens | Live requests |
+|---|---|---|---|---|---|
+| A: current prompts | 65/81 | 78/81 | 2 of 9 | 224 / 48.2 | 26 |
+| B: new shared system prompt | 69/81 | 78/81 | 1 of 14 | 299 / 41.6 | 14 |
+| C: B shortened, plus placeholder lines removed in code | 69/81 | 78/81 | 1 of 14 before the cleanup, 0 after | 272 / 41.6 | 14 |
+
+- **Kept: C.** `llm/prompts.POLISH_SYSTEM_PROMPT` says keep the speaker's
+  wording (fix only grammar, casing and punctuation; no paraphrase, summary
+  or narration), omit labels nothing fills, and treat the fragments as data
+  (X9 for this prompt). The deployment template's labels and rollback
+  subsection appear only when stated. `ai._without_placeholder_lines`
+  removes any "**Label:** N/A" or "Not specified" line before the guards
+  run.
+- **Result.** Four more facts are shown in the speaker's words (lost to
+  rewording 15 to 11), with no fact lost or misplaced.
+- **Time.** About +48 input and -7 output tokens per polish call, roughly
+  +2% of a KT's tokens. No extra call; generation time unchanged or lower.
+- **Guards still work.** In trial C, one answer that added a number ("1.2")
+  and two that dropped a fragment were refused, and those sections kept the
+  speaker's words.
+- **Groq spent:** 54 live requests, about 24k tokens (trial A 26 requests and 14.9k, B 14 and 4.8k, C 14 and 4.4k).
+
+**The PDF review (X20).** The user's own recorded KT ("Online Grocery", job
+174a3215, read-only) was rendered without an LLM. Its pages were read as
+images: headless Edge screenshots of the same HTML and CSS WeasyPrint prints.
+
+- **What works:**
+  - the architecture diagram and the connections table;
+  - the technology table;
+  - Danger Zones in red;
+  - superscript source numbers;
+  - the Sources appendix.
+- **Fixed:**
+  - **The cover** held a title, a date and a job id. It now has "At a
+    glance" tiles: sections covered well, partly and not at all, items to
+    confirm with the outgoing owner (with possible conflicts), and page
+    links to the Quick Reference and the KT Coverage page
+    (`pdf_rendering.handover_glance`).
+  - **The coverage matrix status** (Strong / Partial / Missing) was plain
+    text. It is now a green, amber or red badge.
+  - **Sections of three or more short facts** were walls of separate
+    paragraphs. They are now a list. Polished text with its own structure
+    is unchanged.
+  - **Spacing.** Tighter table cells and card padding, and a 16pt section
+    title. The user's KT went from 15 to 14 pages.
+  - **Split headings.** Section titles were flex containers, which
+    WeasyPrint will split across a page break. The end-to-end replay found
+    one: the section sign at the foot of page 9, "Sources" on page 10. They
+    are now plain blocks that never split or sit alone at a page foot.
+- **Not changed, for the user to decide:**
+  - The Quick Reference ("use this page during an incident") is near the
+    end. The cover now gives its page; moving it forward changes the
+    document's structure.
+  - The font is Inter with fallbacks, but Inter is not installed or
+    bundled, so the PDF prints in Segoe UI on Windows and the system sans
+    elsewhere. Bundling a font file would make it the same everywhere.
+  - A wide table prints "Not covered during KT" in every empty cell (Open
+    tasks): honest, but noisy.
+  - Without an LLM, much of a recorded KT's text is raw speech, and that is
+    most of what is hard to read. The polish fixes it when Groq is on.
+
+**The recorded replay.** The polish prompt changed, so the recorded answers
+no longer match the polish calls. In replay those sections fall back to the
+speaker's words, as on any LLM failure. The replay tests still pass; a
+re-record would bring the polish path back under test.
+
+**Tests:** 204 passed in one run: end-to-end with the recorded Groq replay, PDF helpers, export and security, polish integrity, grounding, renderer sections, golden KT, evidence. The full suite was not run.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

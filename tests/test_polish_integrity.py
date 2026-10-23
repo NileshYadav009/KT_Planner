@@ -64,6 +64,21 @@ def test_local_cleanup_keeps_the_space_before_a_dotted_name():
     assert _local_cleanup("kubectl rollout restart fixes it") == "kubectl rollout restart fixes it."
 
 
+def test_a_label_the_polish_could_not_fill_is_left_out():
+    """Groq trial (23 Oct): the polish wrote "**Rollback trigger:** Not
+    specified" and "**Window:** N/A" for template labels nothing filled;
+    the coverage page already lists what was not discussed."""
+    from ai import _without_placeholder_lines
+
+    polished = ("**Trigger:** Change request\n**Window:** N/A\n1. Jenkins builds and tests.\n\n"
+                "**Rollback trigger:** Not specified.\n**Action:** Scale the previous deployment back up.\n"
+                "- **Target time:** not mentioned\n**Owner:** Not applicable to this KT? No, the platform team.")
+    assert _without_placeholder_lines(polished) == (
+        "**Trigger:** Change request\n1. Jenkins builds and tests.\n\n"
+        "**Action:** Scale the previous deployment back up.\n"
+        "**Owner:** Not applicable to this KT? No, the platform team.")
+
+
 def test_danger_zones_are_never_reworded(monkeypatch):
     """A rewrite turned 'because they are the only copy we can replay from' into
     'as they are the only copy available for replay': safety warnings keep the

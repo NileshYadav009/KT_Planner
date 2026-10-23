@@ -58,3 +58,31 @@ def test_the_topic_stated_under_another_section_still_counts():
     assert "Access and tools to request" in _elsewhere("day1_survival_checklist",
                                                       "On your first day get access to the AWS accounts.")
     assert _elsewhere("first_30_day_ownership", "In your first week, shadow the on-call.") == ["Week 1"]
+
+
+def _discussed(section_id, sentence):
+    return {label for label, state, _ in assess_topics(section_id, {}, [sentence], []) if state == "discussed"}
+
+
+def test_topics_said_in_plain_words_are_discussed():
+    """KT-taker audit (dev d05, matrix T01): "If it goes wrong, swap back.",
+    "About twelve thousand a day.", "The printer queue backs up when a
+    warehouse goes offline." and "Clear the queue from the admin page" were
+    reported "not discussed"."""
+    assert "Rollback procedure" in _discussed("deployment_and_rollback", "If it goes wrong, swap back.")
+    assert "Volume" in _discussed("system_overview", "How many labels a day? About twelve thousand a day.")
+    assert "Volume" in _discussed("system_overview", "Around 8000 bookings a day.")
+    assert "Known failures" in _discussed("common_failures", "The printer queue backs up when a warehouse goes offline.")
+    assert "Fixes or workarounds" in _discussed("common_failures", "Clear the queue from the admin page.")
+    assert "Fixes or workarounds" in _discussed("common_failures", "Spread the sends over an hour.")
+    # A frequency is not a volume.
+    assert "Volume" not in _discussed("system_overview", "We restart the pods 3 times a day.")
+
+
+def test_users_are_recognised_by_who_they_are():
+    """KT-taker audit (dev d05): "the appointment booking system for our forty
+    clinics" and "Patients book online" were "Users and reach: not
+    discussed"."""
+    assert "Users and reach" in _discussed("system_overview", "It's the appointment booking system for our forty clinics.")
+    assert "Users and reach" in _discussed("system_overview", "Patients book online or through the call centre.")
+    assert "Users and reach" in _discussed("system_overview", "Drivers and merchants use the app every day.")

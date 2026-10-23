@@ -32,10 +32,10 @@ from policy import (
 
 from runtime_policy import load_policy
 from devops_transcription import (
-    capitalise_sentence_start, clean_transcript, points_back_to, replaces_value_before, resolve_correction_across,
-    resolve_self_corrections,
+    capitalise_sentence_start, clean_transcript, compares_one_value, corrects_statement_before, points_back_to,
+    replaces_value_before, resolve_correction_across, resolve_self_corrections,
 )
-from dialogue import merge_question_answers
+from dialogue import display_text, merge_question_answers, speaker_labels
 from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
 from section_rules import (
@@ -225,6 +225,17 @@ _KT_META_COMMENTARY_PATTERNS = [
 ]
 
 
+_SPEAKER_LEAD_RE = re.compile(r"^[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s+")
+_TALK_REQUEST_RE = re.compile(
+    r"^\W*(?:[\w']+\W+){0,6}?(?:can|could|may|shall)\s+(?:i|we|you)\s+(?:run\s+through|go\s+through"
+    r"|walk\s+(?:me|us)\s+through|take\s+(?:me|us)\s+through|ask(?:\s+(?:you|a\s+few|some))?)\b[^.!]*\?\s*$",
+    re.IGNORECASE)
+_ACKNOWLEDGEMENT_RE = re.compile(
+    r"^\W*(?:sure|yes|yeah|yep|ok(?:ay)?|of\s+course|absolutely|no\s+problem|go\s+ahead|please\s+do|right|fine)"
+    r"(?:[\s,!.]+(?:sure|go\s+ahead|of\s+course|please|thanks|thank\s+you|let'?s\s+(?:do\s+it|go|start)))*[\s.!]*$",
+    re.IGNORECASE)
+
+
 def is_kt_session_meta_commentary(text: str) -> bool:
     """True for sentences about the KT recording/tool itself rather than
     the system being handed over — see _KT_META_COMMENTARY_PATTERNS."""
@@ -304,6 +315,13 @@ def split_facts(text: str) -> List[Tuple[int, int]]:
     """The facts a sentence states, as character spans of `text`."""
     spans = split_into_facts(text)
     if len(spans) > 1:
+        # One value compared across environments ("Staging uses 2000K,
+        # while production uses 3000K") is one statement: cut, each half
+        # lost what the other said it measures.
+        pieces = [text[a:b] for a, b in spans]
+        if any(compares_one_value(pieces[i], pieces[j])
+               for i in range(len(pieces)) for j in range(i + 1, len(pieces))):
+            return [(0, len(text.rstrip()))]
         return spans
     halves = split_two_topic_sentence(text)
     if len(halves) == 1:
@@ -418,7 +436,10 @@ def segment_sentences(
 
     # A sentence that replaces a value of the one before it ("We use
     # PostgreSQL 14. Actually, the upgrade is complete; production is now on
-    # PostgreSQL 16.") is kept whole with it, as said: one unit, one section.
+    # PostgreSQL 16.", "We upgraded production to PostgreSQL 16 last night."),
+    # or that corrects what it said without a number ("Actually, application
+    # ownership belongs to Payments ..."), is kept whole with it, as said:
+    # one unit, one section.
     # Apart, the first read as current wherever it landed. A correction that
     # only restates the value is rewritten instead (merge_spoken_corrections).
     # One that points further back ("I was wrong about the backups earlier,
@@ -426,7 +447,8 @@ def segment_sentences(
     # when that sentence states nothing else.
     joined_sentences = []   # [text, run_on, cut, kept whole]
     for st, run_on, cut in refined_sentences:
-        if joined_sentences and replaces_value_before(joined_sentences[-1][0], st):
+        if joined_sentences and (replaces_value_before(joined_sentences[-1][0], st)
+                                 or corrects_statement_before(joined_sentences[-1][0], st)):
             prev = joined_sentences[-1]
             joined_sentences[-1] = [f"{prev[0]} {st}", prev[1] or run_on, prev[2], True]
             continue
@@ -459,9 +481,24 @@ def segment_sentences(
             sentence_texts.append((st, "run_on" if run_on else None, cut, source_id, st, (0, len(st))))
 
     current_pos = 0
+    after_request = False
     for sent_text, kind, cut, source_id, source_text, span in sentence_texts:
         if not sent_text.strip():
             continue
+
+        # "Can you walk me through Tern before you leave?" / "Sure, go
+        # ahead.": asking for the walkthrough and agreeing to it. Shown, they
+        # sat in System Overview as facts (KT-taker audit, matrix T01). Only
+        # an acknowledgement right after such a request: "Yes." answering
+        # "Is it encrypted at rest?" is a fact.
+        plain = _SPEAKER_LEAD_RE.sub("", sent_text.strip())
+        if _TALK_REQUEST_RE.match(plain) or (after_request and _ACKNOWLEDGEMENT_RE.match(plain)):
+            if excluded is not None:
+                excluded.append({"text": re.sub(r"\s+", " ", sent_text.strip()),
+                                 "reason": "asking for or agreeing to the walkthrough, not about the system"})
+            after_request = bool(_TALK_REQUEST_RE.match(plain))
+            continue
+        after_request = False
 
         # Drop KT-session/tool meta-commentary before it can become a
         # classifiable Sentence at all — see is_kt_session_meta_commentary.
@@ -2987,6 +3024,14 @@ class ContextMappingPipeline:
         logger.info("Stage 3.5: Applied section routing rules")
         restore_sections_emptied_by_topic(classified_sentences, unboosted_picks)
 
+        # What the document shows: no speaker labels, and no question that its
+        # answer makes redundant ("Nadia: How do I deploy? Owen: Merge to main
+        # ..." was a deployment step). Classified as said; the Sources
+        # appendix still quotes the transcript (dialogue.display_text).
+        labels = speaker_labels(" ".join(seg.text for seg in segments))
+        for cs in classified_sentences:
+            cs.sentence.text = display_text(cs.sentence.text, labels)
+
         # Stage 3.6: every fact now has its section. The facts of one spoken
         # sentence that sit side by side in one section are one unit from
         # here on, shown as that sentence, so the section text, its fields
@@ -2996,6 +3041,8 @@ class ContextMappingPipeline:
         fact_sections = [cs.primary_classification.section_id if cs.primary_classification else None
                          for cs in classified_sentences]
         classified_sentences = rejoin_classified(classified_sentences)
+        for cs in classified_sentences:
+            cs.sentence.text = display_text(cs.sentence.text, labels)
 
         # Load runtime policy and enforce policies before repair
         policy = load_policy()

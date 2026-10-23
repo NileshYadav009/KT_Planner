@@ -391,3 +391,27 @@ def find_conflicts_with_llm(units: Sequence[str], generate, encode, exclude: Seq
     except Exception as exc:
         logging.getLogger(__name__).warning("LLM conflict check skipped: %s", exc)
         return []
+
+
+# A change said with a hedge: "The backup retention is seven days. I think we
+# changed it to thirty days, but I'm not sure." (adversarial matrix A18). The
+# mapper keeps the two sentences as one unit; which value holds is unknown,
+# so the pair is flagged for the outgoing owner to confirm.
+_HEDGE_RE = re.compile(
+    r"\b(?:i\s+think|i\s+believe|not\s+(?:sure|certain)|probably|maybe|might|i\s+guess|if\s+i\s+remember"
+    r"|i'?m\s+not\s+sure)\b", re.IGNORECASE)
+
+
+def find_unconfirmed_changes(units: Sequence[str]) -> List[Tuple[str, str]]:
+    """(earlier statement, hedged change) pairs inside the units: a sentence
+    that changes or corrects the one before it, said with a hedge."""
+    from devops_transcription import corrects_statement_before, replaces_value_before
+
+    pairs: List[Tuple[str, str]] = []
+    for unit in units:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", unit or "") if s.strip()]
+        for a, b in zip(sentences, sentences[1:]):
+            if (_HEDGE_RE.search(b) and not _HEDGE_RE.search(a)
+                    and (replaces_value_before(a, b) or corrects_statement_before(a, b))):
+                pairs.append((a, b))
+    return pairs

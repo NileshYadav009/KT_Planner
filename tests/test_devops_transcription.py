@@ -545,6 +545,54 @@ def test_a_sentence_that_replaces_a_value_of_the_one_before_is_recognised():
         assert not replaces(previous, nxt), nxt
 
 
+def test_a_change_stated_as_news_or_with_a_hedge_replaces_the_value_before():
+    """Adversarial matrix A16, A18: "The database is PostgreSQL 14. We
+    upgraded production to PostgreSQL 16 last night." and "The backup
+    retention is seven days. I think we changed it to thirty days, but I'm
+    not sure." have no correction marker; the old value stood alone."""
+    from devops_transcription import replaces_value_before as replaces
+
+    assert replaces("The database is PostgreSQL 14.", "We upgraded production to PostgreSQL 16 last night.")
+    assert replaces("The backup retention is seven days.", "I think we changed it to thirty days, but I'm not sure.")
+    assert replaces("The pool size is 20 connections.", "It is now 40 connections.")
+    # A change to something of another kind is a new fact.
+    assert not replaces("The pool size is 20 connections.", "We increased the timeout to 30 seconds.")
+
+
+def test_a_correction_of_a_statement_without_a_number_is_recognised():
+    """Adversarial matrix A19: "The service is owned by Platform Engineering.
+    Actually, application ownership belongs to Payments, but Platform owns
+    the cluster." The first stood alone as the service's owner."""
+    from devops_transcription import corrects_statement_before as corrects
+
+    assert corrects("The service is owned by Platform Engineering.",
+                    "Actually, application ownership belongs to Payments, but Platform owns the cluster.")
+    assert corrects("The payments team owns the service.", "Actually the platform team owns it since the reorg.")
+    assert corrects("Alerts go to the ops channel.", "Sorry, alerts go to the payments-oncall channel.")
+    # A new topic after "actually", nothing in common, or no marker at all.
+    for previous, nxt in [
+            ("Monitoring, we have Airflow's own task alerts going to a Slack channel.",
+             "Actually that reminds me, the most annoying failure is an empty file from a store."),
+            ("The service is owned by Platform Engineering.", "Actually, deploys happen on Tuesdays."),
+            ("The service is owned by Platform Engineering.", "Platform also owns the cluster.")]:
+        assert not corrects(previous, nxt), nxt
+
+
+def test_one_value_compared_across_environments_stays_one_statement():
+    """Adversarial matrix A17: "Staging uses 2000K, while production uses
+    3000K." was cut in two, and "Production uses 3000K." landed in System
+    Overview without what it measured."""
+    from context_mapper import split_facts
+
+    for said in ["Staging uses 2000K, while production uses 3000K.",
+                 "Staging has 2 nodes, and production has 6 nodes."]:
+        assert split_facts(said) == [(0, len(said.rstrip()))], said
+    # Two settings, or no environments: cut as before.
+    for said in ["The rto is four hours, and the rpo is one hour.",
+                 "The frontend runs on Vercel, while the API runs on Amazon ECS."]:
+        assert len(split_facts(said)) == 2, said
+
+
 def test_a_replaced_value_is_kept_whole_with_the_sentence_that_replaces_it():
     from context_mapper import AudioSegment, segment_sentences
 

@@ -39,11 +39,12 @@ def expected(exp):
     words = {
         "shows": "shows", "shows_any": "shows one of", "verbatim": "exactly", "absent": "never shows",
         "absent_re": "never shows", "never_alone": "never shows alone", "in_section": "in", "order": "in order",
-        "flagged": "flags", "coverage": "coverage of", "completes": "the job completes", "pdf_shows": "PDF shows",
+        "flagged": "flags", "not_flagged": "does not flag", "coverage": "coverage of", "completes": "the job completes", "system_name": "title names", "pdf_shows": "PDF shows",
         "pdf_absent": "PDF never shows"}
     detail = f"{words.get(kind, kind)} “{what}”" if what else words.get(kind, kind)
     if kind == "never_alone":
-        detail += f" (without “{exp['with']}”)"
+        companions = exp["with"] if isinstance(exp["with"], list) else [exp["with"]]
+        detail += " (without " + " or ".join(f"“{w}”" for w in companions) + ")"
     if kind == "in_section":
         detail += " in " + ", ".join(exp["sections"])
     if kind == "coverage":
@@ -79,8 +80,10 @@ lines = [
     "corrected: D02 expected a sentence the document shows as an ownership row",
     "(“Deployment approvals | Developers”); I02 expected “Argo CD” where the",
     "document uses the project's spelling, “ArgoCD” (I02 also had a real",
-    "defect: the last step went to another section); and the PDF checks of A01",
-    "and A05 read the PDF text only up to the cover's list of sections.",
+    "defect: the last step went to another section); the PDF checks of A01",
+    "and A05 read the PDF text only up to the cover's list of sections; and in",
+    "the first run of T01 and T02 the title check errored (the harness gained it",
+    "after that run started), so it counts as failed there.",
     "",
     "| ID | Category | Scenario | Expected | Before | After | Regression test |",
     "|---|---|---|---|---|---|---|",

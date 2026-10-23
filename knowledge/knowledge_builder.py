@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .entities import build_entities
 from .evidence import build_evidence
@@ -7,11 +7,13 @@ from .facts import build_facts
 from .relationships import build_relationships
 from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import (
-    PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _trim_name_capture, current_tool_mentions, smart_title,
+    PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _CALENDAR_WORDS, _trim_name_capture, current_tool_mentions,
+    smart_title,
 )
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something_before_gap,
+from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something,
+                      states_something_before_gap,
                       without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
 from fact_units import fact_texts
@@ -212,7 +214,63 @@ def _collect_evidence(
     ]
 
 
+# A name candidate that opens with a pronoun ("It's the appointment booking
+# system for our forty clinics") is a description of the system said after
+# its name was asked for: the KT was titled "It's the Appointment Booking"
+# (KT-taker audit, dev d05; matrix T01).
+_PRONOUN_LEAD_RE = re.compile(r"^(?:it'?s|it\s+is|this\s+is|that'?s|that\s+is|its|our)\s+(?:(?:the|a|an|our)\s+)?",
+                              re.IGNORECASE)
+_CLOUD_WORDS = {"aws", "amazon", "azure", "microsoft", "google", "gcp", "cloud", "oracle", "ibm"}
+# A person being called, asked or paged is not the system.
+_PERSON_CUE_RE = re.compile(r"\b(?:call|ask|page|ping|contact|email|message|escalate\s+to|talk\s+to|with|from|by)\s+$",
+                            re.IGNORECASE)
+
+
+def _repeated_proper_name(texts: List[str]) -> Optional[str]:
+    """The capitalised word said most often mid-sentence (at least twice)
+    that is not a product, a cloud, a date, a speaker label or a person
+    being contacted: in a KT that is the system's own name ("questions about
+    Fernhill", "What is Fernhill exactly?", "owns Fernhill")."""
+    from collections import Counter
+
+    text = " ".join(t for t in texts if isinstance(t, str))
+    tool_words = {w.lower() for t in PATTERN_EXTRACTORS["tools"].findall(text) for w in t.split()}
+    labels = {m.lower() for m in re.findall(r"(?:^|(?<=[.!?]\s))([A-Z][\w'-]*)(?:\s[A-Z][\w'-]*)?:\s", text)}
+    counts: "Counter[str]" = Counter()
+    contacted = set()
+    for m in re.finditer(r"(?<=[a-z,;]\s)([A-Z][a-z][\w-]*)\b(?!:)", text):
+        word = m.group(1)
+        low = word.lower()
+        if (low in tool_words or low in labels or low in SYSTEM_NAME_STOPWORDS or low in _CALENDAR_WORDS
+                or low in _CLOUD_WORDS):
+            continue
+        if _PERSON_CUE_RE.search(text[max(0, m.start() - 20):m.start()]):
+            contacted.add(word)
+        counts[word] += 1
+    for word, count in counts.most_common():
+        if count >= 2 and word not in contacted:
+            return word
+    return None
+
+
 def _infer_system_name(
+    coverage: Dict[str, Any],
+    populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> str:
+    name = _infer_system_name_from_overview(coverage, populated_fields)
+    if name == "KT Document" or _PRONOUN_LEAD_RE.match(name or ""):
+        texts = [str(c) for cov in (coverage or {}).values() if isinstance(cov, dict)
+                 for c in ([cov.get("content")] if isinstance(cov.get("content"), str) else cov.get("content") or [])]
+        proper = _repeated_proper_name(texts)
+        if proper:
+            return proper
+        stripped = _PRONOUN_LEAD_RE.sub("", name or "").strip()
+        if stripped and stripped.lower() not in SYSTEM_NAME_STOPWORDS:
+            return smart_title(stripped, " ".join(texts))
+    return name
+
+
+def _infer_system_name_from_overview(
     coverage: Dict[str, Any],
     populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
@@ -845,13 +903,16 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
       thing two counts, are stored on knowledge_object["_conflicts"] for the
       section and the coverage page to show.
     """
-    from conflicts import find_contradictions, find_superseded_tools, find_value_conflicts
+    from conflicts import find_contradictions, find_superseded_tools, find_unconfirmed_changes, find_value_conflicts
 
     sentence_section: Dict[str, str] = {}
     texts: List[str] = []
+    units: List[str] = []
     for sid, cov in (coverage or {}).items():
         for s in (cov or {}).get("sentences") or []:
             text = (s or {}).get("text", "") if isinstance(s, dict) else ""
+            if text.strip():
+                units.append(text.strip())
             # Classification units can hold several sentences (semantic
             # chunking joined "Deploying on Fridays is fine for us. Never
             # deploy on Fridays..."); contradictions are found per sentence.
@@ -884,6 +945,13 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
         {"section_id": sentence_section.get(a), "a": a, "b": b}
         for a, b in find_contradictions(texts) + find_value_conflicts(texts)
     ]
+    # A change said with a hedge ("The backup retention is seven days. I
+    # think we changed it to thirty days, but I'm not sure."): the mapper
+    # keeps the two together; which value holds is for the outgoing owner to
+    # confirm (adversarial matrix A18).
+    knowledge_object["_conflicts"].extend(
+        {"section_id": sentence_section.get(a), "a": a, "b": b, "kind": "unconfirmed"}
+        for a, b in find_unconfirmed_changes(units))
     return knowledge_object
 
 
@@ -917,17 +985,22 @@ def apply_llm_conflict_check(knowledge_object: Dict[str, Any], coverage: Dict[st
 def attach_conflict_warnings(rendered_sections: List[Dict[str, Any]], knowledge_object: Dict[str, Any]) -> None:
     """Show each contradiction found by apply_conflicts() as a warning in the
     section where it was said."""
-    by_section: Dict[str, List[str]] = {}
+    titles = {"unconfirmed": "Unconfirmed change — confirm with the outgoing owner",
+              None: "Possible conflict — confirm with the outgoing owner"}
+    by_section: Dict[Tuple[Any, Any], List[str]] = {}
     for c in knowledge_object.get("_conflicts") or []:
-        by_section.setdefault(c.get("section_id"), []).append(f"“{c['a']}” but also “{c['b']}”")
+        kind = c.get("kind") if c.get("kind") in titles else None
+        joiner = " then " if kind == "unconfirmed" else " but also "
+        by_section.setdefault((c.get("section_id"), kind), []).append(f"“{c['a']}”{joiner}“{c['b']}”")
     for sec in rendered_sections or []:
-        warnings = by_section.get(sec.get("section_id"))
-        if warnings:
-            sec.setdefault("blocks", []).insert(0, {
-                "type": "WarningBlock",
-                "title": "Possible conflict — confirm with the outgoing owner",
-                "warnings": warnings,
-            })
+        for kind in (None, "unconfirmed"):
+            warnings = by_section.get((sec.get("section_id"), kind))
+            if warnings:
+                sec.setdefault("blocks", []).insert(0, {
+                    "type": "WarningBlock",
+                    "title": titles[kind],
+                    "warnings": warnings,
+                })
 
 
 def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
@@ -1505,7 +1578,7 @@ def append_coverage_matrix_section(
         texts = [s.get("text", "") for s in (cov.get("sentences") or []) if isinstance(s, dict)]
         stated_gaps = [t for t in texts if is_gap_statement(t)]
         only_stated_gaps = bool(texts) and len(stated_gaps) == len(texts) and \
-            not any(states_something_before_gap(t) for t in stated_gaps)
+            not any(states_something(t) for t in stated_gaps)
         if only_stated_gaps:
             bucket = "Missing"
 
@@ -1518,7 +1591,13 @@ def append_coverage_matrix_section(
         # documented") does not cover it: topics are assessed on the section's
         # facts without its stated gaps. Read whole, that sentence counted
         # RTO and RPO as discussed.
-        own_facts = [f for t in own_texts for f in fact_texts(t) if not is_gap_statement(f)]
+        # Judged sentence by sentence: a unit kept whole with its correction
+        # ("The backup retention is seven days. I think we changed it to
+        # thirty days, but I'm not sure.") states the backup policy; read
+        # as one gap, Disaster Recovery was reported Missing (matrix A18). A
+        # question and its answer stay together (no cut at "?").
+        own_facts = [f for t in own_texts for s in re.split(r"(?<=[.!])\s+", t) for f in fact_texts(s)
+                     if not is_gap_statement(f)]
         topic_states = assess_topics(section_id, field_objects, own_facts, other_texts_for(section_id), structured)
         if topic_states and not own_texts:
             # A section the session never discussed as such, though one of its
@@ -1621,8 +1700,9 @@ def append_coverage_matrix_section(
     # mapped+deduplicated+unmapped and the two disagree, which would mean a
     # real accounting bug rather than something to paper over.
     for conflict in knowledge_object.get("_conflicts") or []:
+        label = "Unconfirmed change" if conflict.get("kind") == "unconfirmed" else "Possible conflict"
         gaps.append(
-            f"Possible conflict ({titles.get(conflict.get('section_id'), 'KT session')}): "
+            f"{label} ({titles.get(conflict.get('section_id'), 'KT session')}): "
             f"“{_short_quote(conflict['a'])}” vs “{_short_quote(conflict['b'])}” — confirm with the outgoing owner"
         )
 

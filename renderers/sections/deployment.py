@@ -14,7 +14,8 @@ def _coverage_paragraphs(section: Dict[str, Any]) -> List[str]:
     return [str(item).strip() for item in coverage_content if isinstance(item, str) and item.strip()]
 
 
-_STEP_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(A-Z0-9])")
+# Not after a question: it stays with the sentence that answers it.
+_STEP_SPLIT_RE = re.compile(r"(?<=[.!])\s+(?=[\"'(A-Z0-9])")
 
 
 def _normalized_key(text: str) -> str:

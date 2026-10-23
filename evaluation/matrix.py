@@ -114,6 +114,9 @@ def check(exp, ko, units, status, pdf):
     plain = [u for u in units if not is_flag(u)]
     if kind == "completes":
         return status == "completed", status
+    if kind == "system_name":
+        got = str(ko.get("system_name") or "")
+        return norm(exp["text"]) in norm(got), got
     if kind == "shows":
         hits = [u for u in units if norm(exp["text"]) in norm(u[3])]
         return bool(hits), sorted({u[0] for u in hits})
@@ -131,7 +134,8 @@ def check(exp, ko, units, status, pdf):
         hits = [u for u in plain if re.search(exp["pattern"], u[3].lower())]
         return not hits, [f"{u[0]}: {u[3][:160]}" for u in hits]
     if kind == "never_alone":
-        hits = [u for u in plain if has_word(exp["text"], u[3]) and norm(exp["with"]) not in norm(u[3])]
+        companions = exp["with"] if isinstance(exp["with"], list) else [exp["with"]]
+        hits = [u for u in plain if has_word(exp["text"], u[3]) and not any(norm(w) in norm(u[3]) for w in companions)]
         return not hits, [f"{u[0]}: {u[3][:160]}" for u in hits]
     if kind == "in_section":
         texts = golden_eval.section_texts(ko)
@@ -151,6 +155,9 @@ def check(exp, ko, units, status, pdf):
     if kind == "flagged":
         hits = [u for u in units if is_flag(u) and all(norm(t) in norm(u[3]) for t in exp["texts"])]
         return bool(hits), [u[2] for u in hits]
+    if kind == "not_flagged":
+        hits = [u for u in units if u[1] == "WarningBlock" and all(norm(t) in norm(u[3]) for t in exp["texts"])]
+        return not hits, [f"{u[0]}: {u[3][:160]}" for u in hits]
     if kind == "coverage":
         got = golden_eval.coverage_buckets(ko).get(exp["section"])
         ok = (got in exp["is"]) if "is" in exp else (got not in exp.get("not", []))

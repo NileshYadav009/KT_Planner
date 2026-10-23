@@ -752,17 +752,89 @@ def _value_kinds(text: str) -> List[Tuple[str, set]]:
     return out
 
 
+# A change stated as news, with no correction marker: "We upgraded
+# production to PostgreSQL 16 last night", "I think we changed it to thirty
+# days", "It is now 40 connections" (adversarial matrix A16, A18).
+_CHANGED_TO_RE = re.compile(
+    r"\b(?:upgraded|migrated|moved|switched|changed|bumped|raised|lowered|increased|decreased|reduced|updated"
+    r"|extended|shortened)\b(?:\s+[\w'-]+){0,4}?\s+(?:to|up\s+to|down\s+to)\b"
+    r"|\b(?:is|are)\s+now\b|\bnow\s+(?:runs?|uses?|is|are|on|at)\b", re.IGNORECASE)
+
+
 def replaces_value_before(previous: str, sentence: str) -> bool:
-    """`sentence` says that a value `previous` stated is no longer right and
-    gives another of the same kind, in more words than the new value
-    (resolve_correction_across rewrites those)."""
+    """`sentence` says that a value `previous` stated is no longer right, or
+    has changed, and gives another of the same kind, in more words than the
+    new value (resolve_correction_across rewrites those)."""
     if not previous or not sentence or resolve_correction_across(previous, sentence):
         return False
-    strong = _REPLACES_LEADING_RE.match(sentence) or _REPLACES_ANYWHERE_RE.search(sentence)
+    strong = (_REPLACES_LEADING_RE.match(sentence) or _REPLACES_ANYWHERE_RE.search(sentence)
+              or _CHANGED_TO_RE.search(sentence))
     if not strong and not (_ACTUALLY_LEADING_RE.match(sentence) and _CHANGE_WORD_RE.search(sentence)):
         return False
     old, new = _value_kinds(previous), _value_kinds(sentence)
     return any(a != b and ka & kb for a, ka in old for b, kb in new)
+
+
+# One value compared across environments in one sentence: "Staging uses
+# 2000K, while production uses 3000K." Cut into two facts, "Production uses
+# 3000K." went to another section without what it measured (adversarial
+# matrix A17). Two settings ("the RTO is four hours, and the RPO is one
+# hour") are two facts.
+_SCOPE_WORDS = frozenset("""prod production staging stage dev development qa uat test testing sandbox preprod
+pre-prod dr primary secondary""".split())
+
+
+def compares_one_value(left: str, right: str) -> bool:
+    """`left` and `right` give one setting different values: named by the
+    same word ("uses 2000K" / "uses 3000K"), or with the same unit for two
+    environments ("Staging has 2 nodes" / "production has 6 nodes")."""
+    scopes_left = set(re.findall(r"[a-z][\w-]*", (left or "").lower())) & _SCOPE_WORDS
+    scopes_right = set(re.findall(r"[a-z][\w-]*", (right or "").lower())) & _SCOPE_WORDS
+    two_scopes = bool(scopes_left and scopes_right and scopes_left != scopes_right)
+    for a, kinds_a in _value_kinds(left):
+        for b, kinds_b in _value_kinds(right):
+            if a == b:
+                continue
+            shared = kinds_a & kinds_b
+            if any(k.startswith("of:") for k in shared) or (two_scopes and any(k.startswith("unit:") for k in shared)):
+                return True
+    return False
+
+
+# A correction with no number: "The service is owned by Platform
+# Engineering. Actually, application ownership belongs to Payments, but
+# Platform owns the cluster." (adversarial matrix A19). The second opens
+# with a correction marker or "actually" and is about the same thing: a
+# content word in common, compared on a rough stem ("owned", "ownership",
+# "owns"). "Actually that reminds me, ..." opens a new topic.
+_NEW_TOPIC_AFTER_ACTUALLY_RE = re.compile(
+    r"^\W*actually,?\s+(?:that\s+reminds|one\s+more|another|also|on\s+(?:that|another)\s+note|speaking\s+of"
+    r"|before\s+i\s+forget|by\s+the\s+way)", re.IGNORECASE)
+_STATEMENT_LIGHT = _VALUE_LIGHT | frozenset("""actually sorry correction wait mean meant think one thing things
+just really basically also only since because which who what when where there here then than into onto over
+under about after before""".split())
+
+
+def _rough_stems(text: str) -> set:
+    out = set()
+    for w in re.findall(r"[a-z][a-z'-]+", (text or "").lower()):
+        if w in _STATEMENT_LIGHT or len(w) < 3:
+            continue
+        if len(w) > 3:
+            w = re.sub(r"(?:ership|ers|er|ing|ed|es|s)$", "", w)
+        out.add(w[:5])
+    return out
+
+
+def corrects_statement_before(previous: str, sentence: str) -> bool:
+    """`sentence` corrects what `previous` said, with no number to compare:
+    it opens with a correction marker or "actually" and shares a content
+    word with it."""
+    if not previous or not sentence or _NEW_TOPIC_AFTER_ACTUALLY_RE.match(sentence):
+        return False
+    if not (_REPLACES_LEADING_RE.match(sentence) or _ACTUALLY_LEADING_RE.match(sentence)):
+        return False
+    return bool(_rough_stems(previous) & _rough_stems(sentence))
 
 
 # A correction of something said further back names what it corrects: "I was

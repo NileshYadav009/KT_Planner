@@ -141,21 +141,22 @@ h1 {
      very long sections to overflow the page instead of splitting. */
   page-break-inside: auto;
   break-inside: auto;
-  margin-bottom: 1.8rem;
+  margin-bottom: 1.4rem;
 }
 
 .section-title {
-  font-size: 18pt;
+  font-size: 16pt;
   color: #111827;
   margin: 0 0 0.8rem;
   border-bottom: 2px solid var(--accent);
   padding-bottom: 0.55rem;
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
+  /* A block, not flex: WeasyPrint does not apply break rules inside a
+     flex container, and the heading split across a page break. */
+  display: block;
 }
 
 .section-number {
+  margin-right: 0.6rem;
   font-size: 11pt;
   font-weight: 700;
   color: var(--accent);
@@ -177,7 +178,7 @@ ul, ol {
 }
 
 li {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
 }
 
 .table-wrapper {
@@ -192,7 +193,7 @@ table {
 }
 
 th, td {
-  padding: 9px 10px;
+  padding: 6px 9px;
   border: 1px solid #d1d5db;
   text-align: left;
   vertical-align: top;
@@ -263,8 +264,8 @@ th {
 }
 
 .block-card {
-  margin-bottom: 1.2rem;
-  padding: 0.8rem 1rem;
+  margin-bottom: 0.9rem;
+  padding: 0.6rem 0.9rem;
   border-left: 3px solid var(--accent);
   background: #fafafa;
 }
@@ -413,3 +414,34 @@ code {
   color: #374151;
   font-weight: 600;
 }
+
+/* PDF review (23 Oct). The cover says how complete the handover is; the
+   coverage matrix colours its status; a block of short facts is a list. */
+.glance { margin-top: 1.6rem; }
+.glance-title { text-transform: uppercase; letter-spacing: 0.12em; color: #6b7280; font-size: 9pt; margin: 0 0 0.5rem; }
+.glance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+.glance-tile { border-radius: 6px; padding: 0.55rem 0.6rem; border: 1px solid #e5e7eb; background: #ffffff; }
+.glance-tile strong { display: block; font-size: 20pt; line-height: 1.1; }
+.glance-tile span { display: block; font-size: 8.5pt; color: #4b5563; line-height: 1.3; }
+.tile-strong { border-top: 3px solid #16a34a; } .tile-strong strong { color: #15803d; }
+.tile-partial { border-top: 3px solid #d97706; } .tile-partial strong { color: #b45309; }
+.tile-missing { border-top: 3px solid #dc2626; } .tile-missing strong { color: #b91c1c; }
+.tile-confirm { border-top: 3px solid #2563eb; } .tile-confirm strong { color: #1d4ed8; }
+.glance-note { margin-top: 0.6rem; font-size: 9pt; color: #374151; }
+.glance-note a { color: #1d4ed8; text-decoration: none; }
+a.page-ref::after { content: " (page " target-counter(attr(href), page) ")"; color: #6b7280; }
+
+.status { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 0.85em; font-weight: 600; white-space: nowrap; }
+.status-strong { background: #dcfce7; color: #166534; }
+.status-partial { background: #fef3c7; color: #92400e; }
+.status-missing { background: #fee2e2; color: #991b1b; }
+.status-after-review { background: #e5e7eb; color: #374151; }
+
+.fact-list { margin: 0 0 0.2rem 1.1rem; }
+.fact-list li { margin-bottom: 0.3rem; }
+.fact-list li p { margin: 0; display: inline; }
+
+/* A heading is never split across pages, nor left at the foot of a page
+   apart from its content: the section sign stayed at the bottom of page 9
+   and "Sources" opened page 10 once the spacing changed (23 Oct). */
+.section-title, .block-title { break-inside: avoid; page-break-inside: avoid; break-after: avoid; page-break-after: avoid; }
