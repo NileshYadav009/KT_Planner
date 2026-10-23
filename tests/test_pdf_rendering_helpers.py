@@ -137,13 +137,18 @@ def test_render_section_blocks_numbers_sections_sequentially():
 
 
 def test_decision_table_blank_cell_shows_not_covered_marker():
+    # A dash in each empty cell and one note under the table: "Not covered
+    # during KT" in every cell filled whole rows of a wide table.
     sections = [_section("a", "A", [
-        {"type": "DecisionTable", "title": "A", "columns": ["Symptom", "Fix"],
-         "rows": [{"Symptom": "Pool exhaustion", "Fix": ""}]},
+        {"type": "DecisionTable", "title": "A", "columns": ["Symptom", "Cause", "Fix"],
+         "rows": [{"Symptom": "Pool exhaustion", "Cause": "", "Fix": ""}]},
     ])]
     html = render_section_blocks(sections)
-    assert '<td class="cell-not-covered">Not covered during KT</td>' in html
+    assert html.count('<td class="cell-not-covered">—</td>') == 2
     assert "<td></td>" not in html
+    assert html.count('class="table-note"') == 1
+    assert "Not covered during the KT; confirm with the outgoing owner." in html
+    assert "Not covered during KT<" not in html
 
 
 def test_decision_table_populated_cell_unaffected():
@@ -154,6 +159,7 @@ def test_decision_table_populated_cell_unaffected():
     html = render_section_blocks(sections)
     assert "Scale connections" in html
     assert "cell-not-covered" not in html
+    assert "table-note" not in html
 
 
 def _rendered_section(section, **overrides):

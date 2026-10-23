@@ -108,7 +108,7 @@ def test_common_failures_adds_historical_incident_block_for_past_occurrence():
     row = historical["rows"][0]
     assert row["Incident"] == "Major outage"
     assert row["When"] == "Last year"
-    assert row["Resolution"] == "Not covered in KT"
+    assert row["Resolution"] == ""                    # never a guessed fix; each view marks the empty cell
 
 
 def test_common_failures_no_historical_block_when_nothing_has_a_when():

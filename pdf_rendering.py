@@ -161,7 +161,11 @@ def _render_inline_text(value) -> str:
     return re.sub(r"\*(.+?)\*", r"<em>\1</em>", escaped)
 
 
-NOT_COVERED_CELL = "Not covered during KT"
+# An empty table cell shows a dash, and one note under the table says what it
+# means: "Not covered during KT" in every empty cell filled whole rows of a
+# wide table (an incident record printed it four times in one row).
+NOT_COVERED_CELL = "—"
+NOT_COVERED_NOTE = "Not covered during the KT; confirm with the outgoing owner."
 
 
 _SVG_URI_RE = re.compile(r"data:image/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}")
@@ -374,6 +378,7 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for col in columns:
                     html.append(f"<th>{html_escape(col)}</th>")
                 html.append("</tr></thead><tbody>")
+                has_empty_cell = False
                 for i, row in enumerate(block.get("rows", [])):
                     html.append("<tr>")
                     for c, col in enumerate(columns):
@@ -391,9 +396,13 @@ def render_section_blocks(rendered_sections: list) -> str:
                         elif isinstance(cell_value, str) and cell_value.strip():
                             html.append(f"<td>{_render_inline_text(cell_value)}{refs}</td>")
                         else:
+                            has_empty_cell = True
                             html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}{refs}</td>")
                     html.append("</tr>")
                 html.append("</tbody></table></div>")
+                if has_empty_cell:
+                    html.append(f"<p class=\"table-note\"><span class=\"cell-not-covered\">{NOT_COVERED_CELL}</span> "
+                                f"{NOT_COVERED_NOTE}</p>")
             elif block_type == "TroubleshootingBlock":
                 html.append("<ol>")
                 for i, step in enumerate(block.get("steps", [])):

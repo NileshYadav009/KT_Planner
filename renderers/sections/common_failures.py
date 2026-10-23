@@ -20,7 +20,9 @@ STRUCTURED_COLUMNS = [
 ]
 
 HISTORICAL_COLUMNS = ["Incident", "Cause", "When", "Impact", "Resolution", "Preventive action"]
-NOT_COVERED = "Not covered in KT"
+# A detail the KT did not give is left empty: every view marks an empty cell
+# itself (the PDF with a dash and one note under the table).
+NOT_COVERED = ""
 
 
 def _structured_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -58,7 +60,7 @@ def _historical_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
     year") describe a one-off historical incident rather than a recurring
     issue — surface them as their own record instead of leaving that detail
     stranded in the shared Frequency column. Never infer a missing
-    resolution/preventive action — "Not covered in KT" beats a fabricated fix."""
+    resolution/preventive action — an empty cell beats a fabricated fix."""
     failures = (section.get("_structured") or {}).get("failures")
     if not isinstance(failures, list):
         return []

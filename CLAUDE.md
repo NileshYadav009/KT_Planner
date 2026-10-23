@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aat is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aau is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -147,3 +147,4 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X18 | Low | A pronoun-only sentence after an answer ("Only six clinics have it.") is placed on its own; an unpunctuated speech-to-text run-on ("the app is on eks and the db is rds ... argo cd does the deployment") is one fact | Open: matrix B09 (should). Needs answer-turn grouping and punctuation restoration. |
 | X19 | Med | With Groq, the section polish wrote filler for template labels nothing filled ("**Window:** N/A", "**Rollback trigger:** Not specified"; 18 of 133 cached answers) and reworded what was said, so 15 of 81 facts on two dev KTs no longer read as said | Fixed, §9aat: shared polish system prompt (keep the speaker's wording, omit unfilled labels, fragments are data) and deterministic removal of placeholder lines. Strict 65 to 69 of 81, lenient unchanged at 78; output tokens per polish call down about 14% |
 | X20 | Med | PDF: the cover said nothing about the handover; coverage status was plain text; sections of short facts were walls of paragraphs | Fixed, §9aat: "At a glance" tiles on the cover (covered well, partly, not covered, to confirm, with page links), coloured status badges, short facts as a list, tighter spacing (the user's KT 15 to 14 pages) |
+| X21 | Med | PDF: the Quick Reference (the incident page) sat after the coverage report, on page 9 to 11; its rows quoted up to 120 words of speech; each empty table cell said "Not covered during KT" | Fixed, §9aau: the card is section 01 (`knowledge_builder.lead_with_quick_reference`); a row over 45 words keeps its first whole sentences (never a safety, conflict or no-fix row); an empty cell is a dash, with one note under the table |

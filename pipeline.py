@@ -37,6 +37,7 @@ from knowledge import (
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
     append_quick_reference_section,
+    lead_with_quick_reference,
     reconcile_linked_fields,
     verify_document_coverage,
     apply_conflicts,
@@ -683,6 +684,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             )
         except Exception as exc:
             _stage_failed(stage_errors, "Completeness check", exc, "The completeness check did not run, so some transcript sentences may be missing from this document.")
+
+        # The incident card goes first: the page a new owner opens during an
+        # incident. After the completeness check (which places Additional
+        # Notes by the digests) and before the source numbers are assigned.
+        lead_with_quick_reference(knowledge_object.get("rendered_sections"))
 
         # Evidence per fact (P1-2): each fact in the document points to the
         # transcript sentences it came from, and when they were said.

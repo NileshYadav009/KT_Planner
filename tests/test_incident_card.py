@@ -60,7 +60,7 @@ def tripwise_card():
     ko = result["knowledge_object"]
     rows = next(s for s in ko["sections"] if s["id"] == "quick_reference")["_quick_reference_rows"]
     rendered = next(s for s in ko["rendered_sections"] if s["section_id"] == "quick_reference")
-    return rows, rendered
+    return rows, rendered, [s["section_id"] for s in ko["rendered_sections"]]
 
 
 def _norm(text):
@@ -68,7 +68,7 @@ def _norm(text):
 
 
 def test_tripwise_card_carries_every_annotated_incident_fact(tripwise_card):
-    rows, _ = tripwise_card
+    rows, _, _ = tripwise_card
     card = _norm(" ".join(f"{r['Situation']} {r['What to do']}" for r in rows))
     annotated = {
         "alert -> first check": "pagerduty pages us if it drops below ninety five percent",
@@ -87,7 +87,7 @@ def test_tripwise_card_carries_every_annotated_incident_fact(tripwise_card):
 
 
 def test_every_line_is_sourced_from_the_kt(tripwise_card):
-    rows, _ = tripwise_card
+    rows, _, _ = tripwise_card
     transcript = _norm(TRIPWISE)
     for row in rows:
         assert row["Source"], row
@@ -96,10 +96,30 @@ def test_every_line_is_sourced_from_the_kt(tripwise_card):
 
 
 def test_the_card_renders_with_a_source_column(tripwise_card):
-    _, rendered = tripwise_card
+    _, rendered, _ = tripwise_card
     table = rendered["blocks"][0]
     assert table["type"] == "DecisionTable"
     assert table["columns"] == ["Situation", "What to do", "Source"]
+
+
+def test_the_card_comes_first_and_its_sources_are_numbered_first(tripwise_card):
+    # The page a new owner opens during an incident; it sat on page 9 to 11.
+    _, rendered, order = tripwise_card
+    assert order[0] == "quick_reference"
+    assert order.count("quick_reference") == 1
+    numbers = [n for refs in rendered["blocks"][0].get("sources") or [] for n in refs]
+    assert numbers and min(numbers) == 1                     # source numbers follow the printed order
+
+
+def test_lead_with_quick_reference_moves_only_the_card():
+    from knowledge.knowledge_builder import lead_with_quick_reference
+    sections = [{"section_id": s} for s in ("system_overview", "unmapped_findings", "kt_coverage", "quick_reference")]
+    lead_with_quick_reference(sections)
+    assert [s["section_id"] for s in sections] == ["quick_reference", "system_overview", "unmapped_findings", "kt_coverage"]
+    without = [{"section_id": "system_overview"}, {"section_id": "kt_coverage"}]
+    lead_with_quick_reference(without)
+    assert [s["section_id"] for s in without] == ["system_overview", "kt_coverage"]
+    lead_with_quick_reference(None)                          # no rendered document: nothing to do
 
 
 # --------------------------------------------------------------------------
@@ -190,3 +210,26 @@ def test_spoken_lead_ins_are_dropped_and_duplicates_shown_once():
         _section("security", "Security", ["Never purge the dead letter queue."]),
     )
     assert rows == [{"Situation": "Never", "What to do": "Never purge the dead letter queue.", "Source": "Danger Zones"}]
+
+
+def test_a_long_row_keeps_whole_sentences_and_points_to_its_section():
+    # A recorded KT's rollback row quoted 120 words of speech on the card.
+    ramble = ("We have dev staging and prod and you can see the status of them being synced or out of sync here and "
+              "if something is wrong rolling back is done from the same screen and then we decide what to do next "
+              "with the team")
+    rows = _card(_section("deployment_and_rollback", "Deployment & Rollback",
+                          [f"To roll back, redeploy the previous release from ArgoCD. {ramble}."]))
+    row = next(r for r in rows if r["Situation"].startswith("A release misbehaves"))
+    assert row["What to do"] == "To roll back, redeploy the previous release from ArgoCD. (More in its section.)"
+    assert row["Source"] == "Deployment & Rollback"
+
+
+def test_a_long_safety_row_is_never_shortened():
+    # A rule's second sentence can carry its exception or a second window.
+    freeze = ("There is a change freeze during the last week of every quarter while finance closes the books, "
+              "and nothing goes to production then. We also avoid deploying on Fridays after two in the afternoon "
+              "because nobody from the platform team is around over the weekend to watch the release.")
+    rows = _card(_section("known_bad_days", "Operational Calendar", [freeze]))
+    row = next(r for r in rows if r["Situation"] == "Do not deploy")
+    assert len(row["What to do"].split()) > 45
+    assert row["What to do"] == freeze

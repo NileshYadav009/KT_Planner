@@ -1916,6 +1916,30 @@ def _tidy(text: str) -> str:
     return capitalise_sentence_start(_QR_LEAD_RE.sub("", text.strip()))
 
 
+# A card row is read at a glance. A longer one (the rollback row of a
+# recorded KT quoted 120 words of speech) keeps its first whole sentences
+# and says the rest is in its section, which the Source column names. A
+# sentence is never cut, so no condition or negation inside one is lost;
+# safety and conflict rows are never shortened; the whole text stays in its
+# own section.
+_QR_MAX_WORDS = 45
+_QR_MORE = " (More in its section.)"
+
+
+def _at_a_glance(text: str) -> str:
+    if len(text.split()) <= _QR_MAX_WORDS:
+        return text
+    sentences = _QR_SENTENCE_RE.split(text)
+    kept: List[str] = []
+    for sentence in sentences:
+        if kept and len(" ".join(kept + [sentence]).split()) > _QR_MAX_WORDS:
+            break
+        kept.append(sentence)
+    if len(kept) == len(sentences):
+        return text
+    return " ".join(kept) + _QR_MORE
+
+
 def _clause(text: str) -> str:
     """The rest of a failure sentence after its subject ("which silently
     stop …", "so we archive …"), as a sentence of its own."""
@@ -2028,7 +2052,8 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     def title_of(section: Optional[Dict[str, Any]], fallback: str) -> str:
         return str((section or {}).get("title") or fallback)
 
-    def add(situation: str, action: Any, section: Optional[Dict[str, Any]], fallback_title: str) -> None:
+    def add(situation: str, action: Any, section: Optional[Dict[str, Any]], fallback_title: str,
+            trim: bool = True) -> None:
         text = _join_if_list(action)
         if not text:
             return
@@ -2038,6 +2063,7 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
             # Each unfixed failure keeps its own row: the text is the same.
             key = f"{situation.lower()} | {key}"
             words = set(_content_words(f"{situation} {text}"))
+            trim = False                                # "No fix was stated" is never trimmed away
         # The same statement said twice in different words ("Danger zones
         # include X, Y, Z outside ArgoCD" / "The danger zones are X, Y, Z")
         # is one row.
@@ -2045,7 +2071,10 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
             return
         used.add(key)
         used_words.append(words)
-        rows.append({"Situation": situation, "What to do": _tidy(text), "Source": title_of(section, fallback_title)})
+        shown = _tidy(text)
+        if trim:
+            shown = _at_a_glance(shown)
+        rows.append({"Situation": situation, "What to do": shown, "Source": title_of(section, fallback_title)})
 
     def first_matching(section, pattern, limit=2) -> Optional[str]:
         hits = [_tidy(s) for s in _qr_sentences(section, stale) if pattern.search(s)]
@@ -2103,16 +2132,16 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
             if _OPENING_PROHIBITION_RE.match(sentence):
                 cautions.append(("Never", sentence, section))
     for situation, sentence, section in cautions[:_QR_MAX_CAUTIONS]:
-        add(situation, sentence, section, "Danger Zones")
+        add(situation, sentence, section, "Danger Zones", trim=False)
 
     freeze = first_matching(calendar, _FREEZE_CUE_RE) or _field_value(calendar, "deployment_blackout_times")
-    add("Do not deploy", freeze, calendar, "Operational Calendar")
+    add("Do not deploy", freeze, calendar, "Operational Calendar", trim=False)
 
     for c in conflicts:
         section = _find_section(knowledge_object, c.get("section_id") or "")
         add("Conflicting guidance — confirm first",
             f"“{_tidy(c['a'])}” but also “{_tidy(c['b'])}” Ask the outgoing owner before acting on either.",
-            section, "KT session")
+            section, "KT session", trim=False)
 
     # "If you are unsure ... contact X" guidance can be classified into any
     # of several sections (open responsibilities, ownership, danger zones);
@@ -2161,6 +2190,19 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     summary["section_count"] = summary.get("section_count", len(sections) - 1) + 1
     summary["covered_sections"] = summary.get("covered_sections", 0) + 1
     return knowledge_object
+
+
+def lead_with_quick_reference(rendered_sections: List[Dict[str, Any]]) -> None:
+    """Put the incident card first in the rendered document (in place).
+
+    It is the page a new owner opens during an incident; at the end it sat
+    on page 9 to 11. Called after the completeness check, which places
+    Additional Notes before the first digest section, and before source
+    numbering, so the numbers follow the printed order."""
+    for i, section in enumerate(rendered_sections or []):
+        if section.get("section_id") == QUICK_REFERENCE_SECTION_ID:
+            rendered_sections.insert(0, rendered_sections.pop(i))
+            return
 
 
 # Sections that restate content from real sections (or are the coverage

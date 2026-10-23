@@ -5761,6 +5761,50 @@ re-record would bring the polish path back under test.
 
 **Tests:** 204 passed in one run: end-to-end with the recorded Groq replay, PDF helpers, export and security, polish integrity, grounding, renderer sections, golden KT, evidence. The full suite was not run.
 
+### 9aau. The Quick Reference first, card rows at a glance, empty table cells (23 Oct)
+
+The user asked which pending item to take first for the most impact. Taken:
+the two PDF items that need no LLM quota and reach every KT.
+
+- **The Quick Reference is section 01.** It is the page a new owner opens
+  during an incident, and it was printed after the coverage report (pages 9
+  to 11). `knowledge_builder.lead_with_quick_reference` moves it in the
+  pipeline:
+  - after the completeness check, which places Additional Notes before the
+    first digest section, so the notes stay with the real sections;
+  - before source numbering, so the numbers follow the printed order.
+
+  The PDF, web view, Markdown and Confluence exports all read that order.
+  KTs generated earlier keep theirs.
+- **Card rows read at a glance.** With the card first, its weakness showed:
+  rows quoted long speech. On the user's KT with Groq, the rollback row was
+  120 words and the escalation row 47. Without an LLM, "An alert fires" and
+  "Where to look first" were each a paragraph of run-on speech.
+  - A row over 45 words keeps its first whole sentences and ends "(More in
+    its section.)"; the Source column names the section.
+  - A sentence is never cut, so no negation or condition inside one is
+    lost.
+  - Never trimmed: safety rows (Never, Be careful, Do not deploy), conflict
+    rows, and a failure's "No fix was stated" line.
+  - A single sentence over 45 words (a run-on with no full stop) is kept
+    whole: a pointer in its place would leave the row with no source.
+  - On the user's KT without an LLM, the card went from more than a page to
+    under half a page, all five rows sourced.
+- **Empty table cells.** A cell the KT did not fill printed "Not covered
+  during KT", or "Not covered in KT" in the incident record (four times in
+  one row of an end-to-end KT). It is now a grey dash, with one note under
+  the table: "Not covered during the KT; confirm with the outgoing owner."
+  The incident record leaves the cell empty instead of writing the text, so
+  each view marks it its own way (the web view and Markdown export are
+  unchanged).
+- **Pages:** the user's KT 14 to 13, without an LLM.
+- **Correction to 9aat.** It said a wide table printed "Not covered during
+  KT" in every empty cell (Open tasks). Rendered today, neither the user's
+  KT nor its stored Groq version prints that text; the repetition is
+  confirmed in the end-to-end incident record.
+
+**Checks:** adversarial matrix 147/147 must and 15/20 should, no check changed. Tests: 284 passed in one run on the final code (end-to-end replay, incident card, knowledge builders, dialogue, evidence, golden KT, PDF helpers, renderer sections, dedup, runbook, exports, PDF export).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

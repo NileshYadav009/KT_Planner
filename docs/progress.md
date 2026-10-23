@@ -1664,3 +1664,14 @@ Results:
   - a heading can no longer be split across pages.
 - **Your call:** move the Quick Reference to the front, bundle a font, and
   re-record the replay answers (about 35k tokens).
+
+## The Quick Reference first (audit §9aau, 23 Oct)
+
+- **The incident page comes first.** The Quick Reference is now section 01,
+  right after the contents, instead of page 9 to 11.
+- **Its rows are short.** A row that quoted a long stretch of speech (120
+  words for the rollback on your KT) now keeps its first whole sentences and
+  says the rest is in its section. Safety rules are never shortened.
+- **Empty table cells** show a dash, with one note under the table, instead
+  of "Not covered during KT" in every cell.
+- No Groq quota used. Your KT is 13 pages instead of 14.
