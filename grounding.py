@@ -234,18 +234,64 @@ def looks_malformed(value) -> bool:
     return bool(_CHATTER_RE.search(value) or _JSONISH_RE.search(value))
 
 
-def ground_structured(data, source: str, dropped: List[str] = None):
+def withdrawn_in(source: str) -> list:
+    """The values `source` says and then corrects in the same unit
+    (devops_transcription.withdrawn_values), line by line."""
+    from devops_transcription import withdrawn_values
+    return [p for line in (source or "").splitlines() for p in withdrawn_values(line)]
+
+
+def states_withdrawn_value(text: str, withdrawn: list) -> bool:
+    """`text` states a value its source withdrew, measuring the same thing,
+    without the value that replaced it: "Database backups retained for seven
+    days" from "... seven days—actually, the new retention policy is 30 days"
+    (a user's KT, 23 Oct)."""
+    if not withdrawn or not isinstance(text, str):
+        return False
+    from devops_transcription import _value_kinds
+    values = [(_number_values(key) or {key}, kinds) for key, kinds in _value_kinds(text)]
+    said = set().union(*(v for v, _ in values)) if values else set()
+    for pair in withdrawn:
+        old, new = _number_values(pair["old"]) or {pair["old"]}, _number_values(pair["new"]) or {pair["new"]}
+        if new & said:
+            continue
+        if any(v & old and kinds & pair["kinds"] for v, kinds in values):
+            return True
+    return False
+
+
+def ground_structured(data, source: str, dropped: List[str] = None, _withdrawn: list = None):
     """Recursively drop ungrounded or malformed values from an LLM JSON
     result. List items are judged one by one so a single invented step does
     not discard the real ones. Records (dicts inside lists, e.g. a failure
-    row) are dropped whole if any of their values is ungrounded."""
+    row) are dropped whole if any of their values is ungrounded. A value the
+    speaker withdrew, shown without its correction, is dropped too."""
     dropped = dropped if dropped is not None else []
+    withdrawn = withdrawn_in(source) if _withdrawn is None else _withdrawn
+
+    def bad(value) -> bool:
+        return isinstance(value, str) and (looks_malformed(value) or ungrounded(value, source)
+                                           or states_withdrawn_value(value, withdrawn))
+
+    def without_withdrawn_lines(key, value):
+        # A value of several lines is listed a line each: "...seven days\nNew
+        # retention policy is 30 days" printed "seven days" as its own item.
+        if not isinstance(value, str) or "\n" not in value or not withdrawn:
+            return value
+        lines = value.split("\n")
+        kept = [line for line in lines if not states_withdrawn_value(line, withdrawn)]
+        dropped.extend(f"{key}: {line}" for line in lines if line not in kept)
+        return "\n".join(kept) if any(line.strip() for line in kept) else None
+
     if isinstance(data, dict):
         out = {}
         for key, value in data.items():
+            value = without_withdrawn_lines(key, value)
             if isinstance(value, (dict, list)):
-                out[key] = ground_structured(value, source, dropped)
-            elif isinstance(value, str) and (looks_malformed(value) or ungrounded(value, source)):
+                out[key] = ground_structured(value, source, dropped, withdrawn)
+            elif value is None:
+                out[key] = None
+            elif bad(value):
                 dropped.append(f"{key}: {value}")
                 out[key] = None
             else:
@@ -255,13 +301,12 @@ def ground_structured(data, source: str, dropped: List[str] = None):
         kept = []
         for item in data:
             if isinstance(item, dict):
-                bad = [v for v in item.values() if isinstance(v, str) and (looks_malformed(v) or ungrounded(v, source))]
-                if bad:
+                if any(bad(v) for v in item.values()):
                     dropped.append(str(item))
                     continue
                 kept.append(item)
             elif isinstance(item, str):
-                if looks_malformed(item) or ungrounded(item, source):
+                if bad(item):
                     dropped.append(item)
                     continue
                 kept.append(item)

@@ -418,6 +418,14 @@ class _Index:
         row_keys = set(_content_keys(_canonical(" ".join(cells))))
         chosen = set()
         for cell in cells:
+            items = [p.strip() for p in re.split(r"[;,]", cell) if _content_keys(self._strip(p))]
+            if len(items) >= 2 and all(len(_content_keys(self._strip(p))) <= 2 for p in items):
+                # A list of names, each said in its own sentence ("GitHub
+                # Actions; Helm" was printed "no source"): each item cites the
+                # sentence that names it.
+                for item in items:
+                    chosen.update(self.sources_for(item))
+                continue
             keys = _content_keys(self._strip(cell))
             if len(keys) >= 2:
                 chosen.update(self.sources_for(cell))

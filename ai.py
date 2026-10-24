@@ -34,7 +34,7 @@ except Exception:
     pass
 
 from field_populator import find_source_sentence_index
-from grounding import ground_structured, added_specifics, negations_flipped
+from grounding import ground_structured, added_specifics, negations_flipped, states_withdrawn_value, withdrawn_in
 from llm.usage import record_rejected as record_llm_rejected
 from llm_provider import get_llm_provider, LLM_PARALLEL_WORKERS
 import contextvars
@@ -563,6 +563,14 @@ def polish_coverage_sections(
                 # checks cannot see it (grounding.NEGATION_RE).
                 logger.warning("Polish for %s changed a negation; keeping raw text instead", sid)
                 record_llm_rejected("section_polish", f"{sid}: negation changed")
+                return _local_cleanup_list(_all_fragments(section))
+            withdrawn = withdrawn_in("\n".join(section["fragments"]))
+            if any(states_withdrawn_value(line, withdrawn) for line in cleaned_text.splitlines()):
+                # A corrected value split from its correction: "Database backups
+                # are retained for seven days." on a line of its own read as
+                # current (a user's KT, 23 Oct). The speaker's sentence keeps both.
+                logger.warning("Polish for %s showed a withdrawn value alone; keeping raw text instead", sid)
+                record_llm_rejected("section_polish", f"{sid}: withdrawn value shown alone")
                 return _local_cleanup_list(_all_fragments(section))
             dropped = _fragments_missing_from(section["fragments"], cleaned_text)
             if dropped:

@@ -852,3 +852,19 @@ def test_system_name_from_a_named_subject():
     assert _extract_by_pattern(SYSTEM_NAME_FIELD, "So Tern is the appointment booking system for the clinics.") == "Tern"
     assert _extract_by_pattern(SYSTEM_NAME_FIELD, "Kafka is the event platform we use.") is None   # a product
     assert _extract_by_pattern(SYSTEM_NAME_FIELD, "This is Monday, the busy day.") is None
+
+
+def test_a_check_after_a_failure_is_not_a_pre_deployment_check():
+    # A user's KT (23 Oct, matrix T03, J04): "If a deployment fails, check the
+    # logs first and rollback using Helm." was printed as "Pre-deployment
+    # checks: ..." (semantic fill, no LLM).
+    from field_populator import _extract_by_semantic
+
+    field = {"id": "pre_deployment_checks", "label": "Pre-deployment Checks", "type": "text"}
+    after_failure = "If a deployment fails, check the logs first and roll back using Helm."
+    assert _extract_by_semantic(field, [after_failure], None) is None
+    before = "Before each release, check that the pipeline is green and no incident is open."
+    assert _extract_by_semantic(field, [after_failure, before], None) == before
+    # A field about what happens after a failure still takes it.
+    rollback = {"id": "rollback_scenarios", "label": "Rollback scenarios", "type": "text"}
+    assert _extract_by_semantic(rollback, [after_failure], None) == after_failure

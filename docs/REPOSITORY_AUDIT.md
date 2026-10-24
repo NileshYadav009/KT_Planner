@@ -5805,6 +5805,70 @@ the two PDF items that need no LLM quota and reach every KT.
 
 **Checks:** adversarial matrix 147/147 must and 15/20 should, no check changed. Tests: 284 passed in one run on the final code (end-to-end replay, incident card, knowledge builders, dialogue, evidence, golden KT, PDF helpers, renderer sections, dedup, runbook, exports, PDF export).
 
+### 9aav. A user's KT reviewed, and the general mechanisms behind its gaps (24 Oct)
+
+The user shared the PDF of a KT they had just run with Groq ("Order Service",
+job 665c8255, 13 sentences) and the "Principal SaaS Architect" brief: fix the
+general mechanisms, one defect at a time, with a regression test each.
+
+**Method.**
+
+- **Reproduced for free.** The run's Groq answers were in the app's LLM
+  cache. A copy of it, replayed (`LLM_CACHE=replay`, no key set, 0 live
+  calls), reproduced the PDF exactly: 16 answers replayed, the same 1
+  skipped.
+- **Baseline first.** 8 adversarial cases were written before any fix,
+  each in another domain except T03 (the user's own KT): A20, A21, B10, C05,
+  J02, J03, J04, T03. The matrix gained two checks:
+  - `gaps_consistent`: the PDF's "Not Covered" list names exactly what the
+    coverage matrix calls not covered;
+  - `sourced`: no fact marked "no source".
+- **Baseline result.** 155/177 must and 15/25 should; the 56 earlier cases
+  all still passed.
+
+**Defects and fixes (ledger X22 to X29).**
+
+| ID | What the KT showed | Root cause | Fix |
+|---|---|---|---|
+| X22 | With Groq, Disaster Recovery listed "Database backups retained for seven days" as its own item (the speaker said "seven days—actually, the new retention policy is 30 days") | The fact splitter cut the sentence after "actually"; the marker was then tidied away, so neither the LLM nor the guards could see a correction | `context_mapper.split_facts` never cuts a correction away from the value it withdraws (`devops_transcription.withdrawn_values`). Behind it, LLM output is checked: `grounding.ground_structured` drops an extracted value, or one line of it, that states a withdrawn value without its replacement; the polish and the copy edit (`copyedit.problems`, "correction lost") refuse a rewrite that does. |
+| X23 | Without an LLM the KT was titled "Today I'll Explain Our Order", and so were the diagram's application box and the connections table; "Today I'll explain our order service." was printed under System Overview | The name pattern took everything before "service" from the start of the sentence; "explain" was not an announcement verb | `field_populator._trim_name_capture` keeps what follows the last determiner or introducing verb; a one-word lower-case name keeps its descriptor ("Order Service", not "Order"); `dialogue` announcements include explain, introduce, describe, go over, run through, give the KT for |
+| X24 | First 30-Day Ownership Plan Partial from "we upgraded it last week"; Disaster Recovery failover from "production runs five replicas"; the deployment window and approvals from "never restart the production database during business hours unless the incident commander approves it" | Topic patterns matched words of other topics | `coverage_topics`: Week 4 needs the plan's last week ("in the last week"); failover needs a standby copy; under another section a deployment topic needs a deploy word (`states_topic_elsewhere`). Week 1 and 2 learned "the first two weeks" and "the first few days" (tuning h10 had been covered only through "the last week before Christmas"). |
+| X25 | Common Failures said "Not discussed as its own topic" and was Strong (the cover: "covered well"); the "Not Covered in This KT" list named Sign-off and left out Handover Completion Check and First 30-Day Ownership Plan, so it disagreed with the matrix and the cover | Strong counted topics met only in passing elsewhere; the list was built from the rendered sections, not from the matrix | Covered well needs the section's own statements to cover most of its topics; otherwise Partial, worded "came up in passing under ...", and listed to confirm. The list is the matrix's not-covered sections (`pdf_rendering.missing_sections`); an unstarted sign-off says "Not signed yet". |
+| X26 | "We have three replicas in staging, but production runs five replicas" was followed by "not discussed: Differences between environments" | No pattern for two environments set against each other, and topics were judged only on the facts a sentence is cut into | A contrast pattern, and topics are also judged on whole sentences |
+| X27 | The follow-up list left out "We haven't documented the exact rollback revision yet, so that needs confirmation" and "I think Redis is using 4 GB of memory, but I'm not completely sure" | Stated gaps were recognised only as "have not", "not sure"; once recognised, a guess read "stated as not in place" | Contractions, "not completely sure", "that needs confirmation". A doubted claim (a hedge, or a claim before "but") is reported as unconfirmed ("To confirm", Partial), not as absent (`dialogue.is_unconfirmed`); a bare "I am not sure anymore" claims nothing and stays an absence (tuning g08 caught the first, broader version) |
+| X28 | "Pre-deployment checks: If a deployment fails, check the logs first and rollback using Helm." | The semantic field fill matched "check ... logs" | A field about what happens before something never takes a sentence about what to do after a failure |
+| X29 | "GitOps / deployment: GitHub Actions; Helm" marked "no source" | Two names had to be in one sentence | Each name in a list cites its own sentence (`knowledge/evidence.py`) |
+
+**Results.**
+
+- **Adversarial matrix:** 177/177 must and 20/25 should on 64 cases (baseline 155/177 and 15/25). The 5 open should checks are the earlier ones: D02 to D04 need an LLM, B09 and T01 are X18.
+- **Accuracy (no LLM), all five sets:** placement unchanged (tuning
+  534/534, dev 214/224, holdouts 86/95, blind 95/114, e2e 100%). False
+  Missing: dev 1 to 0, tuning 1 to 1. No false Covered, repeats or unsourced
+  facts.
+- **The user's KT, replayed with Groq:**
+  - titled "Order Service";
+  - 2 sections covered well (was 3);
+  - the not-covered list, the matrix and the cover agree (6);
+  - 15 items to confirm (was 12), including the guess and the undocumented
+    rollback revision;
+  - Disaster Recovery shows the correction whole.
+
+  Its other LLM answers no longer match the new fact boundaries (3 of 19
+  replayed), so those sections ran rules-only in the replay.
+- **Tests:** 695 passed on the final code in two runs of the 26 affected files: the end-to-end replay, golden KT and suite, knowledge builders, incident card, session framing, dialogue, coverage topics, PDF export and helpers, renderer sections, audit regressions, conflicts, context mapper, section rules, fact units, de-duplication, exports, LLM cost controls, evidence, grounding, polish integrity, copy edit, transcription, field populator, runbook. One known xpass (the holdout accuracy target, met since 17 Oct).
+
+**Not done.**
+
+- **A live Groq run of a KT.** The new guards are tested with mocked LLM
+  output. Confirming them on live answers costs about 16 calls (about 7k
+  tokens) for this KT; that is the user's call.
+- **Two no-LLM placements.** The Redis memory guess went to Common Failures
+  and the CPU scale-up rule to Cost Optimization. These are classifier errors
+  (L3), not handled with a rule for one sentence.
+- **With Groq, Environments repeated the comparison** as a reworded "Additional
+  environment notes" line; paraphrase de-duplication is open.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

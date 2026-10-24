@@ -33,9 +33,10 @@ from policy import (
 from runtime_policy import load_policy
 from devops_transcription import (
     capitalise_sentence_start, clean_transcript, compares_one_value, corrects_statement_before, points_back_to,
-    replaces_value_before, resolve_correction_across, resolve_self_corrections,
+    replaces_value_before, resolve_correction_across, resolve_self_corrections, withdrawn_values,
 )
 from dialogue import display_text, merge_question_answers, speaker_labels
+from grounding import states_withdrawn_value
 from entity_extractor import EntityExtractor
 from fact_units import split_into_facts
 from section_rules import (
@@ -321,6 +322,13 @@ def split_facts(text: str) -> List[Tuple[int, int]]:
         pieces = [text[a:b] for a, b in spans]
         if any(compares_one_value(pieces[i], pieces[j])
                for i in range(len(pieces)) for j in range(i + 1, len(pieces))):
+            return [(0, len(text.rstrip()))]
+        # A correction is not cut away from the value it withdraws: "The
+        # database backups are retained for seven days—actually, the new
+        # retention policy is 30 days" was cut after "actually", and "seven
+        # days" was listed as a recovery action on its own (a user's KT, 23 Oct).
+        withdrawn = withdrawn_values(text)
+        if withdrawn and any(states_withdrawn_value(piece, withdrawn) for piece in pieces):
             return [(0, len(text.rstrip()))]
         return spans
     halves = split_two_topic_sentence(text)

@@ -1,5 +1,5 @@
 {
-  "about": "Adversarial KT matrix. Written 18 Oct before any output was seen. Each case is a short transcript run through the real pipeline (no LLM) by evaluation/matrix.py. Checks: shows / shows_any (normalised text visible somewhere in the document), absent / absent_re (not visible outside conflict warnings), never_alone (every document unit naming `text` also names `with`, so a superseded or hedged value is never shown on its own), verbatim (exact characters), in_section, order (same section, in order), flagged (shown in a conflict or gap warning), not_flagged (no conflict warning names both), coverage, completes. level: must = a wrong final document; should = a desirable behaviour the product does not promise yet.",
+  "about": "Adversarial KT matrix. Written 18 Oct before any output was seen. Each case is a short transcript run through the real pipeline (no LLM) by evaluation/matrix.py. Checks: shows / shows_any (normalised text visible somewhere in the document), absent / absent_re (not visible outside conflict warnings), never_alone (every document unit naming `text` also names `with`, so a superseded or hedged value is never shown on its own), verbatim (exact characters), in_section, order (same section, in order), flagged (shown in a conflict or gap warning), not_flagged (no conflict warning names both), coverage, completes, gaps_consistent (the PDF's Not Covered list names exactly the sections the coverage matrix calls Missing), sourced (no fact marked “no source”). level: must = a wrong final document; should = a desirable behaviour the product does not promise yet.",
   "cases": [
     {
       "id": "A01", "category": "A correction", "title": "Same-sentence correction with a dash and 'no, sorry, it's'",
@@ -798,6 +798,137 @@
         {"check": "absent_re", "pattern": "^[a-z]+(?: [a-z]+)?: ", "level": "must"},
         {"check": "shows", "text": "Volume triples at month end", "level": "must"}
       ]
+    },
+    {
+      "id": "A20", "category": "A correction", "title": "Dash, 'actually', and the subject said again in other words",
+      "regression": "tests/test_devops_transcription.py::test_a_correction_is_not_cut_away_from_the_value_it_withdraws; tests/test_grounding.py::test_a_value_the_speaker_withdrew_is_never_extracted_on_its_own",
+      "transcript": [
+        "Lena: This is the handover for the shipment tracker, which shows parcel status to customers.",
+        "The tracker runs on Azure App Service and stores events in Azure SQL.",
+        "Tracking events are kept for fourteen days—actually, the new retention period is 90 days.",
+        "Customers see status updates within a minute."
+      ],
+      "expect": [
+        {"check": "shows", "text": "90 days", "level": "must"},
+        {"check": "never_alone", "text": "fourteen days", "with": "90 days", "level": "must"}
+      ]
+    },
+    {
+      "id": "A21", "category": "A correction", "title": "Dash, 'sorry', and the change said as news ('we upgraded it last week, so it's ... now')",
+      "regression": "tests/test_coverage_topics.py::test_words_from_other_topics_do_not_cover_a_section",
+      "transcript": [
+        "Omar: This is the handover for the search API behind the recipe site.",
+        "The search API runs on Google Kubernetes Engine behind a Cloud Load Balancer.",
+        "The index is Elasticsearch 7—sorry, we upgraded it last week, so it's Elasticsearch 8 now.",
+        "Search requests time out after three seconds."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Elasticsearch 8", "level": "must"},
+        {"check": "never_alone", "text": "Elasticsearch 7", "with": "Elasticsearch 8", "level": "must"},
+        {"check": "coverage", "section": "first_30_day_ownership", "is": ["Missing"], "level": "must"}
+      ]
+    },
+    {
+      "id": "B10", "category": "B giver realism", "title": "Session framing that names the system: 'today I'll walk you through our ...'",
+      "regression": "tests/test_session_framing.py::test_the_kt_is_named_after_the_system_not_the_words_that_introduce_it",
+      "transcript": [
+        "Hi everyone, today I'll walk you through our billing platform.",
+        "It runs on Amazon ECS and stores invoices in Aurora PostgreSQL.",
+        "Invoices are generated every night by a batch job.",
+        "If the batch job fails, rerun it from the admin console."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "billing platform", "level": "must"},
+        {"check": "absent", "text": "walk you through", "level": "must"},
+        {"check": "absent_re", "pattern": "today i'?ll", "level": "must"},
+        {"check": "shows", "text": "Invoices are generated every night by a batch job", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
+    },
+    {
+      "id": "C05", "category": "C uncertainty", "title": "A guess and a stated unknown are listed to confirm with the outgoing owner",
+      "regression": "tests/test_dialogue.py::test_stated_gaps_are_told_apart_from_rules_and_facts",
+      "transcript": [
+        "Ana: This is the handover for the image resizer used by the product catalogue.",
+        "It runs on Cloud Run and stores images in Cloud Storage.",
+        "I think the bucket holds about two million images, but I'm not completely sure.",
+        "We haven't documented the CDN cache rules yet, so that needs confirmation."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "two million images", "with": ["I think", "not completely sure", "not sure"], "level": "must"},
+        {"check": "flagged", "texts": ["two million images"], "level": "should"},
+        {"check": "flagged", "texts": ["CDN cache rules"], "level": "should"}
+      ]
+    },
+    {
+      "id": "J02", "category": "J coverage", "title": "Words from other topics do not cover a section: 'last week', pod replicas, 'business hours' in a never-do rule",
+      "regression": "tests/test_coverage_topics.py::test_words_from_other_topics_do_not_cover_a_section; tests/test_pdf_export.py::test_the_not_covered_list_names_what_the_coverage_matrix_calls_not_covered",
+      "transcript": [
+        "Ravi: This is the handover for the loyalty points service, which gives shoppers points for each purchase.",
+        "It runs on Kubernetes with three replicas in production.",
+        "We upgraded the database to MySQL 8 last week.",
+        "Never restart the points database during business hours unless the support lead approves it.",
+        "Deployments go out through Jenkins."
+      ],
+      "expect": [
+        {"check": "coverage", "section": "first_30_day_ownership", "is": ["Missing"], "level": "must"},
+        {"check": "coverage", "section": "disaster_recovery", "is": ["Missing"], "level": "must"},
+        {"check": "absent_re", "pattern": "deployment & rollback.*under danger zones", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
+    },
+    {
+      "id": "J03", "category": "J coverage", "title": "Environments compared with 'but' and 'while' are a stated difference",
+      "regression": "tests/test_coverage_topics.py::test_environments_compared_are_a_stated_difference",
+      "transcript": [
+        "Mei: This is the handover for the booking API used by the hotel front desks.",
+        "The API runs on Azure Kubernetes Service.",
+        "Staging has two pods, but production runs six pods behind Azure Front Door.",
+        "Production uses the paid payment gateway, while staging uses the sandbox gateway."
+      ],
+      "expect": [
+        {"check": "absent_re", "pattern": "environments.*not discussed:[^|]*differences between environments", "level": "must"}
+      ]
+    },
+    {
+      "id": "J04", "category": "J coverage", "title": "A section met only in passing under other sections is not 'covered well'; a check after a failure is not a pre-deployment check",
+      "regression": "tests/test_knowledge_builders.py::test_a_section_covered_well_covers_most_of_its_topics_itself; tests/test_field_populator.py::test_a_check_after_a_failure_is_not_a_pre_deployment_check",
+      "transcript": [
+        "Kofi: This is the handover for the invoice exporter, which sends invoices to the accounting system.",
+        "It runs on Amazon EKS and we watch it in Datadog.",
+        "Deployments happen through GitLab CI.",
+        "If a deployment fails, check the pipeline logs first and roll back with Helm.",
+        "If memory stays above 80% for ten minutes, we should scale out."
+      ],
+      "expect": [
+        {"check": "coverage", "section": "common_failures", "not": ["Strong"], "level": "must"},
+        {"check": "absent_re", "pattern": "pre-deployment checks?:? if a deployment fails", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
+    },
+    {
+      "id": "T03", "category": "T KT taker", "title": "A user's own KT (Order Service, 23 Oct): corrections after a dash, framing, a guess, a stated unknown",
+      "regression": "tests/test_session_framing.py::test_more_ways_of_announcing_the_handover_are_not_content; tests/test_evidence.py::test_a_list_of_names_said_in_different_sentences_cites_each; tests/test_copyedit.py::test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value; tests/test_polish_integrity.py::test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused",
+      "transcript": [
+        "Hi team, today I'll explain our order service. It runs on AWS EKS, and the production database is PostgreSQL 14—sorry, we upgraded it last week, so it's PostgreSQL 16 now. The service uses Redis for caching. We have three replicas in staging, but production runs five replicas. If CPU stays above 75% for five minutes, we should scale up. We monitor everything through Prometheus and Grafana, and PagerDuty sends alerts to the on-call engineer. Deployments happen through GitHub Actions. If a deployment fails, check the logs first and rollback using Helm. The database backups are retained for seven days—actually, the new retention policy is 30 days. The Payments team owns the application, while the Platform team manages the Kubernetes cluster. I think Redis is using 4 GB of memory, but I'm not completely sure. Also, never restart the production database during business hours unless the incident commander approves it. We haven't documented the exact rollback revision yet, so that needs confirmation."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "Order Service", "level": "must"},
+        {"check": "never_alone", "text": "seven days", "with": "30 days", "level": "must"},
+        {"check": "never_alone", "text": "PostgreSQL 14", "with": "PostgreSQL 16", "level": "must"},
+        {"check": "absent_re", "pattern": "today i'?ll", "level": "must"},
+        {"check": "coverage", "section": "first_30_day_ownership", "is": ["Missing"], "level": "must"},
+        {"check": "coverage", "section": "common_failures", "not": ["Strong"], "level": "must"},
+        {"check": "absent_re", "pattern": "environments.*not discussed:[^|]*differences between environments", "level": "must"},
+        {"check": "absent_re", "pattern": "deployment & rollback.*under danger zones", "level": "must"},
+        {"check": "absent_re", "pattern": "disaster recovery.*under environments", "level": "must"},
+        {"check": "absent_re", "pattern": "pre-deployment checks?:? if a deployment fails", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["4 GB"], "level": "should"},
+        {"check": "flagged", "texts": ["rollback revision"], "level": "should"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
     }
   ]
 }

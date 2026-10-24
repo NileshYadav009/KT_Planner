@@ -755,6 +755,71 @@ def test_append_coverage_matrix_section_credits_topics_discussed_under_another_s
     assert row["Assessment"].endswith("not discussed: Repository and pipeline links.")
 
 
+def test_a_section_met_only_in_passing_under_other_sections_is_not_covered_well():
+    # A user's KT (23 Oct, matrix T03, J04): Common Failures said "Not
+    # discussed as its own topic" and the matrix called it Strong, so the
+    # cover counted it among the sections covered well.
+    ko = {"sections": [], "summary": {}}
+    dynamic_schema = [{"id": "deployment_and_rollback", "title": "Deployment & Rollback"},
+                      {"id": "monitoring_observability", "title": "Monitoring & Observability"},
+                      {"id": "common_failures", "title": "Common Failures & Fixes"}]
+    coverage = {
+        "deployment_and_rollback": _cov("If a deployment fails, check the logs first and roll back using Helm."),
+        "monitoring_observability": _cov("If CPU stays above 75% for five minutes, we should scale up."),
+        "common_failures": _cov(),
+    }
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    row = next(r for r in matrix["_coverage_rows"] if r["Domain"] == "Common Failures & Fixes")
+    assert row["Coverage"] == "Partial"
+    assert row["Assessment"].startswith("Not discussed as its own topic; 2 of 2 topics came up in passing under")
+    assert any(g.startswith("Common Failures & Fixes: Known failures, Fixes or workarounds only mentioned in passing")
+               for g in matrix["_knowledge_gaps"])
+
+
+def test_a_guess_is_reported_as_unconfirmed_not_as_absent():
+    # A user's KT (23 Oct, no LLM): Common Failures held only "I think Redis is
+    # using 4 GB of memory, but I'm not completely sure." and read "Missing:
+    # Discussed, but stated as not in place".
+    ko = {"sections": [], "summary": {}}
+    dynamic_schema = [{"id": "common_failures", "title": "Common Failures & Fixes"},
+                      {"id": "disaster_recovery", "title": "Disaster Recovery"}]
+    coverage = {"common_failures": _cov("I think Redis is using 4 GB of memory, but I'm not completely sure."),
+                "disaster_recovery": _cov("There is no DR plan.")}
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    rows = {r["Domain"]: r for r in matrix["_coverage_rows"]}
+    assert rows["Common Failures & Fixes"]["Coverage"] == "Partial"
+    assert rows["Common Failures & Fixes"]["Assessment"].startswith("Discussed, but only as unconfirmed:")
+    assert rows["Disaster Recovery"]["Coverage"] == "Missing"
+    assert "stated as not in place" in rows["Disaster Recovery"]["Assessment"]
+    assert any(g.startswith("Common Failures & Fixes: unconfirmed") for g in matrix["_knowledge_gaps"])
+
+
+def test_a_section_covered_well_covers_most_of_its_topics_itself():
+    # Matrix J04 (no LLM): Common Failures held only "we should scale out";
+    # its known failure was said under Deployment. Half its topics in passing
+    # elsewhere: Partial. Monitoring with two of three topics of its own and
+    # PagerDuty named under Ownership stays Strong.
+    ko = {"sections": [], "summary": {}}
+    dynamic_schema = [{"id": "deployment_and_rollback", "title": "Deployment & Rollback"},
+                      {"id": "common_failures", "title": "Common Failures & Fixes"},
+                      {"id": "monitoring_observability", "title": "Monitoring & Observability"},
+                      {"id": "ownership_escalation", "title": "Ownership & Escalation"}]
+    coverage = {
+        "deployment_and_rollback": _cov("If a deployment fails, check the pipeline logs first and roll back with Helm."),
+        "common_failures": _cov("If memory stays above 80% for ten minutes, we should scale out."),
+        "monitoring_observability": _cov("We watch it in Datadog, and the checkout dashboard shows the error rate."),
+        "ownership_escalation": _cov("The platform team owns it, and PagerDuty pages the on-call engineer."),
+    }
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    rows = {r["Domain"]: r for r in next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"]}
+    assert rows["Common Failures & Fixes"]["Coverage"] == "Partial"
+    assert rows["Common Failures & Fixes"]["Assessment"] == (
+        "All 2 topics came up, 1 only in passing under Deployment & Rollback.")
+    assert rows["Monitoring & Observability"]["Coverage"] == "Strong"
+
+
 def test_append_coverage_matrix_section_keeps_architecture_components_as_coverage():
     ko = {"sections": [{"id": "architecture_reference", "title": "ARCHITECTURE REFERENCE",
                         "_architecture_components": ["EKS", "RDS", "Redis"], "fields": {}}], "summary": {}}

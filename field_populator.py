@@ -339,11 +339,31 @@ _ACCESS_LINE_RE = re.compile(
     r"repos?|repositor(?:y|ies)|admin|licen[cs]es?|tokens?|keys?)\b", re.IGNORECASE)
 
 
+# A capture can open with the words that introduce the name: "Today I'll
+# explain our order service" titled a KT "Today I'll Explain Our Order", and
+# "I'm handing over the appointment booking system" "I'm Handing Over the
+# Appointment Booking". The name is what follows the last determiner,
+# possessive or introducing verb; "Bank of the West" keeps its "the".
+_NAME_LEAD_CUT_RE = re.compile(
+    r"^.*\b(?:(?<!\bof\s)(?:the|a|an)|our|my|your|their|its|explain(?:ing)?|introduc(?:e|ing)|describ(?:e|ing)|"
+    r"through|about)\s+(?=\S)", re.IGNORECASE)
+
+
 def _trim_name_capture(name: str) -> str:
-    words = name.split()
+    words = _NAME_LEAD_CUT_RE.sub("", name.strip()).split()
     while words and words[0].lower() in _NAME_LEADING_FILLER_WORDS:
         words.pop(0)
     return " ".join(words)
+
+
+def name_with_descriptor(name: str, descriptor: str) -> str:
+    """A one-word name said in lower case is a common noun ("our order
+    service"), not a name by itself: it keeps the word that followed it
+    ("Order Service", not "Order"). A capitalised name ("CorePay") or a
+    longer one ("appointment booking") stands alone."""
+    if descriptor and len(name.split()) == 1 and name.islower():
+        return f"{name} {descriptor.lower()}"
+    return name
 
 
 # Verbs that commonly introduce an enumerated list in natural speech ("For
@@ -1008,7 +1028,7 @@ def _extract_by_pattern(
             # produced "Site".
             r"(?:handing over|this is|handover for|welcome to|for|about)\s+"
             r"(?:(?:the|a|an|handover|kt|session|call|for)\s+){0,4}"
-            r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)\s+(?:platform|system|application|service)\b",
+            r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)\s+(platform|system|application|service)\b",
             section_text,
             re.IGNORECASE,
         )
@@ -1017,7 +1037,7 @@ def _extract_by_pattern(
             # Reject a capture that's only structural/stop words — a real
             # system name has at least one substantive word.
             if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
-                return smart_title(name, section_text)
+                return smart_title(name_with_descriptor(name, match.group(2)), section_text)
 
     if "escalation" in field_id or "chain" in field_id:
         # Use robust 3-stage extraction for escalation chains
@@ -1140,6 +1160,12 @@ def _field_identity_word(label: str) -> str:
     return words[0].lower() if words else ""
 
 
+_BEFORE_FIELD_RE = re.compile(r"(?:^|[\s_])(?:pre[-_\s]|before\b|prior\b)", re.IGNORECASE)
+_AFTER_FAILURE_RE = re.compile(
+    r"^\W*(?:(?:and|so|also|but)\s+)?(?:if|when|whenever|once|after)\b[^.;]*?\b(?:fail\w*|goes?\s+wrong|went\s+wrong|"
+    r"break\w*|broke|crash\w*|errors?\s+out|is\s+down|goes?\s+down|misbehav\w*)\b", re.IGNORECASE)
+
+
 def _extract_by_semantic(
     field: Dict[str, Any],
     sentences: List[str],
@@ -1168,6 +1194,12 @@ def _extract_by_semantic_scored(
 ):
     if exclude_line_keys:
         sentences = [s for s in sentences if _normalize_line(s) not in exclude_line_keys]
+
+    if _BEFORE_FIELD_RE.search(f"{field.get('id', '')} {field.get('label', '')}"):
+        # What to do once something has failed is not what is checked before
+        # it: "If a deployment fails, check the logs first and rollback using
+        # Helm." was printed as "Pre-deployment checks: ..." (a user's KT).
+        sentences = [s for s in sentences if not _AFTER_FAILURE_RE.match(s)]
 
     if other_identity_words:
         def _primary_entity_is_other(s: str) -> bool:

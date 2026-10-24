@@ -86,3 +86,40 @@ def test_users_are_recognised_by_who_they_are():
     assert "Users and reach" in _discussed("system_overview", "It's the appointment booking system for our forty clinics.")
     assert "Users and reach" in _discussed("system_overview", "Patients book online or through the call centre.")
     assert "Users and reach" in _discussed("system_overview", "Drivers and merchants use the app every day.")
+
+
+def test_words_from_other_topics_do_not_cover_a_section():
+    """A user's KT (23 Oct, matrix T03, J02): "we upgraded it last week"
+    covered First 30-Day Ownership Plan ("Week 4"); "production runs five
+    replicas" covered Disaster Recovery failover; "never restart the
+    production database during business hours unless the incident commander
+    approves it" covered the deployment window."""
+    assert _elsewhere("first_30_day_ownership", "The database is PostgreSQL 16; we upgraded it last week.") == []
+    assert _elsewhere("first_30_day_ownership", "Payday and the last week before Christmas are the peak periods.") == []
+    assert _elsewhere("first_30_day_ownership", "In the last week, you take over the releases.") == ["Week 4"]
+    # The plan said in other words (tuning h10: covered only through "the last week before Christmas").
+    assert _elsewhere("first_30_day_ownership", "In the first two weeks read the last three incident reviews.") == [
+        "Week 1", "Week 2"]
+    assert _elsewhere("first_30_day_ownership", "For the first few days, just shadow the on-call.") == ["Week 1"]
+    assert _elsewhere("first_30_day_ownership", "The first day of the month is busy.") == []
+    assert "Failover / standby" not in _elsewhere("disaster_recovery", "Production runs five replicas.")
+    for standby in ["A read replica in eu-west-2 takes over if the primary fails.",
+                    "The database has a standby replica in another region.",
+                    "We fail over to the secondary site."]:
+        assert "Failover / standby" in _elsewhere("disaster_recovery", standby), standby
+    never = "Never restart the production database during business hours unless the incident commander approves it."
+    assert _elsewhere("deployment_and_rollback", never) == []
+    assert set(_elsewhere("deployment_and_rollback", "Production deployments need approval and only go out on "
+                                                     "Tuesday mornings.")) >= {"Trigger and approvals", "Deployment window"}
+    # Inside the Deployment section itself the window needs no deploy word.
+    assert "Deployment window" in _discussed("deployment_and_rollback", "Only on Tuesday mornings.")
+
+
+def test_environments_compared_are_a_stated_difference():
+    # "We have three replicas in staging, but production runs five replicas."
+    # was followed by "not discussed: Differences between environments".
+    for said in ["We have three replicas in staging, but production runs five replicas.",
+                 "Production uses the paid payment gateway, while staging uses the sandbox gateway.",
+                 "Dev runs on one node; production runs on six."]:
+        assert "Differences between environments" in _discussed("environments", said), said
+    assert "Differences between environments" not in _discussed("environments", "Production runs five replicas.")

@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2 b4final`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base c6final`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `b4final`.
+brackets). After: run `c6final`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
@@ -80,6 +80,14 @@ after that run started), so it counts as failed there.
 | B09 | L noisy / E multi-fact | Speech-to-text run-on with no punctuation, four facts | the job completes; shows “redis for cache”; in “does the deployment from github” in deployment_and_rollback (should) | 2/2 must, 0/1 should (b3base) | 2/2 must, 0/1 should | matrix only |
 | T01 | T KT taker | Question-and-answer handover with a speaker label on every turn | title names “Tern”; never shows “^[a-z]+: ”; never shows “^[^.!]*\?$”; in “Clear the queue from the admin page” in common_failures; never shows “deployment & rollback.*not discussed:[^|]*rollback procedure”; never shows “system overview.*not discussed:[^|]*volume”; never shows “common failures & fixes.*not discussed:[^|]*fixes or workarounds”; never shows “\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\?” (should) | 0/7 must, 0/1 should (b3fix2) | 7/7 must, 0/1 should | matrix only |
 | T02 | T KT taker | Two-word speaker names on every turn | title names “Quill”; never shows “^[a-z]+(?: [a-z]+)?: ”; shows “Volume triples at month end” | 1/3 must (b3fix2) | 3/3 must | matrix only |
+| A20 | A correction | Dash, 'actually', and the subject said again in other words | shows “90 days”; never shows alone “fourteen days” (without “90 days”) | 2/2 must (c6base) | 2/2 must | tests/test_devops_transcription.py::test_a_correction_is_not_cut_away_from_the_value_it_withdraws; tests/test_grounding.py::test_a_value_the_speaker_withdrew_is_never_extracted_on_its_own |
+| A21 | A correction | Dash, 'sorry', and the change said as news ('we upgraded it last week, so it's ... now') | shows “Elasticsearch 8”; never shows alone “Elasticsearch 7” (without “Elasticsearch 8”); coverage of “first_30_day_ownership” is Missing | 2/3 must (c6base) | 3/3 must | tests/test_coverage_topics.py::test_words_from_other_topics_do_not_cover_a_section |
+| B10 | B giver realism | Session framing that names the system: 'today I'll walk you through our ...' | title names “billing platform”; never shows “walk you through”; never shows “today i'?ll”; shows “Invoices are generated every night by a batch job”; the Not Covered list matches the coverage matrix | 1/5 must (c6base) | 5/5 must | tests/test_session_framing.py::test_the_kt_is_named_after_the_system_not_the_words_that_introduce_it |
+| C05 | C uncertainty | A guess and a stated unknown are listed to confirm with the outgoing owner | never shows alone “two million images” (without “I think” or “not completely sure” or “not sure”); flags “two million images” (should); flags “CDN cache rules” (should) | 1/1 must, 0/2 should (c6base) | 1/1 must, 2/2 should | tests/test_dialogue.py::test_stated_gaps_are_told_apart_from_rules_and_facts |
+| J02 | J coverage | Words from other topics do not cover a section: 'last week', pod replicas, 'business hours' in a never-do rule | coverage of “first_30_day_ownership” is Missing; coverage of “disaster_recovery” is Missing; never shows “deployment & rollback.*under danger zones”; the Not Covered list matches the coverage matrix | 0/4 must (c6base) | 4/4 must | tests/test_coverage_topics.py::test_words_from_other_topics_do_not_cover_a_section; tests/test_pdf_export.py::test_the_not_covered_list_names_what_the_coverage_matrix_calls_not_covered |
+| J03 | J coverage | Environments compared with 'but' and 'while' are a stated difference | never shows “environments.*not discussed:[^|]*differences between environments” | 0/1 must (c6base) | 1/1 must | tests/test_coverage_topics.py::test_environments_compared_are_a_stated_difference |
+| J04 | J coverage | A section met only in passing under other sections is not 'covered well'; a check after a failure is not a pre-deployment check | coverage of “common_failures” is not Strong; never shows “pre-deployment checks?:? if a deployment fails”; the Not Covered list matches the coverage matrix | 0/3 must (c6base) | 3/3 must | tests/test_knowledge_builders.py::test_a_section_covered_well_covers_most_of_its_topics_itself; tests/test_field_populator.py::test_a_check_after_a_failure_is_not_a_pre_deployment_check |
+| T03 | T KT taker | A user's own KT (Order Service, 23 Oct): corrections after a dash, framing, a guess, a stated unknown | title names “Order Service”; never shows alone “seven days” (without “30 days”); never shows alone “PostgreSQL 14” (without “PostgreSQL 16”); never shows “today i'?ll”; coverage of “first_30_day_ownership” is Missing; coverage of “common_failures” is not Strong; never shows “environments.*not discussed:[^|]*differences between environments”; never shows “deployment & rollback.*under danger zones”; never shows “disaster recovery.*under environments”; never shows “pre-deployment checks?:? if a deployment fails”; the Not Covered list matches the coverage matrix; flags “4 GB” (should); flags “rollback revision” (should); no fact marked “no source” (should) | 2/11 must, 0/3 should (c6base) | 11/11 must, 3/3 should | tests/test_session_framing.py::test_more_ways_of_announcing_the_handover_are_not_content; tests/test_evidence.py::test_a_list_of_names_said_in_different_sentences_cites_each; tests/test_copyedit.py::test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value; tests/test_polish_integrity.py::test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused |
 
 ## Still failing after the fixes
 

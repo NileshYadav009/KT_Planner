@@ -240,3 +240,18 @@ def test_each_statement_cell_of_a_row_cites_its_own_sentence():
     quotes = pairs[next(iter(pairs))]
     assert "Fix: restart the channel from the MQ console." in quotes and \
         "MQ channel stops after a mainframe restart." in quotes
+
+
+def test_a_list_of_names_said_in_different_sentences_cites_each():
+    # A user's KT (23 Oct): "GitOps / deployment: GitHub Actions; Helm" was
+    # printed "no source"; GitHub Actions and Helm were each said in their
+    # own sentence.
+    said = ["Deployments happen through GitHub Actions.", "The service uses Redis for caching.",
+            "If a deployment fails, check the logs first and rollback using Helm."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    ko = _ko({"type": "TechnologyGrid", "title": "Technology summary",
+              "rows": [{"label": "GitOps / deployment", "value": "GitHub Actions; Helm"}]})
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    quotes = dict(evidence_pairs(ko))
+    cited = [q for qs in quotes.values() for q in qs]
+    assert said[0] in cited and said[2] in cited and said[1] not in cited

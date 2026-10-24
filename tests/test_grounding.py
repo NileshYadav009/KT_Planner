@@ -166,3 +166,27 @@ def test_a_polish_may_fix_a_misheard_tool_name_but_not_add_one():
     source = ["The services uses post gray SQL on Amazon RDS for order data and Argo UD deploys them."]
     assert added_specifics("The services use PostgreSQL on Amazon RDS and Argo CD deploys them.", source) == []
     assert added_specifics("The services use PostgreSQL; Datadog monitors them.", source) == ["Datadog"]
+
+
+def test_a_value_the_speaker_withdrew_is_never_extracted_on_its_own():
+    # A user's KT (23 Oct): structured extraction cut "The database backups are
+    # retained for seven days—actually, the new retention policy is 30 days."
+    # into two items, and Disaster Recovery listed "Database backups retained
+    # for seven days" as a recovery action.
+    said = "The database backups are retained for seven days—actually, the new retention policy is 30 days."
+    dropped = []
+    out = ground_structured({"rpo_steps": ["Database backups retained for seven days", "New retention policy is 30 days"],
+                             "retention": "7 days"}, said, dropped)
+    assert out["rpo_steps"] == ["New retention policy is 30 days"]
+    assert out["retention"] is None
+    assert len(dropped) == 2
+    # The same two items as one value, a line each (the renderer lists each line).
+    lines = ground_structured({"rpo_steps": "Database backups retained for seven days\nNew retention policy is 30 days"},
+                              said, [])
+    assert lines["rpo_steps"] == "New retention policy is 30 days"
+    # Both values together are the correction as said; another seven is not the withdrawn one.
+    other = "The database backups are retained for seven days—actually, the new retention policy is 30 days. " \
+            "The cluster has seven nodes."
+    kept = ground_structured({"notes": ["Retention went from seven days to 30 days", "The cluster has seven nodes"]},
+                             other, [])
+    assert kept["notes"] == ["Retention went from seven days to 30 days", "The cluster has seven nodes"]

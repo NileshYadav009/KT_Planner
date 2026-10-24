@@ -165,7 +165,33 @@ def check(exp, ko, units, status, pdf):
     if kind in ("pdf_shows", "pdf_absent"):
         found = has_word(exp["text"], pdf)
         return found == (kind == "pdf_shows"), "in PDF" if found else "not in PDF"
+    if kind == "gaps_consistent":
+        # The PDF's "Not Covered in This KT" list names exactly the sections
+        # the coverage matrix (and the cover's "not covered" tile) call Missing.
+        # A section discussed only to say it is not in place keeps its own
+        # content and is not in the list ("Nothing in the KT session covered").
+        listed = set(not_covered_list(ko))
+        rows = next((s.get("_coverage_rows") or [] for s in ko.get("sections") or [] if s.get("id") == "kt_coverage"), [])
+        missing = {r.get("Domain") for r in rows
+                   if r.get("Coverage") == "Missing" and str(r.get("Assessment") or "").startswith("Not covered")}
+        return listed == missing, {"listed only": sorted(listed - missing), "Missing only": sorted(missing - listed)}
+    if kind == "sourced":
+        # No fact printed with a "no source" mark.
+        marked = [f"{sec.get('section_id')}: {block.get('title')}" for sec in ko.get("rendered_sections") or []
+                  for block in sec.get("blocks") or [] if block.get("unsourced")]
+        return not marked, marked
     raise ValueError(kind)
+
+
+def not_covered_list(ko):
+    """The section titles the PDF lists under "Not Covered in This KT"."""
+    import pdf_rendering
+    rendered = list(ko.get("rendered_sections") or [])
+    if hasattr(pdf_rendering, "not_covered_titles"):
+        return pdf_rendering.not_covered_titles(rendered, ko)
+    out = pdf_rendering.collapse_not_covered_sections(rendered)
+    sec = next((s for s in out if s.get("section_id") == pdf_rendering.NOT_COVERED_SECTION_ID), None)
+    return [str(i) for b in (sec or {}).get("blocks") or [] for i in b.get("items") or []]
 
 
 with open(os.path.join(HERE, "matrix", "cases.json"), encoding="utf-8") as fh:

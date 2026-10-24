@@ -52,13 +52,45 @@ def _only_not_covered(section: dict) -> bool:
         for block in blocks)
 
 
-def collapse_not_covered_sections(rendered_sections: list) -> list:
+# Recorded when the document is reviewed, not in the KT session: never a gap.
+_AFTER_REVIEW_SECTION_IDS = ("signoff",)
+SIGNOFF_PENDING = "Not signed yet. The sign-off is recorded when this document is reviewed and signed."
+
+
+def missing_sections(knowledge_object: dict):
+    """Titles of the sections the coverage matrix reports as not covered at
+    all, in its order; None when the document has no coverage matrix."""
+    for sec in (knowledge_object or {}).get("sections") or []:
+        if sec.get("id") == "kt_coverage":
+            return [str(r.get("Domain")) for r in sec.get("_coverage_rows") or []
+                    if r.get("Coverage") == "Missing" and str(r.get("Assessment") or "").startswith("Not covered")]
+    return None
+
+
+def collapse_not_covered_sections(rendered_sections: list, missing: list = None) -> list:
     """Sections with nothing from the KT, listed once. Each used to take a
-    heading and a "not covered" paragraph: six of them in a 112-word KT."""
-    empty = [s for s in rendered_sections if _only_not_covered(s)]
-    if not empty:
-        return rendered_sections
-    kept = [s for s in rendered_sections if not _only_not_covered(s)]
+    heading and a "not covered" paragraph: six of them in a 112-word KT.
+
+    With `missing` (missing_sections()) the list names exactly what the
+    coverage matrix reports as not covered, so the list, the matrix and the
+    cover agree. It used to list Sign-off (recorded at review) and leave out
+    a section the document omits when empty (Handover Completion Check). A
+    sign-off not yet started says so instead of being listed as a gap."""
+    sections = [
+        {**s, "blocks": [{"type": "NarrativeBlock", "title": s.get("section_title") or "Sign-off",
+                          "paragraphs": [SIGNOFF_PENDING]}]}
+        if s.get("section_id") in _AFTER_REVIEW_SECTION_IDS and _only_not_covered(s) else s
+        for s in rendered_sections]
+    empty = [s for s in sections if _only_not_covered(s)]
+    items = [s.get("section_title") or s.get("section_id") for s in empty]
+    if missing is not None:
+        # A section the matrix does not call not covered keeps its place.
+        listed = {str(m).lower() for m in missing}
+        empty = [s for s in empty if str(s.get("section_title") or s.get("section_id")).lower() in listed]
+        items = list(missing)
+    if not items:
+        return sections
+    kept = [s for s in sections if not any(s is e for e in empty)]
     combined = {
         "section_id": NOT_COVERED_SECTION_ID,
         "section_title": NOT_COVERED_SECTION_TITLE,
@@ -66,12 +98,18 @@ def collapse_not_covered_sections(rendered_sections: list) -> list:
             {"type": "NarrativeBlock", "title": NOT_COVERED_SECTION_TITLE,
              "paragraphs": ["Nothing in the KT session covered these sections. Confirm them with the outgoing "
                             "owner before relying on this handover."]},
-            {"type": "ChecklistBlock", "title": NOT_COVERED_SECTION_TITLE,
-             "items": [s.get("section_title") or s.get("section_id") for s in empty]},
+            {"type": "ChecklistBlock", "title": NOT_COVERED_SECTION_TITLE, "items": items},
         ],
     }
     at = next((i for i, s in enumerate(kept) if s.get("section_id") in _DIGEST_SECTIONS), len(kept))
     return kept[:at] + [combined] + kept[at:]
+
+
+def not_covered_titles(rendered_sections: list, knowledge_object: dict) -> list:
+    """The section titles the PDF lists under "Not Covered in This KT"."""
+    out = collapse_not_covered_sections(list(rendered_sections or []), missing_sections(knowledge_object))
+    sec = next((s for s in out if s.get("section_id") == NOT_COVERED_SECTION_ID), None)
+    return [str(i) for b in (sec or {}).get("blocks") or [] for i in b.get("items") or []]
 
 
 def build_toc_sections(rendered_sections: list) -> list:
@@ -434,16 +472,17 @@ def load_template_environment():
 
 def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
                     warnings: list = None, notices: list = None, sources: list = None,
-                    show_toc: bool = True, glance: dict = None) -> str:
+                    show_toc: bool = True, glance: dict = None, not_covered: list = None) -> str:
     """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
     degraded document never looks like a complete one; `notices` are
     informational (e.g. built without an LLM). `sources` are the transcript
     sentences the facts point to (knowledge/evidence.py), listed at the end.
     Without `show_toc` the cover lists the sections and there is no
-    contents page (build_job_pdf, for short documents)."""
+    contents page (build_job_pdf, for short documents). `not_covered` is the
+    coverage matrix's list of sections not covered (missing_sections())."""
     env = load_template_environment()
     template = env.get_template("kt_document.html")
-    rendered_sections = collapse_not_covered_sections(rendered_sections)
+    rendered_sections = collapse_not_covered_sections(rendered_sections, not_covered)
     toc_sections = build_toc_sections(rendered_sections)
     content_html = render_section_blocks(rendered_sections)
     if sources:
@@ -829,6 +868,7 @@ def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
             sources=knowledge_object.get("sources"),
             show_toc=show_toc,
             glance=handover_glance(knowledge_object),
+            not_covered=missing_sections(knowledge_object),
         )
 
     # A contents page for a few pages of content is a page of its own for

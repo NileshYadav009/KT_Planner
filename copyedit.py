@@ -214,7 +214,25 @@ def problems(source: str, rewrite: str) -> List[str]:
                      if w.startswith(stem) and not any(s.startswith(stem) for s in said)})
     if topics:
         out.append("added topic words: " + ", ".join(topics))
+    if _correction_lost(source, rewrite):
+        out.append("correction lost")
     return out
+
+
+def _correction_lost(source: str, rewrite: str) -> bool:
+    """`rewrite` keeps a value `source` withdraws but not the word that
+    withdraws it: "The database backups are retained for seven days—actually,
+    the new retention policy is 30 days." became "... seven days. The new
+    retention policy is 30 days.", and an LLM then listed "seven days" as
+    current (a user's KT, 23 Oct)."""
+    from devops_transcription import withdrawn_values
+    from grounding import _number_values
+
+    pairs = withdrawn_values(source)
+    if not pairs or withdrawn_values(rewrite):
+        return False
+    said = _number_values(rewrite)
+    return any(_number_values(p["old"]) & said for p in pairs)
 
 
 # --------------------------------------------------------------------------

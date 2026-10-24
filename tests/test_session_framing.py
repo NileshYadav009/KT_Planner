@@ -164,3 +164,33 @@ def test_screen_tour_narration_is_not_a_fact():
     for text in ["Let me show you how the rollback works: run helm rollback payments 3.",
                  "We have an operation console UI as you can see in front of you."]:
         assert not is_kt_session_meta_commentary(text), text
+
+
+@pytest.mark.parametrize("text", [
+    # A user's KT (23 Oct) printed "Today I'll explain our order service." under System Overview.
+    "Hi team, today I'll explain our order service.",
+    "Today I'm going to introduce the claims portal.",
+    "In this session I'll go over our payroll platform.",
+    "Today I will give the KT for the order streaming platform.",
+])
+def test_more_ways_of_announcing_the_handover_are_not_content(text):
+    assert is_handover_announcement(text)
+
+
+def test_an_explanation_that_says_what_the_system_does_stays():
+    assert not is_handover_announcement("Today I'll explain our order service, which takes orders from the web shop.")
+
+
+@pytest.mark.parametrize("opening, name", [
+    # Titled "Today I'll Explain Our Order" and "Today I'll Walk You Through Our Billing" (matrix T03, B10).
+    ("Hi team, today I'll explain our order service. It runs on AWS EKS.", "Order Service"),
+    ("Hi everyone, today I'll walk you through our billing platform.", "Billing Platform"),
+    # Two words or a name the speaker capitalised: the descriptor word is not added.
+    ("Today I'm handing over the appointment booking system for our clinics.", "Appointment Booking"),
+    ("Today I'll explain the CorePay platform.", "CorePay"),
+    ("The data comes from the Bank of the West service.", "Bank of the West"),
+])
+def test_the_kt_is_named_after_the_system_not_the_words_that_introduce_it(opening, name):
+    from knowledge.knowledge_builder import _infer_system_name
+
+    assert _infer_system_name({"system_overview": {"content": [opening]}}) == name

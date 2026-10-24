@@ -8,11 +8,11 @@ from .relationships import build_relationships
 from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import (
     PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _CALENDAR_WORDS, _trim_name_capture, current_tool_mentions,
-    smart_title,
+    name_with_descriptor, smart_title,
 )
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, states_something,
+from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_unconfirmed, states_something,
                       states_something_before_gap,
                       without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
@@ -257,8 +257,11 @@ def _infer_system_name(
     coverage: Dict[str, Any],
     populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
-    name = _infer_system_name_from_overview(coverage, populated_fields)
-    if name == "KT Document" or _PRONOUN_LEAD_RE.match(name or ""):
+    said: List[str] = []
+    name = _infer_system_name_from_overview(coverage, populated_fields, said)
+    # Judged on the words as said: the name itself is trimmed ("It's the
+    # appointment booking" -> "Appointment Booking").
+    if name == "KT Document" or _PRONOUN_LEAD_RE.match(name or "") or _PRONOUN_LEAD_RE.match(said[0] if said else ""):
         texts = [str(c) for cov in (coverage or {}).values() if isinstance(cov, dict)
                  for c in ([cov.get("content")] if isinstance(cov.get("content"), str) else cov.get("content") or [])]
         proper = _repeated_proper_name(texts)
@@ -273,7 +276,10 @@ def _infer_system_name(
 def _infer_system_name_from_overview(
     coverage: Dict[str, Any],
     populated_fields: Optional[Dict[str, Dict[str, Any]]] = None,
+    said: Optional[List[str]] = None,
 ) -> str:
+    """The system's name; `said`, when given, receives the words the name was
+    cut from."""
     overview = coverage.get("system_overview", {})
     content_list = overview.get("content", [])
     if isinstance(content_list, str):
@@ -298,13 +304,15 @@ def _infer_system_name_from_overview(
     # of a real name. finditer + a stopword-rejection guard keeps trying
     # later candidates in the same text until a substantive one is found.
     for match in re.finditer(
-        r"\b([A-Za-z0-9][A-Za-z0-9\s\-']{2,40}?)\s+(?:platform|system|application|service)\b",
+        r"\b([A-Za-z0-9][A-Za-z0-9\s\-']{2,40}?)\s+(platform|system|application|service)\b",
         combined,
         re.IGNORECASE,
     ):
         name = _trim_name_capture(match.group(1).strip())
         if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
-            return smart_title(name, combined)
+            if said is not None:
+                said.append(match.group(1).strip())
+            return smart_title(name_with_descriptor(name, match.group(2)), combined)
     return "KT Document"
 
 
@@ -1544,11 +1552,12 @@ def append_coverage_matrix_section(
         """(section, sentence) for the most direct statement of the topic
         elsewhere: the shortest matching sentence ("Secret Manager handles
         secrets" over a long day-one list that also names Secret Manager)."""
-        from coverage_topics import _COMPILED as topic_patterns
+        from coverage_topics import _COMPILED as topic_patterns, states_topic_elsewhere
         rx = next((r for label, _, r in topic_patterns.get(section_id, []) if label == topic_label), None)
         if rx is None:
             return None
-        hits = [(len(t), sid, t) for sid, t in all_texts if sid != section_id and rx.search(t)]
+        hits = [(len(t), sid, t) for sid, t in all_texts
+                if sid != section_id and states_topic_elsewhere(section_id, topic_label, rx, t)]
         return min(hits)[1:] if hits else None
 
     for section in dynamic_schema:
@@ -1598,6 +1607,11 @@ def append_coverage_matrix_section(
         # question and its answer stay together (no cut at "?").
         own_facts = [f for t in own_texts for s in re.split(r"(?<=[.!])\s+", t) for f in fact_texts(s)
                      if not is_gap_statement(f)]
+        # And whole: a comparison spans the facts it is cut into ("We have
+        # three replicas in staging, but production runs five replicas"
+        # states a difference between environments; a user's KT, 23 Oct).
+        own_facts += [s for t in own_texts for s in re.split(r"(?<=[.!])\s+", t)
+                      if s not in own_facts and not is_gap_statement(s)]
         topic_states = assess_topics(section_id, field_objects, own_facts, other_texts_for(section_id), structured)
         if topic_states and not own_texts:
             # A section the session never discussed as such, though one of its
@@ -1617,6 +1631,13 @@ def append_coverage_matrix_section(
             # recorded session; listing it as a session gap was misleading.
             bucket = "After review"
             assessment = "Recorded when the document is reviewed and signed, not during the KT session."
+        elif only_stated_gaps and all(is_unconfirmed(g) for g in stated_gaps):
+            # A guess is not an absence: "I think Redis is using 4 GB of memory,
+            # but I'm not completely sure" read "Missing: stated as not in
+            # place" (a user's KT, 23 Oct).
+            bucket = "Partial"
+            assessment = f"Discussed, but only as unconfirmed: “{_short_quote(stated_gaps[0])}”"
+            gaps.append(f"{title}: unconfirmed (“{_short_quote(stated_gaps[0])}”)")
         elif only_stated_gaps:
             bucket = "Missing"
             assessment = f"Discussed, but stated as not in place: “{_short_quote(stated_gaps[0])}”"
@@ -1640,15 +1661,34 @@ def append_coverage_matrix_section(
                 # when none of its expected topics matched: Danger Zones that
                 # listed four danger zones was reported Missing.
                 bucket = "Strong" if not missing else ("Partial" if covered or own_texts else "Missing")
-                if not missing:
+                # Topics met only in passing under other sections do not make a
+                # section covered well: Common Failures said "Not discussed as
+                # its own topic" and was Strong, counted on the cover as covered
+                # well (a user's KT, 23 Oct). Covered well needs the section's
+                # own statements to cover most of its topics.
+                passing_only = not own_texts and bool(covered) and all(t[1] == "elsewhere" for t in covered)
+                mostly_elsewhere = bool(elsewhere) and 2 * (len(covered) - len(elsewhere)) <= total
+                where = sorted({titles.get(w, w) for _, _, w in elsewhere})
+                if passing_only or mostly_elsewhere:
+                    bucket = "Partial" if covered else bucket
+                if passing_only:
+                    assessment = (f"Not discussed as its own topic; {len(covered)} of {total} topics came up in "
+                                  f"passing under {', '.join(where)}")
+                elif not missing and mostly_elsewhere:
+                    assessment = (f"All {total} topics came up, {len(elsewhere)} only in passing under "
+                                  f"{', '.join(where)}")
+                elif not missing:
                     assessment = "Covered" if total == 1 else f"All {total} topics covered"
                 elif not covered and own_texts:
                     assessment = f"{len(own_texts)} statement(s) captured, but not the expected topics"
                 else:
                     assessment = f"{len(covered)} of {total} topics covered"
-                if elsewhere:
-                    where = sorted({titles.get(w, w) for _, _, w in elsewhere})
+                if elsewhere and not passing_only and not (not missing and mostly_elsewhere):
                     assessment += f" ({len(elsewhere)} under {', '.join(where)})"
+                if (passing_only or mostly_elsewhere) and not missing:
+                    # Otherwise listed below with what was not discussed.
+                    gaps.append(f"{title}: {', '.join(t[0] for t in elsewhere)} only mentioned in passing "
+                                f"under {', '.join(where)}")
                 # "Our RTO and RPO have never been documented" discusses RTO
                 # and RPO: they are known to be unknown, not undiscussed.
                 unknown = [m for m in missing if _named_in(m, stated_gaps)]
@@ -1679,7 +1719,8 @@ def append_coverage_matrix_section(
             # documented" quotes the RTO/RPO half, and a section with two
             # missing runbooks lists both.
             gap_facts = [f for t in stated_gaps for f in fact_texts(t) if is_gap_statement(f)] or stated_gaps
-            assessment = f"{assessment} Stated gap: “{_short_quote(gap_facts[0])}”"
+            label = "To confirm" if is_unconfirmed(gap_facts[0]) else "Stated gap"
+            assessment = f"{assessment} {label}: “{_short_quote(gap_facts[0])}”"
             gaps.extend(f"{title}: “{_short_quote(f)}”" for f in dict.fromkeys(gap_facts))
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})

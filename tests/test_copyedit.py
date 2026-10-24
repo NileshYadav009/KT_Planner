@@ -237,3 +237,17 @@ def test_a_correction_marker_may_go_but_a_word_that_only_looks_like_one_may_not(
     # "mean" and "wait" are content outside a marker.
     assert copyedit.problems("The mean latency is 200 ms.", "The latency is 200 ms.")
     assert copyedit.problems("Wait five minutes before retrying the job.", "Retry the job after five minutes.")
+
+
+def test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value():
+    # A user's KT (23 Oct): "The database backups are retained for seven
+    # days—actually, the new retention policy is 30 days." was copy edited to
+    # "... seven days. The new retention policy is 30 days.", and the LLM then
+    # listed "Database backups retained for seven days" as current.
+    from copyedit import problems
+
+    said = "The database backups are retained for seven days—actually, the new retention policy is 30 days."
+    assert "correction lost" in problems(said, "The database backups are retained for seven days. "
+                                               "The new retention policy is 30 days.")
+    assert "correction lost" not in problems(said, "The database backups are retained for seven days. "
+                                                   "Actually, the new retention policy is 30 days.")

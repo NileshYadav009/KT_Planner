@@ -643,3 +643,35 @@ def test_the_corrected_sentence_is_merged_and_the_correction_is_recorded():
     # Another speaker's "sorry" is not the speaker correcting themselves.
     other = [said[0], Sentence(text="Sorry, 300.", start=2.0, end=3.0, speaker="Nadia")]
     assert len(merge_spoken_corrections(other, [])[0]) == 2
+
+
+def test_a_value_withdrawn_later_in_the_same_sentence_is_found():
+    from devops_transcription import withdrawn_values
+
+    def pairs(text):
+        return [(p["old"], p["new"]) for p in withdrawn_values(text)]
+
+    # A user's KT (23 Oct).
+    assert pairs("The database backups are retained for seven days—actually, the new retention policy is "
+                 "30 days.") == [("seven", "30")]
+    assert pairs("It runs on AWS EKS, and the production database is PostgreSQL 14—sorry, we upgraded it last "
+                 "week, so it's PostgreSQL 16 now.") == [("14", "16")]
+    assert pairs("The cache limit is 2000K—no, sorry, it's 3000K.") == [("2000k", "3000k")]
+    # "actually" adding to a value, not withdrawing it.
+    assert pairs("A restore takes 5 minutes, actually 10 on a bad day.") == []
+    assert pairs("We keep 3 replicas, sorry for the noise, and 2 workers.") == []
+
+
+def test_a_correction_is_not_cut_away_from_the_value_it_withdraws():
+    # A user's KT (23 Oct): cut after "actually", "The database backups are
+    # retained for seven days" became a fact of its own and was listed as a
+    # recovery action; the new retention period went into another item.
+    from context_mapper import split_facts
+
+    said = "The database backups are retained for seven days—actually, the new retention policy is 30 days."
+    assert split_facts(said) == [(0, len(said.rstrip()))]
+    # Cut where each part keeps its own correction whole.
+    both = ("It runs on AWS EKS, and the production database is PostgreSQL 14—sorry, we upgraded it last week, "
+            "so it's PostgreSQL 16 now.")
+    pieces = [both[a:b] for a, b in split_facts(both)]
+    assert len(pieces) == 2 and "PostgreSQL 14" in pieces[1] and "PostgreSQL 16" in pieces[1]

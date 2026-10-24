@@ -156,3 +156,24 @@ def test_a_sentence_repair_may_not_change_a_negation():
 
     assert not _is_faithful_repair("Do not restart the consumer.", "Restart the consumer.", "")
     assert _is_faithful_repair("Dont restart the consumr.", "Don't restart the consumer.", "")
+
+
+def test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused(monkeypatch):
+    # A user's KT (23 Oct): "The database backups are retained for seven
+    # days—actually, the new retention policy is 30 days." came back from the
+    # LLM as two items, and "Database backups retained for seven days" read as
+    # current. The speaker's own sentence keeps both values together.
+    import ai
+
+    class Splitter:
+        model = "stub"
+
+        def generate(self, prompt, **kwargs):
+            return "- Database backups are retained for seven days.\n- The new retention policy is 30 days."
+
+    monkeypatch.setattr(ai, "get_llm_provider", lambda: Splitter())
+    said = "The database backups are retained for seven days—actually, the new retention policy is 30 days."
+    out = ai.polish_coverage_sections({"deployment_and_rollback": {"title": "Deployment", "fragments": [said]}})
+    text = " ".join(out["deployment_and_rollback"])
+    assert "seven days" in text and "30 days" in text
+    assert not any("seven days" in line and "30 days" not in line for line in text.splitlines())

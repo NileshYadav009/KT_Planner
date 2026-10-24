@@ -19,6 +19,18 @@ _QUESTION_START_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Uncertainty the speaker states: a gap, but in what is known, not in what is
+# in place (is_unconfirmed).
+_UNCONFIRMED_RES = [
+    re.compile(r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+not\s+(?:really\s+|completely\s+|entirely\s+|totally\s+|"
+               r"fully\s+|quite\s+|(?:a\s+hundred|100)\s*(?:percent|%)\s+)?sure\b", re.IGNORECASE),
+    # Left open by the speaker: "..., so that needs confirmation", "still to be
+    # confirmed". Not a rule that needs an approval ("changes need
+    # confirmation from the CAB").
+    re.compile(r"\b(?:that|this|it)\s+(?:still\s+)?needs?\s+(?:to\s+be\s+)?confirm(?:ed|ation)\b|"
+               r"\b(?:yet|still)\s+to\s+be\s+confirmed\b|\btbc\b", re.IGNORECASE),
+]
+
 # Statements that something is absent, undecided or unknown. Deliberately
 # subject + verb based, so imperatives such as "Never delete the table" or
 # "We never deploy on Fridays" (real operational rules) do not match, and
@@ -29,11 +41,14 @@ _GAP_RES = [
                r"(?:plan|process|runbook|documentation|docs?|backups?|monitoring|alert(?:ing|s)?|tests?|testing|"
                r"dr|disaster\s+recovery|rto|rpo|sla|staging|environment|policy|procedure|on-?call|"
                r"rotation|dashboards?|automation|rollback|failover|owner|escalation|contact|diagram)\b", re.IGNORECASE),
-    re.compile(r"\b(?:we|i|they|nobody|no\s*one|the\s+team)\s+(?:have\s+|has\s+|had\s+)?(?:never|not)\s+"
+    # Said with a contraction too: "We haven't documented the exact rollback
+    # revision yet" was not a stated gap (a user's KT, 23 Oct).
+    re.compile(r"\b(?:we|i|they|nobody|no\s*one|the\s+team)\s+(?:(?:have\s+|has\s+|had\s+)?(?:never|not)\s+|"
+               r"(?:haven|hasn|hadn)'?t\s+(?:ever\s+)?)"
                r"(?:yet\s+)?(?:agreed|defined|documented|tested|checked|set\s+up|written|configured|decided|"
                r"measured|reviewed|practi[cs]ed|tried|done)\b", re.IGNORECASE),
     re.compile(r"\bnobody\s+(?:has\s+)?(?:tested|checked|knows|documented|reviewed)\b", re.IGNORECASE),
-    re.compile(r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+not\s+(?:really\s+)?sure\b", re.IGNORECASE),
+    *_UNCONFIRMED_RES,
     re.compile(r"\b(?:i|we)\s+(?:don'?t|do\s+not)\s+(?:really\s+)?know\b", re.IGNORECASE),
     re.compile(r"\b(?:i|we)\s+have\s+never\s+(?:checked|tested|seen|verified)\b", re.IGNORECASE),
     # "have not been formally documented": an adverb between them.
@@ -73,6 +88,17 @@ def is_gap_statement(text: str) -> bool:
     not in place, not decided or not known, which is a gap, not coverage."""
     text = text or ""
     return bool(_NEGATIVE_ANSWER_RE.search(text) or any(rx.search(text) for rx in _GAP_RES))
+
+
+def is_unconfirmed(text: str) -> bool:
+    """A stated gap that is a doubted claim, not an absence: "I think Redis is
+    using 4 GB of memory, but I'm not completely sure" (a hedge on a claim,
+    or a claim before "but"). Reported as unconfirmed, not "not in place".
+    "Who do I escalate to? I am not sure anymore" claims nothing: absent."""
+    text = text or ""
+    if not any(rx.search(text) for rx in _UNCONFIRMED_RES):
+        return False
+    return bool(_HEDGE_RE.search(text) or states_something_before_gap(text))
 
 
 # "Cosmos has continuous backup turned on, but we have never tried a restore"
@@ -129,7 +155,13 @@ _ANNOUNCEMENT_LEAD = (
     r"(?:(?:i|we)(?:'m|'re|\s+am|\s+are|'ll|\s+will|'d\s+like\s+to|\s+would\s+like\s+to|\s+want\s+to|"
     r"(?:'m|'re|\s+am|\s+are)\s+going\s+to)?\s+(?:be\s+)?"
     r"(?:hand(?:ing)?\s+over|walk(?:ing)?\s+(?:you\s+)?through|tak(?:e|ing)\s+you\s+through|present(?:ing)?|"
-    r"cover(?:ing)?|talk(?:ing)?\s+(?:you\s+)?(?:about|through))"
+    r"cover(?:ing)?|talk(?:ing)?\s+(?:you\s+)?(?:about|through)|"
+    # "Hi team, today I'll explain our order service." was printed under
+    # System Overview (a user's KT, 23 Oct).
+    r"explain(?:ing)?|introduc(?:e|ing)|describ(?:e|ing)|go(?:ing)?\s+(?:over|through)|"
+    r"run(?:ning)?\s+(?:you\s+)?through|"
+    r"giv(?:e|ing)\s+(?:you\s+)?(?:the|a|an)\s+(?:kt|handover|hand-?over|knowledge\s+transfer|overview|walk-?through|"
+    r"tour)\s+(?:for|of|on|about))"
     r"|let\s+me\s+(?:hand\s+over|walk\s+you\s+through|take\s+you\s+through|talk\s+about)"
     r"|(?:this|today'?s|the)\s+(?:kt|session|handover|hand-?over|knowledge\s+transfer|call|walkthrough)\s+"
     r"(?:is\s+(?:for|about|on)|covers|will\s+cover)"

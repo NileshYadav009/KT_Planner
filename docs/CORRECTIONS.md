@@ -3,7 +3,7 @@
 How the pipeline decides which value a KT document shows when the speaker
 gave more than one. All of it is deterministic: it runs with or without an
 LLM, before the copy edit, and the Sources appendix always quotes what was
-said. Evidence and history: `docs/REPOSITORY_AUDIT.md` §9aan, §9aap, §9aaq, §9aar, §9aas.
+said. Evidence and history: `docs/REPOSITORY_AUDIT.md` §9aan, §9aap, §9aaq, §9aar, §9aas, §9aav.
 Cases: `evaluation/matrix/cases.json` (categories A and D), run by
 `python evaluation/matrix.py LABEL`. Unit tests:
 `tests/test_devops_transcription.py` (same sentence, next sentence, further
@@ -37,6 +37,7 @@ back), `tests/test_conflicts.py` (conflicts), `tests/test_knowledge_builders.py`
 | The next sentence states a change, with no marker: "The database is PostgreSQL 14. We upgraded production to PostgreSQL 16 last night."; "It is now 40 connections." | Both together, as said (as above). | `replaces_value_before` (a change verb with "to", "is now") |
 | The next sentence corrects a statement with no number: "The service is owned by Platform Engineering. Actually, application ownership belongs to Payments, but Platform owns the cluster." | Both together, as said. It opens with a correction marker or "actually" (not "actually, that reminds me") and shares a content word with the sentence before. | `corrects_statement_before` |
 | A change said with a hedge: "The backup retention is seven days. I think we changed it to thirty days, but I'm not sure." | Both together, an "Unconfirmed change — confirm with the outgoing owner" warning, and a knowledge-gap line. The section still counts as discussed. | `conflicts.find_unconfirmed_changes` |
+| A value withdrawn in the same sentence that says more than the new value: "The database backups are retained for seven days—actually, the new retention policy is 30 days."; "PostgreSQL 14—sorry, we upgraded it last week, so it's PostgreSQL 16 now." | The sentence whole, as said: never cut at the marker into two facts. An LLM answer that shows the old value without the new one is refused (an extracted value or line is dropped; a polish or copy edit falls back to the sentence as said). | `devops_transcription.withdrawn_values`, `context_mapper.split_facts`, `grounding.ground_structured`, `ai._polish_one`, `copyedit.problems` |
 | One value compared across environments in one sentence: "Staging uses 2000K, while production uses 3000K." | One statement, not cut into two facts; no conflict. | `compares_one_value` in `context_mapper.split_facts` |
 | A later sentence points back: "I was wrong about the backups earlier, they are kept for 35 days now." | The earlier sentence is moved next to the correction and shown with it. Only when the earlier sentence states nothing else, is about the named topic, and is at most 20 sentences back. | `points_back_to`, `segment_sentences` |
 | A tool replaced: "we moved off PagerDuty to Opsgenie" | Tool fields and the Technology summary name the new tool | `conflicts.find_superseded_tools`, `knowledge_builder.apply_conflicts` |
@@ -51,7 +52,9 @@ back), `tests/test_conflicts.py` (conflicts), `tests/test_knowledge_builders.py`
 - **Same sentence:** "sorry", "I mean", "or rather", "no wait", "correction",
   "scratch that", "my mistake", optionally after "no,", a comma, a dash or a
   pause. A bare "no" or "actually" is not enough ("9 to 5, no 24/7 support";
-  "5 minutes, actually 10 on a bad day").
+  "5 minutes, actually 10 on a bad day"). After a dash, or with "new" or a
+  word of change after it, "actually" withdraws the value before it: the
+  sentence is then kept whole (`withdrawn_values`).
 - **Next sentence:** a sentence opening with one of the markers above, "wait",
   "forget what I said" or "I was wrong"; or one that says the old value "is
   old", "is outdated", "is wrong", "use the latter", "the correct value is".

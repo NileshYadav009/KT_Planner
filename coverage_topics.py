@@ -51,8 +51,15 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("Production", ("production_notes",), r"\bprod(?:uction)?\b"),
         ("Staging / pre-production", ("staging_notes",), r"\b(?:staging|pre-?prod\w*|uat)\b"),
         ("Development / test", ("non_production_notes",), r"\b(?:dev|development|test|qa|sandbox|non-?prod\w*)\b"),
+        # Two environments set against each other state a difference without
+        # the word: "We have three replicas in staging, but production runs
+        # five replicas" was followed by "not discussed: Differences between
+        # environments" (a user's KT, 23 Oct).
         ("Differences between environments", ("known_differences",),
-         r"\b(?:differ\w*|mirrors?|unlike|whereas|only\s+in|test\s+keys|mocked|smaller|scaled?\s+down)\b"),
+         r"\b(?:differ\w*|mirrors?|unlike|whereas|only\s+in|test\s+keys|mocked|smaller|scaled?\s+down)\b"
+         r"|\b" + r"(?:prod(?:uction)?|staging|dev(?:elopment)?|test|qa|uat|pre-?prod\w*|sandbox|non-?prod\w*)"
+         r"\b[^.;]*?(?:\b(?:but|while|whereas|versus|vs)\b|\bcompared\s+(?:to|with)\b|;)[^.]*?\b"
+         r"(?:prod(?:uction)?|staging|dev(?:elopment)?|test|qa|uat|pre-?prod\w*|sandbox|non-?prod\w*)\b"),
     ],
     "monitoring_observability": [
         ("Monitoring tools", ("tools",),
@@ -66,7 +73,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("RPO", ("rpo_metric",), r"\brpo\b|\brecovery\s+point\b"),
         ("Backups", ("rpo_steps",),
          r"\bbackups?\b|\bback(?:ed|s)?\s+up\b|\bsnapshots?\b|\bpoint[\s-]in[\s-]time\b|\bretain\w*\b|\bretention\b"),
-        ("Failover / standby", ("rto_steps",), r"\b(?:failover|standby|replica\w*|geo-?replicat\w*)\b"),
+        # A standby copy, not any replica: "production runs five replicas"
+        # (pods) covered failover (a user's KT, 23 Oct).
+        ("Failover / standby", ("rto_steps",),
+         r"\b(?:fail(?:s|ed|ing)?\s*over|failover|standby|hot\s+spare|geo-?replicat\w*"
+         r"|(?:read|standby|database|db|cross-?region|secondary)\s+replicas?"
+         r"|replicas?\s+in\s+(?:another|a\s+(?:second|different)|the\s+other)\s+region"
+         r"|secondary\s+(?:site|region|data\s*cent(?:er|re)))\b"),
         ("DR testing", ("dr_testing_frequency",),
          r"\b(?:test\w*\s+(?:the\s+)?(?:failover|restores?|recovery|dr)|(?:failover|restore|recovery|dr)\s+(?:test|drill)\w*)\b"),
     ],
@@ -163,10 +176,18 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("On-call tool", ("oncall_tool",), r"\b(?:pagerduty|opsgenie|on-?call)\b"),
     ],
     "first_30_day_ownership": [
-        ("Week 1", ("week1",), r"\b(?:first\s+week(?!\s+of\b)|week\s+(?:one|1))\b"),
-        ("Week 2", ("week2",), r"\b(?:second\s+week|week\s+(?:two|2))\b"),
+        # "In the first two weeks read the last three incident reviews" and
+        # "for the first few days" are the plan's first weeks.
+        ("Week 1", ("week1",),
+         r"\b(?:first\s+(?:week(?!\s+of\b)|(?:two|2|couple\s+of|few)\s+weeks|(?:two|2|three|3|few|couple\s+of)\s+days)"
+         r"|week\s+(?:one|1))\b"),
+        ("Week 2", ("week2",), r"\b(?:second\s+week|week\s+(?:two|2)|first\s+(?:two|2|couple\s+of)\s+weeks)\b"),
         ("Week 3", ("week3",), r"\b(?:third\s+week|week\s+(?:three|3))\b"),
-        ("Week 4", ("week4",), r"\b(?:fourth\s+week|last\s+week|week\s+(?:four|4)|end\s+of\s+the\s+(?:first\s+)?month|day\s+30)\b"),
+        # The plan's last week, not a past one: "we upgraded it last week"
+        # covered Week 4 (a user's KT, 23 Oct).
+        ("Week 4", ("week4",),
+         r"\b(?:fourth\s+week|(?:in|during|by)\s+(?:the\s+|your\s+)?last\s+week(?!\s+of\b)|week\s+(?:four|4)|"
+         r"end\s+of\s+the\s+(?:first\s+)?month|day\s+30)\b"),
     ],
     "open_responsibilities": [
         ("Open work", ("open_tasks",),
@@ -195,6 +216,27 @@ AFTER_REVIEW_SECTIONS = {"signoff"}
 _COMPILED = {sid: [(label, fields, re.compile(rx, _I) if rx else None) for label, fields, rx in topics]
              for sid, topics in SECTION_TOPICS.items()}
 
+# A topic stated under another section counts only when that sentence names
+# the topic's subject. Inside its own section the subject is understood ("Only
+# on Tuesday mornings."); elsewhere "never restart the production database
+# during business hours unless the incident commander approves it" (a
+# never-do rule) covered the deployment window and its approvals.
+_DEPLOY_CONTEXT = re.compile(
+    r"\b(?:deploy\w*|releas\w*|rollouts?|roll\s+out|ship\w*|go-?live|merg\w*|pipelines?|production\s+changes?|"
+    r"changes?\s+(?:to|in)\s+production|change\s+(?:freeze|window))\b", _I)
+_ELSEWHERE_CONTEXT = {
+    ("deployment_and_rollback", "Trigger and approvals"): _DEPLOY_CONTEXT,
+    ("deployment_and_rollback", "Deployment window"): _DEPLOY_CONTEXT,
+}
+
+
+def states_topic_elsewhere(section_id: str, label: str, rx: Optional["re.Pattern[str]"], text: str) -> bool:
+    """`text`, said under another section, states this section's topic."""
+    if rx is None or not rx.search(text):
+        return False
+    context = _ELSEWHERE_CONTEXT.get((section_id, label))
+    return context is None or bool(context.search(text))
+
 
 def _filled(field_objects: Dict[str, Any], fid: str) -> bool:
     entry = field_objects.get(fid)
@@ -222,7 +264,7 @@ def assess_topics(section_id: str, field_objects: Dict[str, Any], own_texts: Seq
         elif rx is not None and any(rx.search(t) for t in own_texts):
             out.append((label, "discussed", None))
         elif rx is not None and section_id != "handover_completion":
-            where = next((sid for sid, t in other_texts if rx.search(t)), None)
+            where = next((sid for sid, t in other_texts if states_topic_elsewhere(section_id, label, rx, t)), None)
             out.append((label, "elsewhere", where) if where else (label, "missing", None))
         else:
             out.append((label, "missing", None))

@@ -9,7 +9,7 @@ Provides:
 """
 
 import re
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Any, Dict, List, Set, Tuple, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -773,6 +773,41 @@ def replaces_value_before(previous: str, sentence: str) -> bool:
         return False
     old, new = _value_kinds(previous), _value_kinds(sentence)
     return any(a != b and ka & kb for a, ka in old for b, kb in new)
+
+
+# A value withdrawn later in the same unit: a correction marker, or a dash
+# and "actually", then a value of the same kind. "The database backups are
+# retained for seven days—actually, the new retention policy is 30 days." The
+# document keeps such a unit whole; an LLM that cut it into list items printed
+# "Database backups retained for seven days" on its own (a user's KT, 23 Oct).
+# grounding.states_withdrawn_value() judges LLM output against these pairs.
+_WITHDRAWING_RE = re.compile(
+    r"(?P<pause>—|–|--?|,|;|\.)\s*(?:(?:oh|no|um|uh)\W+)?(?P<marker>" + _CORRECTION_MARKER + r"|actually"
+    + _NOT_JOINED + r")", re.IGNORECASE)
+_NEW_VALUE_WORD_RE = re.compile(r"\bnew\b", re.IGNORECASE)
+
+
+def withdrawn_values(text: str) -> List[Dict[str, Any]]:
+    """[{"old", "new", "kinds"}] for each value `text` says and then corrects:
+    the last value before the marker and the first after it that measures the
+    same thing (_value_kinds). "Actually" withdraws only after a dash or with
+    a word of change ("5 minutes, actually 10 on a bad day" adds a case)."""
+    pairs: List[Dict[str, Any]] = []
+    for m in _WITHDRAWING_RE.finditer(text or ""):
+        before, after = text[:m.start()], text[m.end():]
+        if m.group("marker").lower() == "actually" and not (
+                m.group("pause") in ("—", "–", "-", "--") or _CHANGE_WORD_RE.search(after)
+                or _NEW_VALUE_WORD_RE.search(after)):
+            continue
+        old_values = _value_kinds(before)
+        if not old_values:
+            continue
+        old, old_kinds = old_values[-1]
+        for new, new_kinds in _value_kinds(after):
+            if new != old and old_kinds & new_kinds:
+                pairs.append({"old": old, "new": new, "kinds": old_kinds & new_kinds})
+                break
+    return pairs
 
 
 # One value compared across environments in one sentence: "Staging uses

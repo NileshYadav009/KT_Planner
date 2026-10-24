@@ -1675,3 +1675,22 @@ Results:
 - **Empty table cells** show a dash, with one note under the table, instead
   of "Not covered during KT" in every cell.
 - No Groq quota used. Your KT is 13 pages instead of 14.
+
+## Your Order Service KT reviewed (audit §9aav, 24 Oct)
+
+- **The title** no longer comes from the opening words ("Today I'll Explain
+  Our Order" without an LLM); the opening line is no longer printed as a
+  fact.
+- **A corrected value is never shown alone:** "seven days—actually, ... 30
+  days" stays one statement, and an LLM answer that splits it is refused.
+- **Coverage tells the truth:**
+  - "last week", pod replicas and a database-restart rule no longer count as
+    a 30-day plan, failover or a deployment window;
+  - a section only mentioned in passing is not "covered well";
+  - the "Not Covered" list matches the coverage table and the cover.
+- **The follow-up list** now includes the speaker's guesses and the things
+  they said are not documented yet, marked "to confirm".
+- **Smaller fixes:** "Pre-deployment checks" no longer mislabels a failure
+  step, and a list of tools no longer shows "no source".
+- No Groq quota used. Confirming the LLM guards on a live run needs your OK
+  (about 7k tokens).

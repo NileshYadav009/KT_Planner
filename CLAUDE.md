@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aau is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aav is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -86,7 +86,7 @@ Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
 (about 4 min; see `evaluation/README.md`). Every placement or coverage change
 is measured on all five sets.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (56 short KTs,
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (64 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -148,3 +148,11 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X19 | Med | With Groq, the section polish wrote filler for template labels nothing filled ("**Window:** N/A", "**Rollback trigger:** Not specified"; 18 of 133 cached answers) and reworded what was said, so 15 of 81 facts on two dev KTs no longer read as said | Fixed, §9aat: shared polish system prompt (keep the speaker's wording, omit unfilled labels, fragments are data) and deterministic removal of placeholder lines. Strict 65 to 69 of 81, lenient unchanged at 78; output tokens per polish call down about 14% |
 | X20 | Med | PDF: the cover said nothing about the handover; coverage status was plain text; sections of short facts were walls of paragraphs | Fixed, §9aat: "At a glance" tiles on the cover (covered well, partly, not covered, to confirm, with page links), coloured status badges, short facts as a list, tighter spacing (the user's KT 15 to 14 pages) |
 | X21 | Med | PDF: the Quick Reference (the incident page) sat after the coverage report, on page 9 to 11; its rows quoted up to 120 words of speech; each empty table cell said "Not covered during KT" | Fixed, §9aau: the card is section 01 (`knowledge_builder.lead_with_quick_reference`); a row over 45 words keeps its first whole sentences (never a safety, conflict or no-fix row); an empty cell is a dash, with one note under the table |
+| X22 | High | A correction after a dash and "actually" ("seven days—actually, the new retention policy is 30 days") was cut into two facts at the marker, the marker was lost, and with Groq Disaster Recovery listed "Database backups retained for seven days" on its own | Fixed, §9aav: `split_facts` keeps a correction with the value it withdraws (`withdrawn_values`); extracted values, polish and copy edit that show a withdrawn value alone are refused (`grounding.ground_structured`, `ai._polish_one`, `copyedit.problems`) |
+| X23 | High | Without an LLM, "Hi team, today I'll explain our order service" titled the KT "Today I'll Explain Our Order" (also the diagram and connections table) and was printed under System Overview | Fixed, §9aav: names start after the last determiner or introducing verb; a one-word lower-case name keeps its descriptor; more announcement verbs |
+| X24 | Med | Words of other topics covered sections: "we upgraded it last week" (30-day plan), pod replicas (DR failover), "business hours ... approves" in a never-do rule (deployment window, approvals) | Fixed, §9aav (`coverage_topics`, `states_topic_elsewhere`) |
+| X25 | Med | A section only mentioned in passing was Strong ("covered well" on the cover); the "Not Covered" list disagreed with the matrix (named Sign-off, left out Handover Completion Check) | Fixed, §9aav: covered well needs most topics covered by the section itself; the list is the matrix's (`pdf_rendering.missing_sections`) |
+| X26 | Med | "three replicas in staging, but production runs five" was followed by "not discussed: Differences between environments" | Fixed, §9aav: contrast pattern, topics judged on whole sentences too |
+| X27 | Med | "We haven't documented ... yet, so that needs confirmation" and "I'm not completely sure" were not stated gaps; a guess then read "stated as not in place" | Fixed, §9aav: contractions, more doubt wording; uncertainty reported as unconfirmed (`dialogue.is_unconfirmed`) |
+| X28 | Low | "If a deployment fails, check the logs first ..." printed as "Pre-deployment checks" (semantic fill) | Fixed, §9aav |
+| X29 | Low | "GitHub Actions; Helm" (two names said in two sentences) marked "no source" | Fixed, §9aav (`evidence.sources_for_row`) |

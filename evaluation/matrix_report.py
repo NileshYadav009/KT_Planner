@@ -40,7 +40,8 @@ def expected(exp):
         "shows": "shows", "shows_any": "shows one of", "verbatim": "exactly", "absent": "never shows",
         "absent_re": "never shows", "never_alone": "never shows alone", "in_section": "in", "order": "in order",
         "flagged": "flags", "not_flagged": "does not flag", "coverage": "coverage of", "completes": "the job completes", "system_name": "title names", "pdf_shows": "PDF shows",
-        "pdf_absent": "PDF never shows"}
+        "pdf_absent": "PDF never shows", "gaps_consistent": "the Not Covered list matches the coverage matrix",
+        "sourced": "no fact marked “no source”"}
     detail = f"{words.get(kind, kind)} “{what}”" if what else words.get(kind, kind)
     if kind == "never_alone":
         companions = exp["with"] if isinstance(exp["with"], list) else [exp["with"]]

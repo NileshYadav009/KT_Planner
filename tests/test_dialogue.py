@@ -27,9 +27,31 @@ from dialogue import is_gap_statement, is_question, merge_question_answers
     ("Still open: the cost review for BigQuery storage has no owner yet.", False),
     ("Is the database backed up? Yes, nightly snapshots to S3.", False),
     ("If you are not sure about a change, involve the platform owner.", False),
+    # A user's KT (23 Oct, matrix T03, C05): left off the follow-up list.
+    ("We haven't documented the exact rollback revision yet, so that needs confirmation.", True),
+    ("I think Redis is using 4 GB of memory, but I'm not completely sure.", True),
+    ("The team hasn't tested the restore.", True),
+    ("The CDN rules are still to be confirmed.", True),
+    ("Production changes need confirmation from the CAB.", False),
+    ("We haven't had an outage in a year.", False),
 ])
 def test_stated_gaps_are_told_apart_from_rules_and_facts(text, gap):
     assert is_gap_statement(text) is gap
+
+
+@pytest.mark.parametrize("text,unconfirmed", [
+    # A claim with doubt on it: to confirm, not absent (a user's KT, 23 Oct).
+    ("I think Redis is using 4 GB of memory, but I'm not completely sure.", True),
+    ("The bucket holds about two million images, but I'm not sure.", True),
+    # No claim: the thing is not known or not in place (tuning g08: Missing).
+    ("Who do I escalate to? I am not sure anymore, the old manager left.", False),
+    ("We haven't documented the exact rollback revision yet, so that needs confirmation.", False),
+    ("There is no DR plan.", False),
+])
+def test_a_doubted_claim_is_told_apart_from_an_absence(text, unconfirmed):
+    from dialogue import is_unconfirmed
+
+    assert is_unconfirmed(text) is unconfirmed
 
 
 def test_a_statement_before_a_hedged_change_is_not_a_stated_gap():

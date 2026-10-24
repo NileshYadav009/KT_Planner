@@ -125,6 +125,33 @@ def test_sections_with_nothing_from_the_kt_are_listed_once_before_the_digests():
     assert NOT_COVERED_MESSAGE not in html_doc and "Not Covered in This KT" in html_doc
 
 
+def test_the_not_covered_list_names_what_the_coverage_matrix_calls_not_covered():
+    # A user's KT (23 Oct, matrix T03): the list named Sign-off (recorded at
+    # review, "After review" in the matrix) and left out Handover Completion
+    # Check (Missing in the matrix, omitted from the document when empty), so
+    # it disagreed with the matrix and the cover's "not covered" count.
+    from pdf_rendering import SIGNOFF_PENDING, missing_sections
+
+    ko = {"sections": [{"id": "kt_coverage", "_coverage_rows": [
+        {"Domain": "Security", "Coverage": "Missing", "Assessment": "Not covered in the KT session."},
+        {"Domain": "Disaster Recovery", "Coverage": "Missing",
+         "Assessment": "Discussed, but stated as not in place: “There is no DR plan.”"},
+        {"Domain": "Handover Completion Check", "Coverage": "Missing", "Assessment": "Not covered in the KT session."},
+        {"Domain": "Sign-off", "Coverage": "After review", "Assessment": "Recorded when the document is reviewed."},
+    ]}]}
+    assert missing_sections(ko) == ["Security", "Handover Completion Check"]
+    sections = [
+        _section("security_controls", "Security", [no_coverage_block("Security")]),
+        _section("disaster_recovery", "Disaster Recovery", [_narrative("There is no DR plan.")]),
+        _section("kt_coverage", "KT Coverage", [_narrative("Coverage matrix.")]),
+        _section("signoff", "Sign-off", [no_coverage_block("Sign-off")]),
+    ]
+    out = collapse_not_covered_sections(sections, missing_sections(ko))
+    assert [s["section_id"] for s in out] == ["disaster_recovery", NOT_COVERED_SECTION_ID, "kt_coverage", "signoff"]
+    assert out[1]["blocks"][1]["items"] == ["Security", "Handover Completion Check"]
+    assert out[3]["blocks"][0]["paragraphs"] == [SIGNOFF_PENDING]
+
+
 def test_a_section_with_its_own_content_is_never_folded_into_the_list():
     sections = [_section("disaster_recovery", "Disaster Recovery",
                          [_narrative("RDS takes daily backups."), no_coverage_block("Disaster Recovery")])]
