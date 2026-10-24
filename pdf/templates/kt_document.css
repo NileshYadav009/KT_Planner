@@ -2,7 +2,9 @@
   color: #1c2431;
   background: #ffffff;
   font-family: Inter, 'Segoe UI', Arial, sans-serif;
-  font-size: 11pt;
+  /* Inter (bundled, pdf/fonts) reads larger than the fallback at the same
+     size: 10.5pt matches it and keeps documents no longer (24 Oct). */
+  font-size: 10.5pt;
   line-height: 1.55;
   --accent: #2563eb;
   --accent-dark: #1d4ed8;

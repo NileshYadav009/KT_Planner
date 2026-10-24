@@ -410,7 +410,7 @@ def test_system_name_extracts_compound_handover_for_phrasing():
     # "the" wasn't enough, so this used to match nothing at all.
     text = "Good morning, this is the handover for the CorePay payments processing platform."
     # The speaker's own casing of the name is kept ("CorePay", not "Corepay").
-    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "CorePay Payments Processing"
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "CorePay Payments Processing Platform"
 
 
 def test_system_name_does_not_false_positive_on_unrelated_for_the_x_sentence():
@@ -436,7 +436,7 @@ def test_system_name_returns_none_when_no_proper_name_is_stated():
 # outright.
 def test_system_name_extracts_direct_system_name_is_x_statement():
     text = "The system name is cloud nat order processing platform."
-    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Cloud Nat Order Processing"
+    assert _extract_by_pattern(SYSTEM_NAME_FIELD, text) == "Cloud Nat Order Processing Platform"
 
 
 def test_system_name_extracts_is_named_x_without_trailing_descriptor():

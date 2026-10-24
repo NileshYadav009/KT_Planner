@@ -827,6 +827,10 @@ def attach_to_rendered_sections(rendered_sections: List[Dict[str, Any]], assets:
     for a in assets:
         by_section.setdefault(a.get("section_id") or SHARED_SCREENS_SECTION_ID, []).append(a)
     index = {s.get("section_id"): s for s in rendered_sections}
+    # A single-page console shows one URL on every tab: the same link was
+    # listed ten times, once per dashboard (the user's recordings, 24 Oct).
+    # Each URL is listed once, where it was first shown.
+    listed: set = set()
     for sid, items in by_section.items():
         target = index.get(sid)
         if target is None:
@@ -853,11 +857,18 @@ def attach_to_rendered_sections(rendered_sections: List[Dict[str, Any]], assets:
                     "caption": f"{tool}dashboard shown at {_mmss(a['start'])} in the session recording.",
                     "url": a.get("url"),
                 })
-        links = [a for a in items if a.get("url")]
+        links = []
+        for a in sorted((a for a in items if a.get("url")), key=lambda a: a.get("start") or 0):
+            if a["url"] not in listed:
+                listed.add(a["url"])
+                links.append(a)
         if links:
             blocks.append({
                 "type": "ChecklistBlock",
                 "title": "Links shown on screen",
+                # Read off the screen at the time given, not said: sourced by
+                # the recording, like a screenshot (knowledge/evidence.py).
+                "from_screen": True,
                 "items": [f"{a['title']}: {a['url']} (at {_mmss(a['start'])})" for a in links],
             })
 

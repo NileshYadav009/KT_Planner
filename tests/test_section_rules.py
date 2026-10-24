@@ -2,6 +2,8 @@
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from section_rules import match_section_rules
@@ -270,3 +272,70 @@ def test_a_fix_said_right_after_its_failure_stays_with_it():
                            else "monitoring_observability"), classified(nxt, section)]
         apply_continuation_rules(pair, {})
         assert pair[1].primary_classification.section_id == section, nxt
+
+
+@pytest.mark.parametrize("text,section", [
+    # A user's KT (23 Oct, matrix T03): a scale-up on a threshold went to
+    # Cost Optimization, and the size of a cache to Common Failures.
+    ("If CPU stays above 75% for five minutes, we should scale up.", "common_failures"),
+    ("If the queue backs up, you need to restart the consumer.", "common_failures"),
+    ("I think Redis is using 4 GB of memory, but I'm not completely sure.", "architecture_reference"),
+    ("The database runs with 32 GB of memory and 8 vCPUs.", "architecture_reference"),
+    # Running short of memory is a failure, not a size; not a runbook step.
+    ("The pod hits 4 GB of memory and gets OOM-killed.", None),
+    ("When Redis fills up its 4 GB, sessions get evicted.", None),
+    ("If you need access, you should ask the platform team.", None),
+    ("The team has 4 engineers.", None),
+])
+def test_a_threshold_response_is_a_runbook_step_and_a_size_is_architecture(text, section):
+    match = match_section_rules(text)
+    assert (match.section_id if match else None) == section
+
+
+@pytest.mark.parametrize("text,section", [
+    # The user's KTs (24 Oct).
+    ("I think Redis has a 4 GB memory limit, but this needs verification.", "architecture_reference"),
+    ("Redis is used for caching, and I think memory limit is 4 GB, but need to verify this.",
+     "architecture_reference"),
+    ("The pod hits its 4 GB memory limit and restarts.", None),
+    # A caveat about the document is not a "never" rule; a real one is.
+    ("Do not describe the one-hour recovery estimate as a verified guarantee.", None),
+    ("Never restart the production database without approval from the incident commander.", "danger_zones"),
+])
+def test_a_stated_limit_is_architecture_and_a_document_caveat_is_no_danger_zone(text, section):
+    match = match_section_rules(text)
+    assert (match.section_id if match else None) == section
+
+
+def test_a_permission_is_not_data_moving_to_a_store():
+    # Dev d02: "Security wise, the service account only has read access to
+    # BigQuery" went to Architecture as if data were read from BigQuery.
+    for text in ["the service account only has read access to BigQuery",
+                 "The CI role has write access to the artifacts bucket."]:
+        assert match_section_rules(text) is None, text
+    for text in ["The workers read events from Kafka.", "Exports write files to Cloud Storage."]:
+        assert match_section_rules(text).section_id == "architecture_reference", text
+
+
+def test_what_happens_when_that_happens_stays_with_the_failure():
+    # Dev d02: "The thing that goes wrong most is the training job failing ...
+    # When that happens the API keeps serving yesterday's recommendations ..."
+    # went to Monitoring.
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, Sentence
+    from section_rules import apply_continuation_rules
+
+    def classified(text, section_id):
+        primary = Classification(section_id=section_id, section_title=section_id, confidence=0.6, reason="",
+                                 similarity_score=0.6)
+        return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0), primary_classification=primary,
+                               is_unassigned=False, explainability_log=None)
+
+    pair = [classified("The thing that goes wrong most is the training job failing because a table schema "
+                       "changed upstream.", "common_failures"),
+            classified("When that happens the API keeps serving yesterday's recommendations.",
+                       "monitoring_observability")]
+    apply_continuation_rules(pair, {})
+    assert pair[1].primary_classification.section_id == "common_failures"
+

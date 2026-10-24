@@ -535,6 +535,26 @@ def test_default_provider_without_a_key_is_no_provider(monkeypatch, caplog):
     assert sum("no API key" in r.getMessage() for r in caplog.records) == 1
 
 
+def test_unset_provider_is_the_one_whose_key_is_set(monkeypatch):
+    # Found 24 Oct: docker-compose.yml gives the worker GROQ_API_KEY only, and
+    # .env is not in the image, so LLM_PROVIDER fell back to Gemini, which had
+    # no key, and every KT in a container ran without an LLM.
+    for name in ("LLM_PROVIDER", "GROQ_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    assert lp._provider_from_env() == "groq"
+    monkeypatch.setenv("LLM_PROVIDER", "")          # compose passes an empty value
+    assert lp._provider_from_env() == "groq"
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    assert lp._provider_from_env() == "gemini"      # both keys: the old default
+    monkeypatch.setenv("LLM_PROVIDER", "Groq")
+    assert lp._provider_from_env() == "groq"        # an explicit setting wins
+    monkeypatch.delenv("GROQ_API_KEY")
+    monkeypatch.delenv("GEMINI_API_KEY")
+    monkeypatch.delenv("LLM_PROVIDER")
+    assert lp._provider_from_env() == "gemini"      # no key: no provider either way
+
+
 def test_groq_without_a_key_is_no_provider(monkeypatch):
     monkeypatch.setattr(lp, "LLM_PROVIDER_NAME", "groq")
     monkeypatch.setattr(lp, "GROQ_API_KEY", "")

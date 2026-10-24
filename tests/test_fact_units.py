@@ -343,3 +343,18 @@ def test_no_two_sentences_are_merged_before_classification_except_a_question_and
         "What is the RTO? We never agreed one with the business."]
     assert len(_segment_text("Anything unfinished? The runtime upgrade has not been started and has no owner. "
                              "And for me, starting out? Get added to the admins group first.")) == 2
+
+
+def test_a_condition_opened_mid_sentence_stays_with_what_it_leads_to():
+    # The user's recordings (24 Oct): cut after the condition, the first
+    # piece read "It is business critical because if the platform becomes
+    # unavailable."
+    from fact_units import split_into_facts
+
+    said = ("It is business critical because if the platform becomes unavailable, customers cannot place orders "
+            "and downstream warehouse processing is affected.")
+    assert split_into_facts(said) == [(0, len(said))]
+    # Two statements with no open condition are still two facts.
+    two = "The API runs on EKS, and the database is PostgreSQL on RDS."
+    assert len(split_into_facts(two)) == 2
+

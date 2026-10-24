@@ -293,7 +293,13 @@ PHRASE_CORRECTIONS = {
     r"environment\s+variables\s+mirrors": "environment closely mirrors",
     r"non-production\s+environment\s+variables\s+schedule": "non-production environments and schedule",
     r"load\s+traffic": "low traffic",
-    r"roll\s+back": "rollback",
+    # The noun only: "a roll back" is "a rollback", but "we roll back using the
+    # previous task definition" is the verb, and printed as "we rollback" (the
+    # user's KTs, 24 Oct).
+    r"\b(a|an|the|this|that|any|no|our|each|every|manual|automatic|automated|quick|fast|full|safe|clean)\s+roll\s+back\b":
+        r"\1 rollback",
+    r"\b(a|an|the|this|that|any|no|our|each|every|manual|automatic|automated|regional|full)\s+fail\s+over\b":
+        r"\1 failover",
     r"helm\s+roll\s+back": "Helm rollback",
     r"cloud\s+front": "CloudFront",
     r"postgres\s+sql": "PostgreSQL",
@@ -327,6 +333,21 @@ PHRASE_CORRECTIONS = {
     # words it reads as a nonsensical common-failures symptom name instead
     # of the specific, well-known Kubernetes term.
     r"crash\s*loop\s*back\s*off": "CrashLoopBackOff",
+    # Whisper on the user's recordings (24 Oct): "CrashLuke backoff",
+    # "application roadbalances", "Jenkins for CSD pipeline", "investigating
+    # application cold", "Month and Sales", "autoscalar", "pavement
+    # orchestration" and "Diplomats must be avoided during those periods"
+    # (deployments, in a freeze). Each is gated on the words around it.
+    r"\bcrash\s*lu(?:ke|ck|k|c)\s*back\s*off\b": "CrashLoopBackOff",
+    r"\broad\s*balanc(?:ers|es)\b": "load balancers",
+    r"\broad\s*balancer\b": "load balancer",
+    r"\bcsd(?=\s+pipelines?\b)": "CI/CD",
+    r"\b(application|source|app)\s+cold\b(?!\s+(?:start|starts|storage|standby|path|data|tier))": r"\1 code",
+    r"\bmonth\s+and\s+sales\b": "month-end sales",
+    r"\bautoscalar\b": "autoscaler",
+    r"\bpavement\s+(?=(?:orchestration|gateway|provider|processing|integration|service)s?\b)": "payment ",
+    r"\bdiplomats\b(?=\s+(?:must|should|need\s+to|have\s+to|are\s+to)\s+(?:not\s+)?be\s+(?:avoided|frozen|paused|"
+    r"blocked|stopped|planned|approved|scheduled))": "deployments",
     # Single-token typo, not a generic fuzzy-similarity match (that class
     # of correction was deliberately reverted earlier — see
     # apply_fuzzy_term_corrections' MIN_FUZZY_PHRASE_WORDS — after it

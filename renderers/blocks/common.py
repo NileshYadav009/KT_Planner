@@ -35,6 +35,22 @@ def split_bullet_blob(items: List[str]) -> List[str]:
     return out
 
 
+def not_shown_in(paragraphs: List[str], shown: List[str]) -> List[str]:
+    """The paragraphs that the rows above them do not already say. A reworded
+    restatement counts as said: with Groq, Environments showed "We have three
+    replicas in staging, but production runs five replicas." in its table and
+    again under "Additional environment notes" as "Staging has three
+    replicas, while production runs five replicas." (a user's KT, 23 Oct).
+    Judged like the residual-content check (pdf_rendering.is_text_represented):
+    every content word, or every clause, already shown."""
+    from pdf_rendering import _norm_for_match, is_text_represented
+
+    norms = [_norm_for_match(s) for s in shown if isinstance(s, str) and s.strip()]
+    if not norms:
+        return list(paragraphs)
+    return [p for p in paragraphs if not is_text_represented(p, norms)]
+
+
 def without_session_framing(text: str) -> str:
     """The paragraph without the KT session's own framing (dialogue.py): no
     greeting or spoken lead-in, no sentence that only announces the handover,

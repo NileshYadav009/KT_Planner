@@ -152,7 +152,11 @@ _COUNT_LIGHT = {"has", "have", "had", "run", "runs", "running", "span", "spans",
                 "keep", "keeps", "get", "gets", "there", "across", "spread", "deployed", "deploy", "live", "lives",
                 "need", "needs", "today", "currently", "now", "with", "into", "over", "of", "in", "on", "at", "the",
                 "a", "an", "and", "is", "are", "we", "our", "it", "its", "this", "that", "to", "for", "by", "all"}
-_PAST_RE = re.compile(r"\b(?:had|used\s+to|was|were|previously|originally|formerly|before\s+the)\b", re.IGNORECASE)
+# Past, or said to be out of date: "Earlier, someone mentioned four production
+# replicas, but that information is outdated." (the user's KTs, 24 Oct).
+_PAST_RE = re.compile(r"\b(?:had|used\s+to|was|were|previously|originally|formerly|before\s+the|outdated|"
+                      r"out\s+of\s+date|obsolete|no\s+longer\s+(?:true|valid|correct|accurate|the\s+case))\b",
+                      re.IGNORECASE)
 
 
 def _counts(text: str) -> List[Tuple[float, str, str, set]]:
@@ -171,6 +175,11 @@ def _counts(text: str) -> List[Tuple[float, str, str, set]]:
             continue
         clause = re.split(r"[.;!?,]|\b(?:and|but|while)\b", text[:m.start()], flags=re.IGNORECASE)[-1]
         subject = {w for w in re.findall(r"[a-z][\w+-]*", clause.lower()) if w not in _COUNT_LIGHT}
+        # The environment can follow the count ("three replicas in staging")
+        # or name it ("four production replicas"): read as staging and
+        # production, the two disagreed with "production runs five replicas".
+        tail = re.split(r"[.;!?,]|\b(?:and|but|while)\b", text[m.end():], flags=re.IGNORECASE)[0]
+        subject |= {w for w in re.findall(r"[a-z][\w+-]*", tail.lower()) + words[:-1] if w in _SCOPE_WORDS}
         out.append((sorted(values)[0], words[-1][:-1], words[0] if len(words) > 1 else "", subject))
     return out
 

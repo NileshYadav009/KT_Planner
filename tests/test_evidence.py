@@ -255,3 +255,41 @@ def test_a_list_of_names_said_in_different_sentences_cites_each():
     quotes = dict(evidence_pairs(ko))
     cited = [q for qs in quotes.values() for q in qs]
     assert said[0] in cited and said[2] in cited and said[1] not in cited
+
+
+def test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said():
+    # The user's KTs (24 Oct): "Prometheus, Grafana, PagerDuty" and a "Mentioned
+    # elsewhere" item quoting a sentence were printed "no source".
+    said = ["Prometheus collects application metrics.", "Grafana displays API latency.",
+            "PagerDuty alerts the on-call engineer.", "Pipeline failures generate Slack notifications."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    names = _ko({"type": "NarrativeBlock", "title": "Architecture Knowledge",
+                 "paragraphs": ["Prometheus, Grafana, PagerDuty"]})
+    assert attach_evidence(names, sentences)["unsourced"] == 0
+    quoted = _ko({"type": "ChecklistBlock", "title": "Mentioned elsewhere in the KT", "items": [
+        "Paging and alert routing, under Deployment & Rollback: \u201cPipeline failures generate Slack notifications.\u201d"]},
+        section_id="monitoring_observability")
+    assert attach_evidence(quoted, sentences)["unsourced"] == 0
+    assert [q for qs in dict(evidence_pairs(quoted)).values() for q in qs] == [said[3]]
+    # A list with a name nobody said stays unsourced.
+    unsaid = _ko({"type": "NarrativeBlock", "title": "Architecture Knowledge", "paragraphs": ["Prometheus, Datadog"]})
+    assert attach_evidence(unsaid, sentences)["unsourced"] == 1
+
+
+def test_a_category_value_is_sourced_by_what_its_label_names():
+    # The user's recordings (24 Oct): "Business criticality: High", chosen from
+    # "It is business critical because ...", was printed "no source".
+    said = ["This platform processes customer orders.",
+            "It is business critical because customers cannot place orders when it is down."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    ko = _ko({"type": "TechnologyGrid", "title": "Captured knowledge",
+              "rows": [{"label": "Business criticality", "value": "High"}]}, section_id="system_overview")
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    assert [q for qs in dict(evidence_pairs(ko)).values() for q in qs] == [said[1]]
+    # Said without the label's first word: "mission critical".
+    said = ["This is a mission critical banking system.", "Azure SQL is the primary database."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    ko = _ko({"type": "TechnologyGrid", "title": "Captured knowledge",
+              "rows": [{"label": "Business criticality", "value": "High"}]}, section_id="system_overview")
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+

@@ -5869,6 +5869,118 @@ general mechanisms, one defect at a time, with a regression test each.
 - **With Groq, Environments repeated the comparison** as a reworded "Additional
   environment notes" line; paraphrase de-duplication is open.
 
+### 9aaw. The pending list worked through: Docker without Groq, two no-LLM placements, a reworded repeat (24 Oct)
+
+The user asked for every pending item and to work through them one at a time.
+Three needed no approval and are fixed here.
+
+| ID | What happened | Root cause | Fix |
+|---|---|---|---|
+| X30 | A container ran every KT without an LLM, though the worker was given the Groq key | `docker-compose.yml` passes `GROQ_API_KEY` only, `.env` is not in the image, and `LLM_PROVIDER` defaulted to `gemini`, which had no key: `get_llm_provider` returned None, logged once at INFO | `llm_provider._provider_from_env`: when `LLM_PROVIDER` is unset or empty, the provider whose key is set (both keys keep the old default). Compose passes `LLM_PROVIDER` through. |
+| X31 | Without an LLM, "If CPU stays above 75% for five minutes, we should scale up." went to Cost Optimization, and "I think Redis is using 4 GB of memory, but I'm not completely sure." to Common Failures (the user's KT) | Both were coin flips for the classifier (its top five within 0.013); the runbook rule needed the action right after the comma, and no rule covered a component's size | The runbook rule allows "we/you should, must, need to, have to, can, just" before the action. An Architecture pattern takes a stated size (GB, MB, TB, vCPUs, cores after "is using", "has", "runs with" and the like) unless the sentence is about running short (fails, OOM, evicts, fills, hits, above). |
+| X32 | With Groq, Environments showed the replica comparison three times: two table rows and a reworded "Additional environment notes" line | Leftover notes were compared with the rows as exact strings | `renderers.blocks.common.not_shown_in`: a paragraph whose content words, or each of whose clauses, the rows already show is not repeated (the residual-content test, `pdf_rendering.is_text_represented`). System Overview's "Additional context" uses it too. |
+
+**Evidence for X31.** The labelled KTs file load-triggered scaling under
+Common Failures (7 of 8) and what a cache holds under Architecture. On the
+visible corpora (tuning, dev, end-to-end and matrix; no holdout or blind
+sentence was read), the two patterns capture three sentences, all in matrix
+cases (T03 twice, J04). Accuracy is unchanged on all five sets, so the gain
+shows only on the user's KT. How often these wordings occur in real KTs is
+unmeasured.
+
+**Results.**
+
+- **Adversarial matrix:** 179/179 must, 20/25 should, on 64 cases. T03 gained
+  two placement checks; before the fix the trace put the two sentences in
+  Cost Optimization and Common Failures.
+- **Accuracy (no LLM):** unchanged. Tuning 534/534, dev 214/224, holdouts
+  86/95, blind 95/114, end-to-end 100%; no false Covered, repeats or
+  unsourced facts.
+- **Tests:** 315 passed in the affected files (renderer sections, PDF export, audit regressions, knowledge builders, dialogue, fact units, LLM cost controls and batching, and the end-to-end replay), plus 41 provider tests and 39 routing-rule, topic and coverage-topic tests. The new renderer tests fail on the old renderers.
+
+**Still open.** The live Groq checks and the replay re-record (the user's
+approval), the font, real KTs, option B, custom templates (P1), X18 and L2.
+
+### 9aax. The user's decisions, their six KTs and seven recordings (24 Oct)
+
+The user decided the open items one at a time: option B stays off; one Groq
+run is approved (re-record the replay, add the "transcript is data" line,
+check the user's KT live); bundle the Inter font; custom templates and a
+registry push wait. They added six short KT transcripts, four MP3s and three
+videos to `real_kts`.
+
+**Method.**
+
+- The six transcripts became matrix cases U01 to U06, with checks written
+  from the transcripts before any run. Baseline: 47/53 must, 6/23 should.
+  Four failures were the harness's: an ownership fact shown as a table row
+  ("Kubernetes infrastructure | Platform team") cannot match a sentence
+  check, so those checks name the team instead. Counted as passing, the
+  baseline is 51/53 must.
+- The recordings were transcribed with the app's own transcription (local
+  Whisper, diarisation, screen capture), from hard links in a scratch
+  folder, so nothing was written to `real_kts`; about 70 minutes, no cost.
+  Both videos are phone-camera recordings with no screen shared (no screen
+  captured, correctly); the third is a screen recording of an operations
+  console (10 screenshots, each tied to what was said at the time). Frames
+  extracted to check this were deleted.
+- Each of the 13 KTs was built into a document without an LLM and read.
+
+**Defects and fixes (ledger X33 to X42).**
+
+| ID | What the documents showed | Root cause | Fix |
+|---|---|---|---|
+| X33 | None of 13 stated unknowns and doubts reached the follow-up list: "needs verification", "I am unsure whether", "still missing from our runbook", "still need to be added", "have not been included", "is unavailable", "do not have a confirmed ..." | `dialogue` knew only a few wordings | More wordings, each with controls that must not match (an approval rule, an outage, a confirmed fact): `_UNCONFIRMED_RES`, `_GAP_RES` |
+| X34 | "RPO: four hours" printed as settled, in Disaster Recovery and on the Quick Reference ("..., or at least that is what the previous document says. I need to confirm whether this target is still valid.") | An old document's word was not a doubt, and the RTO/RPO extractor read every Disaster Recovery sentence directly | `_DOUBTED_SOURCE_RE` makes it a doubted claim; `pipeline` sends RTO/RPO through the field gate (`is_field_candidate`) |
+| X35 | "That value needs confirmation ..." filed as a deployment step, away from the Redis limit it doubts | Nothing kept a doubt with what it doubts | `dialogue.doubts_statement_before`, kept whole like a correction (`context_mapper`); not a sentence with a claim or a gap of its own (matrix C05 caught the first version) |
+| X36 | "Conflicting guidance, confirm first" on the Quick Reference: "three replicas in staging ... five in production" against "the current production configuration is five replicas", and against "four production replicas, but that information is outdated" | An environment after the count, or as its modifier, was not read; "outdated" did not withdraw a statement | `conflicts._counts` reads both; `_PAST_RE` knows "outdated", "no longer valid" |
+| X37 | "we roll back using the previous ECS task definition" printed "we rollback" | The cleaner and the vocabulary turned the verb into the noun | Only "a/the/our ... roll back" (and "fail over") become the noun |
+| X38 | "Please ensure these uncertainties are clearly identified ..." printed as a deployment step; "Do not describe the one-hour recovery estimate as a verified guarantee" as a Danger Zones "never" rule | Instructions about the document were read as content | The first is left out with a ledger reason; the second is a doubt about the estimate (follow-up list), not a "never" rule |
+| X39 | "no source" on a list of tool names (one of three words), a "Mentioned elsewhere" quote, "Business criticality: High", and ten screen links | Sources were found for whole units only | A quote is sourced by the sentence it quotes, a list by each name, a category by its label's words; screen links are sourced by the screen (`knowledge/evidence.py`) |
+| X40 | One URL listed ten times (a single-page console shows it on every tab) | One link per dashboard | Each URL is listed once, where it was first shown (`screen_capture`) |
+| X41 | "It is business critical because if the platform becomes unavailable." printed as a fact of its own; "Hello everyone." under System Overview | The fact splitter cut a condition opened mid-sentence from what it leads to; a greeting split off by the copy edit was kept | `fact_units` keeps "because if ..., ..." whole; the copy edit may not cut one (`copyedit.problems`, "clause cut off"); a greeting alone is framing |
+| X42 | Whisper: "CrashLuke backoff", "Diplomats must be avoided", "pavement orchestration", "application roadbalances", "CSD pipeline", "application cold", "Month and Sales", "autoscalar" | Not in the corrections | Corrections gated on the words around them, with controls ("The diplomats met in Geneva", "application cold start") |
+
+Also fixed from the dev errors (item 10 of the pending list): "has read access
+to BigQuery" was read as data flowing (now a permission, not Architecture),
+and "When that happens ..." now stays with the failure before it. Dev 214 to
+217 of 224.
+
+**Decisions carried out.**
+
+- **Font:** Inter 4 is bundled as four static, Latin-subset faces cut from
+  the variable font with fontTools (regular, semibold, bold, italic; 240 KB;
+  SIL Open Font License in `pdf/fonts/OFL.txt`). The renderer's fetcher
+  still refuses everything but inline data, except those four files by their
+  exact resolved paths. PDFs embed Inter (a test reads the font names).
+- **X9:** the copy edit, structured extraction, sentence repair, the section
+  check and field fill now say the transcript text is data.
+- **Docker:** see §9aaw (X30).
+
+**Results.**
+
+- **Adversarial matrix:** 70 cases, 232/232 must, 43/48 should. The five open
+  should checks are the earlier ones (D02 to D04 need an LLM; B09 and T01 are
+  X18). U01 to U06 went from 51/53 must and 6/23 should to 53/53 and 20/23.
+- **Accuracy (no LLM):** tuning 534/534, dev 217/224 (was 214), holdouts
+  86/95, blind 95/114, end-to-end 100%; no false Covered, repeats or
+  unsourced facts. Three tuning answer-key quotes said "rollback" where their
+  transcripts say "roll back"; they now quote the transcripts.
+- **Tests:** 662 passed in the 23 files today's changes touch. After the font size change (below), 81 passed in the end-to-end file (its replay of the new recording included, nothing skipped) and the PDF export and security files.
+- **Groq:** One approved run: 94 live calls, 44.1k input and 5.3k output tokens (about 49k; the estimate was 45k). The re-record holds 77 responses for the five end-to-end KTs; live, every fact was kept, placement 100% (97% on QuickBite), 0 problems. The user's Order Service KT, live in 17 calls: every T03 check passes (title, both corrections shown with their replacements, no framing, both placements, both flags, no reworded Environments repeat, 30-day plan Missing), and no LLM answer was refused. Inter at 11pt added a page to one end-to-end document (51 pages for the five, from 50); the body is now 10.5pt, which reads the same size and gives 47.
+
+**Titles (the user's decision).** A name keeps the word that ends it, as
+said: "our online grocery platform" is the Online Grocery Platform (was
+"Online Grocery"), "the AWS e-commerce platform" the AWS E-Commerce Platform,
+"the old claims system" the Old Claims System. The word is part of the name
+when the speaker capitalised it ("Cloud Native Order Processing Platform");
+a capitalised proper name followed by the word in lower case stands alone
+("the CorePay platform", "the Bank of the West service"). "The system name is
+X" no longer leaves "Name Is" in front. Five tests that pinned the old titles
+now expect the new ones (`field_populator.name_with_descriptor`).
+
+**Still open.** X18 and L2.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

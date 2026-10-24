@@ -27,9 +27,53 @@ _UNCONFIRMED_RES = [
     # Left open by the speaker: "..., so that needs confirmation", "still to be
     # confirmed". Not a rule that needs an approval ("changes need
     # confirmation from the CAB").
-    re.compile(r"\b(?:that|this|it)\s+(?:still\s+)?needs?\s+(?:to\s+be\s+)?confirm(?:ed|ation)\b|"
-               r"\b(?:yet|still)\s+to\s+be\s+confirmed\b|\btbc\b", re.IGNORECASE),
+    # "That value needs confirmation", "this needs verification", "the
+    # readiness probe timeout also needs verification" (the user's KTs, 24
+    # Oct). Not "Every schema change needs verification by the DBA team".
+    re.compile(r"\b(?:that|this|it)\s+(?:(?:value|number|figure|limit|setting|target|estimate|date|detail|part|one)\s+)?"
+               r"(?:still\s+|also\s+)?needs?\s+(?:to\s+be\s+)?(?:confirm(?:ed|ation)|verif(?:ied|ication)|validat(?:ed|ion))\b|"
+               r"\b(?:still|also|yet)\s+needs?\s+(?:to\s+be\s+)?(?:confirm(?:ed|ation)|verif(?:ied|ication))\b|"
+               r"\b(?:yet|still)\s+to\s+be\s+(?:confirmed|verified)\b|\btbc\b", re.IGNORECASE),
+    re.compile(r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:still\s+)?(?:unsure|uncertain|not\s+certain)\b", re.IGNORECASE),
+    # "..., but need to verify this", "I need to confirm whether this target
+    # is still valid". Not an instruction ("you need to confirm that the pods
+    # are healthy"): only "this", "it" or a closing "that", or the speaker's
+    # own "I need to ... whether".
+    re.compile(r"\bneeds?\s+to\s+(?:verify|confirm|double-check)\s+(?:this|it\b|that\s*(?:[.,;!?]|$))|"
+               r"\bi\s+(?:still\s+)?need\s+to\s+(?:verify|confirm|check|find\s+out)\s+(?:whether|if)\b", re.IGNORECASE),
 ]
+# A value given on an old document's word is a claim with doubt on it: "Our
+# recovery point objective is four hours, or at least that is what the
+# previous document says." It went into the RPO field as settled.
+_DOUBTED_SOURCE_RE = re.compile(
+    r"\bor\s+at\s+least\s+(?:that'?s|that\s+is)\s+what\s+(?:the|our|my)\s+(?:[a-z]+\s+){0,2}?"
+    r"(?:document(?:ation)?|docs?|runbook|wiki|page|notes|spreadsheet|handover)\s+(?:says|said)\b|"
+    r"\baccording\s+to\s+(?:the|our)\s+(?:old|previous|outdated|last|earlier)\s+"
+    r"(?:document(?:ation)?|docs?|runbook|wiki|notes)\b", re.IGNORECASE)
+_UNCONFIRMED_RES.append(_DOUBTED_SOURCE_RE)
+# A caveat on a value, said as an instruction about the document: "Do not
+# describe the one-hour recovery estimate as a verified guarantee." Printed as
+# a Danger Zones "never" rule; it says the estimate is unconfirmed.
+_DOCUMENT_CAVEAT_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|never)\s+(?:describe|present|report|document|state|treat|label|record|write\s+up)\s+"
+    r"(?:the|this|that|these|those|our|any|it)\b[^.!?]{0,80}?\s+as\s+(?:an?\s+)?"
+    r"(?:verified|confirmed|guaranteed|guarantee|final|fact|certain|settled)\b", re.IGNORECASE)
+_UNCONFIRMED_RES.append(_DOCUMENT_CAVEAT_RE)
+# An instruction about the document that says nothing about the system:
+# "Please ensure these uncertainties are clearly identified instead of
+# assuming values." (the user's KTs, 24 Oct; printed as a deployment step).
+_DOCUMENT_INSTRUCTION_RE = re.compile(
+    r"^\W*(?:please\s+)?(?:make\s+sure|ensure)\s+(?:that\s+)?(?:these|the|all|any|this|those)\s+(?:[a-z]+\s+)?"
+    r"(?:uncertaint(?:y|ies)|gaps?|unknowns?|assumptions?|open\s+(?:points|questions|items)|values?|estimates?)\s+"
+    r"(?:are|is)\s+(?:clearly\s+|explicitly\s+)?(?:identified|marked|flagged|called\s+out|noted|highlighted|listed)\b",
+    re.IGNORECASE)
+
+
+def is_document_instruction(text: str) -> bool:
+    """An instruction to whoever writes the document, with nothing in it
+    about the system ("Please ensure these uncertainties are clearly
+    identified instead of assuming values.")."""
+    return bool(_DOCUMENT_INSTRUCTION_RE.search(text or ""))
 
 # Statements that something is absent, undecided or unknown. Deliberately
 # subject + verb based, so imperatives such as "Never delete the table" or
@@ -60,6 +104,28 @@ _GAP_RES = [
     re.compile(r"\b(?:runbooks?|procedures?|documentation|docs|plans?|process(?:es)?|diagrams?|owners?|"
                r"playbooks?|polic(?:y|ies)|tests?|alerting|monitoring|dashboards?|backups?|rto|rpo|slas?)\b"
                r"[^.!?]{0,80}?\b(?:is|are)\s+(?:still\s+|currently\s+|also\s+)?missing\b", re.IGNORECASE),
+    # Missing from a document, whatever it is: "The exact rollback revision
+    # and weekend escalation contact are still missing from our runbook."
+    re.compile(r"\b(?:is|are)\s+(?:still\s+|currently\s+|also\s+)?missing\s+from\s+(?:the|our|this)\s+(?:[a-z-]+\s+){0,2}?"
+               r"(?:runbooks?|documentation|docs|handover|wiki|playbooks?|notes|document|page|confluence)\b", re.IGNORECASE),
+    # Still to be written down: "Repository links ... still need to be added to
+    # the handover document", "the team still needs to define response targets".
+    re.compile(r"\b(?:still|yet)\s+needs?\s+to\s+(?:be\s+)?(?:add(?:ed)?|document(?:ed)?|defin(?:e|ed)|writ(?:e|ten)(?:\s+down)?|"
+               r"creat(?:e|ed)|agree(?:d)?|decid(?:e|ed)|record(?:ed)?|captur(?:e|ed)|set\s+up)\b", re.IGNORECASE),
+    # Not done yet: "has not been completed this year", "have not been
+    # included in the handover documentation", "are not finalized".
+    re.compile(r"\b(?:(?:has|have|had)\s+not|(?:hasn|haven|hadn)'?t)\s+(?:yet\s+)?been\s+(?:[a-z]+ly\s+)?"
+               r"(?:completed|included|added|recorded|captured|finali[sz]ed|shared|written\s+down|performed)\b|"
+               r"\b(?:is|are)\s+not\s+(?:yet\s+)?(?:finali[sz]ed|decided|known)\b", re.IGNORECASE),
+    # Information said to be unavailable: "The latest recovery test date is
+    # unavailable." Not "the service is unavailable", which is an outage.
+    re.compile(r"\b(?:dates?|values?|numbers?|contacts?|owners?|urls?|links?|details?|revisions?|versions?|targets?|"
+               r"figures?|schedules?|times?|names?)\s+(?:is|are)\s+(?:still\s+|currently\s+)?"
+               r"(?:unavailable|unknown|not\s+(?:available|known))\b", re.IGNORECASE),
+    # "We do not have a confirmed rollback revision in the runbook."
+    re.compile(r"\b(?:we|i|they|the\s+team)\s+(?:do\s+not|don'?t|does\s+not|doesn'?t)\s+(?:yet\s+|currently\s+)?have\s+"
+               r"(?:a|an|any)\s+(?:confirmed|documented|agreed|defined|tested|written|current|up-to-date|verified)\b",
+               re.IGNORECASE),
     # A topic put off to a later session is not covered: "We will cover
     # deployment and the rest next week."
     re.compile(r"\b(?:we(?:'ll|\s+will)|let'?s|i(?:'ll|\s+will))\s+(?:cover|go\s+(?:over|through)|discuss|"
@@ -98,7 +164,33 @@ def is_unconfirmed(text: str) -> bool:
     text = text or ""
     if not any(rx.search(text) for rx in _UNCONFIRMED_RES):
         return False
-    return bool(_HEDGE_RE.search(text) or states_something_before_gap(text))
+    return bool(_HEDGE_RE.search(text) or _DOUBTED_SOURCE_RE.search(text) or _DOCUMENT_CAVEAT_RE.search(text)
+                or states_something_before_gap(text))
+
+
+# A back-reference in a sentence that only doubts what came before it.
+_REFERS_BACK_RE = re.compile(r"\b(?:this|that|these|those)\b|^\W*it\b", re.IGNORECASE)
+
+
+def doubts_statement_before(previous: str, sentence: str) -> bool:
+    """`sentence` only doubts what `previous` said: "We also use Redis for
+    caching, but I am unsure whether its memory limit is 4 GB or 8 GB." "That
+    value needs confirmation before updating the operational documentation."
+    Apart, the doubt was filed as a deployment step and the value read as
+    settled, so the two are kept as one statement, as a correction is."""
+    if not previous or not sentence or len(sentence.split()) > 16 or not _REFERS_BACK_RE.search(sentence):
+        return False
+    if not any(rx.search(sentence) for rx in _UNCONFIRMED_RES) or _DOUBTED_SOURCE_RE.search(sentence):
+        return False
+    # "I think Redis has a 4 GB memory limit, but this needs verification"
+    # doubts its own claim, not the sentence before it, and "We haven't
+    # documented the CDN cache rules yet, so that needs confirmation" states
+    # a gap of its own (matrix C05).
+    if _HEDGE_RE.search(sentence) or is_unconfirmed(sentence):
+        return False
+    if any(rx.search(sentence) for rx in _GAP_RES if rx not in _UNCONFIRMED_RES):
+        return False
+    return states_something(previous) or is_unconfirmed(previous)
 
 
 # "Cosmos has continuous backup turned on, but we have never tried a restore"
@@ -268,7 +360,15 @@ def without_session_framing(text: str) -> str:
     sentence through without_framing, and sentences that only announce the
     handover (the document's title already names the system) left out."""
     kept = [without_framing(s) for s in _SENTENCE_SPLIT_RE.split(text or "") if s.strip()]
-    return " ".join(s for s in kept if not is_handover_announcement(s)).strip()
+    return " ".join(s for s in kept if not is_handover_announcement(s) and not is_greeting_only(s)).strip()
+
+
+def is_greeting_only(text: str) -> bool:
+    """A sentence that is only a greeting: "Hello everyone." The copy edit can
+    split "Hi everyone, today I will be handing over X" in two, and the
+    greeting was printed under System Overview (the user's recordings, 24 Oct)."""
+    match = _GREETING_PREFIX_RE.match(text or "")
+    return bool(match) and not (text or "")[match.end():].strip()
 
 
 def is_handover_announcement(text: str) -> bool:

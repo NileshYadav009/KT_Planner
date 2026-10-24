@@ -1694,3 +1694,36 @@ Results:
   step, and a list of tools no longer shows "no source".
 - No Groq quota used. Confirming the LLM guards on a live run needs your OK
   (about 7k tokens).
+
+## Pending items, first three fixed (audit §9aaw, 24 Oct)
+
+- **Docker now uses Groq.** A container given only the Groq key ran every KT
+  without an LLM, because the app defaulted to Gemini. It now uses the
+  provider whose key is set.
+- **Two facts of your Order Service KT now land in the right place without
+  Groq:** the CPU scale-up rule is under Common Failures (it was under Cost
+  Optimization), and the Redis memory guess is under Architecture (it was
+  under Common Failures).
+- **No reworded repeats under the Environments table.** With Groq the
+  replica comparison appeared a third time, reworded, as an "additional
+  note". System Overview had the same gap.
+- Accuracy unchanged on every test set; no Groq quota used.
+
+## Your six KTs and seven recordings (audit §9aax, 24 Oct)
+
+- **Unknowns and doubts are flagged.** All 13 ways your KTs said "we don't
+  know this yet" now reach the follow-up list.
+- **A doubted value is not printed as settled.** "RPO four hours, or at least
+  that is what the previous document says" no longer appears as the RPO.
+- **No false "conflicting guidance"** on the Quick Reference for staging vs
+  production counts, or for a count the speaker called outdated.
+- **Cleaner text:** "we roll back" stays a verb; a condition is no longer cut
+  from its sentence; a stray "Hello everyone." is gone; eight Whisper
+  mishearings are corrected.
+- **Sources:** tool lists, quotes, "Business criticality: High" and screen
+  links no longer show "no source"; a URL shown on every tab is listed once.
+- **The PDF uses Inter on every machine**, and every LLM prompt now says the
+  transcript is data, not instructions.
+- **Titles name the system as said:** "Online Grocery Platform", not "Online
+  Grocery".
+- Groq, one approved run (about 49k tokens): the tests' recorded Groq answers are re-recorded, and your Order Service KT passed every check live.

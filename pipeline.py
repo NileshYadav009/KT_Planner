@@ -27,6 +27,7 @@ from ai import map_analysis_to_fields, polish_coverage_sections, _extract_struct
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript, close_segment_sentences
 from input_gate import assess_transcript, language_warning
+from dialogue import is_field_candidate
 from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
 from knowledge import (
     build_knowledge_object,
@@ -497,7 +498,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # unreachable even via its own ['blocks'] fallback, silently starving
         # this extractor of any text.
         dr_sentences = coverage.get("disaster_recovery", {}).get("sentences", [])
-        dr_sentence_texts = [s.get("text", "") for s in dr_sentences if isinstance(s, dict)]
+        # A doubted or missing objective is not a value: "Our recovery point
+        # objective is four hours, or at least that is what the previous
+        # document says" printed "RPO: four hours" (the user's KTs, 24 Oct).
+        dr_sentence_texts = [s.get("text", "") for s in dr_sentences
+                             if isinstance(s, dict) and is_field_candidate(s.get("text", ""))]
         dr_text = " ".join(dr_sentence_texts)
         rto_rpo = extract_rto_rpo(dr_text)
         if rto_rpo:

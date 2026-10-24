@@ -342,3 +342,19 @@ def test_two_views_of_one_console_url_are_both_captured(tmp_path):
     assert result["stats"]["links"] == 1
     from PIL import Image
     assert all(Image.open(a["image_path"]).height < 540 for a in shots)   # address bar cropped off
+
+
+def test_a_url_shown_on_every_tab_is_listed_once_and_sourced_by_the_screen():
+    # The user's recordings (24 Oct): a single-page console showed one URL on
+    # ten tabs, and the document listed it ten times, each "no source".
+    from knowledge.evidence import block_units
+
+    url = "https://console.example.io/app"
+    rendered = [{"section_id": sid, "section_title": sid, "blocks": []}
+                for sid in ("monitoring_observability", "cost_optimization")]
+    shots = [dict(_asset("dashboard", "dashboard", 14.0, title="Alerts", url=url), section_id="monitoring_observability"),
+             dict(_asset("dashboard", "dashboard", 90.0, title="Cloud cost", url=url), section_id="cost_optimization")]
+    sc.attach_to_rendered_sections(rendered, shots, "job-1234-5678")
+    lists = [b for s in rendered for b in s["blocks"] if b.get("title") == "Links shown on screen"]
+    assert [b["items"] for b in lists] == [[f"Alerts: {url} (at 00:14)"]]
+    assert block_units(lists[0]) is None

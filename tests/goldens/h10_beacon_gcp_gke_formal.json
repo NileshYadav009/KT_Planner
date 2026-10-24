@@ -94,7 +94,7 @@
   },
   {
    "id": "F12",
-   "quote": "you rollback by promoting the previous release",
+   "quote": "you roll back by promoting the previous release",
    "in": [
     "deployment_and_rollback"
    ]

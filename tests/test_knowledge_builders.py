@@ -374,7 +374,7 @@ def test_a_kt_is_named_after_its_system_not_a_pronoun_phrase():
     assert _infer_system_name(coverage) == "Fernhill"
     # No name said twice: the description, without the pronoun.
     coverage = {"system_overview": {"content": ["It's the appointment booking system for our forty clinics."]}}
-    assert _infer_system_name(coverage) == "Appointment Booking"
+    assert _infer_system_name(coverage) == "Appointment Booking System"
 
 
 def test_a_value_kept_with_its_hedged_correction_still_covers_its_topic():
@@ -1045,7 +1045,7 @@ def test_build_knowledge_object_system_name_fallback_keeps_contraction_intact():
     assert not ko["system_name"].lower().startswith("s the")
     # Not "It's the Old Claims" either: a KT title is never a pronoun
     # phrase (KT-taker audit, matrix T01).
-    assert ko["system_name"] == "Old Claims"
+    assert ko["system_name"] == "Old Claims System"
 
 
 def test_build_knowledge_object_system_name_fallback_trims_leading_verb_filler():
@@ -1065,7 +1065,8 @@ def test_build_knowledge_object_system_name_fallback_trims_leading_verb_filler()
     }
     ko = build_knowledge_object("job1", coverage, [], {})
     # The acronym keeps the speaker's casing ("Cloud NAT", not "Cloud Nat").
-    assert ko["system_name"] == "Cloud NAT Order Processing"
+    # The name as said, with the word that ends it (the user's decision, 24 Oct).
+    assert ko["system_name"] == "Cloud NAT Order Processing Platform"
 
 
 def test_build_knowledge_object_recovers_real_label_and_type_from_schema():

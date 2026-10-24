@@ -157,13 +157,52 @@ def _render_paragraph_text(text: str) -> str:
     return escaped
 
 
+# The document's typeface, bundled so a PDF looks the same on every machine:
+# the stylesheet asked for Inter, which no server had, so each fell back to
+# its own font. Static, Latin subsets of Inter 4 (SIL Open Font License,
+# pdf/fonts/OFL.txt), cut from the variable font for the weights the
+# stylesheet uses.
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf", "fonts")
+_FONT_FACES = (("Inter-Regular.ttf", 400, "normal"), ("Inter-SemiBold.ttf", 600, "normal"),
+               ("Inter-Bold.ttf", 700, "normal"), ("Inter-Italic.ttf", 400, "italic"))
+
+
+def _font_paths():
+    return [os.path.join(FONT_DIR, name) for name, _, _ in _FONT_FACES]
+
+
+def font_face_css() -> str:
+    """@font-face rules for the bundled faces that are present."""
+    from pathlib import Path
+
+    rules = []
+    for name, weight, style in _FONT_FACES:
+        path = os.path.join(FONT_DIR, name)
+        if os.path.exists(path):
+            rules.append(f'@font-face {{ font-family: "Inter"; src: url("{Path(path).as_uri()}") format("truetype"); '
+                         f"font-weight: {weight}; font-style: {style}; }}")
+    return "\n".join(rules)
+
+
+def _is_bundled_font(url: str) -> bool:
+    """`url` is a file: URL of one of the bundled font files, exactly."""
+    from urllib.parse import unquote, urlparse
+    from urllib.request import url2pathname
+
+    parsed = urlparse(str(url))
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        return False
+    path = os.path.normcase(os.path.realpath(url2pathname(unquote(parsed.path))))
+    return path in {os.path.normcase(os.path.realpath(p)) for p in _font_paths()}
+
+
 def safe_url_fetcher(url, *args, **kwargs):
     """WeasyPrint URL fetcher for KT documents: only inline data: URIs are
     loaded (the stylesheet is inline and screenshots are embedded as data
-    URIs). Any other URL in the document, file:// or http(s)://, is refused,
-    so no content can make the renderer read server files or call internal
-    addresses."""
-    if str(url).startswith("data:"):
+    URIs), and the bundled font files by their exact paths. Any other URL in
+    the document, file:// or http(s)://, is refused, so no content can make
+    the renderer read server files or call internal addresses."""
+    if str(url).startswith("data:") or _is_bundled_font(url):
         from weasyprint import default_url_fetcher
         return default_url_fetcher(url, *args, **kwargs)
     raise ValueError(f"External resource blocked in KT document: {str(url)[:80]}")
@@ -493,6 +532,7 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
     if os.path.exists(css_path):
         with open(css_path, "r", encoding="utf-8") as css_file:
             style_css = css_file.read()
+    style_css = font_face_css() + "\n" + style_css
 
     return template.render(
         title=title,

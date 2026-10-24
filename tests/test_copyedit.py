@@ -251,3 +251,15 @@ def test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value():
                                                "The new retention policy is 30 days.")
     assert "correction lost" not in problems(said, "The database backups are retained for seven days. "
                                                    "Actually, the new retention policy is 30 days.")
+
+
+def test_a_rewrite_may_not_cut_a_condition_from_what_it_leads_to():
+    # The user's recordings (24 Oct).
+    from copyedit import problems
+
+    said = ("It is business critical because if the platform becomes unavailable, customers cannot place orders "
+            "and downstream warehouse processing is affected.")
+    cut = ("It is business critical because if the platform becomes unavailable. Customers cannot place orders, "
+           "and downstream warehouse processing is affected.")
+    assert "clause cut off" in problems(said, cut)
+    assert "clause cut off" not in problems(said, said.replace("orders and", "orders, and"))

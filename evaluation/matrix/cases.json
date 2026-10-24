@@ -908,7 +908,7 @@
     },
     {
       "id": "T03", "category": "T KT taker", "title": "A user's own KT (Order Service, 23 Oct): corrections after a dash, framing, a guess, a stated unknown",
-      "regression": "tests/test_session_framing.py::test_more_ways_of_announcing_the_handover_are_not_content; tests/test_evidence.py::test_a_list_of_names_said_in_different_sentences_cites_each; tests/test_copyedit.py::test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value; tests/test_polish_integrity.py::test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused",
+      "regression": "tests/test_session_framing.py::test_more_ways_of_announcing_the_handover_are_not_content; tests/test_evidence.py::test_a_list_of_names_said_in_different_sentences_cites_each; tests/test_copyedit.py::test_a_rewrite_may_not_drop_the_word_that_withdraws_a_value; tests/test_polish_integrity.py::test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused; tests/test_section_rules.py::test_a_threshold_response_is_a_runbook_step_and_a_size_is_architecture",
       "transcript": [
         "Hi team, today I'll explain our order service. It runs on AWS EKS, and the production database is PostgreSQL 14—sorry, we upgraded it last week, so it's PostgreSQL 16 now. The service uses Redis for caching. We have three replicas in staging, but production runs five replicas. If CPU stays above 75% for five minutes, we should scale up. We monitor everything through Prometheus and Grafana, and PagerDuty sends alerts to the on-call engineer. Deployments happen through GitHub Actions. If a deployment fails, check the logs first and rollback using Helm. The database backups are retained for seven days—actually, the new retention policy is 30 days. The Payments team owns the application, while the Platform team manages the Kubernetes cluster. I think Redis is using 4 GB of memory, but I'm not completely sure. Also, never restart the production database during business hours unless the incident commander approves it. We haven't documented the exact rollback revision yet, so that needs confirmation."
       ],
@@ -926,6 +926,146 @@
         {"check": "gaps_consistent", "level": "must"},
         {"check": "flagged", "texts": ["4 GB"], "level": "should"},
         {"check": "flagged", "texts": ["rollback revision"], "level": "should"},
+        {"check": "sourced", "level": "should"},
+        {"check": "in_section", "text": "we should scale up", "sections": ["common_failures", "monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "Redis is using 4 GB of memory", "sections": ["architecture_reference", "system_overview"], "level": "must"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U01", "category": "U user KT", "title": "The user's KT 1 (e-commerce platform): a corrected replica count, a corrected retention, a guess, a plan, stated unknowns",
+      "regression": "tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_section_rules.py::test_a_stated_limit_is_architecture_and_a_document_caveat_is_no_danger_zone",
+      "transcript": [
+        "Today I'll explain our e-commerce platform. The application runs on AWS EKS, with PostgreSQL as the primary database and Redis for caching. Production has three replicas—sorry, we increased that to five replicas last week, while staging still has three. Database backups run every six hours and are retained for 14 days, not seven as mentioned in the old documentation.\n\nPrometheus collects metrics, and Grafana displays CPU, memory, and API error rates. If errors remain above 5% for five minutes, PagerDuty alerts the on-call engineer. Deployments use GitHub Actions and Helm. If a deployment fails, check the pod logs and events before considering rollback.\n\nThe Platform team manages Kubernetes infrastructure, while developers own application code. I think Redis has a 4 GB memory limit, but this needs verification. We plan to migrate the database to a newer version next quarter, although the version and migration date are not finalized. The exact rollback revision and weekend escalation contact are still missing from our runbook."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "commerce", "level": "must"},
+        {"check": "absent_re", "pattern": "today i'?ll", "level": "must"},
+        {"check": "never_alone", "text": "three replicas", "with": ["five replicas", "staging"], "level": "must"},
+        {"check": "never_alone", "text": "seven", "with": ["14 days"], "level": "must"},
+        {"check": "never_alone", "text": "4 GB", "with": ["verif", "think", "confirm"], "level": "must"},
+        {"check": "in_section", "text": "Database backups run every six hours", "sections": ["disaster_recovery"], "level": "must"},
+        {"check": "in_section", "text": "PagerDuty alerts the on-call engineer", "sections": ["monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "check the pod logs and events before considering rollback", "sections": ["deployment_and_rollback", "common_failures"], "level": "must"},
+        {"check": "in_section", "text": "Platform team", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "in_section", "text": "Redis has a 4 GB memory limit", "sections": ["architecture_reference", "system_overview"], "level": "should"},
+        {"check": "coverage", "section": "first_30_day_ownership", "is": ["Missing"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["4 GB"], "level": "should"},
+        {"check": "flagged", "texts": ["rollback revision"], "level": "should"},
+        {"check": "flagged", "texts": ["weekend escalation"], "level": "should"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U02", "category": "U user KT", "title": "The user's KT 2 (order processing on ECS Fargate): three corrections, a scale rule, an undecided limit, stated unknowns",
+      "regression": "tests/test_dialogue.py::test_a_sentence_that_only_doubts_the_one_before_is_kept_with_it; tests/test_devops_transcription.py::test_roll_back_and_fail_over_said_as_verbs_stay_verbs; tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt",
+      "transcript": [
+        "Today I'll explain our order processing platform. The application runs on AWS ECS Fargate behind an Application Load Balancer. Production runs three tasks—sorry, we increased that to five tasks last week, while staging still runs three. The database is Amazon RDS PostgreSQL 14, actually production was upgraded to PostgreSQL 16 recently. Backups are retained for seven days, no, the new retention policy is 30 days. CloudWatch monitors CPU, memory, and application errors. If CPU stays above 80% for ten minutes, the team investigates and scales if required. Deployments happen through GitHub Actions. If a release fails, we roll back using the previous ECS task definition. However, the exact rollback revision is not documented. The Payments team owns the application, while the Platform team manages infrastructure. We also use Redis for caching, but I am unsure whether its memory limit is 4 GB or 8 GB. That value needs confirmation before updating the operational documentation. Weekend escalation contacts are also missing from the runbook."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "order processing", "level": "must"},
+        {"check": "absent_re", "pattern": "today i'?ll", "level": "must"},
+        {"check": "never_alone", "text": "PostgreSQL 14", "with": ["PostgreSQL 16"], "level": "must"},
+        {"check": "never_alone", "text": "seven days", "with": ["30 days"], "level": "must"},
+        {"check": "never_alone", "text": "three tasks", "with": ["five tasks", "staging"], "level": "must"},
+        {"check": "never_alone", "text": "4 GB", "with": ["8 GB"], "level": "must"},
+        {"check": "in_section", "text": "If CPU stays above 80% for ten minutes", "sections": ["common_failures", "monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "roll back using the previous ECS task definition", "sections": ["deployment_and_rollback"], "level": "must"},
+        {"check": "in_section", "text": "Payments team", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["4 GB"], "level": "should"},
+        {"check": "flagged", "texts": ["rollback revision"], "level": "should"},
+        {"check": "flagged", "texts": ["weekend escalation"], "level": "should"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U03", "category": "U user KT", "title": "The user's KT 3 (a customer application on Kubernetes): a symptom and its checks, limits compared across environments, an outdated count, stated unknowns",
+      "regression": "tests/test_conflicts.py::test_an_environment_after_the_count_or_an_outdated_count_is_not_a_conflict; tests/test_dialogue.py::test_an_instruction_about_the_document_is_not_content; tests/test_evidence.py::test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said",
+      "transcript": [
+        "Our customer application running in Kubernetes sometimes becomes slow when traffic is high. Pods restarting frequently and users seeing delayed responses. We check Grafana first, then Kubernetes events and previous container logs. CPU limit is 2000 millicores in staging, but production limit is 3000 millicores. Redis is used for caching, and I think memory limit is 4 GB, but need to verify this. The application deploy through Helm using our CI pipeline. If new deployment fails, check pod health before doing rollback. We normally wait for readiness checks to pass before allowing traffic. The Platform team manages the cluster, and developers maintain application code. We have three replicas in staging and five in production. Earlier, someone mentioned four production replicas, but that information is outdated. The current production configuration is five replicas. We do not have a confirmed rollback revision in the runbook, and the readiness probe timeout also needs verification. Please ensure these uncertainties are clearly identified instead of assuming values."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "four production replicas", "with": ["outdated", "five"], "level": "must"},
+        {"check": "never_alone", "text": "3000 millicores", "with": ["CPU"], "level": "must"},
+        {"check": "never_alone", "text": "4 GB", "with": ["verify", "think", "confirm"], "level": "must"},
+        {"check": "in_section", "text": "Pods restarting frequently", "sections": ["common_failures"], "level": "must"},
+        {"check": "in_section", "text": "We check Grafana first", "sections": ["common_failures", "monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "wait for readiness checks to pass", "sections": ["deployment_and_rollback"], "level": "must"},
+        {"check": "in_section", "text": "Platform team", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["rollback revision"], "level": "should"},
+        {"check": "flagged", "texts": ["readiness probe timeout"], "level": "should"},
+        {"check": "flagged", "texts": ["4 GB"], "level": "should"},
+        {"check": "absent_re", "pattern": "please ensure these uncertainties", "level": "should"},
+        {"check": "absent_re", "pattern": "conflicting guidance", "level": "must"},
+        {"check": "not_flagged", "texts": ["three replicas in staging", "five replicas"], "level": "must"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U04", "category": "U user KT", "title": "The user's KT 4 (a CI/CD pipeline): approvals, a release blocker, a retired practice, a plan not started, stated unknowns",
+      "regression": "tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_evidence.py::test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said",
+      "transcript": [
+        "Our CI/CD pipeline starts when a developer raises a pull request. Jenkins builds the application, SonarQube checks code quality, and Trivy scans the container image before it is pushed to Amazon ECR. Deployment to Kubernetes happens through Helm. Production deployment requires approval from the release manager. If a critical vulnerability is detected, the release must not proceed until the issue is reviewed and resolved according to the security process. Developers maintain the pipeline, while the Platform team manages Kubernetes infrastructure. Rollback is supported through Helm, but the exact revision and emergency approval process are not documented. Pipeline failures generate Slack notifications. The team previously used manual deployments, but that process has been retired. We are planning to introduce automated rollback next quarter, although implementation has not started. The security team owns vulnerability exceptions, and the release manager approves production deployments. Repository links and the emergency release contact still need to be added to the handover document."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "manual deployments", "with": ["retired", "previously"], "level": "must"},
+        {"check": "never_alone", "text": "automated rollback", "with": ["planning", "plan", "next quarter", "not started"], "level": "must"},
+        {"check": "in_section", "text": "Production deployment requires approval from the release manager", "sections": ["deployment_and_rollback", "ownership_escalation", "security_controls"], "level": "must"},
+        {"check": "in_section", "text": "the release must not proceed", "sections": ["danger_zones", "security_controls", "deployment_and_rollback"], "level": "must"},
+        {"check": "in_section", "text": "Trivy scans the container image", "sections": ["security_controls", "deployment_and_rollback", "architecture_reference"], "level": "must"},
+        {"check": "in_section", "text": "Pipeline failures generate Slack notifications", "sections": ["monitoring_observability", "common_failures", "deployment_and_rollback"], "level": "must"},
+        {"check": "in_section", "text": "vulnerability exceptions", "sections": ["ownership_escalation", "security_controls"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["emergency approval process"], "level": "should"},
+        {"check": "flagged", "texts": ["repository links"], "level": "should"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U05", "category": "U user KT", "title": "The user's KT 5 (customer database recovery): a changed backup policy, an untested recovery estimate, an RPO to confirm, stated unknowns",
+      "regression": "tests/test_dialogue.py::test_a_doubted_objective_does_not_fill_a_field; tests/test_section_rules.py::test_a_stated_limit_is_architecture_and_a_document_caveat_is_no_danger_zone",
+      "transcript": [
+        "The customer database runs on Amazon RDS PostgreSQL. Backups run every six hours and are retained for 14 days. The old documentation mentions daily backups, but that policy changed last month. We expect database recovery to take around one hour, although this has not been tested recently. Our recovery point objective is four hours, or at least that is what the previous document says. I need to confirm whether this target is still valid. The database has a standby replica in another availability zone. Regional disaster recovery testing has not been completed this year. The Data Engineering team owns database restoration, while the Platform team recreates application infrastructure using Terraform. We used to perform recovery exercises quarterly, but I do not know whether that schedule is still active. The latest recovery test date is unavailable. Do not describe the one-hour recovery estimate as a verified guarantee. The current backup schedule and retention policy are confirmed, but recovery objectives and testing arrangements require confirmation from the responsible owners."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "daily backups", "with": ["changed", "old documentation", "six hours"], "level": "must"},
+        {"check": "never_alone", "text": "one hour", "with": ["not been tested", "expect", "estimate", "confirm", "verified"], "level": "must"},
+        {"check": "never_alone", "text": "four hours", "with": ["confirm", "previous document", "at least"], "level": "must"},
+        {"check": "in_section", "text": "standby replica in another availability zone", "sections": ["disaster_recovery"], "level": "must"},
+        {"check": "in_section", "text": "Backups run every six hours and are retained for 14 days", "sections": ["disaster_recovery"], "level": "must"},
+        {"check": "in_section", "text": "The Data Engineering team owns database restoration", "sections": ["ownership_escalation", "disaster_recovery"], "level": "must"},
+        {"check": "coverage", "section": "disaster_recovery", "not": ["Missing"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["four hours"], "level": "should"},
+        {"check": "flagged", "texts": ["recovery test"], "level": "should"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
+    },
+    {
+      "id": "U06", "category": "U user KT", "title": "The user's KT 6 (monitoring and incidents): an alert threshold that replaced an old one, a never-do rule, an escalation, stated unknowns",
+      "regression": "tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_evidence.py::test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said",
+      "transcript": [
+        "Prometheus collects application metrics, and Grafana displays API latency, error rates, CPU, and memory. PagerDuty alerts the on-call engineer when the API error rate remains above 5% for five minutes. During an incident, check application logs and database connections before restarting any service. Never restart the production database without approval from the incident commander. The Data Engineering team owns the database, while the application team investigates API errors. If the issue continues after initial checks, escalate to the relevant service owner. Weekend escalation contacts are not documented, and the team still needs to define response targets for critical incidents. Sometimes high CPU happens during scheduled reporting jobs, so investigate whether the spike is temporary before scaling. We previously used a 10% error threshold, but the current alert threshold is 5%. The operations team reviews Grafana dashboards daily. The exact dashboard URL and incident communication channel have not been included in the handover documentation."
+      ],
+      "expect": [
+        {"check": "never_alone", "text": "10%", "with": ["previously", "5%"], "level": "must"},
+        {"check": "verbatim", "text": "Never restart the production database without approval from the incident commander.", "level": "must"},
+        {"check": "in_section", "text": "Never restart the production database", "sections": ["danger_zones"], "level": "must"},
+        {"check": "in_section", "text": "PagerDuty alerts the on-call engineer when the API error rate remains above 5%", "sections": ["monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "escalate to the relevant service owner", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "in_section", "text": "high CPU happens during scheduled reporting jobs", "sections": ["common_failures", "known_bad_days", "monitoring_observability"], "level": "must"},
+        {"check": "in_section", "text": "The operations team reviews Grafana dashboards daily", "sections": ["monitoring_observability", "operational_calendar", "ownership_escalation"], "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "flagged", "texts": ["weekend escalation"], "level": "should"},
+        {"check": "flagged", "texts": ["dashboard URL"], "level": "should"},
         {"check": "sourced", "level": "should"}
       ],
       "pdf": true

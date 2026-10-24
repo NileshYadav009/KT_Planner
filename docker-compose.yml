@@ -31,6 +31,7 @@ services:
       CONTINUUM_WORKER_CONCURRENCY: "1"
       CONTINUUM_SECRET_KEY: ${CONTINUUM_SECRET_KEY:?set CONTINUUM_SECRET_KEY}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
     volumes:
       - continuum-data:/app/data
     healthcheck:

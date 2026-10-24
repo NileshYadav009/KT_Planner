@@ -35,7 +35,20 @@ except Exception:
 
 import requests
 
-LLM_PROVIDER_NAME = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+def _provider_from_env() -> str:
+    """LLM_PROVIDER, or, when it is not set, the provider whose key is set.
+    The default used to be Gemini whatever the keys, so a container given
+    only GROQ_API_KEY (docker-compose.yml; .env is not in the image) ran
+    every KT without an LLM."""
+    name = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if name:
+        return name
+    if os.getenv("GROQ_API_KEY") and not os.getenv("GEMINI_API_KEY"):
+        return "groq"
+    return "gemini"
+
+
+LLM_PROVIDER_NAME = _provider_from_env()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # llama-3.3-70b-versatile has been decommissioned on Groq (confirmed live via
 # this account's /models list, 2026-09-05 — it's no longer in the catalog).

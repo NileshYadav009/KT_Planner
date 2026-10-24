@@ -245,6 +245,10 @@ def block_units(block: Dict[str, Any]) -> Optional[List[str]]:
     """The fact-bearing units of a block, in order; None for blocks that
     hold no transcript facts (diagrams, screenshots, code)."""
     kind = block.get("type")
+    if block.get("from_screen"):
+        # Read off the screen (screen_capture.py), with its time: no sentence
+        # says it.
+        return None
     if kind == "NarrativeBlock":
         return [str(p) for p in block.get("paragraphs") or []]
     if kind == "ChecklistBlock":
@@ -269,6 +273,12 @@ def block_units(block: Dict[str, Any]) -> Optional[List[str]]:
 # --------------------------------------------------------------------------
 # Matching
 # --------------------------------------------------------------------------
+
+# A field value that is a category, not words of the transcript.
+_CATEGORY = re.compile(r"^(?:high|medium|low|critical|yes|no)$", re.IGNORECASE)
+# A sentence quoted in a unit, as the document quotes speech.
+_QUOTED = re.compile(r"\u201c([^\u201d]{8,})\u201d")
+
 
 class _Index:
     def __init__(self, sentences: List[Dict[str, Any]], labels: Sequence[str] = (), system_name: str = ""):
@@ -314,6 +324,13 @@ class _Index:
     def sources_for(self, text: str) -> List[int]:
         """Indexes of the sentences that state `text`, or [] if none do."""
         found = self._sources_for(text)
+        if not found:
+            # A unit that quotes what was said around the document's own
+            # words ("Paging and alert routing, under Deployment & Rollback:
+            # “Pipeline failures generate Slack notifications.”"), or a list
+            # of names ("Kubernetes, Grafana, Redis, Helm"), each said in its
+            # own sentence: both were printed "no source" (the user's KTs).
+            found = self._sources_for_quotes(text) or self._sources_for_names(text)
         # A paragraph of several sentences: each cites the sentence that
         # states it. Matched as a whole, a polished paragraph stopped at
         # MAX_SOURCES_PER_UNIT sentences, or at one sentence that covered
@@ -331,6 +348,32 @@ class _Index:
                 return found
             chosen.update(got)
         return sorted(chosen | set(found))
+
+    def _sources_for_quotes(self, text: str) -> List[int]:
+        """The sentences quoted in `text`, when every quote is one."""
+        chosen: set = set()
+        quotes = _QUOTED.findall(text or "")
+        for quote in quotes:
+            got = self._sources_for(quote)
+            if not got:
+                return []
+            chosen.update(got)
+        return sorted(chosen)
+
+    def _sources_for_names(self, text: str) -> List[int]:
+        """A list of names (";" or "," between them): each item cites the
+        sentence that names it, when every item is a name of up to three words."""
+        items = [p.strip() for p in re.split(r"[;,]", text or "") if _content_keys(self._strip(p))]
+        # Up to three words a name: "application load balancer" (the user's recordings).
+        if len(items) < 2 or not all(len(_content_keys(self._strip(p))) <= 3 for p in items):
+            return []
+        chosen: set = set()
+        for item in items:
+            got = self._sources_for(item)
+            if not got:
+                return []
+            chosen.update(got)
+        return sorted(chosen)
 
     def _sources_for(self, text: str) -> List[int]:
         text = self._strip(text)
@@ -419,7 +462,7 @@ class _Index:
         chosen = set()
         for cell in cells:
             items = [p.strip() for p in re.split(r"[;,]", cell) if _content_keys(self._strip(p))]
-            if len(items) >= 2 and all(len(_content_keys(self._strip(p))) <= 2 for p in items):
+            if len(items) >= 2 and all(len(_content_keys(self._strip(p))) <= 3 for p in items):
                 # A list of names, each said in its own sentence ("GitHub
                 # Actions; Helm" was printed "no source"): each item cites the
                 # sentence that names it.
@@ -473,6 +516,15 @@ def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, 
                     refs.append([])
                     continue
                 found = index.sources_for_row(cells[position]) if cells else index.sources_for(text)
+                if not found and block.get("type") == "TechnologyGrid" and _CATEGORY.match(text.strip()):
+                    # A category chosen from what was said ("Business
+                    # criticality: High" from "It is business critical ...")
+                    # is sourced by the words its label names.
+                    row = (block.get("rows") or [{}])[position]
+                    label = str(row.get("label") or "")
+                    # Or by its head word: "mission critical" for "Business
+                    # criticality" (the user's recordings).
+                    found = index.sources_for(label) or index.sources_for(label.split()[-1] if label.split() else "")
                 stats["stated" if found else "unsourced"] += 1
                 if not found:
                     unsourced.append(position)

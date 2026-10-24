@@ -4,6 +4,7 @@ from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.common import (
     no_coverage_block,
+    not_shown_in,
     coverage_paragraphs as shared_coverage_paragraphs,
     tool_names_in,
 )
@@ -224,8 +225,8 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         # Anything captured for this section that didn't map to one of the
         # explicit fields above (e.g. free-form context) should still
         # surface, not silently vanish just because some fields matched.
-        used_texts = {row["value"] for row in knowledge_rows}
-        leftover = [p for p in _coverage_paragraphs(section) if p not in used_texts]
+        used_texts = [row["value"] for row in knowledge_rows]
+        leftover = not_shown_in(_coverage_paragraphs(section), used_texts)
         if leftover:
             blocks.append(build_narrative_block("Additional context", leftover))
 

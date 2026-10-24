@@ -622,7 +622,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         "danger_zones",
         [
             r"^(?:\W*(?:and|but|also|so|please|be\s+careful)\b[\s,:]*)*(?:never|do\s+not|don'?t)\s+"
-            r"(?!worry\b|hesitate\b|forget\b|mind\b)[a-z]+",
+            r"(?!worry\b|hesitate\b|forget\b|mind\b)"
+            # Not a caveat about the document ("Do not describe the estimate
+            # as a verified guarantee": dialogue._DOCUMENT_CAVEAT_RE).
+            r"(?!(?:describe|present|report|document|state|treat|label|record)\b[^.]*\bas\s+(?:an?\s+)?"
+            r"(?:verified|confirmed|guaranteed|guarantee|final|fact|certain|settled)\b)[a-z]+",
             # The same prohibition after a lead-in: "Watch out for the
             # nightly batch at 2 AM: do not restart Tomcat while it runs."
             r"[:;]\s*(?:please\s+)?(?:never|do\s+not|don'?t)\s+(?!worry\b|hesitate\b|forget\b|mind\b|panic\b)[a-z]+",
@@ -632,8 +636,11 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "common_failures",
         [
-            # A runbook step: "When invoices get stuck, check whether ..."
+            # A runbook step: "When invoices get stuck, check whether ...", or
+            # with who does it: "If CPU stays above 75% for five minutes, we
+            # should scale up." (went to Cost Optimization, a user's KT, 23 Oct).
             r"^(?:\W*(?:and|so|also)\s+)?(?:when|whenever|if)\s+[^,;]{4,120}?,\s*(?:then\s+|first\s+)?"
+            r"(?:(?:we|you)\s+(?:should|must|need\s+to|have\s+to|can|just)\s+(?:then\s+|first\s+|just\s+)?)?"
             r"(?:check|restart|run|scale|rotate|renew|redeploy|switch|verify|look\s+at|clear|flush|drain|"
             r"increase|bump|recreate)\b",
             # A failure introduced as such, and its fix.
@@ -684,9 +691,22 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # went to Ownership); a standby or replica region is DR.
             r"\b(?:run|runs|running|deployed|hosted|live|lives)\s+(?:only\s+)?in\s+(?:one|a\s+single|two|three|four|"
             r"\d+|multiple|several)\s+(?:[\w-]+\s+)?regions?\b",
-            r"\b(?:publish\w*|writ(?:e|es|ten|ing)|stor(?:e|es|ed|ing)|archiv\w*|reads?|reading|send\w*|stream\w*|"
+            # Not a permission: "the service account only has read access to
+            # BigQuery" said under "Security wise" went to Architecture (dev d02).
+            r"\b(?:publish\w*|writ(?:e|es|ten|ing)(?![\s-]+(?:access|permissions?|rights?|roles?|scopes?)\b)|"
+            r"stor(?:e|es|ed|ing)|archiv\w*|reads?(?![\s-]+(?:access|only|permissions?|rights?|roles?|scopes?)\b)|"
+            r"reading|send\w*|stream\w*|"
             r"push\w*|load\w*|ingest\w*|enqueue\w*)\b[^.;]{0,40}?\b(?:to|into|in|from|on)\s+(?:the\s+|a\s+|an\s+)?"
             r"(?:" + _DATA_COMPONENTS + r")\b",
+            # A component's size: "I think Redis is using 4 GB of memory" went
+            # to Common Failures for "memory" (a user's KT, 23 Oct). Not when
+            # the sentence is about running short ("hits 4 GB and gets killed").
+            r"^(?!.*\b(?:fail\w*|error\w*|crash\w*|oom\w*|evict\w*|leak\w*|spik\w*|exhaust\w*|runs?\s+out|fill\w*|"
+            r"full|hit|hits|exceed\w*|above|over|throttl\w*|slow\w*)\b)"
+            r".*\b(?:(?:is|are)\s+(?:using|allocated|sized\s+(?:at|with)|provisioned\s+with|configured\s+with|given)|"
+            r"uses|has|have|runs?\s+with|gets?|(?:memory|ram|disk|storage)\s+limit\s+(?:is|of))\s+"
+            r"(?:about\s+|around\s+|roughly\s+|approximately\s+|up\s+to\s+|~|an?\s+)?"
+            r"\d[\d.,]*\s*(?:gb|gib|mb|mib|tb|tib|vcpus?|cpus?|cores?)\b",
         ],
         0.95,
     ),
@@ -1184,7 +1204,10 @@ _DEPENDENT_CONTINUATION_RE = re.compile(
     # When or how often it happens: "Redis evicts sessions under memory
     # pressure. That happens during peak traffic." (adversarial matrix B05).
     r"|(?:this|that|it)\s+(?:usually\s+|mostly\s+|only\s+|typically\s+|normally\s+|often\s+|always\s+|also\s+)?"
-    r"(?:happens|happened|occurs|occurred|tends\s+to\s+happen|shows\s+up|kicks\s+in)\b)",
+    r"(?:happens|happened|occurs|occurred|tends\s+to\s+happen|shows\s+up|kicks\s+in)\b"
+    # What follows it: "When that happens the API keeps serving yesterday's
+    # recommendations, ..." (dev d02; it went to Monitoring).
+    r"|(?:when|whenever|if|once|after)\s+(?:this|that|it)\s+(?:happens|occurs|fails|breaks|goes\s+down)\b)",
     re.IGNORECASE,
 )
 # How far back an ordinal item may look for its enumeration head.

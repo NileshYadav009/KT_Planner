@@ -101,6 +101,23 @@ def test_fetcher_refuses_everything_but_data_uris():
             pdf_rendering.safe_url_fetcher(url)
 
 
+def test_fetcher_loads_only_the_bundled_font_files():
+    # The bundled Inter faces load by their exact paths; nothing else under
+    # the font folder or beside it does, however the URL is written.
+    from pathlib import Path
+
+    font = Path(pdf_rendering.FONT_DIR) / "Inter-Regular.ttf"
+    assert font.exists()
+    assert pdf_rendering._is_bundled_font(font.as_uri())
+    for url in ((Path(pdf_rendering.FONT_DIR) / "OFL.txt").as_uri(),
+                font.as_uri().replace("Inter-Regular.ttf", "../../pdf_rendering.py"),
+                font.as_uri().replace("file://", "file://evil.example"),
+                "http://example.com/Inter-Regular.ttf"):
+        assert not pdf_rendering._is_bundled_font(url), url
+        with pytest.raises(ValueError):
+            pdf_rendering.safe_url_fetcher(url)
+
+
 def test_image_block_only_embeds_captured_screenshots(tmp_path, monkeypatch):
     assets = tmp_path / "kt_assets"
     (assets / "job-1").mkdir(parents=True)
@@ -136,3 +153,17 @@ def test_export_route_uses_the_restricted_renderer(tmp_path):
         pipeline.JOB_QUEUE.pop(job_id, None)
     assert resp.status_code == 200
     assert _file_attachments(resp.content) == []
+
+
+def test_the_pdf_is_set_in_the_bundled_typeface():
+    # The stylesheet asked for Inter, which no machine had, so each PDF was set
+    # in whatever font the machine fell back to (24 Oct).
+    sections = [{"section_id": "system_overview", "section_title": "System Overview",
+                 "blocks": [{"type": "NarrativeBlock", "title": "Overview",
+                             "paragraphs": ["The **order service** takes customer orders."]}]}]
+    html = render_pdf_html(title="T", job_id="font-0001", rendered_sections=sections, coverage={}, date_str="d")
+    reader = pypdf.PdfReader(io.BytesIO(html_to_pdf_bytes(html)))
+    names = {str(font.get_object().get("/BaseFont")) for page in reader.pages
+             for font in (page["/Resources"].get("/Font") or {}).values()}
+    assert any(n.split("+")[-1] in ("Inter", "Inter-Regular") for n in names), names
+    assert any("Inter-Bold" in n or "Inter-SemiBold" in n for n in names), names

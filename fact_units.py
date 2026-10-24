@@ -45,6 +45,13 @@ _BOUNDARY_RE = re.compile(r",\s+(?:and|but|while|whereas)\s+|;\s+(?:and\s+|but\s
 _SUBORDINATE_OPENER_RE = re.compile(
     r"^\W*(?:if|when|whenever|once|after|before|unless|until|while|although|though|because|since|"
     r"as\s+soon\s+as|in\s+case|provided|whether|even\s+if)\b", re.IGNORECASE)
+# A condition opened mid-sentence and closed by the comma: "It is business
+# critical because if the platform becomes unavailable, customers cannot place
+# orders" was cut into "... because if the platform becomes unavailable" and
+# "customers cannot place orders" (the user's recordings, 24 Oct).
+_OPEN_CONDITION_RE = re.compile(
+    r"\b(?:because|since|so|and|but|that|as)\s+(?:if|when|whenever|unless|once|until|in\s+case)\b[^,;]*$",
+    re.IGNORECASE)
 
 # Words a piece cannot start with and still stand alone.
 _LEANING_OPENERS = {
@@ -323,6 +330,9 @@ def split_into_facts(text: str) -> List[Tuple[int, int]]:
     for atom_start, atom_end, separator in atoms[1:]:
         left = stripped[cur_start:cur_end]
         right = stripped[atom_start:atom_end]
+        if _OPEN_CONDITION_RE.search(left):
+            cur_end = atom_end
+            continue
         left_states = is_statement(left, opens_sentence=(cur_start == 0))
         bare_comma = separator.strip() == ","
         if left_states and not _is_imperative(left) and is_statement(right, inflected_only=bare_comma):

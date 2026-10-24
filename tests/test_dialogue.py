@@ -183,3 +183,73 @@ def test_a_question_is_dropped_only_when_its_answer_says_it_all():
                  "How many bookings is that? Around eight thousand a day, and Mondays are the busiest.",
                  "Is it encrypted at rest? Yes, with KMS keys we manage."]:
         assert drop(kept) == kept, kept
+
+
+@pytest.mark.parametrize("text,gap,unconfirmed", [
+    # The user's six KTs (24 Oct): every stated unknown and doubt was missed,
+    # so none reached the follow-up list.
+    ("I think Redis has a 4 GB memory limit, but this needs verification.", True, True),
+    ("We also use Redis for caching, but I am unsure whether its memory limit is 4 GB or 8 GB.", True, True),
+    ("Our recovery point objective is four hours, or at least that is what the previous document says.", True, True),
+    ("Do not describe the one-hour recovery estimate as a verified guarantee.", True, True),
+    ("The exact rollback revision and weekend escalation contact are still missing from our runbook.", True, False),
+    ("We do not have a confirmed rollback revision in the runbook, and the readiness probe timeout also needs "
+     "verification.", True, False),
+    ("Repository links and the emergency release contact still need to be added to the handover document.", True, False),
+    ("Regional disaster recovery testing has not been completed this year.", True, False),
+    ("The latest recovery test date is unavailable.", True, False),
+    ("The exact dashboard URL and incident communication channel have not been included in the handover "
+     "documentation.", True, False),
+    # Rules, approvals, outages and facts.
+    ("Every schema change needs verification by the DBA team.", False, False),
+    ("According to the runbook, restart the consumer first.", False, False),
+    ("The payments service is unavailable when the VPN drops.", False, False),
+    ("The current backup schedule and retention policy are confirmed.", False, False),
+])
+def test_more_ways_of_stating_an_unknown_or_a_doubt(text, gap, unconfirmed):
+    from dialogue import is_unconfirmed
+
+    assert is_gap_statement(text) is gap
+    assert is_unconfirmed(text) is unconfirmed
+
+
+def test_a_sentence_that_only_doubts_the_one_before_is_kept_with_it():
+    """The user's KTs (24 Oct): "That value needs confirmation ..." was filed
+    as a deployment step, away from the Redis limit it doubts."""
+    from context_mapper import AudioSegment, segment_sentences
+    from dialogue import doubts_statement_before
+
+    said = ("Deployments happen through GitHub Actions. We also use Redis for caching, but I am unsure whether its "
+            "memory limit is 4 GB or 8 GB. That value needs confirmation before updating the operational "
+            "documentation. Weekend escalation contacts are also missing from the runbook.")
+    units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert ("We also use Redis for caching, but I am unsure whether its memory limit is 4 GB or 8 GB. "
+            "That value needs confirmation before updating the operational documentation.") in units
+    assert "Weekend escalation contacts are also missing from the runbook." in units
+    # A doubt about its own claim, or a sentence with no doubt, stays apart.
+    assert not doubts_statement_before("The Platform team manages Kubernetes infrastructure.",
+                                       "I think Redis has a 4 GB memory limit, but this needs verification.")
+    assert not doubts_statement_before("The API runs on EKS.", "Deployments happen through GitHub Actions.")
+    # A sentence with a gap of its own (matrix C05): its "that" is itself.
+    assert not doubts_statement_before("I think the bucket holds about two million images, but I'm not completely "
+                                       "sure.", "We haven't documented the CDN cache rules yet, so that needs "
+                                       "confirmation.")
+
+
+def test_a_doubted_objective_does_not_fill_a_field():
+    # "RPO: four hours" was printed as settled, in Disaster Recovery and on the
+    # Quick Reference (the user's KTs, 24 Oct).
+    from dialogue import is_field_candidate
+
+    assert not is_field_candidate("Our recovery point objective is four hours, or at least that is what the "
+                                  "previous document says. I need to confirm whether this target is still valid.")
+    assert is_field_candidate("Our recovery point objective is four hours.")
+
+
+def test_an_instruction_about_the_document_is_not_content():
+    from dialogue import is_document_instruction
+
+    assert is_document_instruction("Please ensure these uncertainties are clearly identified instead of assuming "
+                                   "values.")
+    assert not is_document_instruction("Make sure the backups are tested every month.")
+    assert not is_document_instruction("Ensure the pods are healthy before switching traffic.")

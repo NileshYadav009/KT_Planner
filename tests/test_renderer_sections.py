@@ -805,6 +805,37 @@ def test_environments_omits_extra_notes_block_when_rows_cover_everything():
     assert not any(b.get("title") == "Additional environment notes" for b in result["blocks"])
 
 
+def test_a_reworded_restatement_of_a_table_row_is_not_an_extra_note():
+    # A user's KT with Groq (23 Oct): the table showed "We have three replicas
+    # in staging, but production runs five replicas." and the polish said it
+    # again under "Additional environment notes", reworded. A note that adds
+    # something (here the node pool) still shows.
+    section = {
+        "id": "environments", "title": "ENVIRONMENTS",
+        "fields": {"production_notes": {"value": "Production runs five replicas"},
+                   "staging_notes": {"value": "We have three replicas in staging, but production runs five replicas."}},
+        "coverage_content": ["Staging has three replicas, while production runs five replicas.",
+                             "Staging has three replicas and runs on a smaller node pool."],
+    }
+    result = render_environments(section)
+    extra = next(b for b in result["blocks"] if b.get("title") == "Additional environment notes")
+    assert extra["paragraphs"] == ["Staging has three replicas and runs on a smaller node pool."]
+
+
+def test_system_overview_does_not_repeat_a_field_row_as_additional_context():
+    from renderers.sections.system_overview import render as render_overview
+
+    section = {
+        "id": "system_overview", "title": "SYSTEM OVERVIEW",
+        "fields": {"system_in_5_lines": {"what_it_does": {"value": "The order service takes and tracks customer orders."}}},
+        "coverage_content": ["The order service tracks and takes customer orders.",
+                             "The service uses Redis for caching."],
+    }
+    blocks = render_overview(section)["blocks"]
+    extra = next(b for b in blocks if b.get("title") == "Additional context")
+    assert extra["paragraphs"] == ["The service uses Redis for caching."]
+
+
 def test_technology_summary_drops_a_generic_term_when_the_branded_one_is_present():
     # A transcript says the full product name once and the generic word
     # afterwards ("Azure Kubernetes Service ... Kubernetes workloads"), and

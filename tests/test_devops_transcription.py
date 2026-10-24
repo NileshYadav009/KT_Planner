@@ -16,6 +16,8 @@ on a routine basis.
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from devops_transcription import clean_transcript, apply_devops_corrections
@@ -675,3 +677,35 @@ def test_a_correction_is_not_cut_away_from_the_value_it_withdraws():
             "so it's PostgreSQL 16 now.")
     pieces = [both[a:b] for a, b in split_facts(both)]
     assert len(pieces) == 2 and "PostgreSQL 14" in pieces[1] and "PostgreSQL 16" in pieces[1]
+
+
+def test_roll_back_and_fail_over_said_as_verbs_stay_verbs():
+    # The user's KTs (24 Oct): "we roll back using the previous ECS task
+    # definition" was printed "we rollback using ...".
+    for said in ["If a release fails, we roll back using the previous ECS task definition.",
+                 "You can roll back to the previous revision.", "We fail over to the secondary region."]:
+        assert clean_transcript(said) == said
+    assert clean_transcript("Do a roll back if the canary fails.") == "Do a rollback if the canary fails."
+    assert clean_transcript("A fail over takes five minutes.") == "A failover takes five minutes."
+
+
+@pytest.mark.parametrize("heard,meant", [
+    # Whisper on the user's recordings (24 Oct).
+    ("If a pod enters CrashLuke backoff, verify the secret references.",
+     "If a pod enters CrashLoopBackOff, verify the secret references."),
+    ("Diplomats must be avoided during those periods.", "Deployments must be avoided during those periods."),
+    ("It handles validation, pavement orchestration and fulfillment.",
+     "It handles validation, payment orchestration and fulfillment."),
+    ("Traffic enters through application roadbalances.", "Traffic enters through application load balancers."),
+    ("Jenkins for CSD pipeline.", "Jenkins for CI/CD pipeline."),
+    ("Verify secret references before investigating application cold.",
+     "Verify secret references before investigating application code."),
+    ("Busy during Black Friday, Month and Sales and campaigns.", "Busy during Black Friday, month-end sales and campaigns."),
+    ("Check the cluster autoscalar configuration.", "Check the cluster autoscaler configuration."),
+    # Said as meant.
+    ("The diplomats met in Geneva.", "The diplomats met in Geneva."),
+    ("The pavement outside the office is wet.", "The pavement outside the office is wet."),
+    ("The application cold start takes two seconds.", "The application cold start takes two seconds."),
+])
+def test_mishearings_on_real_recordings_are_corrected_in_context(heard, meant):
+    assert clean_transcript(heard) == meant

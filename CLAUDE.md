@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aav is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aax is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -86,7 +86,7 @@ Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
 (about 4 min; see `evaluation/README.md`). Every placement or coverage change
 is measured on all five sets.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (64 short KTs,
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (70 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -135,7 +135,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X6 | Med | Two counts of one thing, or one setting with two values, with no correction, were shown apart with no flag | Fixed, §9aaq (`conflicts.find_value_conflicts`). No flag on any of the five corpora. |
 | X7 | Low | Names opening a sentence lost their spelling ("Orders-api", "Kubectl", "IOS"); spelled-out acronyms ("r d s") and split names ("post gres", "graph ana") were kept; call chatter ("my connection dropped") became a fact; "That happens during peak traffic" left its antecedent; a connection quoted a corrected sentence without its correction | Fixed, §9aaq |
 | X8 | Med | Contradictions of meaning ("Developers own deployment approvals" / "Only the release manager can approve production deployments"; "The service is public" / "Only private subnets can reach it"; "hourly" / "every six hours") are shown but not flagged | Fixed with an LLM, §9aar (`conflict_check`, one call per KT, about 400 tokens). Matrix D02-D04 flagged; no false flag on 8 matrix controls or the 11 dev and e2e KTs. Without an LLM they are still not flagged. Recall on real KTs is unmeasured: no visible KT has such a contradiction. |
-| X9 | Low | No LLM prompt says that transcript text is data, not instructions | Partly: `conflict_check` and the section polish (§9aat) say it. The others don't yet. Their outputs are checked (a section answer must be one of its candidates; polish and extraction values are grounded; a polish that drops a fragment is reverted), which limits an injection. Add the line to them at the next replay re-record, since a prompt change invalidates it. |
+| X9 | Low | No LLM prompt said that transcript text is data, not instructions | Fixed: the polish and `conflict_check` (§9aat), and the copy edit, extraction, repair, section check and field fill (§9aax). |
 | X10 | Med | The permit/forbid rule flagged any "allowed" and "forbidden" sentences with two shared words: false "Possible conflict" warnings in 3 of the 6 dev KTs ("we can always redeploy an older model" / "don't delete the old model versions") | Fixed, §9aar: the permitting sentence must name the forbidden action (its verb and two thirds of its words). Dev false flags 3 to 0; g07's Fridays rule still flagged. |
 | X11 | High | The brief's own correction examples: "We upgraded production to PostgreSQL 16 last night" (no marker), "I think we changed it to thirty days, but I'm not sure" (hedged), and "Actually, application ownership belongs to Payments, but Platform owns the cluster" (no number) left the old statement standing alone | Fixed, §9aas (`replaces_value_before` reads change statements; `corrects_statement_before`). Matrix A16, A18, A19. |
 | X12 | Med | "Staging uses 2000K, while production uses 3000K." was cut into two facts; "Production uses 3000K." lost what it measured and left Environments | Fixed, §9aas (`compares_one_value` keeps one value compared across environments as one statement). Matrix A17. |
@@ -156,3 +156,17 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X27 | Med | "We haven't documented ... yet, so that needs confirmation" and "I'm not completely sure" were not stated gaps; a guess then read "stated as not in place" | Fixed, §9aav: contractions, more doubt wording; uncertainty reported as unconfirmed (`dialogue.is_unconfirmed`) |
 | X28 | Low | "If a deployment fails, check the logs first ..." printed as "Pre-deployment checks" (semantic fill) | Fixed, §9aav |
 | X29 | Low | "GitHub Actions; Helm" (two names said in two sentences) marked "no source" | Fixed, §9aav (`evidence.sources_for_row`) |
+| X30 | High | A Docker container ran every KT without an LLM: compose passes only the Groq key, and `LLM_PROVIDER` defaulted to Gemini | Fixed, §9aaw (`llm_provider._provider_from_env`) |
+| X31 | Med | Without an LLM, "If CPU stays above 75% ..., we should scale up" went to Cost Optimization and "Redis is using 4 GB of memory" to Common Failures | Fixed, §9aaw (runbook rule allows "we should"; a component's size is Architecture) |
+| X32 | Low | With Groq, a reworded restatement of an Environments row was printed again as an "Additional environment notes" line | Fixed, §9aaw (`renderers.blocks.common.not_shown_in`) |
+| X33 | High | 13 ways of saying "not known yet" or "not sure" were not flagged (the user's six KTs) | Fixed, §9aax (`dialogue`) |
+| X34 | High | A value given on an old document's word ("RPO four hours, or at least that is what the previous document says") printed as the RPO, also on the Quick Reference | Fixed, §9aax (`_DOUBTED_SOURCE_RE`; RTO/RPO through `is_field_candidate`) |
+| X35 | Med | A sentence that only doubts the one before ("That value needs confirmation") was filed apart, as a deployment step | Fixed, §9aax (`dialogue.doubts_statement_before`) |
+| X36 | High | False "Conflicting guidance" on the Quick Reference: an environment after the count, an "outdated" count | Fixed, §9aax (`conflicts._counts`, `_PAST_RE`) |
+| X37 | Low | "we roll back" printed "we rollback"; "fail over" likewise | Fixed, §9aax (noun only) |
+| X38 | Low | Instructions about the document printed as a deployment step or a "never" rule | Fixed, §9aax |
+| X39 | Low | "no source" on name lists, quotes, category values and screen links | Fixed, §9aax (`knowledge/evidence.py`) |
+| X40 | Low | One screen URL listed once per dashboard tab (ten times) | Fixed, §9aax (`screen_capture`) |
+| X41 | Med | A condition cut from its sentence ("because if the platform becomes unavailable."); a greeting left under System Overview | Fixed, §9aax (`fact_units`, `copyedit.problems`, `dialogue.is_greeting_only`) |
+| X42 | Med | Eight Whisper mishearings on the user's recordings ("Diplomats must be avoided", "pavement orchestration", ...) | Fixed, §9aax (gated corrections) |
+| T2 | Product | Titles dropped "platform"/"system" from names of more than one word ("Online Grocery") | Fixed, §9aax, the user's decision: the name as said ("Online Grocery Platform"); a capitalised proper name stands alone ("CorePay", "Bank of the West") (`field_populator.name_with_descriptor`) |

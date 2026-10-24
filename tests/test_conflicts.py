@@ -274,3 +274,15 @@ def test_document_flags_the_contradictory_rule(contradictory_result):
     assert any("Fridays is fine" in w and "Never deploy on Fridays" in w for w in warnings)
     gaps = next(s for s in contradictory_result["knowledge_object"]["sections"] if s["id"] == "kt_coverage")["_knowledge_gaps"]
     assert any(g.startswith("Possible conflict") for g in gaps)
+
+
+def test_an_environment_after_the_count_or_an_outdated_count_is_not_a_conflict():
+    # The user's KTs (24 Oct): both pairs were on the Quick Reference as
+    # "Conflicting guidance, confirm first".
+    from conflicts import find_value_conflicts
+
+    said = "We have three replicas in staging and five in production."
+    assert find_value_conflicts([said, "The current production configuration is five replicas."]) == []
+    assert find_value_conflicts([said, "Earlier, someone mentioned four production replicas, but that information "
+                                       "is outdated."]) == []
+    assert find_value_conflicts(["Production runs three replicas.", "Production runs five replicas."])

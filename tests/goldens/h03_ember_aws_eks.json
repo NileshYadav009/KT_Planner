@@ -63,7 +63,7 @@
   },
   {
    "id": "F08",
-   "quote": "To rollback you revert the commit",
+   "quote": "To roll back you revert the commit",
    "in": [
     "deployment_and_rollback"
    ]

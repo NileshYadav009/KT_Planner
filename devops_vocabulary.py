@@ -343,8 +343,11 @@ DEVOPS_VOCABULARY = {
     "availability": ["availability", "avail-ability"],
     "scalability": ["scalability", "scal-ability"],
     "reliability": ["reliability", "re-lie-ability"],
-    "failover": ["failover", "fail-over", "fail over"],
-    "rollback": ["rollback", "roll-back", "roll back"],
+    # Not "fail over" or "roll back": written apart they are the verb ("we
+    # roll back using the previous task definition"), not a misspelt noun
+    # (devops_transcription.PHRASE_CORRECTIONS rewrites "a roll back").
+    "failover": ["failover", "fail-over"],
+    "rollback": ["rollback", "roll-back"],
     "infrastructure": ["infrastructure", "infra-structure"],
     "restart": ["restart", "re-start"],
     "scaling": ["scaling", "scal-ing"],

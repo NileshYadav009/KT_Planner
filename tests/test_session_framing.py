@@ -185,8 +185,12 @@ def test_an_explanation_that_says_what_the_system_does_stays():
     # Titled "Today I'll Explain Our Order" and "Today I'll Walk You Through Our Billing" (matrix T03, B10).
     ("Hi team, today I'll explain our order service. It runs on AWS EKS.", "Order Service"),
     ("Hi everyone, today I'll walk you through our billing platform.", "Billing Platform"),
-    # Two words or a name the speaker capitalised: the descriptor word is not added.
-    ("Today I'm handing over the appointment booking system for our clinics.", "Appointment Booking"),
+    # The word that ends the name stays, as said (the user's decision, 24 Oct), except
+    # after a proper name the speaker capitalised.
+    ("Today I'm handing over the appointment booking system for our clinics.", "Appointment Booking System"),
+    ("I am handing over our online grocery platform.", "Online Grocery Platform"),
+    ("Hello everyone. Today, I will be handing over the AWS e-commerce platform.", "AWS E-Commerce Platform"),
+    ("The system name is Cloud Native Order Processing Platform.", "Cloud Native Order Processing Platform"),
     ("Today I'll explain the CorePay platform.", "CorePay"),
     ("The data comes from the Bank of the West service.", "Bank of the West"),
 ])
@@ -194,3 +198,13 @@ def test_the_kt_is_named_after_the_system_not_the_words_that_introduce_it(openin
     from knowledge.knowledge_builder import _infer_system_name
 
     assert _infer_system_name({"system_overview": {"content": [opening]}}) == name
+
+
+def test_a_greeting_left_on_its_own_is_not_content():
+    # The user's recordings (24 Oct): the copy edit split "Hi everyone, today I
+    # will be handing over the AWS e-commerce platform." in two, and "Hello
+    # everyone." was printed under System Overview.
+    from dialogue import without_session_framing
+
+    assert without_session_framing("Hello everyone. Today, I will be handing over the AWS e-commerce platform.") == ""
+    assert without_session_framing("Hello everyone. The platform runs on EKS.") == "The platform runs on EKS."

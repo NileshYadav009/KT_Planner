@@ -76,7 +76,7 @@
   },
   {
    "id": "F10",
-   "quote": "rollback by hand from the CodeDeploy console",
+   "quote": "roll back by hand from the CodeDeploy console",
    "in": [
     "deployment_and_rollback"
    ]

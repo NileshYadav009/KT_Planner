@@ -3,6 +3,7 @@ from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.common import (
     no_coverage_block,
+    not_shown_in,
     coverage_paragraphs as shared_coverage_paragraphs,
 )
 
@@ -83,8 +84,8 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         # dropped outright on a live run, losing the existence of the dev
         # and QA environments entirely. Anything captured for this section
         # that isn't already shown in a row still surfaces here.
-        shown = {row["Known characteristics"] for row in rows}
-        leftover = [p for p in _coverage_paragraphs(section) if p not in shown]
+        shown = [row["Known characteristics"] for row in rows]
+        leftover = not_shown_in(_coverage_paragraphs(section), shown)
         if leftover:
             blocks.append(build_narrative_block("Additional environment notes", leftover))
 
