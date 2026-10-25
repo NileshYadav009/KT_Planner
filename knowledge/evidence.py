@@ -199,6 +199,11 @@ def transcript_sentences(transcript: str, segments: Optional[Sequence[Dict[str, 
         text, spans = "", []
         for seg in segments:
             part = str(seg.get("text") or "").strip()
+            # A pasted turn ("Meera: ...") is quoted without its label: the
+            # Sources list shows who said it.
+            speaker = str(seg.get("speaker") or "")
+            if speaker and part.startswith(speaker + ":"):
+                part = part[len(speaker) + 1:].strip()
             if not part:
                 continue
             if text:

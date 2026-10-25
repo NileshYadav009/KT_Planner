@@ -262,3 +262,15 @@ def test_something_still_undocumented_is_a_stated_gap():
                             "undocumented.")
     assert is_gap_statement("The failover runbook remains untested.")
     assert not is_gap_statement("Recovery testing is performed twice a year.")
+
+
+def test_a_no_that_gives_the_right_value_is_a_correction_not_a_gap():
+    # A three-person test (25 Oct): "So it stores invoices in MySQL? No, it's
+    # PostgreSQL on Amazon RDS." made Architecture "stated as not in place".
+    from dialogue import is_gap_statement
+
+    assert not is_gap_statement("So it stores invoices in MySQL? No, it's PostgreSQL on Amazon RDS.")
+    assert not is_gap_statement("So it runs on EKS? No, it's on ECS now.")
+    assert is_gap_statement("Is there a DR plan? No.")
+    assert is_gap_statement("Do we have a runbook? No, there isn't one.")
+    assert is_gap_statement("Is it encrypted? No, not yet.")

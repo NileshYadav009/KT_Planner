@@ -929,20 +929,27 @@ REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)(?:\s+\1\b)+", re.IGNORECASE)
 REPEATED_PHRASE_PATTERN = re.compile(r"\b((?:\w+\s+){1,12}\w+)\s+\1\b", re.IGNORECASE)
 
 
-def remove_fillers(text: str) -> str:
+def remove_fillers(text: str, keep_tag_questions: bool = False) -> str:
     """Remove spoken filler without deleting meaningful uses of the same words.
 
     "So", "like", "well" and "right" are content words far more often than
     fillers in a technical walkthrough, so they are only dropped in discourse
     positions (sentence-initial or comma-delimited). See _LEADING_FILLER_RE.
+
+    `keep_tag_questions`: in a conversation, "So it stores invoices in MySQL,
+    right?" asks; it keeps its question mark (the tag itself still goes).
     """
     if not text:
         return text
     cleaned = _ANYWHERE_FILLER_RE.sub("", text)
     cleaned = _AGREEMENT_FILLER_RE.sub("", cleaned)
     cleaned = _TURN_FILLER_RE.sub(". ", cleaned)
-    # "We use Kafka, right?" is a statement with a tag, not a question.
-    cleaned = _TAG_QUESTION_RE.sub(".", cleaned)
+    # "We use Kafka, right?" is a statement with a tag, not a question, when
+    # one person is talking. In a conversation it asks the other person, who
+    # may answer "No, ...": as a statement it was printed as a fact (a
+    # three-person test, 25 Oct).
+    if not keep_tag_questions:
+        cleaned = _TAG_QUESTION_RE.sub(".", cleaned)
     cleaned = _TRAILING_TAG_RE.sub("", cleaned)
     previous = None
     while previous != cleaned:
@@ -1026,8 +1033,11 @@ def join_spelled_acronyms(text: str) -> str:
     return _SPELLED_LETTERS_RE.sub(_join, text or "")
 
 
-def clean_transcript(text: str) -> str:
+def clean_transcript(text: str, keep_tag_questions: Optional[bool] = None) -> str:
     """Normalize transcript before semantic classification.
+
+    `keep_tag_questions` (remove_fillers): None decides from the text, true
+    for a conversation with speaker labels ("Meera: ...").
 
     Steps:
     1. Normalize whitespace
@@ -1058,7 +1068,10 @@ def clean_transcript(text: str) -> str:
 
     normalized = join_spelled_acronyms(normalized)
     normalized, _ = apply_devops_corrections(normalized)
-    normalized = remove_fillers(normalized)
+    if keep_tag_questions is None:
+        from dialogue import speaker_labels
+        keep_tag_questions = bool(speaker_labels(text))
+    normalized = remove_fillers(normalized, keep_tag_questions)
     normalized = remove_repeated_words(normalized)
     normalized = remove_repeated_phrases(normalized)
     normalized, _ = apply_devops_corrections(normalized)

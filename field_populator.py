@@ -549,16 +549,31 @@ _MOVED_OFF_RE = re.compile(r"\b(?:from|off|away\s+from|replac(?:e|es|ing)|instea
 _CLAUSE_START_RE = re.compile(r"[.;!?]\s+|,\s+(?:and|but|while|whereas|so)\s+|\s+but\s+", re.IGNORECASE)
 
 
+# A technology said to be the past: "MySQL was the old system".
+_WAS_OLD_RE = re.compile(r"^\s*(?:was|were)\s+(?:the\s+|our\s+)?(?:old|previous|former|legacy|original)\b|"
+                         r"^\s*used\s+to\s+be\b", re.IGNORECASE)
+# A question the next speaker answers "No": its guess is not the system.
+_ANSWERED_NO_RE = re.compile(r"^\s*(?:[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s*)?(?:no|nope|not\s+quite)\b",
+                             re.IGNORECASE)
+
+
 def current_tool_mentions(text: str) -> List[str]:
     """The technologies `text` names as part of the system now: PATTERN_
     EXTRACTORS["tools"] matches, less those named after a plan or a guess in
-    their clause ("planning to migrate to X", "might be using X")."""
+    their clause ("planning to migrate to X", "might be using X"), said to be
+    the old one ("MySQL was the old system"), or guessed in a question the
+    answer turns down ("So it stores invoices in MySQL? No, it's PostgreSQL")."""
     text = text or ""
     out = []
-    for start, _, name in PATTERN_EXTRACTORS["tools"].spans(text):
+    for start, end, name in PATTERN_EXTRACTORS["tools"].spans(text):
         head = text[:start]
         lead = head[max((m.end() for m in _CLAUSE_START_RE.finditer(head)), default=0):]
         if _NOT_YET_RE.search(lead) and not _MOVED_OFF_RE.search(lead):
+            continue
+        if _WAS_OLD_RE.match(text[end:]):
+            continue
+        asked = text.find("?", end)
+        if asked != -1 and not re.search(r"[.!]", text[end:asked]) and _ANSWERED_NO_RE.match(text[asked + 1:]):
             continue
         out.append(name)
     return out

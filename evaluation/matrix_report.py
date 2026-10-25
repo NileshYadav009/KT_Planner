@@ -95,6 +95,8 @@ lines = [
     "least four of them).",
     "R01-R05 come from the 25 Oct review of the e2e KTs' PDFs; their checks were written",
     "after the defects were seen, and their “before” is the code before the fixes (run r_base).",
+    "S01-S03 (conversations) were written with the speaker-roles change; their “before” is the",
+    "code before it (run s_base).",
     "",
     "| ID | Category | Scenario | Expected | Before | After | Regression test |",
     "|---|---|---|---|---|---|---|",

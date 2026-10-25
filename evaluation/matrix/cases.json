@@ -1166,6 +1166,51 @@
         {"check": "shows", "text": "Environments (optional): ask whether it applies", "level": "must"},
         {"check": "gaps_consistent", "level": "must"}
       ]
+    },
+    {
+      "id": "S01", "category": "S conversation", "title": "Three people: small talk, the receiver's guess and claim the giver corrects, the giver's value the receiver corrects and he agrees to, a challenge nobody answers, a repeat request (a three-person test, 25 Oct)",
+      "regression": "tests/test_speaker_roles.py; tests/test_dialogue.py::test_a_no_that_gives_the_right_value_is_a_correction_not_a_gap; tests/test_field_populator.py::test_a_tool_turned_down_or_said_to_be_the_old_one_is_not_current",
+      "transcript": [
+        "Arjun: Morning both. Before we start, how was the offsite?\nMeera: Good, the food was great.\nTom: Ha, too much coffee though.\nArjun: Okay, let's begin. This is Ledgerline, our invoicing service on Amazon EKS.\nMeera: So it stores invoices in MySQL, right?\nArjun: No, it's PostgreSQL on Amazon RDS. MySQL was the old system.\nMeera: And I heard backups are kept for 30 days.\nArjun: Actually, backups are kept for 14 days, not 30.\nArjun: The cluster runs three nodes.\nMeera: I think it's five now, they scaled it last month.\nArjun: Oh right, yes, it's five nodes since the scaling.\nArjun: Alerts go to Slack.\nMeera: Isn't it PagerDuty now?\nTom: Let's not go down that path now, we're short on time.\nArjun: Never run the reconciliation job twice in one day, it double charges customers.\nMeera: Sorry, my connection dropped, can you repeat that?\nArjun: Never run the reconciliation job twice in one day.\nTom: Also, Meera, you'll own the on-call rotation from next month."
+      ],
+      "expect": [
+        {"check": "absent_re", "pattern": "offsite|food was great|too much coffee|morning both|let.s begin", "level": "must"},
+        {"check": "absent_re", "pattern": "stores invoices in mysql\\.", "level": "must"},
+        {"check": "absent_re", "pattern": "database[^.]*mysql", "level": "must"},
+        {"check": "absent_re", "pattern": "heard backups are kept for 30 days", "level": "must"},
+        {"check": "shows", "text": "backups are kept for 14 days", "level": "must"},
+        {"check": "absent_re", "pattern": "runs three nodes", "level": "must"},
+        {"check": "shows", "text": "five nodes", "level": "must"},
+        {"check": "absent_re", "pattern": "alerting pagerduty", "level": "must"},
+        {"check": "flagged", "texts": ["Alerts go to Slack", "PagerDuty"], "level": "must"},
+        {"check": "absent_re", "pattern": "repeat that|short on time", "level": "must"},
+        {"check": "verbatim", "text": "Never run the reconciliation job twice in one day", "level": "must"},
+        {"check": "absent_re", "pattern": "who to page or escalate to.*on-call rotation", "level": "must"}
+      ]
+    },
+    {
+      "id": "S02", "category": "S conversation", "title": "A receiver's statement the giver never answers is listed to confirm, not shown as a fact",
+      "regression": "tests/test_speaker_roles.py::test_what_the_receiver_says_alone_is_listed_to_confirm_not_shown",
+      "transcript": [
+        "Arjun: This is Paystream, our payouts service on Cloud Run. Payouts run every Thursday night.\nMeera: The payout job also exports a report to BigQuery.\nArjun: Deploys go through Cloud Build, and production needs an approval.\nMeera: What happens if a payout fails?\nArjun: It goes to the finance ops queue and they fix it by hand."
+      ],
+      "expect": [
+        {"check": "absent_re", "pattern": "^(?!said by).*also exports a report to bigquery", "level": "must"},
+        {"check": "shows", "text": "Said by Meera, not confirmed by Arjun", "level": "must"},
+        {"check": "shows", "text": "finance ops queue", "level": "must"}
+      ]
+    },
+    {
+      "id": "S03", "category": "S conversation", "title": "One person talking about a food-delivery business: its domain words are not small talk",
+      "regression": "tests/test_speaker_roles.py::test_small_talk_and_asking_to_repeat_are_left_out_but_business_words_are_not",
+      "transcript": [
+        "Hi team, today I'm handing over QuickBite, our food delivery platform. Demand increases sharply during weekends and dinner hours. We process about two million events a day, more on bank holidays."
+      ],
+      "expect": [
+        {"check": "shows", "text": "food delivery platform", "level": "must"},
+        {"check": "shows", "text": "weekends and dinner hours", "level": "must"},
+        {"check": "shows", "text": "more on bank holidays", "level": "must"}
+      ]
     }
   ]
 }

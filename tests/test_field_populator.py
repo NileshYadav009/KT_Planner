@@ -868,3 +868,13 @@ def test_a_check_after_a_failure_is_not_a_pre_deployment_check():
     # A field about what happens after a failure still takes it.
     rollback = {"id": "rollback_scenarios", "label": "Rollback scenarios", "type": "text"}
     assert _extract_by_semantic(rollback, [after_failure], None) == after_failure
+
+
+def test_a_tool_turned_down_or_said_to_be_the_old_one_is_not_current():
+    # A three-person test (25 Oct): MySQL was listed as the database after the
+    # giver said "No, it's PostgreSQL" and "MySQL was the old system".
+    from field_populator import current_tool_mentions
+
+    assert "MySQL" not in current_tool_mentions("So it stores invoices in MySQL? No, it's PostgreSQL on Amazon RDS.")
+    assert current_tool_mentions("MySQL was the old system.") == []
+    assert current_tool_mentions("We use MySQL for reports.") == ["MySQL"]

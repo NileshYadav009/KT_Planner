@@ -347,3 +347,14 @@ def test_a_rollback_row_says_when_no_procedure_was_given():
     assert rows == [{"Situation": "A release misbehaves (roll back)",
                      "What to do": "Rolling back is usually quick. No rollback procedure was stated in the KT; "
                                    "ask the outgoing owner.", "Source": "Deployment & Rollback"}]
+
+
+def test_owning_the_on_call_rotation_is_not_who_to_page():
+    # "Meera, you'll own the on-call rotation from next month" was carded as
+    # who to page: "call Rotation" matched with the pattern ignoring case.
+    rows = _card(_section("ownership_escalation", "Ownership",
+                          ["Also, Meera, you'll own the on-call rotation from next month."]))
+    assert all(r["Situation"] != "Who to page or escalate to" for r in rows)
+    rows = _card(_section("ownership_escalation", "Ownership",
+                          ["If production is down, call Maria, the engineering manager."]))
+    assert rows[0]["Situation"] == "Who to page or escalate to"

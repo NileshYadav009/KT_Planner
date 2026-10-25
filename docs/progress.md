@@ -1789,3 +1789,18 @@ Results:
 - **With Groq** (as the app runs), 321 of 341 (94%) on unseen KTs. A wider
   Groq check reached 322 for 37% more tokens, so it stays off.
 - Groq used: 71 calls, about 132k tokens.
+
+## Conversations: who is handing over (audit §9abb, 25 Oct)
+
+- **Who said it:** in a pasted conversation ("Meera: ...") each turn keeps
+  its speaker, and Sources say who said each sentence.
+- **Facts come from the giver:** the person who states the most is taken as
+  handing over, and the KT page lets you choose someone else, which rebuilds
+  the document as a new version.
+- **The receiver's words count only when the giver confirms them.** A guess
+  the giver turns down, or a value he corrects, is left out; a correction he
+  agrees to replaces what he said; a question nobody answers flags his
+  sentence to confirm; anything else the receiver says is listed to confirm.
+- **Small talk** ("how was the offsite?"), "can you repeat that?" and
+  "let's move on" are left out; every left-out line is recorded with why.
+- Accuracy unchanged; no Groq quota used.

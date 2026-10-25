@@ -6194,6 +6194,65 @@ cost so far.
 - **Matrix:** 77 cases, 266/266 must, 44/49 should, unchanged.
 - **Tests:** the routing, topic, coverage, continuation, clause, fact, dialogue and e2e files, 237 passed and 1 skipped (the online learning KT's replay: no recorded answers); the three new rule tests pass.
 
+### 9abb. Conversations: who is handing over, and what counts (25 Oct)
+
+The user asked what happens when two or three people talk in a KT: small
+talk, the receiver's questions and wrong statements, the giver correcting
+the receiver and the receiver correcting the giver, and how to keep to the
+giver's information. A three-person transcript (giver, receiver, manager)
+was run through the pipeline first, with no LLM.
+
+**What it showed (before).** Everything anyone said was a fact. The offsite
+small talk described the Production environment; "So it stores invoices in
+MySQL, right?" printed as "It stores invoices in MySQL." (the cleaner removed
+the tag question, then the clause was cut into a statement) after the giver
+said "No, it's PostgreSQL", and MySQL was listed as the database; the
+receiver's "30 days" stood beside the giver's "14 days"; the giver's "three
+nodes" stood after he agreed it was five; an unanswered "Isn't it PagerDuty
+now?" made PagerDuty the alerting and on-call tool; "you'll own the on-call
+rotation" was carded as who to page. Pasted speaker labels were never
+recorded, so Sources named nobody.
+
+**Design (the user chose detection with a way to change it).** Each turn
+keeps its speaker (`turn_segments`; recordings already had diarised
+speakers). With two or more speakers, roles are detected: the giver states
+the most, a receiver mostly asks, anyone else (a colleague, a manager) is a
+source like the giver. Then (`apply_roles`, before questions are paired with
+answers): a question goes with the answer a trusted speaker gives it; a
+receiver's statement corrected by the giver is left out; one the giver
+agrees to counts, and the giver's earlier value on that point is taken back;
+an unanswered challenge flags the giver's sentence ("Questioned in the
+session, not answered"); a receiver's statement nobody answers is listed to
+confirm; small talk, repeat requests and "let's move on" are left out. Every
+left-out sentence is in the facts ledger with its reason. The document
+names the giver; the KT page shows the detected giver and lets the user
+choose another (`POST /kt/{job_id}/giver`), which rebuilds the document as a
+new version (the earlier one stays in History; a signed KT cannot be
+rebuilt). Ledger X68 to X73 and T3; corrections between speakers are in
+`docs/CORRECTIONS.md`.
+
+**Mistakes found on the way.** A word list for small talk took business
+words: a food-delivery KT lost "our food delivery platform" and "demand ...
+during weekends and dinner hours", and a toll KT "two million events a day,
+more on bank holidays" (accuracy run spk1). Small talk is now recognised by
+its phrasing. "Fourteen" was missing from the number words, so a confirmed
+correction to fourteen days did not take back the old value (unit test).
+
+**Results (no LLM; nothing sent to Groq).**
+
+- The three-person transcript (matrix S01-S03): 7 of 18 must checks on the old code, 18 of 18 after; the whole matrix 80 cases, 284/284 must, 44/49 should.
+- Accuracy unchanged on every set (spk2): tuning 534/534, dev 223/224,
+  holdouts 87/95, blind 97/114, blind b04-b07 112/132, e2e 6/6 at 100%. The
+  visible conversations (dev d02, d05) detect the giver and receiver
+  correctly (Priya and Marcus, with Dan a source; Owen and Nadia).
+- Tests: 19 files including the new tests/test_speaker_roles.py and tests/test_giver_choice.py (the API: detect, choose another person, rebuild as version 2, back to detecting), the sessions, auth and e2e files: 566 passed, 1 skipped (the online learning KT's replay: no recorded answers).
+
+**Limits.** Roles are judged from what each speaker says; a receiver who
+states more than they ask is a source, and the user can change the giver
+but not mark a receiver. Diarised speakers are "Speaker 1, 2, ...", so the
+page names them that way. A statement and its agreement must be within the
+next three turns.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

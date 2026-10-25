@@ -1469,6 +1469,23 @@
       </div>
     </div>
 
+    <!-- Who is handing over (speaker_roles): shown for a conversation KT -->
+    <div class="rp-card" id="giverCard" hidden>
+      <div class="rp-card-header">
+        <div class="rp-card-icon rp-icon-amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <span class="rp-card-title">Who is handing over</span>
+      </div>
+      <div class="rp-card-body">
+        <p id="giverSummary" style="font-size:12px;color:var(--text2);margin:0 0 8px;line-height:1.5"></p>
+        <label for="giverSelect" style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Handing over</label>
+        <select id="giverSelect" style="width:100%;font-size:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:6px 8px;box-sizing:border-box"></select>
+        <button id="giverApplyBtn" class="btn btn-ghost btn-block" style="margin-top:6px">Rebuild with this person</button>
+        <p id="giverStatus" aria-live="polite" style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5"></p>
+      </div>
+    </div>
+
     <!-- Visual Evidence card -->
     <div class="rp-card">
       <div class="rp-card-header">
@@ -2628,6 +2645,7 @@ function pollJobStatus(jobId){
         renderSummary(data);
         renderJobWarnings(data);
         loadSessions(jobId);
+        renderGiver(jobId, data);
         loadHistory();
         transcriptEl.textContent=data.transcript||'(none)';
         renderCoverage(data.coverage||{});
@@ -3198,6 +3216,69 @@ document.getElementById('addSessionBtn')?.addEventListener('click', async () => 
   document.getElementById('sessionFile').value = '';
   showToast('Session queued: the document is rebuilt from every session');
   loadSessions(jobId);
+});
+
+/* Who is handing over (speaker_roles). In a conversation the giver is
+   detected (the person who states the most); what the receiver said counts
+   only where the giver confirmed it. Choosing another person rebuilds the
+   document as a new version. */
+let giverTimer = null;
+function renderGiver(jobId, data){
+  const card = document.getElementById('giverCard');
+  const roles = (data && data.speaker_roles) || null;
+  if(!card) return;
+  if(!roles || !(roles.speakers || []).length){ card.hidden = true; return; }
+  card.hidden = false;
+  const receivers = roles.receivers || [];
+  document.getElementById('giverSummary').textContent =
+    `${roles.giver} is handing over (${roles.detected ? 'detected: states the most' : 'chosen'}).`
+    + (receivers.length ? ` What ${receivers.join(' and ')} said counts only where ${roles.giver} confirmed it; the rest is listed to confirm.` : '');
+  const select = document.getElementById('giverSelect');
+  select.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = ''; auto.textContent = 'Detect automatically';
+  select.appendChild(auto);
+  for(const s of roles.speakers){
+    const opt = document.createElement('option');
+    opt.value = s.name; opt.textContent = s.name;
+    select.appendChild(opt);
+  }
+  select.value = data.giver ? data.giver : '';
+  document.getElementById('giverStatus').textContent = data.giver_error || '';
+}
+async function waitForGiver(jobId){
+  clearTimeout(giverTimer);
+  try{
+    const resp = await fetch(`/status/${encodeURIComponent(jobId)}`);
+    if(resp.ok){
+      const data = await resp.json();
+      if(data.giver_pending){ giverTimer = setTimeout(() => waitForGiver(jobId), 4000); return; }
+      document.getElementById('giverApplyBtn').disabled = false;
+      if(data.giver_error){ document.getElementById('giverStatus').textContent = data.giver_error; return; }
+      showToast('Document rebuilt');
+      pollJobStatus(jobId);
+      return;
+    }
+  }catch(e){}
+  giverTimer = setTimeout(() => waitForGiver(jobId), 6000);
+}
+document.getElementById('giverApplyBtn')?.addEventListener('click', async () => {
+  const jobId = currentJobId;
+  if(!jobId) return;
+  const value = document.getElementById('giverSelect').value;
+  let resp;
+  try{
+    resp = await fetch(`/kt/${encodeURIComponent(jobId)}/giver`, {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({giver: value || null})});
+  }catch(e){ showToast('Could not rebuild the document', 6000, 'error'); return; }
+  if(!resp.ok){
+    const detail = (await resp.json().catch(() => ({}))).detail;
+    showToast(detail || `Could not rebuild the document (HTTP ${resp.status})`, 8000, 'error');
+    return;
+  }
+  document.getElementById('giverApplyBtn').disabled = true;
+  document.getElementById('giverStatus').textContent = 'Rebuilding the document; the earlier version stays in History.';
+  waitForGiver(jobId);
 });
 
 document.getElementById('downloadMdBtn').addEventListener('click',()=>downloadKtFile('markdown'));

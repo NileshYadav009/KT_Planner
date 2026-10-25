@@ -960,6 +960,18 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
     knowledge_object["_conflicts"].extend(
         {"section_id": sentence_section.get(a), "a": a, "b": b, "kind": "unconfirmed"}
         for a, b in find_unconfirmed_changes(units))
+    # A receiver who questioned what the giver had just said, and got no
+    # answer ("Alerts go to Slack." / "Isn't it PagerDuty now?"): the giver's
+    # statement stands, flagged to confirm (speaker_roles).
+    for finding in knowledge_object.get("_dialogue_findings") or []:
+        if finding.get("kind") != "challenged":
+            continue
+        about = finding.get("about") or ""
+        key = _dedup_normalize(about)
+        section = sentence_section.get(about) or next(
+            (sid for text, sid in sentence_section.items() if key and key in _dedup_normalize(text)), None)
+        knowledge_object["_conflicts"].append({"section_id": section, "a": about, "b": finding.get("text") or "",
+                                               "kind": "challenged", "by": finding.get("by")})
     return knowledge_object
 
 
@@ -994,14 +1006,18 @@ def attach_conflict_warnings(rendered_sections: List[Dict[str, Any]], knowledge_
     """Show each contradiction found by apply_conflicts() as a warning in the
     section where it was said."""
     titles = {"unconfirmed": "Unconfirmed change — confirm with the outgoing owner",
+              "challenged": "Questioned in the session, not answered — confirm with the outgoing owner",
               None: "Possible conflict — confirm with the outgoing owner"}
     by_section: Dict[Tuple[Any, Any], List[str]] = {}
     for c in knowledge_object.get("_conflicts") or []:
         kind = c.get("kind") if c.get("kind") in titles else None
-        joiner = " then " if kind == "unconfirmed" else " but also "
-        by_section.setdefault((c.get("section_id"), kind), []).append(f"“{c['a']}”{joiner}“{c['b']}”")
+        if kind == "challenged":
+            line = f"“{c['a']}”, but {c.get('by') or 'the receiver'} asked “{c['b']}”"
+        else:
+            line = f"“{c['a']}”{' then ' if kind == 'unconfirmed' else ' but also '}“{c['b']}”"
+        by_section.setdefault((c.get("section_id"), kind), []).append(line)
     for sec in rendered_sections or []:
-        for kind in (None, "unconfirmed"):
+        for kind in (None, "unconfirmed", "challenged"):
             warnings = by_section.get((sec.get("section_id"), kind))
             if warnings:
                 sec.setdefault("blocks", []).insert(0, {
@@ -1780,7 +1796,20 @@ def append_coverage_matrix_section(
     # only ever nonzero if facts_identified was computed independently of
     # mapped+deduplicated+unmapped and the two disagree, which would mean a
     # real accounting bug rather than something to paper over.
+    # What a receiver said that the giver did not confirm, and questions
+    # nobody answered (speaker_roles): to ask the outgoing owner.
+    for finding in knowledge_object.get("_dialogue_findings") or []:
+        if finding.get("kind") == "unconfirmed":
+            gaps.append(f"Said by {finding.get('by')}, not confirmed by {finding.get('giver')}: "
+                        f"“{_short_quote(finding.get('text') or '')}”")
+        elif finding.get("kind") == "unanswered":
+            gaps.append(f"{finding.get('by')} asked “{_short_quote(finding.get('text') or '')}”; not answered")
     for conflict in knowledge_object.get("_conflicts") or []:
+        if conflict.get("kind") == "challenged":
+            gaps.append(f"Questioned ({titles.get(conflict.get('section_id'), 'KT session')}): "
+                        f"“{_short_quote(conflict['a'])}”, but {conflict.get('by') or 'the receiver'} asked "
+                        f"“{_short_quote(conflict['b'])}”; not answered — confirm with the outgoing owner")
+            continue
         label = "Unconfirmed change" if conflict.get("kind") == "unconfirmed" else "Possible conflict"
         gaps.append(
             f"{label} ({titles.get(conflict.get('section_id'), 'KT session')}): "
@@ -1930,8 +1959,10 @@ _FREEZE_CUE_RE = re.compile(
     r"\b(freeze|blackout|no (?:\w+ ){0,2}(?:deploy\w*|changes|releases)|deploy\w* on fridays?|"
     r"avoid (?:\w+ ){0,2}(?:deploy\w*|releas\w*|changes)|do not deploy|don't deploy|only (?:run|deploy|release)\w* on)\b",
     re.IGNORECASE)
-_ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+|reach out to|call\s+[A-Z]\w+|"
-                                r"ping\s+[A-Z]\w+)", re.IGNORECASE)
+# A name after "call" or "ping" keeps its capital: with the pattern ignoring
+# case, "own the on-call rotation from next month" was carded as who to page.
+_ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+|reach out to|"
+                                r"(?<![\w-])call\s+(?-i:[A-Z])\w+|ping\s+(?-i:[A-Z])\w+)", re.IGNORECASE)
 # "One recurring problem is X", "The most common production issue is X",
 # "Another issue is X, which …; fix …".
 _FAILURE_INTRO_RE = re.compile(
@@ -2342,6 +2373,11 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
 
     for c in conflicts:
         section = _find_section(knowledge_object, c.get("section_id") or "")
+        if c.get("kind") == "challenged":
+            add("Questioned, not answered — confirm first",
+                f"“{_tidy(c['a'])}”, but {c.get('by') or 'the receiver'} asked “{_tidy(c['b'])}”. "
+                f"Ask the outgoing owner before acting on it.", section, "KT session", trim=False)
+            continue
         add("Conflicting guidance — confirm first",
             f"“{_tidy(c['a'])}” but also “{_tidy(c['b'])}” Ask the outgoing owner before acting on either.",
             section, "KT session", trim=False)

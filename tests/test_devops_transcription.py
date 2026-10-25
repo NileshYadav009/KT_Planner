@@ -709,3 +709,14 @@ def test_roll_back_and_fail_over_said_as_verbs_stay_verbs():
 ])
 def test_mishearings_on_real_recordings_are_corrected_in_context(heard, meant):
     assert clean_transcript(heard) == meant
+
+
+def test_a_tag_question_asks_in_a_conversation_and_is_a_statement_in_a_talk():
+    # In a conversation "..., right?" asks the giver, who may answer "No": as
+    # a statement it was printed as a fact (a three-person test, 25 Oct).
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("We use Kafka, right?") == "We use Kafka."
+    cleaned = clean_transcript("Meera: So it stores invoices in MySQL, right? Arjun: No, it is PostgreSQL. "
+                               "Meera: Okay, thanks.")
+    assert "MySQL?" in cleaned and "right" not in cleaned

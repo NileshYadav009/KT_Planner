@@ -49,6 +49,23 @@ back), `tests/test_conflicts.py` (conflicts), `tests/test_knowledge_builders.py`
 | A count said to be out of date: "Earlier, someone mentioned four production replicas, but that information is outdated." | As said; no conflict with the current count. Nor is "three replicas in staging" a conflict with "production runs five replicas" (the environment can follow the count). | `conflicts._PAST_RE`, `conflicts._counts` |
 | A plan or a guess naming a technology: "planning to migrate to Kubernetes", "might be using Redis Cluster" | The sentence as said; the technology is not listed as a current component or in the Technology summary | `field_populator.current_tool_mentions` |
 
+## Between speakers (a conversation)
+
+With two or more speakers (pasted "Name:" turns, or a diarised recording),
+facts come from the giver and anyone who is not a receiver; the receiver's
+words count only where the giver confirmed them (`speaker_roles.py`). The
+giver is the speaker who states the most, unless the user chose another on
+the KT page. A receiver is a speaker whose sentences are mostly questions.
+
+| What was said | What the document shows | Code |
+|---|---|---|
+| The receiver guesses, the giver turns it down: "So it stores invoices in MySQL, right?" / "No, it's PostgreSQL on Amazon RDS." | The question and the answer together, as said. "No" with the value is not a gap; the guessed tool is not a current component. In a conversation a tag question stays a question. | `speaker_roles.apply_roles`, `dialogue._NEGATIVE_ANSWER_RE`, `field_populator.current_tool_mentions`, `devops_transcription.remove_fillers` |
+| The receiver states something, the giver corrects it: "I heard backups are kept for 30 days." / "Actually, backups are kept for 14 days, not 30." | The giver's sentence only. The receiver's is left out, recorded "said by Meera; corrected by Arjun". | `apply_roles` |
+| The receiver corrects the giver, and the giver agrees: "The cluster runs three nodes." / "I think it's five now." / "Oh right, yes, it's five nodes since the scaling." | The agreement only (with the receiver's words when the agreement does not repeat the point: "Yes, that's right."). The giver's earlier sentence is taken back: recorded "corrected by Meera, and Arjun agreed". Only when the two give that point different values (numbers or products). | `apply_roles` |
+| The receiver questions what the giver just said, and nobody answers: "Alerts go to Slack." / "Isn't it PagerDuty now?" / "Let's not go down that path." | The giver's sentence, with a "Questioned in the session, not answered" warning, a "confirm first" row on the incident card and a follow-up line. The question is not a fact. | `apply_roles` (kind "challenged"), `knowledge_builder.apply_conflicts` |
+| The receiver states something the giver never answers | Not shown as a fact: "Said by Meera, not confirmed by Arjun: ..." on the follow-up list. | `apply_roles` (kind "unconfirmed") |
+| Small talk, asking to repeat, moving the conversation on: "How was the offsite?", "Can you repeat that?", "Let's park that, we're short on time" | Left out, recorded with the reason. Recognised by social phrasing, not by nouns: "our food delivery platform" stays. | `speaker_roles.is_small_talk`, `_REPEAT_RE`, `_DEFLECTS_RE` |
+
 ## What counts as a correction signal
 
 - **Same sentence:** "sorry", "I mean", "or rather", "no wait", "correction",

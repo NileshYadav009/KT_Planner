@@ -373,6 +373,9 @@ def segment_sentences(
     audio_segments: List[AudioSegment],
     sentence_ending_pattern: str = r"[.!?]",
     excluded: Optional[List[Dict[str, str]]] = None,
+    giver: Optional[str] = None,
+    roles_out: Optional[Dict[str, Any]] = None,
+    findings: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Sentence]:
     """
     STAGE 2: Segment transcript into sentences.
@@ -485,7 +488,12 @@ def segment_sentences(
         # question's topic reaches all of it when merge_question_answers joins
         # the two. Cut, only the first fact went with the question.
         answers_question = source_id > 0 and refined_sentences[source_id - 1][0].rstrip().endswith("?")
-        spans = [(0, len(st))] if answers_question or source_id in kept_whole else split_facts(st)
+        # A question is never cut into facts: "So it stores invoices in MySQL,
+        # right?" was cut at its comma into the statement "It stores
+        # invoices in MySQL." after the giver had answered "No, it's
+        # PostgreSQL" (25 Oct, a three-person test).
+        asks = st.rstrip().endswith("?")
+        spans = [(0, len(st))] if answers_question or asks or source_id in kept_whole else split_facts(st)
         if len(spans) > 1:
             sentence_texts.extend((st[a:b], "clause", cut and i == 0, source_id, st, (a, b))
                                   for i, (a, b) in enumerate(spans))
@@ -600,6 +608,19 @@ def segment_sentences(
     # as context; a sentence that depends on the one before ("The fix is
     # to...") follows it by the continuation rules (section_rules.py), and
     # consecutive facts of one section are shown together (TopicBlock).
+    #
+    # With two or more speakers, who said it matters (speaker_roles.py): a
+    # question goes with the answer a trusted speaker gave it, and what the
+    # receiver said counts only where the giver confirmed it. Small talk is
+    # left out either way.
+    from speaker_roles import apply_roles, detect_roles
+    roles = detect_roles(sentences, giver)
+    if roles and roles_out is not None:
+        roles_out.update(roles)
+    sentences = apply_roles(sentences, roles, _merge_sentences, excluded if excluded is not None else [],
+                            findings if findings is not None else [])
+    if roles:
+        return sentences
     return merge_question_answers(sentences, lambda s: s.text, _merge_sentences)
 
 
@@ -2294,6 +2315,10 @@ class StructuredKT:
     # Per fact: how its section was decided (decided_by) and the score.
     fact_decided_by: Optional[List[Optional[str]]] = None
     fact_confidence: Optional[List[Optional[float]]] = None
+    # With two or more speakers: who is handing over (speaker_roles), and what
+    # a receiver said that needs confirming.
+    speaker_roles: Optional[Dict[str, Any]] = None
+    dialogue_findings: Optional[List[Dict[str, Any]]] = None
 
 def assemble_kt(
     job_id: str,
@@ -2837,7 +2862,8 @@ class ContextMappingPipeline:
         self,
         job_id: str,
         transcript: str,
-        audio_segments: List[Dict]
+        audio_segments: List[Dict],
+        giver: Optional[str] = None,
     ) -> StructuredKT:
         """
         Run full pipeline.
@@ -2851,9 +2877,12 @@ class ContextMappingPipeline:
             StructuredKT object
         """
         # STAGE 1: Convert to AudioSegment objects (already done by Whisper)
+        # In a conversation a tag question asks ("..., right?"): each turn is
+        # cleaned on its own, so whether it is one is decided here.
+        conversation = len({seg.get("speaker") for seg in audio_segments if seg.get("speaker")}) >= 2
         segments = [
             AudioSegment(
-                text=clean_transcript(seg.get("text", "")),
+                text=clean_transcript(seg.get("text", ""), keep_tag_questions=conversation or None),
                 start=seg.get("start", 0.0),
                 end=seg.get("end", 0.0),
                 avg_logprob=seg.get("avg_logprob", -1.0),
@@ -2868,7 +2897,9 @@ class ContextMappingPipeline:
         # STAGE 2: Segment the transcript into facts (a sentence holding
         # several is cut into them; fact_units.py)
         excluded: List[Dict[str, str]] = []
-        sentences = segment_sentences(segments, excluded=excluded)
+        roles: Dict[str, Any] = {}
+        findings: List[Dict[str, Any]] = []
+        sentences = segment_sentences(segments, excluded=excluded, giver=giver, roles_out=roles, findings=findings)
         logger.info(f"Stage 2: Segmented into {len(sentences)} sentences")
 
         # STAGE 2.5: Spoken sentences rewritten as written English where a
@@ -3226,6 +3257,8 @@ class ContextMappingPipeline:
         kt.fact_decided_by = fact_decided_by
         kt.fact_confidence = fact_confidence
         kt.excluded_statements = excluded
+        kt.speaker_roles = roles or None
+        kt.dialogue_findings = findings
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
         
         return kt

@@ -449,6 +449,31 @@ def _queue_session(job_id: str, principal: Principal, payload: dict) -> dict:
     return _session_view(job)
 
 
+@router.post("/kt/{job_id}/giver")
+async def set_kt_giver(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:correct"))):
+    """Choose who is handing over in a conversation KT ({"giver": a speaker's
+    name, or null to detect it again}); a worker rebuilds the document, with
+    the earlier version kept in History (speaker_roles)."""
+    giver = payload.get("giver")
+    if giver is not None and (not isinstance(giver, str) or not giver.strip()):
+        raise HTTPException(status_code=400, detail="giver must be a speaker's name or null.")
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        try:
+            sessions.check_can_set_giver(job, giver)
+        except sessions.SessionError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+        try:
+            pipeline.TASKS.enqueue(job_id, "giver", {"giver": giver, "set_by": principal.key_label})
+        except ValueError:
+            raise HTTPException(status_code=409, detail="This KT is still being processed")
+        job["giver_pending"] = True
+        job.pop("giver_error", None)
+        pipeline.JOB_QUEUE[job_id] = job
+    audit(principal.tenant_id, principal.key_label, "kt_giver_set", {"job_id": job_id, "giver": giver})
+    return {"status": "queued", "job_id": job_id, "giver": giver}
+
+
 @router.post("/kt/{job_id}/sessions")
 async def add_kt_session(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:create"))):
     """Add a pasted follow-up session to a finished KT."""

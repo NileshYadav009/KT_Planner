@@ -137,7 +137,13 @@ _GAP_RES = [
                r"another\s+(?:session|time|call)|tomorrow|separately)\b", re.IGNORECASE),
 ]
 # An answer that opens with a plain "no" to the question before it.
-_NEGATIVE_ANSWER_RE = re.compile(r"\?\s*(?:no|nope|not\s+really|not\s+yet|none|nothing)\b", re.IGNORECASE)
+# "Is there a DR plan? No." is a gap. "So it stores invoices in MySQL? No,
+# it's PostgreSQL on Amazon RDS." corrects the guess with the value: not a
+# gap (a three-person test, 25 Oct: Architecture read "stated as not in place").
+_NEGATIVE_ANSWER_RE = re.compile(
+    r"\?\s*(?:(?:no|nope)\b(?!,?\s+(?:it'?s|it\s+is|that'?s|that\s+is|they'?re|they\s+are|we\s+use|we'?re\s+(?:on|using)"
+    r"|we\s+(?:moved|switched)|it\s+(?:runs|uses|lives|goes|was\s+moved)|it'?s\s+now|the\s+[\w-]+\s+(?:is|are|runs|uses))\b)"
+    r"|not\s+really\b|not\s+yet\b|none\b|nothing\b)", re.IGNORECASE)
 
 
 def is_question(text: str) -> bool:

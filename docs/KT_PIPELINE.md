@@ -69,6 +69,22 @@ about the backups earlier, ...") takes the sentence it corrects along
 (`segment_sentences`, §9aaq). The rules, and what counts as a correction, are
 in `docs/CORRECTIONS.md`.
 
+**Who said it** (`speaker_roles.py`, §9abb): a pasted conversation ("Meera:
+...") is one untimed segment per turn with its speaker
+(`turn_segments`); a recording has diarised speakers. With two or more
+speakers, `segment_sentences` detects the roles (the giver states the most,
+unless the user chose another; a receiver mostly asks) and, before pairing
+questions with answers, applies them (`apply_roles`): a question goes with
+the answer a trusted speaker gives it; a receiver's statement counts only
+where the giver confirmed it, and a confirmed correction takes back the
+giver's earlier value; an unanswered challenge flags the giver's sentence;
+small talk, repeat requests and "let's move on" are left out. Every left-out
+sentence is in the ledger with its reason; what needs confirming becomes a
+follow-up (`StructuredKT.dialogue_findings`). The document names the giver
+(a notice), and the KT page lets the user choose another, which rebuilds it
+(`POST /kt/{job_id}/giver`, `sessions.set_giver`). Corrections between
+speakers are in `docs/CORRECTIONS.md`.
+
 **Stage 3.6 — one unit per sentence and section** (`rejoin_classified`):
 once every fact has its section, the facts of one sentence that sit side by
 side in one section become one unit again, shown as the spoken sentence.

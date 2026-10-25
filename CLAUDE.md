@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aba is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abb is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -37,6 +37,7 @@ about 94% (audit §9aal); with Groq's section check measured again in §9aba,
 |---|---|
 | Upload, queue | `api/routes.py`, `job_queue.py`, `worker.py` |
 | Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` |
+| Speakers and roles (a conversation) | `speaker_roles.turn_segments` (pasted "Name:" turns), `detect_roles`, `apply_roles` (in `segment_sentences`): facts from the giver; the receiver's words only where the giver confirmed them |
 | Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`), `fact_units.split_into_facts` |
 | Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `merge_spoken_corrections`, `copyedit.copyedit_sentences` |
 | Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments) |
@@ -95,7 +96,7 @@ six e2e KTs, with no LLM and from the recorded Groq answers. `--report BEFORE
 AFTER` rewrites `docs/QUALITY_GATES.md`. A failing gate is a defect, never a
 reason to loosen an answer key.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (77 short KTs,
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (80 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -205,3 +206,10 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X65 | Low | The fix after a failure said without a failure word ("... grows and slows logins. Run the purge job, it is safe in business hours.") went to the calendar | Fixed, §9aba (`_FAILURE_RE`: slows, throttled, stalls, saturated, runs out of, stale, degraded) |
 | X66 | Med | The KT's opening definition ("Brightline is our data pipeline that loads ... into Snowflake") and who builds on it ("... teams build all their reports on top of it") went to Architecture | Fixed, §9aba (only before any topic is named, so a component defined later stays Architecture) |
 | X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Open: aggregate only; find the cause on visible KTs written in the same styles, never on the blind set |
+| X68 | High | A conversation's receiver was a source like the giver: "So it stores invoices in MySQL, right?" printed as "It stores invoices in MySQL." after "No, it's PostgreSQL"; the receiver's corrected "30 days" stayed; the giver's "three nodes" stayed after he agreed it was five; an unanswered "Isn't it PagerDuty now?" made PagerDuty the alerting tool | Fixed, §9abb (`speaker_roles.py`: roles, then what counts; matrix S01) |
+| X69 | High | Pasted "Name:" labels were stripped for display but never recorded: no speaker in Sources, so nothing could tell giver from receiver | Fixed, §9abb (`turn_segments`, also on a session rebuild) |
+| X70 | High | The cleaner turned a tag question into a statement ("..., right?" to "."), so a receiver's wrong guess read as a fact | Fixed, §9abb: in a conversation the question keeps its mark (`remove_fillers(keep_tag_questions)`) |
+| X71 | Med | Small talk ("How was the offsite?" / "Good, the food was great.") described the Production environment; "Can you repeat that?" was joined to the answer after it; "Let's not go down that path" was a fact | Fixed, §9abb (phrasing, not nouns: a food-delivery KT keeps "food delivery platform") |
+| X72 | Med | "? No, it's X" was read as a stated gap; a tool guessed in a question turned down, or "the old system", was listed as current | Fixed, §9abb (`dialogue`, `field_populator.current_tool_mentions`) |
+| X73 | Low | "You'll own the on-call rotation" was carded as who to page ("call Rotation", the pattern ignoring case) | Fixed, §9abb |
+| T3 | Product | The user's decision: the giver is detected, shown on the KT page and in the document, and can be changed, which rebuilds the document as a new version | Done, §9abb (`POST /kt/{job_id}/giver`, "Who is handing over" card) |

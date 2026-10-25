@@ -208,7 +208,7 @@ def _job_warnings(stage_errors: list, usage: dict, upstream: Optional[List[str]]
 def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]] = None,
                     screen: Optional[dict] = None, warnings: Optional[List[str]] = None,
                     time_offset: float = 0.0, speakers: Optional[dict] = None,
-                    notices: Optional[List[str]] = None) -> dict:
+                    notices: Optional[List[str]] = None, giver: Optional[str] = None) -> dict:
     """Run classification through rendering for an already-transcribed, already-cleaned
     transcript, and store the result in JOB_QUEUE.
 
@@ -219,6 +219,9 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     compression_ratio/no_speech_prob). If omitted, a single segment spanning the
     whole transcript is synthesized so MAPPER_PIPELINE.process still gets its
     expected shape.
+
+    `giver` is the speaker the user chose as the one handing over; without
+    it the giver is detected (speaker_roles.detect_roles).
 
     Always writes either a "completed" or "failed" result into JOB_QUEUE[job_id]
     and returns that same dict — safe to hand directly to BackgroundTasks.
@@ -250,7 +253,12 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     # transcript has none. `time_offset` is the leading silence trimmed off
     # before transcription, so source times match the original recording.
     timed_segments = segments
+    # A pasted conversation ("Meera: ...") keeps who said each turn.
+    from speaker_roles import roles_notice, turn_segments
+    turns = turn_segments(transcript) if segments is None else None
     try:
+        if segments is None and turns:
+            segments = turns
         if segments is None:
             segments = [{
                 "id": 0,
@@ -267,7 +275,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         if MAPPER_PIPELINE is None:
             raise RuntimeError("Context mapping pipeline not initialized")
 
-        kt = MAPPER_PIPELINE.process(job_id, transcript, segments)
+        kt = MAPPER_PIPELINE.process(job_id, transcript, segments, giver=giver)
         checkpoint("Classification")
 
         coverage = {}
@@ -540,6 +548,11 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         except Exception as exc:
             _stage_failed(stage_errors, "Document assembly", exc, fatal=True)
 
+        # Who is handing over, and what a receiver said that needs confirming
+        # (speaker_roles): read by apply_conflicts and the coverage page.
+        knowledge_object["_speaker_roles"] = kt.speaker_roles
+        knowledge_object["_dialogue_findings"] = kt.dialogue_findings or []
+
         try:
             knowledge_object = reconcile_linked_fields(knowledge_object)
         except Exception as exc:
@@ -703,7 +716,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         # Evidence per fact (P1-2): each fact in the document points to the
         # transcript sentences it came from, and when they were said.
         try:
-            attach_evidence(knowledge_object, transcript_sentences(transcript, timed_segments, time_offset))
+            attach_evidence(knowledge_object, transcript_sentences(transcript, timed_segments or turns, time_offset))
         except Exception as exc:
             _stage_failed(stage_errors, "Source links", exc,
                           "Facts could not be linked to the transcript sentences they came from.")
@@ -792,6 +805,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "screen_links": screen_view["links"],
             "screen_capture": (screen or {}).get("stats"),
             "speakers": speakers,
+            # The roles found in a conversation, and the giver the user chose
+            # (None: detected). A rebuild keeps the choice.
+            "speaker_roles": kt.speaker_roles,
+            "giver": giver,
             "dynamic_schema": dynamic_schema,
             "populated_fields": populated_fields,
             "validation_warnings": validation_warnings,
@@ -826,6 +843,9 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         speaker_line = diarization.speaker_notice(speakers)
         if speaker_line:
             result["notices"].append(speaker_line)
+        roles_line = roles_notice(result.get("speaker_roles"))
+        if roles_line:
+            result["notices"].append(roles_line)
         result["notices"].extend(notices or [])
         rejected = int(result["llm_usage"].get("rejected") or 0)
         if rejected:

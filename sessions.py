@@ -47,7 +47,11 @@ def sessions_of(job: Dict[str, Any]) -> List[Dict[str, Any]]:
 def combined_input(sessions: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
     """One transcript and one segment list for the pipeline. Each session's
     times stay its own (its leading-silence offset folded in); a pasted
-    session is one untimed segment, the same shape a single paste gets."""
+    session is one untimed segment, the same shape a single paste gets, or
+    one per turn when it names its speakers ("Meera: ..."), so a rebuild
+    keeps who said what (speaker_roles)."""
+    from speaker_roles import turn_segments
+
     multi = len(sessions) > 1
     parts, segments = [], []
     for session in sessions:
@@ -60,10 +64,75 @@ def combined_input(sessions: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, 
                 segments.append(dict(seg, start=float(seg.get("start") or 0.0) + offset,
                                      end=float(seg.get("end") or 0.0) + offset, **tag))
         elif session.get("transcript", "").strip():
+            turns = turn_segments(session["transcript"])
+            if turns:
+                segments.extend(dict(turn, id=len(segments) + i, **tag) for i, turn in enumerate(turns))
+                continue
             segments.append({"id": len(segments), "seek": 0, "start": 0.0, "end": 0.0, "text": session["transcript"],
                              "avg_logprob": -0.3, "compression_ratio": None, "no_speech_prob": None,
                              "untimed": True, **tag})
     return "\n\n".join(parts), segments
+
+
+def speakers_of(job: Dict[str, Any]) -> List[str]:
+    """The speakers a finished KT's conversation had, in order (speaker_roles)."""
+    roles = job.get("speaker_roles") or {}
+    return [s.get("name") for s in roles.get("speakers") or [] if s.get("name")]
+
+
+def check_can_set_giver(job: Optional[Dict[str, Any]], giver: Optional[str]) -> None:
+    if job is None:
+        raise SessionError("Job not found", 404)
+    if job.get("status") not in ("completed", "completed_with_warnings"):
+        raise SessionError("The KT is not finished yet", 409)
+    if job.get("session_pending") or job.get("giver_pending"):
+        raise SessionError("The KT is already being rebuilt", 409)
+    if (job.get("signoff") or {}).get("signed_version"):
+        raise SessionError("A signed KT cannot be rebuilt", 409)
+    if giver is not None and giver not in speakers_of(job):
+        raise SessionError("That person did not speak in this KT", 400)
+
+
+def set_giver(job_id: str, payload: Dict[str, Any]) -> None:
+    """Worker task: rebuild a finished KT with the person the user chose as
+    the one handing over (payload {"giver": a speaker, or None to detect it
+    again}). Like a new session: the document as it was stays in History,
+    and the KT keeps its workspace, owner and sign-off record."""
+    import document_model
+    import pipeline
+    import signoff
+
+    before = pipeline.JOB_QUEUE.get(job_id)
+    if before is None:
+        return
+    before = copy.deepcopy(before)
+    before.pop("giver_pending", None)
+    actor = str(payload.get("set_by") or "giver")
+    giver = payload.get("giver") or None
+    try:
+        sessions = sessions_of(before)
+        document_model.ensure_first_version(pipeline, job_id, before)
+        transcript, segments = combined_input(sessions)
+        pipeline.run_kt_pipeline(job_id, transcript, segments, giver=giver)
+        after = pipeline.JOB_QUEUE.get(job_id) or {}
+        if after.get("status") not in pipeline.COMPLETED_STATUSES:
+            raise RuntimeError(after.get("error") or "the document could not be rebuilt")
+        for field in _KT_FIELDS:
+            if field in before:
+                after[field] = before[field]
+        if before.get("sessions"):
+            after["sessions"] = sessions
+        version = document_model.current_version(before) + 1
+        who = (after.get("speaker_roles") or {}).get("giver") or giver
+        summary = f"Handed over by {who}" + (" (chosen)" if giver else " (detected)")
+        pipeline.JOB_STORE.save_version(job_id, version, actor, summary,
+                                        document_model.snapshot(after.get("knowledge_object") or {}))
+        after["document_version"] = version
+        signoff.on_new_version(after, version, actor)
+        pipeline.JOB_QUEUE[job_id] = after
+    except Exception as exc:
+        before["giver_error"] = f"The document could not be rebuilt with that person handing over: {exc}"
+        pipeline.JOB_QUEUE[job_id] = before
 
 
 def knowledge_gaps(job: Dict[str, Any]) -> List[str]:
@@ -131,7 +200,8 @@ def add_session(job_id: str, payload: Dict[str, Any]) -> None:
         # The document as it was stays in History as its own version.
         document_model.ensure_first_version(pipeline, job_id, before)
         transcript, segments = combined_input(sessions)
-        pipeline.run_kt_pipeline(job_id, transcript, segments, warnings=warnings, notices=notices)
+        pipeline.run_kt_pipeline(job_id, transcript, segments, warnings=warnings, notices=notices,
+                                 giver=before.get("giver"))
         after = pipeline.JOB_QUEUE.get(job_id) or {}
         if after.get("status") not in pipeline.COMPLETED_STATUSES:
             raise RuntimeError(after.get("error") or "the document could not be rebuilt")
