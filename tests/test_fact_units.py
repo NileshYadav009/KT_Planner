@@ -233,7 +233,11 @@ def test_every_fact_ends_in_the_ledger_with_its_source_section_and_status():
 
     summary = result["_knowledge_coverage_summary"]
     assert summary == {"facts_identified": 3, "mapped": 2, "unmapped": 0, "recovered": 1, "lost": 0,
-                       "verified_against_document": True, "stated_gaps": 1, "excluded": 2}
+                       "verified_against_document": True, "stated_gaps": 1, "excluded": 2,
+                       "shown_in_own_section": 2, "shown_elsewhere_only": 0}
+    # How each record was decided and whether the reader sees other words.
+    assert entry["reworded"] is True and by_text["Hi team, thanks for joining."]["reworded"] is False
+    assert entry["in_own_section"] is True
 
 
 def test_each_stated_gap_is_listed_as_a_knowledge_gap():

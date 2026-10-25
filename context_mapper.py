@@ -887,6 +887,25 @@ def justify_extra_sections(
     return justified
 
 
+def decided_by(cs: "ClassifiedSentence") -> Optional[str]:
+    """How a fact's section was decided, for the facts ledger: "rule" (a
+    routing rule, section_rules.py), "continuation" (it goes on from the
+    sentence before), "llm_check" (the LLM section check changed or
+    confirmed it), "classifier" (the similarity score), or None (no section)."""
+    primary = cs.primary_classification
+    if primary is None:
+        return None
+    reason = (primary.reason or "").lower()
+    log = cs.explainability_log
+    if log is not None and "llm verification" in (log.reasoning or "").lower():
+        return "llm_check"
+    if log is not None and (log.action or "") == "continuation":
+        return "continuation"
+    if reason.startswith(("rule", "overview", "question:")):
+        return "rule"
+    return "classifier"
+
+
 @dataclass
 class ClassifiedSentence:
     """Sentence with class assignments and explainability."""
@@ -2272,6 +2291,9 @@ class StructuredKT:
     facts: Optional[List[Sentence]] = None
     fact_sections: Optional[List[Optional[str]]] = None
     excluded_statements: Optional[List[Dict[str, str]]] = None
+    # Per fact: how its section was decided (decided_by) and the score.
+    fact_decided_by: Optional[List[Optional[str]]] = None
+    fact_confidence: Optional[List[Optional[float]]] = None
 
 def assemble_kt(
     job_id: str,
@@ -3060,6 +3082,9 @@ class ContextMappingPipeline:
         fact_sentences = [cs.sentence for cs in classified_sentences]
         fact_sections = [cs.primary_classification.section_id if cs.primary_classification else None
                          for cs in classified_sentences]
+        fact_decided_by = [decided_by(cs) for cs in classified_sentences]
+        fact_confidence = [round(float(cs.primary_classification.confidence), 3) if cs.primary_classification else None
+                           for cs in classified_sentences]
         classified_sentences = rejoin_classified(classified_sentences)
         for cs in classified_sentences:
             cs.sentence.text = display_text(cs.sentence.text, labels)
@@ -3198,6 +3223,8 @@ class ContextMappingPipeline:
         kt = assemble_kt(job_id, transcript, classified_sentences, coverage, assets, repaired_map, topic_contexts)
         kt.facts = fact_sentences
         kt.fact_sections = fact_sections
+        kt.fact_decided_by = fact_decided_by
+        kt.fact_confidence = fact_confidence
         kt.excluded_statements = excluded
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
         

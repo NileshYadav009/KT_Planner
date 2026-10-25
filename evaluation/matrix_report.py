@@ -93,6 +93,8 @@ lines = [
     "U07 is a user's KT whose checks were written after reviewing its PDF; its",
     "first run was on the fixed code (replayed before the fixes, it failed at",
     "least four of them).",
+    "R01-R05 come from the 25 Oct review of the e2e KTs' PDFs; their checks were written",
+    "after the defects were seen, and their “before” is the code before the fixes (run r_base).",
     "",
     "| ID | Category | Scenario | Expected | Before | After | Regression test |",
     "|---|---|---|---|---|---|---|",

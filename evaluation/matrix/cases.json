@@ -1089,6 +1089,83 @@
         {"check": "sourced", "level": "should"}
       ],
       "pdf": true
+    },
+    {
+      "id": "R01", "category": "R e2e review", "title": "A dependency list the workload heads: 'The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis' (the user's online learning KT drew no RDS line)",
+      "regression": "tests/test_architecture_diagram.py::test_the_verb_before_a_list_the_workload_heads_applies_to_every_item",
+      "transcript": [
+        "Today I'm handing over our course platform. Students access the React application through CloudFront and an Application Load Balancer, which routes requests to services running on Amazon EKS. The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis for caching course information. Prometheus monitors EKS, PostgreSQL and Redis."
+      ],
+      "expect": [
+        {"check": "shows", "text": "stores data in Amazon RDS", "level": "must"},
+        {"check": "shows", "text": "caches in Redis", "level": "must"}
+      ]
+    },
+    {
+      "id": "R02", "category": "R e2e review", "title": "Stores that open their sentence: 'PostgreSQL on Amazon RDS stores order and payment records', 'Redis caches ...', 'Amazon SQS handles ...' (the user's QuickBite KT drew none); S3 holding Terraform state is not the system's data",
+      "regression": "tests/test_architecture_diagram.py::test_a_store_that_opens_its_sentence_and_says_what_it_holds_gets_its_line",
+      "transcript": [
+        "This is the handover for Mealhop, our food delivery platform. Requests reach microservices running on Amazon EKS. PostgreSQL on Amazon RDS stores order and payment records. Redis caches restaurant menus. Amazon MSK carries order events between services, and Amazon SQS handles delayed notification jobs. Amazon S3 stores the Terraform state."
+      ],
+      "expect": [
+        {"check": "shows", "text": "stores data in Amazon RDS", "level": "must"},
+        {"check": "shows", "text": "caches in Redis", "level": "must"},
+        {"check": "shows", "text": "sends messages via Amazon SQS", "level": "must"},
+        {"check": "absent_re", "pattern": "stores files in amazon s3", "level": "must"}
+      ]
+    },
+    {
+      "id": "R03", "category": "R e2e review", "title": "Incident card: a counted list of failures, a past incident and a step about it, and a sentence that only says where alerts come from (the e2e AWS and ambiguous KTs)",
+      "regression": "tests/test_incident_card.py::test_a_counted_list_of_failures_gives_each_failure_its_row; tests/test_incident_card.py::test_a_past_incident_names_the_failure_and_a_step_about_it_is_its_fix; tests/test_incident_card.py::test_where_alerts_come_from_is_not_given_as_the_response_to_one; tests/test_knowledge_builders.py::test_a_failure_named_without_its_fix_is_a_gap_even_when_another_has_one",
+      "transcript": [
+        "Today I'm handing over the orders API on Amazon EKS. The two incidents you will see most are database connection exhaustion on RDS and pods that fail to start because a Kubernetes secret reference is wrong. A couple of months ago we had an incident where the queue consumer stalled. If you see that again, restart the consumer deployment. Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Database connection exhaustion on RDS No fix was stated", "level": "must"},
+        {"check": "shows", "text": "Pods that fail to start because a Kubernetes secret reference is wrong No fix was stated", "level": "must"},
+        {"check": "shows", "text": "The queue consumer stalled If you see that again, restart the consumer deployment", "level": "must"},
+        {"check": "absent_re", "pattern": "^you see that again", "level": "must"},
+        {"check": "shows", "text": "Alerting (no first step stated)", "level": "must"},
+        {"check": "coverage", "section": "common_failures", "not": ["Strong"], "level": "must"},
+        {"check": "shows", "text": "a fix for Database connection exhaustion on RDS", "level": "must"}
+      ]
+    },
+    {
+      "id": "R04", "category": "R e2e review", "title": "Incident card: a failure after its time ('During dinner peaks, the most common issue is ...'), a failure said by its effect, and a freeze said as 'Avoid production deployments' (the user's QuickBite KT, no LLM)",
+      "regression": "tests/test_incident_card.py::test_a_failure_after_its_time_and_one_said_by_its_effect_are_named",
+      "transcript": [
+        "Today I'm handing over the delivery platform on Amazon EKS. During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag. Check consumer lag and the order service error rate before restarting consumers. Redis memory saturation can also make courier locations appear stale. Avoid production deployments during major promotional campaigns."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Delayed order processing caused by Kafka consumer lag (during dinner peaks)", "level": "must"},
+        {"check": "shows", "text": "Redis memory saturation can also make courier locations appear stale No fix was stated", "level": "must"},
+        {"check": "shows", "text": "Do not deploy Avoid production deployments during major promotional campaigns", "level": "must"}
+      ]
+    },
+    {
+      "id": "R05", "category": "R e2e review", "title": "Incident card: a list of failures with no count, and a rollback said to be quick with no procedure (the e2e Azure and ambiguous KTs)",
+      "regression": "tests/test_incident_card.py::test_a_list_of_failures_without_a_count_gives_each_its_row; tests/test_incident_card.py::test_a_rollback_row_says_when_no_procedure_was_given",
+      "transcript": [
+        "This is the handover for Paygate, our payment platform on AKS. The common problems are a Service Bus backlog when the settlement consumer falls behind, and SQL connection exhaustion during sales peaks. Azure DevOps pipelines deploy the releases. Rolling back is usually quick."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Service Bus backlog when the settlement consumer falls behind No fix was stated", "level": "must"},
+        {"check": "shows", "text": "SQL connection exhaustion during sales peaks No fix was stated", "level": "must"},
+        {"check": "shows", "text": "Rolling back is usually quick. No rollback procedure was stated in the KT", "level": "must"}
+      ]
+    },
+    {
+      "id": "R06", "category": "R e2e review", "title": "Optional sections nobody discussed (Environments, Cost Optimization) are listed as 'Not discussed' and asked about (the user's decision, 25 Oct: they were left out of the coverage report)",
+      "regression": "tests/test_knowledge_builders.py::test_optional_sections_nobody_discussed_are_listed_and_asked_about",
+      "transcript": [
+        "This is the handover for Ledgerly, our invoicing service on Amazon ECS. It stores invoices in PostgreSQL on Amazon RDS. Datadog monitors it and PagerDuty pages the on-call engineer. Never run migrations by hand in production."
+      ],
+      "expect": [
+        {"check": "coverage", "section": "environments", "is": ["Not discussed"], "level": "must"},
+        {"check": "coverage", "section": "cost_optimization", "is": ["Not discussed"], "level": "must"},
+        {"check": "shows", "text": "Environments (optional): ask whether it applies", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
     }
   ]
 }

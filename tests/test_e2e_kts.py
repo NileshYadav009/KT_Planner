@@ -1,14 +1,16 @@
 """End-to-end KT suite (tests/e2e_kts, scored by tests/e2e_eval.py).
 
 Four short synthetic handovers (AWS e-commerce, Azure payments, GCP data
-platform, an ambiguous incomplete KT) and the user's QuickBite KT (AWS food
-delivery, sentences that state several facts), each run through the orchestration
+platform, an ambiguous incomplete KT), the user's QuickBite KT (AWS food
+delivery, sentences that state several facts) and the user's online learning
+KT (its PDF reviewed 25 Oct, audit §9aay), each run through the orchestration
 POST /kt-from-transcript queues (pipeline.run_kt_pipeline) and the real PDF
 renderer, then checked on the PDF text: nothing the speaker said is lost,
 nothing they did not say is added, safety warnings reach Danger Zones,
 stated connections are drawn and unstated ones are not, values the speaker
 called unknown stay unknown, incomplete procedures are flagged where they
-appear, and the coverage report agrees with what is printed.
+appear, the coverage report agrees with what is printed, no known fact is
+marked "no source", and no table, cell or image runs past its page or cell.
 
 No LLM is called (zero external requests); the LLM path is exercised by
 scripts/e2e_kts.py --llm live|replay and reported separately. Placement
@@ -28,12 +30,13 @@ DATASETS = load_datasets()
 IDS = [d["id"] for d in DATASETS]
 
 
-def test_five_datasets_of_100_to_300_words_with_no_secrets():
+def test_six_datasets_of_100_to_300_words_with_no_secrets():
     from e2e_eval import _SECRET
 
     # E (QuickBite) is the user's own KT, added with the fact-level mapping
-    # change: sentences holding several facts for several sections.
-    assert len(DATASETS) == 5
+    # change: sentences holding several facts for several sections. F is the
+    # user's online learning KT (audit §9aaz), annotated after its review.
+    assert len(DATASETS) == 6
     for ds in DATASETS:
         assert 100 <= len(ds["transcript"].split()) <= 300, ds["id"]
         assert not _SECRET.search(ds["transcript"]), ds["id"]
@@ -65,6 +68,8 @@ def test_the_pdf_opens_and_no_llm_was_called(reports, ds_id):
     assert r["status"] in ("completed", "completed_with_warnings")
     assert r["pdf"]["opens"] and r["pdf"]["pages"] > 2
     assert not r["llm"]["llm_calls"]
+    # Measured on the laid-out document (pdf_rendering.layout_overflows).
+    assert r["pdf"]["layout_checked"] and r["false_positives"]["pdf_boxes_past_their_edge"] == []
 
 
 @pytest.mark.parametrize("ds_id", IDS)
@@ -115,6 +120,8 @@ def test_every_fact_shown_has_its_source_and_is_printed_once(reports, ds_id):
     fp = reports[ds_id]["false_positives"]
     assert fp["facts_without_source"] == []
     assert fp["repeated_sentences"] == []
+    assert fp["known_facts_marked_no_source"] == []
+    assert reports[ds_id]["evidence"]["no_source_marks"] == 0
 
 
 @pytest.mark.parametrize("ds_id", IDS)
@@ -165,5 +172,6 @@ def test_llm_mode_from_the_recording_sends_nothing_and_adds_nothing(replay_repor
         assert fn[check] == [], (check, fn[check])
     for check in ("undocumented_given_a_value", "forbidden_claims", "durations_not_in_transcript",
                   "products_not_in_transcript", "false_signoff", "session_framing_printed", "wrong_relations",
-                  "facts_without_source", "incidents_in_danger_zones"):
+                  "facts_without_source", "incidents_in_danger_zones", "known_facts_marked_no_source",
+                  "pdf_boxes_past_their_edge"):
         assert fp[check] == [], (check, fp[check])

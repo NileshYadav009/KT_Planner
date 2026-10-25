@@ -52,6 +52,24 @@ _GAP_NOTE = re.compile(
     r"|^\s*note:\s*this closing remark does not by itself confirm\b", re.IGNORECASE)
 _WORD = re.compile(r"[a-z0-9]+(?:[.\-][a-z0-9]+)*")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# "30-day retention", "a 5-minute window": a number and its unit.
+_NUMBER_UNIT = re.compile(r"(\d+(?:\.\d+)?)-([a-z]+)")
+# Value words a document writes differently from the speaker: "quarterly"
+# for "every quarter", "30-day retention" for "kept for 30 days". Values the
+# LLM filled in that form were printed "no source" (the e2e KTs, 25 Oct).
+_SAME_WORD = {form: base for base, forms in (
+    ("day", "day days daily"), ("week", "week weeks weekly"), ("month", "month months monthly"),
+    ("year", "year years yearly annual annually"), ("hour", "hour hours hourly"), ("night", "night nights nightly"),
+    ("quarter", "quarter quarters quarterly"), ("minute", "minute minutes mins"), ("second", "seconds secs"),
+    ("retain", "retain retains retained retention kept keep keeps"), ("test", "test tests tested testing"),
+) for form in forms.split()}
+# The document's own note beside what was said, in one cell: "Rolling back is
+# usually quick. No rollback procedure was stated in the KT; ask the outgoing
+# owner." (the incident card) was printed "no source".
+_DOCUMENT_NOTE = re.compile(r"\s*\bNo (?:other )?(?:[\w-]+ ){0,3}was stated in the KT[.;,]?\s*"
+                            r"(?:ask|confirm with) the outgoing owner\.?|\s*\(More in its section\.\)", re.IGNORECASE)
+# "DR testing frequency: quarterly": the document's label, then the value said.
+_LABELLED = re.compile(r"^\s*(?P<label>[A-Za-z][^:.]{2,45}):\s+(?P<value>\S.*)$", re.DOTALL)
 
 
 def build_evidence(sentence_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -71,18 +89,21 @@ def build_evidence(sentence_entries: List[Dict[str, Any]]) -> List[Dict[str, Any
 def _key(word: str) -> str:
     # Word forms compare by their first six letters ("deploys"/"deployment"),
     # as in pdf_rendering's completeness check.
+    word = _SAME_WORD.get(word, word)
     return word[:6] if len(word) > 6 else word
 
 
 def _content_keys(text: str) -> List[str]:
     keys, seen = [], set()
-    for word in _WORD.findall(str(text or "").lower().replace("*", " ")):
-        if word in _STOPWORDS or (len(word) < 3 and not word.isdigit()):
-            continue
-        k = _key(word)
-        if k not in seen:
-            seen.add(k)
-            keys.append(k)
+    for token in _WORD.findall(str(text or "").lower().replace("*", " ")):
+        number_unit = _NUMBER_UNIT.fullmatch(token)
+        for word in number_unit.groups() if number_unit else (token,):
+            if word in _STOPWORDS or (len(word) < 3 and not word.isdigit()):
+                continue
+            k = _key(word)
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
     return keys
 
 
@@ -327,6 +348,7 @@ class _Index:
     def _strip(self, text: str) -> str:
         # The list's own numbering and a bold label ("1. **Trigger:** ...")
         # are the renderer's words: "1" is not a number the session said.
+        text = _DOCUMENT_NOTE.sub("", text).strip() or text
         text = _LIST_LABEL.sub("", text) or text
         stripped = _PARENTHETICAL.sub("", text) or text
         if self.system_name is not None:
@@ -350,7 +372,7 @@ class _Index:
             # “Pipeline failures generate Slack notifications.”"), or a list
             # of names ("Kubernetes, Grafana, Redis, Helm"), each said in its
             # own sentence: both were printed "no source" (the user's KTs).
-            found = self._sources_for_quotes(text) or self._sources_for_names(text)
+            found = self._sources_for_quotes(text) or self._sources_for_names(text) or self._sources_for_value(text)
         # A paragraph of several sentences: each cites the sentence that
         # states it. Matched as a whole, a polished paragraph stopped at
         # MAX_SOURCES_PER_UNIT sentences, or at one sentence that covered
@@ -377,6 +399,19 @@ class _Index:
         row_keys = set(_content_keys(_canonical(row_text)))
         holders = [i for i, k in enumerate(self.keys) if keys <= k]
         return [max(holders, key=lambda i: (len(self.keys[i] & row_keys), -i))] if holders else []
+
+    def _sources_for_value(self, text: str) -> List[int]:
+        """A labelled value ("DR testing frequency: quarterly") is sourced by
+        its value, from a sentence that also says a word of the label, so
+        "four hours" said of something else is not cited for "RTO: four hours"."""
+        match = _LABELLED.match(text or "")
+        if not match:
+            return []
+        got = self._sources_for(match.group("value"))
+        label = set(_content_keys(self._strip(match.group("label"))))
+        if got and (not label or label & set().union(*(self.keys[i] for i in got))):
+            return got
+        return []
 
     def _sources_for_quotes(self, text: str) -> List[int]:
         """The sentences quoted in `text`, when every quote is one."""

@@ -228,6 +228,9 @@
    "terms": [
     "database backups run daily",
     "retained for 14 days"
+   ],
+   "alt": [
+    "Database backups run daily. Retained for 14 days"
    ]
   },
   {
@@ -344,6 +347,26 @@
    "from": "ArgoCD",
    "to": "EKS",
    "kind": "deploy"
+  },
+  {
+   "from": "EKS",
+   "to": "RDS",
+   "kind": "dependency"
+  },
+  {
+   "from": "EKS",
+   "to": "Redis",
+   "kind": "dependency"
+  },
+  {
+   "from": "EKS",
+   "to": "MSK",
+   "kind": "dependency"
+  },
+  {
+   "from": "EKS",
+   "to": "SQS",
+   "kind": "dependency"
   }
  ],
  "wrong_relations": [
@@ -352,6 +375,12 @@
    "to": "EKS",
    "label": "deploy",
    "why": "GitHub Actions runs CI; ArgoCD deploys"
+  },
+  {
+   "from": "GitHub Actions",
+   "to": "ECR",
+   "label": "",
+   "why": "the KT never says GitHub Actions builds or pushes images to ECR"
   }
  ],
  "undocumented": [

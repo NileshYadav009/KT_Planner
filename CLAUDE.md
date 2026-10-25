@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aay is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aaz is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -86,7 +86,13 @@ Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
 (about 4 min; see `evaluation/README.md`). Every placement or coverage change
 is measured on all five sets.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (71 short KTs,
+Quality gates: `python evaluation/quality_gates.py LABEL --replay --accuracy ACC
+--matrix M` (about 25 min): the release thresholds counted on the PDFs of the
+six e2e KTs, with no LLM and from the recorded Groq answers. `--report BEFORE
+AFTER` rewrites `docs/QUALITY_GATES.md`. A failing gate is a defect, never a
+reason to loosen an answer key.
+
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (77 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -178,3 +184,16 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X48 | Low | Backup details listed as "Recovery actions" | Fixed, §9aay (`renderers/sections/disaster_recovery.py`) |
 | X49 | Med | PDF: the connections table ran 18pt past the page edge; a status badge spilled out of its column | Fixed, §9aay (CSS; a layout test measures every box) |
 | X50 | Low | The card dropped "before restarting services" ("No fix was stated"); without an LLM, "A common issue occurs when ..." was not a named failure | Fixed, §9aay (`knowledge_builder`) |
+| X51 | Med | Missing architecture dependency: "The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis" drew no RDS line (the workload heads the list; the engine stopped naming its managed database) | Fixed, §9aaz (`architecture_diagram`) |
+| X52 | Med | A store opening its sentence ("PostgreSQL on Amazon RDS stores order and payment records", "Redis caches ...", "Amazon MSK carries ... events", "... is stored in Redis") drew no line (QuickBite) | Fixed, §9aaz (`architecture_diagram`; not object storage) |
+| X53 | Med | Quick Reference: "An alert fires" quoted a sentence that only says where alerts come from as the response | Fixed, §9aaz: "Alerting (no first step stated)" |
+| X54 | Med | Quick Reference without an LLM: failures said as a list ("The two incidents ... are X and Y", "The common problems are X, and Y"), after a time ("During dinner peaks, the most common issue is ..."), by their effect, or as a past incident were missing or merged; "If you see that again" became a situation; "Avoid production deployments during ..." was not a freeze | Fixed, §9aaz (`knowledge_builder._known_failures`) |
+| X55 | Med | A failure named without its fix, beside one with a fix: Common Failures "covered well" and no gap listed | Fixed, §9aaz: Partial, the failure on the follow-up list and in the section's note |
+| X56 | Low | The rollback row ("Rolling back is usually quick") did not say no procedure was given | Fixed, §9aaz |
+| X57 | Med | False "no source" on values in the document's form ("DR testing frequency: quarterly", "30-day retention"; LLM mode) | Fixed, §9aaz (`knowledge/evidence.py`: a labelled value is sourced by its value; value words) |
+| X58 | Low | The diagram's users box said "customers" whatever the KT called its users | Fixed, §9aaz |
+| X59 | Med | No release gates: layout checked in one test only; false "no source" marks and layout not counted by the e2e harness; the facts ledger had no provenance, score or "shown in its own section" | Fixed, §9aaz (`evaluation/quality_gates.py`, `pdf_rendering.layout_overflows` on every PDF, ledger fields) |
+| X60 | Low | Web page: progress and toasts not announced to screen readers | Fixed, §9aaz (live regions, progressbar) |
+| X61 | Low | A deployment chain said in one sentence ("GitHub Actions runs tests, Amazon ECR stores images, and ArgoCD deploys to EKS") is one step, with and without an LLM | Open: splitting it drops the joining words, which breaks the verbatim checks of every golden set (holdouts and blind included); the steps are the speaker's words in order |
+| X62 | Low | The Architecture Knowledge name list repeats the Technology summary and the diagram | Open: component-name facts may be found only through it; measure before removing |
+| P2 | Product | Optional sections (Environments, Cost Optimization) not discussed were left out of the coverage report and the follow-up list | Done, §9aaz, the user's decision: a "Not discussed" row each (`OPTIONAL_NOT_DISCUSSED`, `full_schema`) and a follow-up line asking whether it applies; not counted as a section not covered; no section added to the body. Matrix R06 |

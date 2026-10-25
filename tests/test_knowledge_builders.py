@@ -1419,3 +1419,49 @@ def test_pleasantry_filter_is_content_driven_not_transcript_specific():
     assert _is_session_pleasantry("Good morning, this is the handover session for today.")
     assert not _is_session_pleasantry("Hello, Memorystore caches session tokens.")
     assert not _is_session_pleasantry("Hi team, Amazon MSK carries settlement events.")
+
+
+def test_a_failure_named_without_its_fix_is_a_gap_even_when_another_has_one():
+    # The user's online learning KT, without an LLM: Common Failures was
+    # covered well ("All 2 topics covered") though delayed video processing
+    # had no fix, and nothing asked the outgoing owner for one.
+    said = ["A common issue occurs when database connections are exhausted during examination periods.",
+            "Check connection-pool usage and application errors before restarting services.",
+            "Another issue is delayed video processing when background jobs accumulate in Amazon SQS."]
+    ko = {"sections": [_section("common_failures", "COMMON FAILURES & FIXES", coverage_content=said)], "summary": {}}
+    result = append_coverage_matrix_section(ko, {"common_failures": _cov(*said)},
+                                            [{"id": "common_failures", "title": "COMMON FAILURES & FIXES"}])
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Coverage"] == "Partial"
+    assert row["Assessment"].endswith(
+        "; no fix stated for: Delayed video processing when background jobs accumulate in Amazon SQS.")
+    assert result["_not_stated"]["common_failures"] == [
+        "a fix for Delayed video processing when background jobs accumulate in Amazon SQS"]
+
+
+def test_optional_sections_nobody_discussed_are_listed_and_asked_about():
+    # The user's decision (25 Oct, P2): Environments and Cost Optimization
+    # were left out of the coverage report whenever the KT never touched
+    # them, so the new owner did not know to ask. They get a row of their
+    # own, "Not discussed", and a follow-up line; they are not counted as
+    # sections not covered (they may not apply).
+    from kt_schema_loader import SCHEMA
+
+    dynamic_schema = [s for s in SCHEMA if s["id"] in ("system_overview", "architecture_reference",
+                                                       "monitoring_observability")]
+    coverage = {"system_overview": _cov("Paygate authorises card payments for our online stores."),
+                "architecture_reference": _cov("The services run on AKS."),
+                "monitoring_observability": _cov("Azure Monitor gives us metrics.")}
+    result = append_coverage_matrix_section({"sections": [], "summary": {}}, coverage, dynamic_schema,
+                                            full_schema=SCHEMA)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    rows = [(r["Domain"], r["Coverage"]) for r in matrix["_coverage_rows"]]
+    titles = {s["id"]: s["title"] for s in SCHEMA}
+    # In schema order: Environments between Architecture and Monitoring.
+    assert [d for d, _ in rows] == [titles["system_overview"], titles["architecture_reference"], titles["environments"],
+                                    titles["monitoring_observability"], titles["cost_optimization"]]
+    assert dict(rows)[titles["environments"]] == "Not discussed"
+    assert f"{titles['cost_optimization']} (optional): ask whether it applies" in matrix["_knowledge_gaps"]
+    # Without the full schema (other callers), nothing is added.
+    plain = append_coverage_matrix_section({"sections": [], "summary": {}}, coverage, dynamic_schema)
+    assert len(next(s for s in plain["sections"] if s["id"] == "kt_coverage")["_coverage_rows"]) == 3

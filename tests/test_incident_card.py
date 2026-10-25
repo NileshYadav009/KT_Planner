@@ -198,7 +198,7 @@ def test_corrected_and_contradicted_statements_are_not_given_as_orders():
                      "b": "Never deploy on Fridays, we had an outage last time."}],
     )
     by_situation = {r["Situation"]: r["What to do"] for r in rows}
-    assert by_situation["An alert fires"] == "Alerts go to Opsgenie now, we moved off PagerDuty last month."
+    assert by_situation["Alerting (no first step stated)"] == "Alerts go to Opsgenie now, we moved off PagerDuty last month."
     assert "Never" not in by_situation and "Do not deploy" not in by_situation
     conflict = by_situation["Conflicting guidance — confirm first"]
     assert "fine for us" in conflict and "Never deploy on Fridays" in conflict and "Ask the outgoing owner" in conflict
@@ -262,3 +262,88 @@ def test_a_failure_said_to_occur_when_is_named_on_the_card():
     assert _known_failures({"coverage_content": said}) == [
         ("Database connections are exhausted during examination periods",
          "Check connection-pool usage and application errors before restarting services.")]
+
+
+def test_where_alerts_come_from_is_not_given_as_the_response_to_one():
+    # The e2e and a user's KTs (25 Oct): "Prometheus and Grafana cover
+    # monitoring, and PagerDuty pages the on-call engineer" was the card's
+    # "An alert fires" step. It says where alerts come from, not what to do.
+    rows = _card(_section("monitoring_observability", "Monitoring", [
+        "Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer."]))
+    assert [(r["Situation"], r["What to do"]) for r in rows] == [
+        ("Alerting (no first step stated)",
+         "Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer.")]
+    rows = _card(_section("monitoring_observability", "Monitoring", [
+        "If an alert fires, check the checkout latency dashboard in Grafana first."]))
+    assert rows[0]["Situation"] == "An alert fires"
+
+
+def test_a_counted_list_of_failures_gives_each_failure_its_row():
+    # The e2e AWS KT, without an LLM: the two incidents it names had no row.
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["The two incidents you will see most are database connection exhaustion on RDS and pods that fail "
+            "to start because a Kubernetes secret reference is wrong."]
+    assert _known_failures({"coverage_content": said}) == [
+        ("Database connection exhaustion on RDS", "No fix was stated in the KT. Ask the outgoing owner."),
+        ("Pods that fail to start because a Kubernetes secret reference is wrong",
+         "No fix was stated in the KT. Ask the outgoing owner.")]
+    # The count does not match the items: not split.
+    said = ["The three incidents we see are CPU and memory pressure on the nodes."]
+    assert len(_known_failures({"coverage_content": said})) <= 1
+
+
+def test_a_list_of_failures_without_a_count_gives_each_its_row():
+    # The e2e Azure and GCP KTs, without an LLM: neither failure reached the card.
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["The common problems are a Service Bus backlog when the settlement consumer falls behind, and SQL "
+            "connection exhaustion during sales peaks."]
+    assert [s for s, _ in _known_failures({"coverage_content": said})] == [
+        "Service Bus backlog when the settlement consumer falls behind", "SQL connection exhaustion during sales peaks"]
+    # A clause about the item before stays with it.
+    said = ["The failures you will hit most are a Pub/Sub backlog, where unacknowledged messages pile up, and "
+            "Dataflow jobs that fail and stop processing."]
+    assert [s for s, _ in _known_failures({"coverage_content": said})] == [
+        "Pub/Sub backlog, where unacknowledged messages pile up", "Dataflow jobs that fail and stop processing"]
+    # Two short words joined by "and" are one failure.
+    said = ["The common problems are CPU and memory pressure on the nodes."]
+    assert len(_known_failures({"coverage_content": said})) <= 1
+
+
+def test_a_failure_after_its_time_and_one_said_by_its_effect_are_named():
+    # The user's QuickBite KT, without an LLM: the first failure was carded as
+    # "Where to look first", and the second as part of its fix.
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag.",
+            "Check consumer lag and the Order Service error rate before restarting consumers.",
+            "Redis memory saturation can also make courier locations appear stale."]
+    assert _known_failures({"coverage_content": said}) == [
+        ("Delayed order processing caused by Kafka consumer lag (during dinner peaks)",
+         "Check consumer lag and the Order Service error rate before restarting consumers."),
+        ("Redis memory saturation can also make courier locations appear stale",
+         "No fix was stated in the KT. Ask the outgoing owner.")]
+    rows = _card(_section("known_bad_days", "Operational Calendar",
+                          ["Avoid production deployments during major promotional campaigns."]))
+    assert ("Do not deploy", "Avoid production deployments during major promotional campaigns.") in [
+        (r["Situation"], r["What to do"]) for r in rows]
+
+
+def test_a_past_incident_names_the_failure_and_a_step_about_it_is_its_fix():
+    # The e2e ambiguous KT: the card's situation read "You see that again".
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["A couple of months ago we had an incident where the database ran out of connections.",
+            "If you see that again, check the pool metrics first."]
+    assert _known_failures({"coverage_content": said}) == [
+        ("The database ran out of connections", "If you see that again, check the pool metrics first.")]
+    assert _known_failures({"coverage_content": said[1:]})[0][0] != "You see that again"
+
+
+def test_a_rollback_row_says_when_no_procedure_was_given():
+    rows = _card(_section("deployment_and_rollback", "Deployment & Rollback", ["Rolling back is usually quick."]),
+                 _not_stated={"deployment_and_rollback": ["Rollback procedure"]})
+    assert rows == [{"Situation": "A release misbehaves (roll back)",
+                     "What to do": "Rolling back is usually quick. No rollback procedure was stated in the KT; "
+                                   "ask the outgoing owner.", "Source": "Deployment & Rollback"}]

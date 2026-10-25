@@ -172,26 +172,9 @@ def test_the_pdf_is_set_in_the_bundled_typeface():
 def _boxes_past_their_edge(html):
     """(what, points over) for every box that reaches past the page's content
     area, or content wider than its own table cell."""
-    from pdf_rendering import _layout
+    from pdf_rendering import _layout, layout_overflows
 
-    out = []
-    for page in _layout(html).pages:
-        root = page._page_box
-        right = root.content_box_x() + root.width
-        for box in root.descendants():
-            if not hasattr(box, "margin_width"):
-                continue
-            edge = box.position_x + box.margin_width()
-            tag = getattr(box, "element_tag", "")
-            if edge > right + 0.5 and tag in ("table", "td", "th"):
-                out.append((tag, round(edge - right, 1)))
-            if tag in ("td", "th"):
-                for inner in box.descendants():
-                    if inner is not box and hasattr(inner, "margin_width") and \
-                            inner.position_x + inner.margin_width() > edge + 0.5:
-                        out.append(("in-" + tag, round(inner.position_x + inner.margin_width() - edge, 1)))
-                        break
-    return out
+    return [(what, points) for _, what, points in layout_overflows(_layout(html))]
 
 
 def test_tables_fit_the_page_and_their_cells():
@@ -210,6 +193,8 @@ def test_tables_fit_the_page_and_their_cells():
          "blocks": [{"type": "DecisionTable", "title": "Coverage matrix", "columns": ["Domain", "Coverage", "Assessment"],
                      "rows": [{"Domain": "Sign-off", "Coverage": "After review",
                                "Assessment": "Recorded when the document is reviewed and signed."},
+                              {"Domain": "Cost Optimization", "Coverage": "Not discussed",
+                               "Assessment": "Optional; not discussed in the KT session."},
                               {"Domain": "Open Responsibilities & Transition Plan", "Coverage": "Partial",
                                "Assessment": "1 of 3 topics covered."}]}]},
     ]

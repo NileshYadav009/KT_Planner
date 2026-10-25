@@ -322,3 +322,36 @@ def test_a_greeting_is_never_cited_and_table_labels_are_not_facts():
     cited = {q for qs in dict(evidence_pairs(ko)).values() for q in qs}
     assert said[0] not in cited
     assert said[2] in cited and said[3] in cited
+
+
+def test_a_value_written_in_the_documents_form_still_cites_what_was_said():
+    # The e2e AWS KT with Groq (25 Oct): "DR testing frequency: quarterly" and
+    # "30-day retention" were printed "no source"; the speaker said "kept for
+    # 30 days" and "a DR test every quarter".
+    sentences = transcript_sentences("RDS takes daily backups that are kept for 30 days, and we run a DR test every "
+                                     "quarter. The pods restart in about four hours sometimes.")
+    ko = _ko({"type": "NarrativeBlock", "title": "Disaster Recovery",
+              "paragraphs": ["DR testing frequency: quarterly", "RTO: four hours"]},
+             {"type": "ChecklistBlock", "title": "Backups", "items": ["Daily backups", "30-day retention"]},
+             section_id="disaster_recovery")
+    attach_evidence(ko, sentences)
+    pairs = dict(evidence_pairs(ko))
+    said = sentences[0]["quote"]
+    assert pairs["DR testing frequency: quarterly"] == [said]
+    assert pairs["30-day retention"] == [said] and pairs["Daily backups"] == [said]
+    # A value said about something else is not the source of a labelled one.
+    assert "RTO: four hours" not in pairs
+
+
+def test_the_documents_own_note_in_a_cell_does_not_hide_what_was_said():
+    # The incident card's rollback row (audit §9aaz): "Rolling back is usually
+    # quick. No rollback procedure was stated in the KT; ask the outgoing
+    # owner." was printed "no source".
+    sentences = transcript_sentences("GitHub Actions builds the images. Rolling back is usually quick.")
+    ko = _ko({"type": "DecisionTable", "title": "Quick Reference", "columns": ["Situation", "What to do", "Source"],
+              "rows": [{"Situation": "A release misbehaves (roll back)",
+                        "What to do": "Rolling back is usually quick. No rollback procedure was stated in the KT; "
+                                      "ask the outgoing owner.", "Source": "Deployment & Rollback"}]},
+             section_id="quick_reference")
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    assert list(dict(evidence_pairs(ko)).values()) == [["Rolling back is usually quick."]]

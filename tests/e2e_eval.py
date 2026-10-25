@@ -66,10 +66,15 @@ _TEMPLATE_DURATIONS = re.compile(r"first\s+30[\s-]day\s+ownership(?:\s+plan)?|\b
 # Including the speaker's own words for it: "have not been formally
 # documented", "the runbook is still missing".
 _GAP_MARKER = re.compile(r"not covered|not stated|no fix was stated|not (?:been )?(?:\w+ly )?documented|"
-                         r"never been documented|(?:is|are) (?:still )?missing|"
+                         r"never been documented|(?:is|are) (?:still )?missing|\bundocumented\b|"
                          r"can'?t remember|cannot remember|not discussed|confirm (?:\w+ )?with the outgoing owner",
                          re.IGNORECASE)
-_SUPERSCRIPT = re.compile(r"(?<=[A-Za-z.)”\"])\d{1,2}(?:,\d{1,2})*(?=\s|$)")
+# A source number after a word, before a space, the end, or a list bullet the
+# text layer puts beside it ("Database backups run daily12•").
+_SUPERSCRIPT = re.compile(r"(?<=[A-Za-z.)”\"])\d{1,2}(?:,\d{1,2})*(?=[\s•·]|$)")
+# Two table cells side by side come out of the text layer joined
+# ("Delayed video processingWhen background jobs ..."): read apart as well.
+_JOINED_CELLS = re.compile(r"(?<=[a-z])(?=[A-Z][a-z])")
 
 
 def load_datasets() -> List[Dict[str, Any]]:
@@ -204,6 +209,26 @@ def _section_text(ko: Dict[str, Any], section_id: str) -> str:
     return ""
 
 
+def _marked_no_source(ds: Dict[str, Any], ko: Dict[str, Any]) -> tuple:
+    """(how many units the document marks "no source", the answer-key facts
+    shown in one of them). A known fact so marked tells the reader to
+    distrust something the speaker said."""
+    from knowledge.evidence import block_units
+
+    marked = []
+    for sec in ko.get("rendered_sections") or []:
+        for block in sec.get("blocks") or []:
+            units = block_units(block) or []
+            marked += [norm(_SUPERSCRIPT.sub(" ", str(units[p]))) for p in block.get("unsourced") or [] if p < len(units)]
+    found = []
+    for fact in ds["facts"]:
+        needles = [n for n in [norm(fact["quote"])] + [norm(a) for a in fact.get("alt", [])] if n]
+        terms = [norm(t) for t in fact.get("terms", [])]
+        if any(any(n in m for n in needles) or (terms and all(t in m for t in terms)) for m in marked):
+            found.append(fact["id"])
+    return len(marked), found
+
+
 def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode: str = "no-llm") -> Dict[str, Any]:
     from devops_transcription import clean_transcript
     from kt_schema_loader import SCHEMA
@@ -213,6 +238,7 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
     body = _body(pages)
     body_norm = norm(body)
     body_norm_plain = norm(_SUPERSCRIPT.sub(" ", body))
+    body_norm_cells = norm(_JOINED_CELLS.sub(" ", _SUPERSCRIPT.sub(" ", body)))
     transcript = clean_transcript(ds["transcript"])
     g = golden_score(ds, result)
 
@@ -222,7 +248,7 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
     for fact in ds["facts"]:
         needles = [norm(fact["quote"])] + [norm(a) for a in fact.get("alt", [])]
         terms = [norm(t) for t in fact.get("terms", [])]
-        in_pdf = any(n and (n in body_norm or n in body_norm_plain) for n in needles) or \
+        in_pdf = any(n and (n in body_norm or n in body_norm_plain or n in body_norm_cells) for n in needles) or \
             bool(terms and any(all(t in p for t in terms) for p in page_norms))
         doc = next(f for f in g["facts"] if f["id"] == fact["id"])
         retention[fact["id"]] = "pdf" if in_pdf else ("document_only" if doc["status"] != "lost" else "lost")
@@ -266,6 +292,9 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
     knowledge_summary = ko.get("_knowledge_coverage_summary") or {}
 
     placeholders = len(re.findall(r"This section was not covered in the KT session", body))
+    no_source_marks, known_marked = _marked_no_source(ds, ko)
+    layout = result.get("_pdf_layout") or {}
+    overflows = [f"page {p}: {what} {points}pt" for p, what, points in layout.get("overflows") or []]
     secrets = [m.group(0)[:12] + "…" for m in _SECRET.finditer(ds["transcript"] + "\n".join(pages))]
     pdf_ok = bool(pages) and all(len(p.strip()) > 30 for p in pages)
 
@@ -292,6 +321,8 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
         "coverage_disagrees_with_content": disagreements,
         "repeated_sentences": g["repeats"],
         "facts_without_source": g["unsourced"],
+        "known_facts_marked_no_source": known_marked,
+        "pdf_boxes_past_their_edge": overflows,
     }
     usage = result.get("llm_usage") or {}
     return {
@@ -300,7 +331,8 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
         "status": result.get("status"),
         "system_name": ko.get("system_name"),
         "pdf": {"opens": pdf_ok, "pages": len(pages), "placeholder_sections": placeholders,
-                "words_in": len(ds["transcript"].split())},
+                "words_in": len(ds["transcript"].split()), "layout_checked": "overflows" in layout},
+        "evidence": dict(ko.get("_evidence_stats") or {}, no_source_marks=no_source_marks),
         "facts": len(ds["facts"]),
         "retained_in_pdf": sum(1 for s in retention.values() if s == "pdf"),
         "retained_in_document": sum(1 for s in retention.values() if s != "lost"),
@@ -329,12 +361,13 @@ def run_dataset(ds: Dict[str, Any], job_prefix: str = "e2e") -> tuple:
     from pdf_rendering import build_job_pdf
 
     job_id = f"{job_prefix}-{ds['id']}"
+    layout: Dict[str, Any] = {}
     try:
         result = pipeline.run_kt_pipeline(job_id, clean_transcript(ds["transcript"]))
-        pdf = build_job_pdf(job_id, result, time.time())
+        pdf = build_job_pdf(job_id, result, time.time(), layout=layout)
     finally:
         pipeline.JOB_STORE.delete(job_id)
-    return result, pdf
+    return dict(result, _pdf_layout=layout), pdf
 
 
 def run_all(datasets=None, out_dir: Optional[str] = None) -> List[Dict[str, Any]]:

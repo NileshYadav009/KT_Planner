@@ -18,7 +18,7 @@ python evaluation/accuracy.py LABEL SETS
 | `dev` | `evaluation/dev`: 6 KTs in styles the goldens lack (formal, meeting, noisy speech-to-text, read-aloud notes, Q&A, rambling) | per fact |
 | `holdout` | `tests/goldens` h12-h14 | **aggregate only** |
 | `blind2` | `evaluation/blind`: b01-b03 | **aggregate only** |
-| `e2e` | `tests/e2e_kts` through `tests/e2e_eval.py` | problems only |
+| `e2e` | `tests/e2e_kts` (six KTs: AWS, Azure, GCP, an ambiguous handover, and the user's QuickBite and online learning KTs) through `tests/e2e_eval.py` | problems only |
 
 The results go to `evaluation/results/LABEL.json`, which is git-ignored.
 
@@ -43,6 +43,7 @@ Each set reports:
 
 | Script | Use |
 |---|---|
+| `quality_gates.py LABEL [--replay] [--accuracy ACC] [--matrix M]` | The release gates on the e2e KTs, counted on the PDF: fact retention, silent loss, unsupported claims, misattributed sources, placement, sources, stated connections, false “no source” marks, false sign-off, safety rules, honest gaps, PDF layout (`pdf_rendering.layout_overflows`) and repeats. No LLM, and with `--replay` the recorded Groq answers (nothing sent; a KT with none is listed as blocked). `--accuracy` and `--matrix` add an earlier run's figures. Results: `results/gates-LABEL.json`; `--report BEFORE AFTER` writes `docs/QUALITY_GATES.md`. About 25 minutes for both modes. |
 | `kodiag.py KT_ID SECTION[,...]` | One dev or tuning KT: what a section contains and why the coverage table rates it so. Refuses holdout and blind KTs. |
 | `adversarial.py` | A probe KT with distinctions the goldens under-test, listed below. |
 | `matrix.py LABEL [IDS] [--dump]` | The adversarial matrix: short KTs in `matrix/cases.json`, one per failure (corrections, ambiguity, hedges, contradictions, several facts in a sentence, duplicates, negation, numbers, order, coverage, injection, noise, PDF text), each with exact checks on the rendered document. `must` checks are a wrong document; `should` checks are behaviour not promised yet. About 2 to 6 minutes for all cases. Results: `results/matrix-LABEL.json`. |

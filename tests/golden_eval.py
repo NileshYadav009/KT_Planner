@@ -184,7 +184,8 @@ def score(golden: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "lost": [f["id"] for f in facts if f["status"] == "lost"],
         "violations": [f["id"] for f in facts if f["violations"]],
         "false_missing": [s for s in golden.get("covered", []) if buckets.get(s) == "Missing"],
-        "false_covered": [s for s in golden.get("missing", []) if buckets.get(s) not in ("Missing", None)],
+        # An optional section nobody discussed is listed as "Not discussed".
+        "false_covered": [s for s in golden.get("missing", []) if buckets.get(s) not in ("Missing", "Not discussed", None)],
         "missing_conflicts": [c for c in golden.get("conflicts", []) if c.lower() not in conflicts.lower()],
         "repeats": repeated_sentences(texts),
         "unsourced": unsourced_facts(golden, ko, facts),

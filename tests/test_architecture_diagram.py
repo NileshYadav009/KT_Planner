@@ -275,3 +275,44 @@ def test_a_named_sender_or_the_system_itself_keeps_a_solid_line():
     g = build_architecture_graph(["Pub/Sub", "Google Kubernetes Engine"],
                                  ["Events are published to Pub/Sub by the web trackers."], {}, "Streamline")
     assert not [e for e in g["edges"] if e["to"] == "pub-sub"]
+
+
+def test_the_verb_before_a_list_the_workload_heads_applies_to_every_item():
+    # A user's KT (25 Oct): "The backend uses Python FastAPI, PostgreSQL on
+    # Amazon RDS, and Redis ..." drew Redis's line but not RDS's: FastAPI is
+    # the workload itself, and PostgreSQL had stopped naming the RDS box.
+    g = build_architecture_graph(
+        ["Amazon EKS", "FastAPI", "PostgreSQL", "Amazon RDS", "Redis"],
+        ["The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis for caching course information."],
+        {}, "Online Learning Platform")
+    edges = {(e["from"], e["to"]): e["label"] for e in g["edges"]}
+    assert edges.get(("central", "amazon-rds")) == "stores data in"
+    assert edges.get(("central", "redis")) == "caches in"
+    # A list after another tool's verb draws no line from the system.
+    g = build_architecture_graph(["Amazon EKS", "PostgreSQL", "Amazon RDS", "Redis", "Prometheus"],
+                                 ["Prometheus monitors EKS, PostgreSQL and Redis."], {}, "X")
+    assert not [e for e in g["edges"] if e["from"] == "central"]
+
+
+def test_the_users_box_says_what_the_kt_calls_its_users():
+    sentences = ["Students access the React application through CloudFront and an Application Load Balancer."]
+    g = build_architecture_graph(["React", "CloudFront", "Application Load Balancer", "Amazon EKS"], sentences, {}, "P")
+    assert g["entry"][0]["caption"] == "students"
+    # Not said: the default, and never a team or a component.
+    g = build_architecture_graph(["React", "CloudFront", "Amazon EKS"],
+                                 ["Developers use the React app through CloudFront."], {}, "P")
+    assert g["entry"][0]["caption"] == "customers"
+
+
+def test_a_store_that_opens_its_sentence_and_says_what_it_holds_gets_its_line():
+    # The user's QuickBite KT drew no line for any of these.
+    g = build_architecture_graph(
+        ["Amazon EKS", "PostgreSQL", "Amazon RDS", "Redis", "Amazon MSK", "Kafka", "Amazon SQS", "Amazon S3"],
+        ["PostgreSQL on Amazon RDS stores order and payment records.",
+         "Amazon MSK carries order and delivery events between services, and Amazon SQS handles delayed "
+         "notification jobs.",
+         "Redis caches restaurant menus and courier locations.",
+         "Amazon S3 stores the Terraform state."], {}, "QuickBite")
+    edges = {e["to"]: e["label"] for e in g["edges"] if e["from"] == "central"}
+    assert edges == {"amazon-rds": "stores data in", "kafka-amazon-msk": "sends messages via",
+                     "amazon-sqs": "sends messages via", "redis": "caches in"}

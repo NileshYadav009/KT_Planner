@@ -1232,10 +1232,11 @@
 
         <div id="progressWrap" style="display:none;margin-top:16px">
           <div class="progress-wrap">
-            <div class="progress-track"><div class="progress-bar" id="bar"></div></div>
+            <div class="progress-track" id="progressTrack" role="progressbar" aria-label="KT processing progress"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar" id="bar"></div></div>
             <span class="progress-label" id="progressText">0%</span>
           </div>
-          <p id="progressHint" style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
+          <p id="progressHint" aria-live="polite" style="font-size:12px;color:var(--text3);margin-top:8px;text-align:center">
             Transcribing and classifying — this may take a few minutes for long recordings.
           </p>
         </div>
@@ -1529,7 +1530,7 @@
 </div>
 
 <!-- TOASTS -->
-<div id="toasts"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
 
 <script>
 /* ── Theme toggle ─────────────────────────────────────────── */
@@ -1718,7 +1719,10 @@ function sectionTitle(id){
 }
 
 /* ── Progress ──────────────────────────────────────────────── */
-function setProgress(p){ bar.style.width=p+'%'; progressText.textContent=p+'%'; }
+function setProgress(p){
+  bar.style.width=p+'%'; progressText.textContent=p+'%';
+  const track=document.getElementById('progressTrack'); if(track){ track.setAttribute('aria-valuenow', String(p)); }
+}
 const PROGRESS_HINT = 'Transcribing and classifying — this may take a few minutes for long recordings.';
 function setProgressHint(text){ document.getElementById('progressHint').textContent = text || PROGRESS_HINT; }
 
@@ -1790,7 +1794,8 @@ function renderSummary(data){
   // What the KT covered, from the KT Coverage table (P2-5). A letter grade
   // ("Quality D 66.8") read as the product grading the customer's own KT.
   const covSection = ((data.knowledge_object || {}).sections || []).find(s => s.id === 'kt_coverage');
-  const covRows = ((covSection && covSection._coverage_rows) || []).filter(r => r.Coverage !== 'After review');
+  // Sign-off is recorded at review; an optional section nobody discussed may not apply.
+  const covRows = ((covSection && covSection._coverage_rows) || []).filter(r => r.Coverage !== 'After review' && r.Coverage !== 'Not discussed');
   if(covRows.length){
     const done = covRows.filter(r => r.Coverage === 'Strong' || r.Coverage === 'Partial').length;
     const followUp = covRows.filter(r => r.Coverage !== 'Strong').length;

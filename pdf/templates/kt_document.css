@@ -448,6 +448,8 @@ a.page-ref::after { content: " (page " target-counter(attr(href), page) ")"; col
 .status-partial { background: #fef3c7; color: #92400e; }
 .status-missing { background: #fee2e2; color: #991b1b; }
 .status-after-review { background: #e5e7eb; color: #374151; }
+/* An optional section nobody discussed: may not apply, so not a red gap. */
+.status-not-discussed { background: #f3f4f6; color: #4b5563; border: 0.5pt dashed #9ca3af; }
 
 .fact-list { margin: 0 0 0.2rem 1.1rem; }
 .fact-list li { margin-bottom: 0.3rem; }

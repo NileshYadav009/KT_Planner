@@ -272,6 +272,15 @@ _LOCATED_RE = re.compile(r"\b(?:is|are|lives?|sits?)\s+(?:in|on)\b", re.IGNORECA
 # "Redis is used for caching", "PostgreSQL is the primary database",
 # "Service Bus to queue invoice jobs".
 _DEFINED_AS_RE = re.compile(r"^\s*(?:(?:is|are)\s+(?:used\s+)?(?:for|as|our|the)|to|for|as)\b", re.IGNORECASE)
+# "PostgreSQL on Amazon RDS stores order and payment records", "Redis caches
+# restaurant menus", "Amazon MSK carries order events between services": a
+# store that opens its sentence or clause and says what it holds (the user's
+# QuickBite KT drew none of these). Not object storage: "S3 stores the
+# Terraform state" is not the application's data.
+_HOLDS_RE = re.compile(r"^\s*(?:stores?|holds?|keeps?|contains?|persists?|caches?|carr(?:y|ies)|handles?|queues?|"
+                       r"buffers?|streams?)\b", re.IGNORECASE)
+_OPENS_CLAUSE_RE = re.compile(r"^\W*(?:(?:and|then|also)\s+)?(?:the\s+|our\s+)?(?:[\w./-]+\s+on\s+)?$", re.IGNORECASE)
+_HOLDING_LAYERS = {"database", "cache", "queue"}
 _DEPLOY_RE = re.compile(r"\b(?:deploy\w*|release\w*|ship\w*|roll\w* out|sync\w*|promot\w*)\b", re.IGNORECASE)
 # "Grafana shows the service health" is monitoring too.
 _MONITOR_RE = re.compile(r"\b(?:monitor\w*|watch\w*|dashboard\w*|metric\w*|logs?|logging|observ\w*|trac\w*|alert\w*|"
@@ -292,6 +301,33 @@ _PASSIVE_RE = re.compile(
 _CLAUSE_BREAK_RE = re.compile(r"[;:]|,\s*(?:and|but|while|so)\b|\.\s", re.IGNORECASE)
 
 
+# "Students access the React application", "Customers use the React
+# storefront": what the KT calls the people who use the system.
+_USERS_RE = re.compile(r"^\W*(?:our\s+|the\s+|all\s+)?([a-z]{3,20}s)\s+(?:can\s+|will\s+|usually\s+|mostly\s+)?"
+                       r"(?:access|use|reach|open|visit|browse|place|book|order|shop|watch|stream|submit|log\s+in|"
+                       r"sign\s+in|connect|interact|enrol|enroll|buy|pay|search)\w*\b", re.IGNORECASE)
+# "Users" is the box's own label; a team or a component is not who uses it.
+_NOT_USERS = {"users", "teams", "engineers", "developers", "services", "pods", "jobs", "apps", "applications", "systems",
+              "workers", "tests", "alerts", "requests", "events", "messages", "metrics", "logs", "dashboards",
+              "pipelines", "deployments", "releases", "backups", "builds", "images", "clusters", "nodes", "things"}
+
+
+def _users_word(sentences: List[str], aliases: Dict[str, List[str]], entry: List[Dict[str, str]]) -> str:
+    """The word the KT uses for the people at the start of the request path,
+    from a sentence that names the first component of that path; "customers"
+    when none says. A user's KT about students showed "customers" (25 Oct)."""
+    first = entry[0]["id"] if entry else None
+    names = aliases.get(first, []) if first else []
+    for sentence in sentences:
+        low = sentence.lower()
+        if names and not any(re.search(r"(?<![\w-])" + re.escape(n) + r"(?![\w-])", low) for n in names):
+            continue
+        match = _USERS_RE.match(sentence)
+        if match and match.group(1).lower() not in _NOT_USERS:
+            return match.group(1).lower()
+    return "customers"
+
+
 def _vendor(name: str) -> Optional[str]:
     for vendor, pattern in _VENDORS:
         if pattern.search(name):
@@ -308,13 +344,20 @@ def _merge_with_aliases(components: List[str]) -> List[Tuple[str, List[str]]]:
     engine are one node ("Kafka (Amazon MSK)")."""
     merged = _merge_managed_offerings(components)
     lowered = {c.lower(): c for c in components}
+    # The engine left out beside the one managed database still names that
+    # node: "PostgreSQL on Amazon RDS" is a mention of the RDS box.
+    managed = [c for c in components if c.lower() in _MANAGED_DATABASES]
+    engines = [c for c in components if c.lower() in _DB_ENGINES] if len(managed) == 1 else []
     out = []
     for label in merged:
         members = [label]
         inner = re.match(r"^(.*) \((.*)\)$", label)
         if inner:
             members = [inner.group(1), inner.group(2)]
-        out.append((label, [m for m in members if m.lower() in lowered] or [label]))
+        members = [m for m in members if m.lower() in lowered] or [label]
+        if managed and label == managed[0]:
+            members += engines
+        out.append((label, members))
     return out
 
 
@@ -348,7 +391,8 @@ def _label_for(layer: str, window: str, defining: str) -> Optional[str]:
     elif layer == "cache":
         if _READ_RE.search(window):
             return "reads from"
-        if _CACHE_RE.search(text) or _USE_RE.search(text) or defining:
+        # "The latest location is stored in Redis".
+        if _CACHE_RE.search(text) or _USE_RE.search(text) or _WRITE_RE.search(window) or defining:
             return "caches in"
     elif layer == "queue":
         if _CONSUME_RE.search(text):
@@ -458,7 +502,7 @@ def build_architecture_graph(
 
     entry = [node(by_layer[layer][0], layer) for layer in _CHAIN_LAYERS if layer != "compute" and layer in by_layer]
     if entry:
-        entry.insert(0, {"id": "users", "label": "Users", "caption": "customers"})
+        entry.insert(0, {"id": "users", "label": "Users", "caption": _users_word(sentences, node_aliases, entry)})
     data = [node(label, layer, members) for layer in _DATA_LAYERS
             for label, members in _merge_with_aliases(by_layer.get(layer, []))]
     external = [node(c, "external") for c in by_layer.get("external", [])]
@@ -525,7 +569,9 @@ def build_architecture_graph(
             after = spots[idx + 1][0] if idx + 1 < len(spots) else len(sentence)
             brk = _CLAUSE_BREAK_RE.search(sentence, end, after)
             tail = sentence[end:(brk.start() if brk else after)]
-            defining = tail if _DEFINED_AS_RE.match(tail) else ""
+            opener = sentence[max([m.end() for m in _CLAUSE_BREAK_RE.finditer(sentence, 0, start)] or [0]):start]
+            defining = tail if _DEFINED_AS_RE.match(tail) or (
+                layer in _HOLDING_LAYERS and _HOLDS_RE.match(tail) and _OPENS_CLAUSE_RE.match(opener)) else ""
             if layer in _ACTOR_LAYERS:
                 # "Events are published to Pub/Sub, Dataflow jobs process them":
                 # the pipeline reads from the queue named before it.
@@ -548,6 +594,13 @@ def build_architecture_graph(
                         # workloads, Vertex AI supports ML", "used" is about GKE.
                         cut = max(segment.rfind(","), segment.rfind(";"))
                         source, window = "central", (segment[cut + 1:] if cut >= 0 else segment)
+                        if _TOOL_LIST_GAP_RE.match(segment):
+                            # "The backend uses Python FastAPI, PostgreSQL on
+                            # Amazon RDS, and Redis": the workload heads a list,
+                            # so the verb before it is the list's (a user's KT,
+                            # 25 Oct: RDS was drawn with no line).
+                            heads = [m.end() for m in _CLAUSE_BREAK_RE.finditer(sentence, 0, pstart)]
+                            window = sentence[(heads[-1] if heads else 0):pstart]
                         break
                     if node_layer.get(pid) in _ACTOR_LAYERS:
                         breaks = list(_CLAUSE_BREAK_RE.finditer(segment))

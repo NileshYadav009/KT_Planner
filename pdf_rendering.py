@@ -6,12 +6,15 @@ main.py as part of the Phase 3 architecture split (see REPOSITORY_AUDIT.md).
 """
 
 import base64
+import logging
 import os
 import re
 
 from renderers import get_renderer
 from renderers.blocks.common import NOT_COVERED_MESSAGE
 from renderers.sections.architecture_reference import CONNECTIONS_TABLE_TITLE
+
+logger = logging.getLogger(__name__)
 
 try:
     from markdown import markdown as markdown_to_html
@@ -213,6 +216,35 @@ def _layout(html_doc: str):
     return HTML(string=html_doc, url_fetcher=safe_url_fetcher).render()
 
 
+def layout_overflows(document) -> list:
+    """(page, element, points) for every box of a laid-out document that
+    reaches past the page's content area, and every table cell whose content
+    is wider than the cell: what a reader sees as text cut off at the page
+    edge or running over a column line (the connections table ran 18pt past
+    the edge on a user's KT, 25 Oct). Measured on the boxes WeasyPrint lays
+    out, so it checks the PDF itself rather than the HTML. The page and its
+    margin boxes (header, footer) are the frame, not content."""
+    out = []
+    for number, page in enumerate(document.pages, 1):
+        root = page._page_box
+        right = root.content_box_x() + root.width
+        for box in root.descendants():
+            if box is root or not hasattr(box, "margin_width") or type(box).__name__ in ("PageBox", "MarginBox"):
+                continue
+            tag = getattr(box, "element_tag", None) or type(box).__name__
+            edge = box.position_x + box.margin_width()
+            if edge > right + 0.5:
+                out.append((number, tag, round(edge - right, 1)))
+                continue
+            if tag in ("td", "th"):
+                for inner in box.descendants():
+                    if inner is not box and hasattr(inner, "margin_width") and \
+                            inner.position_x + inner.margin_width() > edge + 0.5:
+                        out.append((number, "in-" + tag, round(inner.position_x + inner.margin_width() - edge, 1)))
+                        break
+    return out
+
+
 def html_to_pdf_bytes(html_doc: str) -> bytes:
     """Render a KT document with the restricted fetcher. The only entry point
     the API should use to produce a PDF."""
@@ -344,7 +376,8 @@ def render_sources_appendix(sources: list) -> str:
             f"<p class=\"sources-intro\">{intro}</p><ol class=\"sources-list\">{''.join(items)}</ol></section>")
 
 
-_COVERAGE_STATUS = {"Strong": "strong", "Partial": "partial", "Missing": "missing", "After review": "after-review"}
+_COVERAGE_STATUS = {"Strong": "strong", "Partial": "partial", "Missing": "missing", "After review": "after-review",
+                    "Not discussed": "not-discussed"}
 _MARKDOWN_STRUCTURE_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s|\*\*|#")
 
 
@@ -864,10 +897,12 @@ def build_rendered_sections(knowledge_object: dict) -> list:
     return rendered_sections
 
 
-def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
+def build_job_pdf(job_id: str, job: dict, created: float = None, layout: dict = None) -> bytes:
     """The KT document for a finished job as PDF bytes. `created` is when
     the KT was submitted (its date on the cover). Synchronous: call it from a
-    worker or a thread pool, never on the event loop."""
+    worker or a thread pool, never on the event loop. The laid-out document
+    is checked for boxes past the page (layout_overflows) and any are
+    logged; a `layout` dict, when given, receives the page count and them."""
     from datetime import datetime
 
     knowledge_object = job.get("knowledge_object", {}) or {}
@@ -915,5 +950,11 @@ def build_job_pdf(job_id: str, job: dict, created: float = None) -> bytes:
     # little: a short document lists its sections on the cover instead.
     document = _layout(_html(True))
     if len(document.pages) <= SHORT_DOCUMENT_PAGES:
-        return html_to_pdf_bytes(_html(False))
+        document = _layout(_html(False))
+    overflows = layout_overflows(document)
+    if overflows:
+        logger.warning("KT document %s: %d box(es) past the page or their table cell, first: page %s %s %spt",
+                       job_id, len(overflows), *overflows[0])
+    if layout is not None:
+        layout.update(pages=len(document.pages), overflows=overflows)
     return document.write_pdf()

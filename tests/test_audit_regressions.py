@@ -334,7 +334,8 @@ def test_document_coverage_check_recovers_sentences_missing_from_the_document():
     ])
     summary = result["_knowledge_coverage_summary"]
     assert summary == {"facts_identified": 2, "mapped": 1, "unmapped": 0, "recovered": 1, "lost": 0,
-                       "verified_against_document": True, "stated_gaps": 0, "excluded": 0}
+                       "verified_against_document": True, "stated_gaps": 0, "excluded": 0,
+                       "shown_in_own_section": 0, "shown_elsewhere_only": 0}
     notes = next(s for s in result["rendered_sections"] if s["section_id"] == "unmapped_findings")
     assert "Aurora backups are retained" in notes["blocks"][0]["paragraphs"][0]
 

@@ -1525,17 +1525,30 @@ def _leaf_field_specs(fields_schema: Optional[List[Dict[str, Any]]]) -> List[tup
     return specs
 
 
+# An optional section the KT never touched is not in the document. Its row
+# says so, and the follow-up list asks whether it applies (the user's
+# decision, 25 Oct: the reader did not know Environments was never covered).
+OPTIONAL_NOT_DISCUSSED = "Not discussed"
+
+
 def append_coverage_matrix_section(
     knowledge_object: Dict[str, Any],
     coverage: Dict[str, Any],
     dynamic_schema: List[Dict[str, Any]],
+    full_schema: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Reshape the pipeline's existing per-section coverage status/confidence
     (already computed before this runs — no new extraction) into a
     Domain/Coverage/Assessment matrix, matching the golden-reference "KT
     Coverage & Knowledge Gaps" page.
+
+    With `full_schema`, each optional section of it that the dynamic schema
+    left out (nothing in the KT touched it) gets a row of its own, "Not
+    discussed", in schema order, and a line on the follow-up list. It is not
+    counted as a section not covered: it may not apply to this system.
     """
     rows: List[Dict[str, str]] = []
+    row_ids: List[str] = []
     gaps: List[str] = []
     mapped_sentence_total = 0
     titles = {s.get("id"): (s.get("title") or s.get("id")) for s in dynamic_schema}
@@ -1704,6 +1717,18 @@ def append_coverage_matrix_section(
                 shows_values = any(_filled_value(v) for v in field_objects.values())
                 if action_gaps and (own_texts or shows_values):
                     knowledge_object.setdefault("_not_stated", {})[section_id] = action_gaps
+                # A failure named without its fix, beside failures that have
+                # one: "Fixes or workarounds" counted as covered and the
+                # section as covered well, with nothing said about the other
+                # (delayed video processing, the user's online learning KT).
+                unfixed = [s for s, fix in _known_failures(section_obj) if fix == _NO_FIX_STATED] \
+                    if section_id == "common_failures" and section_obj and "Fixes or workarounds" not in missing else []
+                if unfixed:
+                    bucket = "Partial" if bucket == "Strong" else bucket
+                    assessment = assessment.rstrip(".") + f"; no fix stated for: {'; '.join(unfixed)}."
+                    gaps.append(f"{title}: no fix stated for {'; '.join(unfixed)}")
+                    knowledge_object.setdefault("_not_stated", {}).setdefault(section_id, []).append(
+                        f"a fix for {'; '.join(unfixed)}")
         else:
             if not (texts or sentence_count):
                 bucket = "Missing"
@@ -1724,6 +1749,21 @@ def append_coverage_matrix_section(
             gaps.extend(f"{title}: “{_short_quote(f)}”" for f in dict.fromkeys(gap_facts))
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})
+        row_ids.append(section_id)
+
+    present = {s.get("id") for s in dynamic_schema}
+    order = [s.get("id") for s in full_schema or []]
+    for section in full_schema or []:
+        section_id = section.get("id")
+        if section.get("required", False) or section_id in present:
+            continue
+        title = section.get("title") or section_id
+        at = next((i for i, sid in enumerate(row_ids) if sid in order and order.index(sid) > order.index(section_id)),
+                  len(rows))
+        rows.insert(at, {"Domain": title, "Coverage": OPTIONAL_NOT_DISCUSSED,
+                         "Assessment": "Optional; not discussed in the KT session."})
+        row_ids.insert(at, section_id)
+        gaps.append(f"{title} (optional): ask whether it applies")
 
     if not rows:
         return knowledge_object
@@ -1861,6 +1901,13 @@ _QR_LEAD_RE = re.compile(r"^(?:and|so|but|also|plus|then|by the way|one more thi
 _ALERT_CUE_RE = re.compile(
     r"\b(alerts?|alerting|alarms?|pages? us|paged|pager|on-?call|threshold|drops? below|goes? (?:above|over)|exceeds?|"
     r"dashboard to (?:watch|check|open)|first (?:thing|check|step)s?)\b", re.IGNORECASE)
+# A step for whoever gets the alert. "PagerDuty pages the on-call engineer"
+# has none: it says where alerts come from, and a row titled "An alert
+# fires" read as if it were the response (the e2e and a user's KTs, 25 Oct).
+_ALERT_STEP_RE = re.compile(
+    r"\b(?:check\w*|look\s+at|open|acknowledg\w*|investigat\w*|triage\w*|restart\w*|follow|run|escalat\w*|"
+    r"(?<!-)call|ping|first\s+(?:thing|check|step)s?|start\s+with|verify|confirm)\b", re.IGNORECASE)
+_ALERT_NO_STEP_SITUATION = "Alerting (no first step stated)"
 _ROLLBACK_CUE_RE = re.compile(
     r"\b(roll(?:ed|ing)?[ -]?back|revert(?:ed|ing)?|redeploy(?:ing)? the previous|previous (?:version|release|"
     r"task definition|image|build|deployment|revision))\b", re.IGNORECASE)
@@ -1877,9 +1924,12 @@ _OPENING_PROHIBITION_RE = re.compile(
 _CAUTION_RE = re.compile(
     r"\b(careful|dangerous|danger|risky|risk|fragile|break|breaks|corrupt\w*|irreversibl\w*|data loss|lose|outage|"
     r"only copy|critical|impact\w*|without (?:telling|asking|approval))\b", re.IGNORECASE)
+# "Avoid production deployments during major promotional campaigns" (the
+# user's QuickBite KT) is a freeze too: the card had no "Do not deploy" row.
 _FREEZE_CUE_RE = re.compile(
-    r"\b(freeze|blackout|no (?:deploy\w*|changes|releases)|deploy\w* on fridays?|avoid deploying|do not deploy|"
-    r"don't deploy|only (?:run|deploy|release)\w* on)\b", re.IGNORECASE)
+    r"\b(freeze|blackout|no (?:\w+ ){0,2}(?:deploy\w*|changes|releases)|deploy\w* on fridays?|"
+    r"avoid (?:\w+ ){0,2}(?:deploy\w*|releas\w*|changes)|do not deploy|don't deploy|only (?:run|deploy|release)\w* on)\b",
+    re.IGNORECASE)
 _ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+|reach out to|call\s+[A-Z]\w+|"
                                 r"ping\s+[A-Z]\w+)", re.IGNORECASE)
 # "One recurring problem is X", "The most common production issue is X",
@@ -1892,6 +1942,53 @@ _FAILURE_INTRO_RE = re.compile(
     r"(?:is|was|we\s+(?:see|hit|get)(?:\s+is)?|that\s+(?:comes\s+up|happens)\s+is|"
     r"(?:occurs|happens|arises|comes\s+up|shows\s+up)\s+(?:when|if|whenever))\s+"
     r"(?P<what>.+?)\s*(?:[;,]\s*(?P<rest>.+))?$", re.IGNORECASE)
+# A list of failures: "The two incidents you will see most are database
+# connection exhaustion on RDS and pods that fail to start because ...", "The
+# common problems are a Service Bus backlog when ..., and SQL connection
+# exhaustion during sales peaks" (the e2e KTs, without an LLM: no failure
+# reached the card). With a count, the items must match it; without one,
+# each item must be a phrase of its own, so "CPU and memory pressure" stays
+# whole. A clause opening "where", "which" or "when" belongs to the item before.
+_FAILURE_LIST_RE = re.compile(
+    r"^(?:the|our)\s+(?:(?P<count>two|three|four|2|3|4)\s+)?(?:(?:most\s+)?(?:common|main|usual|recurring|frequent|"
+    r"biggest|typical|known)\s+)?(?:production\s+)?(?:problems|issues|failures|incidents|errors|outages)\s+"
+    r"(?:(?:you|we)(?:'ll|\s+will)?\s+(?:see|hit|get|run\s+into)(?:\s+(?:most(?:\s+often)?|the\s+most))?\s+)?"
+    r"(?:are|were)\s+(?P<items>.+)$", re.IGNORECASE)
+_COUNTS = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}
+_ATTACHED_CLAUSE_RE = re.compile(r"^(?:where|which|that|when|who|whose|while)\b", re.IGNORECASE)
+# "During dinner peaks, the most common issue is delayed order processing
+# caused by Kafka consumer lag": when it happens comes first (the user's
+# QuickBite KT, without an LLM: the failure was not named on the card).
+_FAILURE_WHEN_RE = re.compile(r"^(?P<when>(?:during|at|on|in|around|over)\s+[^,;]{3,60}),\s+(?P<rest>.+)$", re.IGNORECASE)
+# "Redis memory saturation can also make courier locations appear stale":
+# another failure, said by what it does. It was carded as the fix of the
+# failure before it.
+_FAILURE_EFFECT_RE = re.compile(
+    r"^(?!(?:this|that|it|which|they|these|those)\b)(?P<what>[^,;]{3,80}?)\s+(?:can|could|may|might|will|would|"
+    r"sometimes|often|also)(?:\s+(?:also|sometimes|often))?\s+(?:make|cause|lead\s+to|result\s+in|break|slow|"
+    r"block|stall|delay|stop|corrupt|crash|take\s+down)\w*\b", re.IGNORECASE)
+
+
+def _counted_failures(bare: str) -> List[str]:
+    match = _FAILURE_LIST_RE.match(bare)
+    if not match:
+        return []
+    count = _COUNTS.get((match.group("count") or "").lower())
+    for splitter, min_words in ((r",\s*(?:and\s+|or\s+)?|;\s*", 2), (r"\s+(?:and|or)\s+", 3)):
+        parts: List[str] = []
+        for part in (p.strip() for p in re.split(splitter, match.group("items")) if p.strip()):
+            if parts and _ATTACHED_CLAUSE_RE.match(part):
+                parts[-1] += ", " + part
+            else:
+                parts.append(part)
+        parts = [re.sub(r"^(?:a|an|the)\s+", "", p, flags=re.IGNORECASE) for p in parts]
+        if count is not None and len(parts) == count:
+            return parts
+        if count is None and len(parts) >= 2 and all(len(p.split()) >= min_words for p in parts):
+            return parts
+    return []
+
+
 # The subject-first form: "Airflow DAG failure is another common issue",
 # "Schema change is another important failure scenario because ...".
 _FAILURE_NAMED_RE = re.compile(
@@ -1910,6 +2007,16 @@ _FAILURE_WORD_RE = re.compile(r"\b(?:problem|issue|failure|outage|incident|backl
 _PAST_INCIDENT_RE = re.compile(
     r"^there\s+(?:was|were|has\s+been|have\s+been)\s+(?:(?:a|an|one)\s+)?"
     r"(?P<what>.*\b(?:outage|incident|failure|problem|issue)s?\b.*)$", re.IGNORECASE)
+# "A couple of months ago we had an incident where the database ran out of
+# connections" (the e2e ambiguous KT): the failure is what happened.
+_HAD_INCIDENT_RE = re.compile(
+    r"^(?:[^,;]{0,40}?\b)?(?:we|you|they)\s+(?:had|have\s+had|saw|hit|ran\s+into)\s+(?:an?\s+|one\s+)?"
+    r"(?:incident|outage|failure|problem|issue)\s+(?:where|when|in\s+which)\s+(?P<what>.+)$", re.IGNORECASE)
+# A runbook step about the failure just named: "If you see that again, check
+# the pool metrics first" was carded as the situation "You see that again".
+_ANAPHORIC_SYMPTOM_RE = re.compile(
+    r"^(?:you\s+(?:see|get|hit|notice)\s+)?(?:that|this|it|those|these)\b|"
+    r"\b(?:that|this|it)\s+(?:again|happens|occurs|comes\s+back|recurs)\b", re.IGNORECASE)
 # A runbook step: "When invoices get stuck, check whether …".
 _RUNBOOK_RE = re.compile(
     r"^(?:when|if|whenever)\s+(?P<symptom>[^,;]{4,120}?),\s*(?:then\s+|first\s+)?"
@@ -2036,11 +2143,26 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
         bare = _QR_LEAD_RE.sub("", sentence).rstrip(".")
         if _NOT_A_FAILURE_RE.search(bare):
             continue                      # "Another non-issue is ...": said not to be a problem
+        counted = _counted_failures(bare)
+        if counted:
+            items.extend({"what": what, "parts": []} for what in counted)
+            continue
+        when = _FAILURE_WHEN_RE.match(bare)
+        if when and (_FAILURE_INTRO_RE.match(when.group("rest")) or _FAILURE_NAMED_RE.match(when.group("rest"))):
+            bare = when.group("rest")
+        else:
+            when = None
         named = _FAILURE_NAMED_RE.match(bare)
         intro = None if named else _FAILURE_INTRO_RE.match(bare)
         if intro and _FAILURE_WORD_ONLY_RE.match(intro.group("what")):
             intro = None                  # "X is another common issue" read backwards
-        past = _PAST_INCIDENT_RE.match(bare)
+        if when and (named or intro):
+            match = named or intro
+            items.append({"what": f"{match.group('what').rstrip('.')} ({when.group('when')[0].lower()}"
+                                  f"{when.group('when')[1:]})",
+                          "parts": [match.group("rest")] if intro and match.group("rest") else []})
+            continue
+        past = _PAST_INCIDENT_RE.match(bare) or _HAD_INCIDENT_RE.match(bare)
         runbook = _RUNBOOK_RE.match(bare)
         if named:
             # Its "because ..." is why it matters, not what to do about it.
@@ -2049,8 +2171,11 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
             items.append({"what": intro.group("what"), "parts": [intro.group("rest")] if intro.group("rest") else []})
         elif past:
             items.append({"what": past.group("what"), "parts": []})
-        elif runbook and not (items and not items[-1]["parts"]):
+        elif runbook and not (items and not items[-1]["parts"]) \
+                and not _ANAPHORIC_SYMPTOM_RE.search(runbook.group("symptom")):
             items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
+        elif _FAILURE_EFFECT_RE.match(bare) and not _FIX_CUE_RE.search(bare):
+            items.append({"what": bare, "parts": []})
         elif items and not (_FAILURE_WORD_RE.search(bare) and not _FIX_CUE_RE.search(bare)):
             # A sentence that brings up another problem is not this one's fix.
             items[-1]["parts"].append(sentence)
@@ -2077,7 +2202,7 @@ def _runbook_steps(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]:
     sentences = _qr_sentences(section, skip)
     for i, sentence in enumerate(sentences):
         match = _RUNBOOK_RE.match(_QR_LEAD_RE.sub("", sentence).rstrip("."))
-        if not match:
+        if not match or _ANAPHORIC_SYMPTOM_RE.search(match.group("symptom")):
             continue
         action = _tidy(match.group("action")).rstrip(".") + "."
         if i + 1 < len(sentences) and _FOLLOW_UP_ACTION_RE.match(_QR_LEAD_RE.sub("", sentences[i + 1])):
@@ -2149,8 +2274,13 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
         return " ".join(hits[:limit]) or None
 
     monitoring = _find_section(knowledge_object, "monitoring_observability")
-    add("An alert fires", _field_value(monitoring, "first_response_steps") or first_matching(monitoring, _ALERT_CUE_RE),
-        monitoring, "Monitoring")
+    alert = _field_value(monitoring, "first_response_steps")
+    if alert:
+        add("An alert fires", alert, monitoring, "Monitoring")
+    else:
+        alert = first_matching(monitoring, _ALERT_CUE_RE)
+        add("An alert fires" if alert and _ALERT_STEP_RE.search(alert) else _ALERT_NO_STEP_SITUATION, alert,
+            monitoring, "Monitoring")
 
     failures = _find_section(knowledge_object, "common_failures")
     known = _known_failures(failures, stale)
@@ -2172,7 +2302,12 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
         value = _join_if_list(_field_value(deployment, "rollback_procedure", field_id))
         if value and not (rollback_parts[0] and value.lower() in rollback_parts[0].lower()):
             rollback_parts.append(f"{label}: {value.rstrip('.')}.")
-    add("A release misbehaves (roll back)", " ".join(p for p in rollback_parts if p) or None, deployment, "Deployment")
+    rollback = " ".join(p for p in rollback_parts if p)
+    if rollback and "Rollback procedure" in (knowledge_object.get("_not_stated") or {}).get("deployment_and_rollback", []):
+        # "Rolling back is usually quick" says a rollback is possible, not how
+        # (the e2e ambiguous KT): the row says the procedure was not given.
+        rollback += " No rollback procedure was stated in the KT; ask the outgoing owner."
+    add("A release misbehaves (roll back)", rollback or None, deployment, "Deployment")
 
     ownership = _find_section(knowledge_object, "ownership_escalation")
     escalation = _field_value(ownership, "escalation_chain")
@@ -2304,8 +2439,14 @@ def verify_document_coverage(
     section_id, source (the spoken sentence), start, end and speaker.
     `excluded`: statements left out before classification, with a reason.
     Every fact ends in the ledger (knowledge_object["_facts_ledger"]) as
-    mapped, unmapped (Additional Notes), recovered or excluded with a reason,
-    so none is lost without a record.
+    mapped, unmapped (Additional Notes), recovered or excluded with a reason
+    (a repeat of an earlier statement is excluded as such), so none is lost
+    without a record. Each record keeps its id, the text shown, the spoken
+    sentence it came from with its time and speaker, the section it was
+    classified into, how that was decided and the score, whether the shown
+    text was reworded from the spoken one, and where it appears. "Shown" is
+    not "shown where it belongs": the summary also counts the facts shown in
+    the section they were classified into.
     """
     from pdf_rendering import _block_strings, _norm_for_match
     from pdf_rendering import is_text_represented as _is_represented
@@ -2353,8 +2494,13 @@ def verify_document_coverage(
         if not text:
             continue
         section = record.get("section_id") or (sentence_sections or {}).get(_dedup_normalize(text))
-        entry = {"id": None, "text": text, "section": section, "source": record.get("source") or text,
-                 "start": record.get("start"), "end": record.get("end"), "speaker": record.get("speaker")}
+        source = record.get("source") or text
+        entry = {"id": None, "text": text, "section": section, "source": source,
+                 "start": record.get("start"), "end": record.get("end"), "speaker": record.get("speaker"),
+                 "decided_by": record.get("decided_by"), "confidence": record.get("confidence"),
+                 # Cut from a longer sentence, corrected or copy-edited: the
+                 # reader sees other words than the speaker's.
+                 "reworded": _dedup_normalize(text) != _dedup_normalize(source)}
         if _is_session_pleasantry(text):
             ledger.append(dict(entry, status="excluded", reason="greeting, closing or handover announcement"))
             continue
@@ -2382,6 +2528,8 @@ def verify_document_coverage(
         if _is_represented(text, real_norms) or _paraphrased_in_own_section(text, entry["section"]):
             mapped += 1
             entry["status"] = "mapped"
+            entry["in_own_section"] = bool(entry["section"]) and (
+                entry["section"] in entry["found_in"] or _paraphrased_in_own_section(text, entry["section"]))
         elif _is_represented(text, unmapped_norms):
             unmapped += 1
             entry["status"] = "unmapped"
@@ -2414,6 +2562,12 @@ def verify_document_coverage(
         # knowledge gaps the speaker stated, counted among the mapped ones.
         "stated_gaps": sum(1 for e in facts if e.get("gap") and e.get("status") != "recovered"),
         "excluded": sum(1 for e in ledger if e["status"] == "excluded"),
+        # Knowledge coverage, not template coverage: of the facts shown, how
+        # many are in the section they were classified into, and how many
+        # only under another one (a pointer, a digest or a misplacement).
+        "shown_in_own_section": sum(1 for e in facts if e.get("in_own_section")),
+        "shown_elsewhere_only": sum(1 for e in facts
+                                    if e.get("status") == "mapped" and e.get("section") and not e.get("in_own_section")),
     }
     knowledge_object["_facts_ledger"] = ledger
     coverage_section = _find_section(knowledge_object, KT_COVERAGE_SECTION_ID)

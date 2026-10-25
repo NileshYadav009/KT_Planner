@@ -6026,6 +6026,108 @@ the "Business volume" row that quotes it. Minor, and not changed.
 - **Tests:** 365 passed in the twelve affected files (renderer sections, PDF export, security and helpers, evidence, dialogue, coverage topics, section rules, knowledge builders, de-duplication, incident card, and the end-to-end replay); after the last card change, 145 passed in the end-to-end, knowledge-builder and incident-card files. The layout test fails on the old stylesheet (17pt and 2pt overflows).
 - No Groq quota used.
 
+### 9aaz. Product audit against release gates (25 Oct)
+
+The user asked for an autonomous audit of the whole product against
+measurable quality gates, starting from the AWS, Azure, GCP, QuickBite and
+online learning KTs. No Groq quota was used: LLM mode was measured from
+recorded answers only.
+
+**What was built to measure it.**
+
+- `evaluation/quality_gates.py`: the release gates, counted on the PDF of
+  each e2e KT, with no LLM and from the recorded Groq answers
+  (`docs/QUALITY_GATES.md` has the method and the tables). Gates: fact
+  retention (95%), silent loss (0), unsupported claims (0), misattributed
+  sources (0), placement (90%), facts with a source (95%), stated
+  connections drawn (100%), connections not stated (0), answer-key facts
+  marked "no source" (0), false sign-off (0), safety placement (0), gaps
+  misreported (0), PDF layout (0); repeats and the ledger's own-section
+  share tracked.
+- The online learning KT is the sixth e2e KT (`tests/e2e_kts/f_online_learning.json`),
+  annotated from its transcript; not blind (its PDF was reviewed in §9aay).
+  Stated data connections were added to the QuickBite and online learning
+  answer keys, and "GitHub Actions pushes to ECR" as a connection neither
+  states: stricter, written from the transcripts.
+- `pdf_rendering.layout_overflows` measures every laid-out box against its
+  page and table cell; `build_job_pdf` runs it on every document and logs
+  any overflow.
+- The facts ledger records how each fact's section was decided (rule,
+  continuation, LLM check, classifier) and the score, whether the reader sees
+  other words than the speaker's, and whether the fact is shown in the
+  section it was classified into; the knowledge-coverage summary counts
+  those (`shown_in_own_section`, `shown_elsewhere_only`), so "shown
+  somewhere" is no longer the only measure.
+- Baseline: the code before this round (cf64fd2) in a scratch worktree with
+  only the measurement files copied in, and the same answer keys.
+
+**Defects found and fixed (ledger X51 to X60).** Root causes, in order of
+impact:
+
+| ID | What the PDF showed | Root cause | Fix |
+|---|---|---|---|
+| X51 | "The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis" drew no RDS line (online learning) | The workload heads the list, so the verb before it was never read; and "PostgreSQL" stopped naming the RDS box once merged into it | The verb before a list the workload heads applies to the list; an engine names its one managed database (`architecture_diagram`) |
+| X52 | QuickBite drew no line to RDS, Redis, MSK or SQS | A store that opens its sentence and says what it holds ("PostgreSQL on Amazon RDS stores order and payment records", "Redis caches ...", "Amazon MSK carries ... events") was not read as the system's; "... is stored in Redis" gave a cache no label | Those verbs, for databases, caches and queues opening a sentence or clause; not object storage ("S3 stores the Terraform state") |
+| X53 | The card's "An alert fires" step was "Prometheus and Grafana cover monitoring, and PagerDuty pages the on-call engineer" | Any monitoring sentence naming alerts was given as the response | A sentence with no step is shown as "Alerting (no first step stated)" |
+| X54 | Without an LLM the card left out the failures of four e2e KTs, read "If you see that again" as a situation, and had no "Do not deploy" row for "Avoid production deployments during major promotional campaigns" | `_known_failures` read one failure per sentence, with its words first | Counted and uncounted lists of failures, a failure after its time or said by its effect, a past incident; a step about "that" goes with the failure before it; the freeze wording |
+| X55 | Common Failures "covered well" with one of two failures unfixed (online learning, QuickBite) | The fixes topic counted as covered once any fix was stated | Partial; each unfixed failure on the follow-up list and in the section's note |
+| X56 | "Rolling back is usually quick" on the card with no word that no procedure was given | | The row says so when the rollback procedure was not discussed |
+| X57 | With Groq, "DR testing frequency: quarterly" and "30-day retention" printed "no source" (AWS) | The matcher compared the document's label as speech, and "quarterly"/"every quarter", "30-day"/"30 days", "retention"/"kept" as different words | A labelled value is sourced by its value from a sentence that also says a word of the label; value words compared as one; the document's own notes in a cell are not speech |
+| X58 | The users box said "customers" on a KT about students | A fixed caption | The word the KT uses ("Students access ...") |
+| X59 | No release gates; layout checked in one test; false "no source" and layout not counted by the e2e harness; no provenance in the ledger | | As above |
+| X60 | The web page announced neither a KT's progress nor its toasts ("Processing failed") to screen readers | No live region; the bar had no progressbar role | Live regions and a progressbar with its value; a test |
+
+**Results (all measured; nothing sent to Groq).**
+
+| | Before (cf64fd2) | After |
+|---|---|---|
+| Gates, no LLM, 6 KTs | 2 fail: connections drawn 26/31 (83.9%), 1 gap misreported | all pass: 31/31, 0 |
+| Gates, recorded Groq answers, 5 KTs | 1 fails: connections 22/26 (84.6%); sources 199/202 (98.5%) | all pass: 26/26; 205/206 (99.5%) |
+| Online learning with Groq (the user's job, 12 of 16 answers replayed from the app's cache) | RDS line missing; the unfixed failure not flagged | no problem: 5/5 connections, 20/20 facts, 46/46 units sourced |
+| Fact retention, placement, unsupported claims, false sign-off, safety, PDF layout | pass | pass |
+| Adversarial matrix | 71 cases 243/243; R01-R06 on the old code 3/23 | 77 cases 266/266 must, 44/49 should |
+| Accuracy (no LLM) | tuning 534/534, dev 217/224, holdouts 86/95, blind 95/114 | unchanged |
+
+The one "no source" left with Groq is honest: the polish wrote "Secret
+management is handled by Secret Manager" for "Credentials are read from
+Secret Manager". Pages: the AWS KT grew 10 to 11 (two incident rows on the
+card; its floor is 11 now), the GCP KT 8 to 10 without an LLM (a content
+page more brings the contents page).
+
+- **Tests:** the 16 changed or affected test files, 401 passed; the evidence
+  file again after the last change, 21 passed; tests/test_e2e_kts.py, 67 passed and 1 skipped (the online learning KT's replay test: no recorded answers). After the P2 change: the e2e, knowledge-builder, renderer, PDF, export and frontend files, 257 passed and 1 skipped (the same).
+- **Not done or blocked:** the full suite (hours; run only on request); a
+  live-LLM evaluation (quota); the online learning KT has no answers in the
+  e2e recording, so the gates list it as blocked in replay mode (it was
+  scored from the user's own run instead); no PDF was rasterised (no
+  rasteriser is installed): pages were checked through their text and their
+  laid-out boxes.
+- **Placement on unseen KTs** stays below the 90% target on the blind set
+  (83.3%); holdouts 90.5%.
+- **A process slip:** the first exploratory run called the e2e harness from
+  a script without scratch state, so its six jobs were written to
+  `data/continuum.sqlite` and deleted again at the end of each run; a
+  read-only check found none left. `quality_gates.py` sets scratch state
+  itself.
+
+**The user's decision on P2 (optional sections).** Environments and Cost
+Optimization are optional in the schema, and a KT that never touched them
+left them out of the whole document, coverage report included, so the new
+owner was not told to ask. Each now gets a coverage row "Not discussed"
+("Optional; not discussed in the KT session."), in schema order, and a
+follow-up line ("Environments (optional): ask whether it applies"). It is
+not counted as a section not covered (it may not apply), no section is added
+to the body, and the web page leaves it out of its "covered" ratio
+(`knowledge_builder.OPTIONAL_NOT_DISCUSSED`, `full_schema` from the
+pipeline; a grey dashed badge). Matrix R06: 1 of 4 must checks on the old
+code, 4 of 4 after; the matrix is 77 cases, 266/266 must. Accuracy and every
+gate unchanged. Pages: the online learning KT 10 to 11 without an LLM (the
+Sources appendix spills five lines; its floor is 11); the others unchanged.
+
+**Left open:** X61 (a deployment chain said in one sentence is one step),
+X62 (the Architecture Knowledge list repeats the Technology summary), and the
+earlier L2, L3, X8 (without an LLM), X18.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

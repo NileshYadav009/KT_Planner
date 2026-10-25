@@ -627,7 +627,8 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             _stage_failed(stage_errors, "Tribal knowledge", exc, None)
 
         try:
-            knowledge_object = append_coverage_matrix_section(knowledge_object, coverage, dynamic_schema)
+            knowledge_object = append_coverage_matrix_section(knowledge_object, coverage, dynamic_schema,
+                                                              full_schema=SCHEMA)
         except Exception as exc:
             _stage_failed(stage_errors, "Coverage summary", exc, "The KT coverage summary could not be built.")
 
@@ -678,10 +679,14 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                 if isinstance(sent, dict)
             }
             fact_sections = kt.fact_sections or []
+            decided = kt.fact_decided_by or []
+            scores = kt.fact_confidence or []
             facts = [
                 {"text": s.text, "section_id": fact_sections[i] if i < len(fact_sections) else None,
                  "source": s.source_text or s.raw_text or s.text, "start": s.start + time_offset,
-                 "end": s.end + time_offset, "speaker": s.speaker}
+                 "end": s.end + time_offset, "speaker": s.speaker,
+                 "decided_by": decided[i] if i < len(decided) else None,
+                 "confidence": scores[i] if i < len(scores) else None}
                 for i, s in enumerate(kt.facts if kt.facts is not None else (kt.sentences or []))
             ]
             knowledge_object = verify_document_coverage(

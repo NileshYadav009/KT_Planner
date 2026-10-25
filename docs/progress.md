@@ -1744,3 +1744,32 @@ Results:
 - **Disaster Recovery:** backup details are listed as "Backups", not as
   recovery actions.
 - Accuracy unchanged; no Groq quota used.
+
+## Release gates, and what they found (audit §9aaz, 25 Oct)
+
+- **Gates:** `evaluation/quality_gates.py` checks the PDFs of six KTs (your
+  QuickBite and online learning KTs among them) against release targets:
+  nothing lost, nothing invented, every fact sourced and in its section,
+  every stated connection drawn, gaps honest, no box past the page. Before:
+  2 targets missed (stated connections 84%, one gap not flagged). After:
+  all met, without an LLM and with the recorded Groq answers.
+- **Diagram:** a database named in a list ("The backend uses FastAPI,
+  PostgreSQL on Amazon RDS, and Redis") or opening its own sentence
+  ("PostgreSQL on Amazon RDS stores order records") now gets its line; the
+  users box says "students" when the KT does.
+- **Incident card:** lists of failures, failures after a time ("During
+  dinner peaks, ..."), past incidents and "Avoid production deployments
+  during ..." are on it without an LLM; a sentence that only says where
+  alerts come from is no longer given as the response; the rollback row
+  says when no procedure was given.
+- **Gaps:** a failure named without its fix is on the follow-up list, and
+  Common Failures is no longer "covered well" for it.
+- **Sources:** values in the document's form ("quarterly", "30-day
+  retention") cite what was said instead of "no source".
+- **Facts ledger:** each fact records how its section was decided and
+  whether it is shown there.
+- **Web page:** progress and messages are announced to screen readers.
+- **Your decision:** Environments and Cost Optimization, when the KT never
+  touches them, are listed in the coverage report as "Not discussed" and on
+  the follow-up list ("ask whether it applies"), instead of disappearing.
+- Accuracy unchanged; no Groq quota used.

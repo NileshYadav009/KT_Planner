@@ -1,0 +1,59 @@
+{
+  "id": "e2e_f_online_learning",
+  "title": "Online learning platform: AWS on EKS",
+  "source": "the user's own KT transcript (25 Oct job e4c10724), annotated 25 Oct after its PDF was reviewed (audit §9aay), so not blind",
+  "proves": "Users of the product who 'access' it (not access control); a first check said before a step ('before restarting services'); a failure said to 'occur when'; backups beside RTO/RPO stated as undocumented; a gap said as 'still undocumented' that names escalation contacts; a CI tool, a registry and a GitOps tool in one sentence with no push between them. The system has no name but its description, which the opening announcement gives and the document's title carries (an announcement alone is not repeated under System Overview, by design), so it is not a fact here.",
+  "transcript": "Hi team, today I’m handing over our online learning platform. It serves around 20,000 active users daily. Students access the React application through CloudFront and an Application Load Balancer, which routes requests to services running on Amazon EKS. The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis for caching course information. GitHub Actions runs automated tests, Amazon ECR stores container images, and ArgoCD deploys releases to EKS. Terraform manages infrastructure. Prometheus and Grafana monitor application performance, while PagerDuty handles alerts. A common issue occurs when database connections are exhausted during examination periods. Check connection-pool usage and application errors before restarting services. Another issue is delayed video processing when background jobs accumulate in Amazon SQS. Database backups run daily and are retained for 14 days. Recovery testing is performed twice a year, but RTO and RPO have not been documented. Developers own application code, while Platform Engineering manages Kubernetes and deployment pipelines. Never modify Terraform state manually. The video-processing recovery procedure and formal escalation contacts are still undocumented.",
+  "facts": [
+    {"id": "F02", "kind": "volume", "quote": "around 20,000 active users daily", "in": ["system_overview"]},
+    {"id": "F03", "kind": "flow", "quote": "Students access the React application through CloudFront and an Application Load Balancer", "in": ["architecture_reference", "system_overview"]},
+    {"id": "F04", "kind": "flow", "quote": "routes requests to services running on Amazon EKS", "in": ["architecture_reference", "system_overview"]},
+    {"id": "F05", "kind": "dependency", "quote": "The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis for caching course information", "in": ["architecture_reference", "system_overview"]},
+    {"id": "F06", "kind": "deployment", "quote": "GitHub Actions runs automated tests", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "F07", "kind": "deployment", "quote": "Amazon ECR stores container images", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "F08", "kind": "deployment", "quote": "ArgoCD deploys releases to EKS", "in": ["deployment_and_rollback", "architecture_reference"]},
+    {"id": "F09", "kind": "deployment", "quote": "Terraform manages infrastructure", "in": ["deployment_and_rollback", "architecture_reference", "environments"]},
+    {"id": "F10", "kind": "monitoring", "quote": "Prometheus and Grafana monitor application performance", "in": ["monitoring_observability"]},
+    {"id": "F11", "kind": "alerting", "quote": "PagerDuty handles alerts", "in": ["monitoring_observability", "ownership_escalation"]},
+    {"id": "F12", "kind": "incident", "quote": "database connections are exhausted during examination periods", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "F13", "kind": "first_check", "quote": "Check connection-pool usage and application errors before restarting services", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "F14", "kind": "incident", "quote": "delayed video processing when background jobs accumulate in Amazon SQS", "in": ["common_failures"], "not_in": ["danger_zones"]},
+    {"id": "F15", "kind": "backup", "quote": "Database backups run daily and are retained for 14 days", "in": ["disaster_recovery"], "alt": ["Database backups run daily. Retained for 14 days"]},
+    {"id": "F16", "kind": "backup", "quote": "Recovery testing is performed twice a year", "in": ["disaster_recovery"]},
+    {"id": "F17", "kind": "undocumented", "quote": "RTO and RPO have not been documented", "in": ["disaster_recovery"]},
+    {"id": "F18", "kind": "ownership", "quote": "Developers own application code", "in": ["ownership_escalation"], "terms": ["Developers", "application code"]},
+    {"id": "F19", "kind": "ownership", "quote": "Platform Engineering manages Kubernetes and deployment pipelines", "in": ["ownership_escalation"], "terms": ["Platform Engineering", "Kubernetes and deployment pipelines"]},
+    {"id": "F20", "kind": "safety", "quote": "Never modify Terraform state manually", "in": ["danger_zones"]},
+    {"id": "F21", "kind": "undocumented", "quote": "The video-processing recovery procedure and formal escalation contacts are still undocumented", "in": ["ownership_escalation", "common_failures", "disaster_recovery"]}
+  ],
+  "safety": ["F20"],
+  "covered": ["system_overview", "architecture_reference", "monitoring_observability", "disaster_recovery", "deployment_and_rollback", "common_failures", "danger_zones", "ownership_escalation"],
+  "missing": ["cost_optimization", "environments", "security_controls"],
+  "relations": [
+    {"from": "CloudFront", "to": "Application Load Balancer", "kind": "flow"},
+    {"from": "Application Load Balancer", "to": "EKS", "kind": "flow"},
+    {"from": "ArgoCD", "to": "EKS", "kind": "deploy"},
+    {"from": "EKS", "to": "RDS", "kind": "dependency"},
+    {"from": "EKS", "to": "Redis", "kind": "dependency"}
+  ],
+  "wrong_relations": [
+    {"from": "GitHub Actions", "to": "EKS", "label": "deploy", "why": "GitHub Actions runs tests; ArgoCD deploys"},
+    {"from": "GitHub Actions", "to": "ECR", "label": "", "why": "the KT never says GitHub Actions builds or pushes images to ECR"}
+  ],
+  "undocumented": [
+    {"topic": "RTO", "forbid": "\\bRTO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"},
+    {"topic": "RPO", "forbid": "\\bRPO\\b[^.\\n]{0,60}?\\b(\\d+|one|two|three|four|five|six|eight|twelve|twenty|thirty)\\s*(minutes?|hours?|days?)\\b"}
+  ],
+  "incomplete": [
+    {"topic": "fix for delayed video processing", "note": "Only the symptom is stated.", "section": "common_failures"},
+    {"topic": "escalation contacts", "note": "Stated as still undocumented.", "section": "ownership_escalation"},
+    {"topic": "rollback procedure", "note": "Never discussed.", "section": "deployment_and_rollback"}
+  ],
+  "forbidden": [
+    {"why": "invented command", "pattern": "kubectl|terraform\\s+(apply|import|state\\s+rm)|helm\\s+rollback"},
+    {"why": "invented paging tool", "pattern": "Opsgenie|VictorOps|CloudWatch\\s+alarm"},
+    {"why": "invented fix for connection exhaustion", "pattern": "(increase|raise)\\s+(the\\s+)?(max_connections|connection\\s+pool|pool\\s+size)|RDS\\s+Proxy|PgBouncer"},
+    {"why": "invented fix for the SQS backlog", "pattern": "(scale|add)\\s+(up|out|more)\\s+(the\\s+)?(workers|consumers)|dead[- ]letter"},
+    {"why": "invented security control", "pattern": "Cognito|AWS\\s+WAF|\\bKMS\\b|encrypted\\s+at\\s+rest"}
+  ]
+}
