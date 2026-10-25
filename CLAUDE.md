@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9abb is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abc is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -83,6 +83,7 @@ overnight and only when asked. Use targeted runs, from the repo root with
 | LLM controls, no network | `tests/test_llm_cost_controls.py tests/test_llm_provider.py tests/test_llm_batching.py` | about 25 s |
 | Fields | `tests/test_field_populator.py` | about 15 s |
 | Knowledge and coverage | `tests/test_knowledge_builders.py tests/test_fact_units.py tests/test_dialogue.py` | about 3 min |
+| Web page structure (ids, tabs, coverage source) | `tests/test_frontend_accessibility.py` | seconds |
 | End to end, with recorded Groq replay | `tests/test_e2e_kts.py` | about 13 min |
 
 Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,blind3,e2e`
@@ -213,3 +214,5 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X72 | Med | "? No, it's X" was read as a stated gap; a tool guessed in a question turned down, or "the old system", was listed as current | Fixed, §9abb (`dialogue`, `field_populator.current_tool_mentions`) |
 | X73 | Low | "You'll own the on-call rotation" was carded as who to page ("call Rotation", the pattern ignoring case) | Fixed, §9abb |
 | T3 | Product | The user's decision: the giver is detected, shown on the KT page and in the document, and can be changed, which rebuilds the document as a new version | Done, §9abb (`POST /kt/{job_id}/giver`, "Who is handing over" card) |
+| X74 | Med | The web page counted the classifier's per-section statuses, not the coverage matrix: a KT's page said 13 sections "weak" and none covered while its PDF said 4 covered well, 9 partly and 2 not; Sign-off was listed as a missing critical section | Fixed, §9abc (`static/index.html` reads `_coverage_rows` and `_knowledge_gaps`, as `pdf_rendering.handover_glance`) |
+| X75 | Low | Web page: one long page (the upload card above every KT, empty cards, the job ID, schema and form buttons); no link to a KT or a tab; at phone width the KT list was hidden with no way to open it | Fixed, §9abc (start page and one page per KT with tabs; `?job=` and `#tab` links; menu button) |

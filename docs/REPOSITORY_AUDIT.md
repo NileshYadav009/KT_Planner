@@ -6253,6 +6253,90 @@ but not mark a receiver. Diarised speakers are "Speaker 1, 2, ...", so the
 page names them that way. A statement and its agreement must be within the
 next three turns.
 
+### 9abc. The web page (26 Oct)
+
+The user asked for a more presentable page with the features it needs and a
+clean flow. The page was run against a scratch database (no LLM) and looked
+at in headless Edge before any change.
+
+**What it showed (before).** One long page in three columns:
+
+- The upload card sat above every KT, even when opening an old one.
+- Four empty cards showed before anything was made.
+- A "Session Health" card gave the job ID.
+- "View generated schema" and "Apply results to form" buttons sat beside
+  the exports.
+- A static "Live" dot sat in the header.
+
+The numbers disagreed with each other and with the PDF. The page counted the
+classifier's per-section statuses, so for dev d02 it showed:
+
+- Coverage 13/17, KT completeness 13 of 15, Weak 13, Missing 3, Covered 0;
+- Sign-off listed as a missing critical section.
+
+The PDF's coverage matrix for the same KT has 4 sections covered well,
+9 partly and 2 not covered. The "Coverage Details" accordion repeated the
+document with raw sentences ("Right."). Other problems:
+
+- Nothing linked to a KT or to a part of it.
+- At phone width the KT list was hidden with no way to open it.
+
+**Change (`static/index.html`).**
+
+- **A start page:** upload or paste, how it works, and the recent KTs.
+- **One page per KT:** the name, status, date, giver and version, with
+  Download PDF, an Export menu (Markdown, gaps CSV, runbooks, and Confluence
+  and Jira when connected), copy link and delete.
+- **Five tabs:**
+  - Document: numbered sections, a jump list, Ask, edit, history.
+  - Gaps & coverage: what to ask the outgoing owner, and the coverage
+    table.
+  - Sign-off: the three people as cards, and the gaps to close.
+  - Transcript: one turn per line, and where each sentence went, with Move.
+  - Details: the ID, LLM usage, and the template fields, read-only.
+- **A side panel:**
+  - Handover readiness: the PDF cover's covered well, partly, not covered
+    and to confirm.
+  - The giver.
+  - Sessions.
+  - Screens, only for a recording with video.
+- **Addresses:** `?job=<id>#gaps` survives a refresh and the back button.
+- **Processing** shows its stage.
+- **Small screens:** the KT list opens from a menu button.
+- **Dark mode:** the main button keeps readable contrast.
+- **Empty table cells** are a dash, as in the PDF (X21).
+- **Notices:** the giver notice is not repeated in the banner.
+
+No API or pipeline change. Ledger X74, X75.
+
+**Results.**
+
+- **Browser check:** a headless Edge script over the DevTools protocol ran
+  the main flow on a scratch server with no LLM keys, 54 checks:
+  - paste a three-person conversation and create the KT;
+  - open each tab, the export menu and the Move dialog;
+  - ask the KT a question, approve a line and save version 2, read the
+    history;
+  - start sign-off and close a gap;
+  - change the giver (version 3);
+  - search, the breadcrumb, back and forward;
+  - delete it;
+  - open an unknown KT link.
+
+  All passed with no JavaScript error. The first run found two defects:
+  - The header kept "Version 1" after a save.
+  - The sign-off form did not say that the people must be in the
+    workspace.
+- **Phone width:** two 400 px frames, with no horizontal scroll.
+- **Tests:** `tests/test_frontend_accessibility.py` now also checks that
+  every element the script looks up is on the page (one missing id stops
+  the whole script), the tabs and their panels, and that coverage comes
+  from the matrix. 4 passed.
+
+**Limits.** Local mode (sign-in off) has no people, so sign-off cannot start
+there. `static/review.html` calls a `/reviews` route that does not exist; it
+is left as it was. The browser check is not in CI.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

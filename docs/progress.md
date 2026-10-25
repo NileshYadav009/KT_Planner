@@ -1804,3 +1804,20 @@ Results:
 - **Small talk** ("how was the offsite?"), "can you repeat that?" and
   "let's move on" are left out; every left-out line is recorded with why.
 - Accuracy unchanged; no Groq quota used.
+
+## The web page (audit §9abc, 26 Oct)
+
+- **A start page and one page per KT:** start a KT, then open it on its own
+  page with tabs: Document, Gaps & coverage, Sign-off, Transcript, Details.
+- **The numbers match the PDF:** handover readiness (covered well, partly,
+  not covered, to confirm) now comes from the same coverage table as the
+  PDF. The page had called 13 sections of one KT "weak" that the PDF called
+  covered well.
+- **What to ask the outgoing owner:** one list, including statements
+  questioned in the session and left unanswered.
+- **Links:** a link opens a KT and a tab, and survives a refresh. Copy link
+  and delete are on the KT page.
+- **Phones and dark mode:** it works on a phone (the KT list opens from a
+  menu button) and in dark mode.
+- **Checked:** 54 checks of the main flow in a real browser passed; no LLM
+  used.
