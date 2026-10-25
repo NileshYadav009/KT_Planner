@@ -6128,6 +6128,72 @@ Sources appendix spills five lines; its floor is 11); the others unchanged.
 X62 (the Architecture Knowledge list repeats the Technology summary), and the
 earlier L2, L3, X8 (without an LLM), X18.
 
+### 9aba. Placement accuracy: a fresh blind set, four generic fixes, Groq measured (25 Oct)
+
+The user asked how to improve the KT's accuracy and agreed to all four
+steps proposed: fix the generic error patterns the dev set shows, write a
+fresh blind set, measure with Groq, and A/B the wider section check (L3).
+
+**A fresh blind set first.** `evaluation/blind3` (b04-b07, 132 facts;
+`blind3_kts.py`): a question-and-answer KT for an on-premises system, a noisy
+recording-style KT, a formal document read aloud, and a rambling KT with a
+correction. The answer keys were written before anything ran on them, and
+they are read in aggregate only (`accuracy.py ... blind3`). Written by the
+same author as the fixes, so not independent of them. While checking the
+blind file format, part of b01's transcript was printed once; nothing was
+tuned on it.
+
+**Fixes (ledger X63 to X66), from the seven dev errors.**
+
+| ID | Dev error | Root cause | Fix |
+|---|---|---|---|
+| X63 | "Security wise, the service account ..., and the API sits behind Identity-Aware Proxy ..." (d02); "security, ..., and the certs are rotated every year by the roadside team" (d03): the second fact went to Architecture and Ownership | Cut into facts, the second fact no longer carries the topic its sentence opened with; the topic segment is only a small boost | The fronted topic holds for every fact of its sentence, unless a strong rule of the fact's own claims it (`apply_continuation_rules`) |
+| X64 | "staging uses recorded gantry traffic from last year" went to Deployment (d03) | No rule for a sentence about one environment | Environment-subject rule at 0.945; it does not move the running topic (as first written it did, and "Releases are performed with Azure DevOps" followed into Environments, d01) |
+| X65 | "Run the purge job, it is safe in business hours" went to the calendar (d04) | "slows logins" was not a failure word, so the fix was not attached to its failure | More failure words |
+| X66 | "Brightline is our data pipeline that loads ... into Snowflake, and the ... teams build all their reports on top of it" went to Architecture (d06) | A data-flow rule took the KT's opening definition | Before any topic is named, a definition of the system by its kind is the overview; "build ... on top of it" is who uses it |
+
+The remaining dev error is X18 ("Only six clinics have it.").
+
+**Results without an LLM (accuracy.py, all six sets).**
+
+| Set | Before | After |
+|---|---|---|
+| Holdouts | 86/95 (90.5%) | 87/95 (91.6%) |
+| Blind (b01-b03) | 95/114 (83.3%) | 97/114 (85.1%) |
+| Blind (b04-b07, new) | 112/132 (84.8%) | 112/132 (84.8%) |
+| Dev | 217/224 | 223/224 |
+| Tuning, e2e | 534/534, 6 KTs 100% | unchanged |
+
+Unseen in total 293 to 296 of 341; no set lost a fact. The new blind set
+reports 4 discussed sections as Missing (X67, open: to be found on visible
+KTs in the same styles, never on the blind set).
+
+**With Groq (section check only; agreed with the user).** Facts move between
+sections only through the classifier, the rules and the LLM section check;
+the polish, extraction and field fill change wording, not placement. So the
+section check alone measures production placement at a fraction of a full
+run (one blind KT with every call cost 23 calls and about 14k tokens).
+
+| Unseen set | No LLM | Today's check (3 candidates) | Wider check (5 + purpose) |
+|---|---|---|---|
+| Holdouts | 87/95 | 91/95 | 91/95 |
+| Blind b01-b03 | 97/114 | 108/114 | 109/114 |
+| Blind b04-b07 | 112/132 | 122/132 (126 lenient) | 122/132, one more section wrongly Missing |
+| Total | 296/341 (86.8%) | 321/341 (94.1%) | 322/341 (94.4%) |
+| Tokens | | 49.5k (23 calls) | 68.6k (25 calls), +37% |
+
+The four "lost" facts on b04-b07 are present in other words (the lenient
+scorer finds them). The wider check gained one fact for the third time (L3)
+and costs 37% more on every check; it stays off, so the replay recording is
+unchanged. Groq used for this work: 71 calls, about 132k tokens (the one-KT
+probe 14.1k, arm A 49.5k, arm B 68.6k); the estimate given beforehand
+(45 to 60k) was too low, and the user approved each step after seeing the
+cost so far.
+
+- **Gates:** all pass in both modes, unchanged (gates-acc; page counts unchanged).
+- **Matrix:** 77 cases, 266/266 must, 44/49 should, unchanged.
+- **Tests:** the routing, topic, coverage, continuation, clause, fact, dialogue and e2e files, 237 passed and 1 skipped (the online learning KT's replay: no recorded answers); the three new rule tests pass.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

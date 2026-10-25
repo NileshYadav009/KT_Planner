@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report base2 final`.
+then `python evaluation/quality_gates.py --report base2 acc`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (base2) | After (final) | |
+| Gate | Target | Before (base2) | After (acc) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -63,7 +63,7 @@ model was called for this page.
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (base2) | After (final) | |
+| Gate | Target | Before (base2) | After (acc) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -95,17 +95,19 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `g9aaz2`. Holdouts and blind KTs are unseen and are
-reported in aggregate only. The target is 90% on unseen KTs.
+From `evaluation/accuracy.py` run `acc3`. Holdouts and blind KTs are unseen and are
+reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
+Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
 | Set | Correct | Facts | Placement | Lost | Unseen: 90% |
 |---|---|---|---|---|---|
 | tuning | 534 | 534 | 100.0% | 0 | tuned on |
-| dev | 217 | 224 | 96.9% | 0 | tuned on |
-| holdout | 86 | 95 | 90.5% | 0 | pass |
-| blind2 | 95 | 114 | 83.3% | 1 | FAIL |
+| dev | 223 | 224 | 99.6% | 0 | tuned on |
+| holdout | 87 | 95 | 91.6% | 0 | pass |
+| blind2 | 97 | 114 | 85.1% | 1 | FAIL |
+| blind3 | 112 | 132 | 84.9% | 4 | FAIL |
 
 ## Adversarial matrix
 
-Run `g9aaz2`: 77 cases, must checks 266/266, should checks 44/49
+Run `acc3`: 77 cases, must checks 266/266, should checks 44/49
 (`docs/ADVERSARIAL_MATRIX.md`).

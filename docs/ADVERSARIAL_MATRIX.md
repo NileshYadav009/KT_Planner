@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base g9aaz2`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base acc3`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `g9aaz2`.
+brackets). After: run `acc3`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row

@@ -1,0 +1,253 @@
+{
+ "id": "b04_harbourline_onprem_qa",
+ "title": "Harbourline: on-premises container booking system, question and answer",
+ "proves": "Speaker labels, a taker who asks one question per topic, on-premises stack (OpenShift, Oracle, IBM MQ).",
+ "transcript": "Priya: Can you start with what Harbourline does?\nMarek: Sure. Harbourline is the booking system our customer service agents use to reserve container slots on vessels. It handles roughly three thousand bookings a day, and if it is down the agents fall back to email and spreadsheets, which gets messy fast.\nPriya: Where does it run?\nMarek: Everything is on premises. The booking service and the pricing service are Java Spring Boot apps on our OpenShift cluster in the Rotterdam data centre. They store bookings in an Oracle database, and they talk to the vessel planning system over IBM MQ.\nPriya: And how do releases work?\nMarek: Jenkins builds the images and pushes them to the internal Harbor registry. Then we run the Ansible playbook that updates the OpenShift deployment. Releases need a change ticket approved by the change advisory board, which meets on Tuesdays. If a release goes wrong, we roll back with the same playbook pointing at the previous image tag.\nPriya: Which environments are there?\nMarek: There's a test environment and production. Test shares the Oracle server with the reporting team, so don't run load tests there without asking them.\nPriya: How do you know something is wrong?\nMarek: Dynatrace watches both services, and alerts go to the operations team through ServiceNow. There's also a Grafana board for the MQ queue depths.\nPriya: What breaks most often?\nMarek: The MQ channel to vessel planning stops after their weekly maintenance on Saturday night. Bookings queue up and nothing reaches them. You restart the channel from the MQ Explorer and the backlog drains in about ten minutes. The other one is Oracle running out of sessions when the pricing batch overlaps with office hours; we kill the batch and rerun it in the evening.\nPriya: Backups?\nMarek: The DBA team takes a full Oracle backup every night and keeps it for thirty days. Our recovery target is four hours, but honestly nobody has tested a full restore in the last two years.\nPriya: Security?\nMarek: Agents log in through Active Directory, and the services use a service account whose password is stored in CyberArk.\nPriya: Anything I must never do?\nMarek: Never purge the MQ queues in production. Those messages are bookings, and once they're gone we can't rebuild them.\nPriya: Who owns what?\nMarek: Our team owns the booking and pricing services. The infrastructure team owns OpenShift and the DBA team owns Oracle. If production is down at night, call the operations duty manager, and then me.\nPriya: Anything unfinished?\nMarek: The move from Oracle to PostgreSQL has been approved but not started.\nPriya: What should I do first?\nMarek: Get your Active Directory groups for OpenShift and Jenkins on day one, and in your first month do one release with me watching.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the booking system our customer service agents use to reserve container slots on vessels",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "roughly three thousand bookings a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "if it is down the agents fall back to email and spreadsheets",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The booking service and the pricing service are Java Spring Boot apps on our OpenShift cluster in the Rotterdam data centre",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "They store bookings in an Oracle database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "they talk to the vessel planning system over IBM MQ",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Jenkins builds the images and pushes them to the internal Harbor registry",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "we run the Ansible playbook that updates the OpenShift deployment",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Releases need a change ticket approved by the change advisory board, which meets on Tuesdays",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "we roll back with the same playbook pointing at the previous image tag",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "There's a test environment and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Test shares the Oracle server with the reporting team, so don't run load tests there without asking them",
+   "in": [
+    "environments",
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Dynatrace watches both services",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "alerts go to the operations team through ServiceNow",
+   "in": [
+    "monitoring_observability",
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "a Grafana board for the MQ queue depths",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "The MQ channel to vessel planning stops after their weekly maintenance on Saturday night",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "You restart the channel from the MQ Explorer and the backlog drains in about ten minutes",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Oracle running out of sessions when the pricing batch overlaps with office hours",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "we kill the batch and rerun it in the evening",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "The DBA team takes a full Oracle backup every night and keeps it for thirty days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Our recovery target is four hours",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "nobody has tested a full restore in the last two years",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Agents log in through Active Directory",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the services use a service account whose password is stored in CyberArk",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Never purge the MQ queues in production",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Our team owns the booking and pricing services",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The infrastructure team owns OpenShift and the DBA team owns Oracle",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "If production is down at night, call the operations duty manager, and then me",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "The move from Oracle to PostgreSQL has been approved but not started",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Get your Active Directory groups for OpenShift and Jenkins on day one",
+   "in": [
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "in your first month do one release with me watching",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization"
+ ],
+ "source": "written for round 7 (25 Oct), blind (synthetic)",
+ "holdout": true
+}

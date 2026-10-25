@@ -1,0 +1,293 @@
+{
+ "id": "b06_claimsway_azure_formal",
+ "title": "Claimsway: Azure claims intake platform, a formal document read aloud",
+ "proves": "Passive, formal sentences with no speaker; every section said once, in order.",
+ "transcript": "This document describes Claimsway, the claims intake platform for the motor insurance division. Claimsway receives first notification of loss reports from the customer web form and the call centre, validates them and creates a claim in the core policy system. Approximately two thousand five hundred claims are received per day, rising sharply after storms.\n\nThe platform consists of Azure Functions written in C#. Incoming reports are placed on an Azure Service Bus queue. Claim documents and photographs are stored in Azure Blob Storage. Claim state is held in Azure Cosmos DB. The web form is published through Azure Application Gateway with the web application firewall enabled.\n\nInfrastructure is defined in Bicep. GitHub Actions deploys to the test environment on every merge to the main branch. Deployment to production requires approval from the claims product owner in GitHub. Rollback is performed by redeploying the previous release from the GitHub Actions history.\n\nThere are three environments: development, test and production. The test environment uses masked copies of production claims.\n\nApplication Insights collects logs and traces. Alerts are sent to the claims support channel in Microsoft Teams.\n\nThe most frequent incident is a poison message on the Service Bus queue after the core policy system rejects a claim. Such messages are moved to the dead-letter queue and must be resubmitted from Service Bus Explorer after the policy data is corrected. A second known issue is Cosmos DB throttling during storm peaks; the provisioned throughput is raised temporarily by the on-call engineer.\n\nCosmos DB continuous backup is enabled with a thirty day restore window. Blob Storage uses geo-redundant storage. The recovery time objective is eight hours. A disaster recovery test has not yet been performed.\n\nAll personal data is encrypted at rest. Access to production is granted through Privileged Identity Management for a maximum of four hours.\n\nClaim photographs must never be deleted manually, because they are required as legal evidence for seven years.\n\nStorage of photographs is the largest cost; a lifecycle policy moves photographs older than ninety days to the archive tier.\n\nAfter major storms, claim volumes can triple within a day.\n\nThe claims platform team owns Claimsway. The core policy system is owned by the policy administration team. Escalation for production incidents is to the claims platform manager, Sanjay Mehta.\n\nThe integration with the new fraud scoring service remains outstanding.\n\nOn the first day, the new owner should request Privileged Identity Management eligibility for the production subscription. Within the first thirty days, the new owner should complete a dead-letter resubmission under supervision.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the claims intake platform for the motor insurance division",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "receives first notification of loss reports from the customer web form and the call centre",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Approximately two thousand five hundred claims are received per day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The platform consists of Azure Functions written in C#",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Incoming reports are placed on an Azure Service Bus queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Claim documents and photographs are stored in Azure Blob Storage",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Claim state is held in Azure Cosmos DB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "The web form is published through Azure Application Gateway with the web application firewall enabled",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Infrastructure is defined in Bicep",
+   "in": [
+    "architecture_reference",
+    "deployment_and_rollback",
+    "environments"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "GitHub Actions deploys to the test environment on every merge to the main branch",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Deployment to production requires approval from the claims product owner in GitHub",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Rollback is performed by redeploying the previous release from the GitHub Actions history",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "There are three environments: development, test and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "The test environment uses masked copies of production claims",
+   "in": [
+    "environments",
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Application Insights collects logs and traces",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Alerts are sent to the claims support channel in Microsoft Teams",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "a poison message on the Service Bus queue after the core policy system rejects a claim",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "must be resubmitted from Service Bus Explorer after the policy data is corrected",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Cosmos DB throttling during storm peaks",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the provisioned throughput is raised temporarily by the on-call engineer",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Cosmos DB continuous backup is enabled with a thirty day restore window",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Blob Storage uses geo-redundant storage",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "is eight hours",
+   "terms": [
+    "eight hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "test has not yet been performed",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "All personal data is encrypted at rest",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Access to production is granted through Privileged Identity Management for a maximum of four hours",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Claim photographs must never be deleted manually, because they are required as legal evidence for seven years",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Storage of photographs is the largest cost",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "a lifecycle policy moves photographs older than ninety days to the archive tier",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "After major storms, claim volumes can triple within a day",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "The claims platform team owns Claimsway",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The core policy system is owned by the policy administration team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Escalation for production incidents is to the claims platform manager, Sanjay Mehta",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "The integration with the new fraud scoring service remains outstanding",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "request Privileged Identity Management eligibility for the production subscription",
+   "in": [
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "complete a dead-letter resubmission under supervision",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "cost_optimization",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 7 (25 Oct), blind (synthetic)",
+ "holdout": true
+}

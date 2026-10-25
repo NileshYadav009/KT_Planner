@@ -1773,3 +1773,19 @@ Results:
   touches them, are listed in the coverage report as "Not discussed" and on
   the follow-up list ("ask whether it applies"), instead of disappearing.
 - Accuracy unchanged; no Groq quota used.
+
+## Placement accuracy (audit §9aba, 25 Oct)
+
+- **A new blind test set** of four KTs in styles we had little of
+  (question and answer, noisy speech, a formal document, a rambling KT),
+  answer keys written before anything ran on them.
+- **Four generic fixes:** a topic the speaker names at the start of a
+  sentence ("Security wise, ...") now holds for everything in that
+  sentence; a sentence about one environment ("staging uses ...") goes to
+  Environments; a fix after a failure stays with it; the KT's opening
+  definition of the system goes to System Overview.
+- **Without an LLM**, unseen KTs went from 293 to 296 of 341 facts in the
+  right section; nothing got worse.
+- **With Groq** (as the app runs), 321 of 341 (94%) on unseen KTs. A wider
+  Groq check reached 322 for 37% more tokens, so it stays off.
+- Groq used: 71 calls, about 132k tokens.

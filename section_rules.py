@@ -54,6 +54,19 @@ RISING_LOAD_PERIOD = (
     r"september|october|november|december)\b"
 )
 
+# A sentence about one environment, its subject: "staging uses recorded
+# gantry traffic from last year" (in SECTION_RULES below). Such a detail does
+# not change the topic being discussed (segment_topics): "Releases are
+# performed with Azure DevOps" after "The test environment receives ..." went
+# to Environments on the topic boost (dev d01).
+_ENVIRONMENT_SUBJECT_RX = (
+    r"^\W*(?:(?:and|so|also|but|then)\s+)?(?:the\s+|our\s+)?(?:staging|production|prod|dev|development|test|"
+    r"qa|uat|sandbox|pre-?prod(?:uction)?)(?:\s+(?:environment|cluster|account|subscription|project))?\s+"
+    r"(?:uses?|has|have|gets?|receives?|mirrors?|holds?|contains?|shares?|talks?\s+to|points?\s+(?:at|to)|"
+    r"is\s+(?:a\s+)?(?:copy|clone|replica|smaller|identical|the\s+same|separate)|runs?\s+(?:a\s+)?(?:smaller|"
+    r"single|cheaper|scaled))\b")
+_NOT_TOPIC_ANCHORS = {_ENVIRONMENT_SUBJECT_RX}
+
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "danger_zones",
@@ -611,6 +624,16 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         ],
         0.97,
     ),
+    (
+        # A sentence about one environment, which is its subject: "staging
+        # uses recorded gantry traffic from last year" went to Deployment
+        # (dev d03). What a deploy does there ("staging deploys on merge") is
+        # not one of these verbs; a recovery, monitoring or security rule
+        # (0.95 and up) still wins over it.
+        "environments",
+        [_ENVIRONMENT_SUBJECT_RX],
+        0.945,
+    ),
     # ------------------------------------------------------------------
     # General phrasings found by the golden suite (tests/goldens, P1-11).
     # Each is a way of saying something, not a fact from one transcript.
@@ -718,6 +741,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         "system_overview",
         [
             r"^(?!\s*(?:we|you|they|i)\b)(?:\W*[\w-]+\s+){1,6}?(?:use|uses|rely\s+on|relies\s+on)\s+it\s+(?:to|for)\b",
+            # "the finance and merchandising teams build all their reports on
+            # top of it" (dev d06): who builds on the system.
+            r"^(?!\s*(?:we|you|they|i)\b)(?:\W*[\w-]+\s+){1,6}?(?:build|builds|run|runs)\s+(?:all\s+)?"
+            r"(?:their|its|his|her)\s+(?:[\w-]+\s+){0,2}on\s+top\s+of\s+it\b",
         ],
         0.95,
     ),
@@ -963,7 +990,8 @@ def segment_topics(texts: List[str]) -> List[Optional[str]]:
             current = anchor[1]
         elif anchor is None and SEGMENT_RULE_ANCHOR_MIN is not None:
             rule = match_section_rules(text)
-            if rule is not None and rule.confidence >= SEGMENT_RULE_ANCHOR_MIN:
+            if rule is not None and rule.confidence >= SEGMENT_RULE_ANCHOR_MIN \
+                    and rule.matched_pattern not in _NOT_TOPIC_ANCHORS:
                 current = rule.section_id
         topics.append(current)
     return topics
@@ -1087,6 +1115,18 @@ _GREETING_ONLY_RE = re.compile(
 )
 
 
+# "<Name> is our data pipeline that ...", "This is the claims platform
+# which ...": the system defined by its kind.
+_DEFINES_THE_SYSTEM_RE = re.compile(
+    r"^\W*(?:(?:so|okay|ok|alright|right|well|now|and|um|uh)\W+)*(?:[\w.&+-]+\s+){1,3}?(?:is|are)\s+"
+    r"(?:our|the|a|an)\s+(?:[\w/&.+-]+\s+){0,4}?(?:platform|pipeline|service|system|application|app|backend|tool|"
+    r"product|api|portal|engine|site|website)\b", re.IGNORECASE)
+
+
+def _source_of(cs) -> str:
+    return (getattr(cs.sentence, "source_text", None) or cs.sentence.text or "").strip()
+
+
 def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict]) -> None:
     """
     Apply deterministic routing and pull misplaced sentences out of system_overview.
@@ -1095,6 +1135,8 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
     from context_mapper import Classification, ClassifiedSentence, ExplainabilityLog
     from datetime import datetime
 
+    # Before any topic is named, the KT is saying what the system is.
+    opening = True
     for idx, cs in enumerate(classified_sentences):
         text = cs.sentence.text or ""
         if _GREETING_ONLY_RE.match(text):
@@ -1106,6 +1148,19 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
             cs.is_unassigned = True
             continue
         rule_match = match_section_rules(text)
+        if rule_match is not None and rule_match.section_id == "architecture_reference" \
+                and _DEFINES_THE_SYSTEM_RE.match(_source_of(cs)) and opening:
+            # "Brightline is our data pipeline that loads sales and inventory
+            # data from the stores into Snowflake": the KT's opening sentence
+            # says what the system is; the data-flow rule took it to
+            # Architecture (dev d06). Only before any topic is named:
+            # "Kafka is our event pipeline that ..." later on is a component.
+            rule_match = SectionRuleMatch(section_id="system_overview", confidence=RULE_OVERRIDE_CONFIDENCE,
+                                          reason="rule:system_overview", matched_pattern=_DEFINES_THE_SYSTEM_RE.pattern)
+        if topic_anchor(text) is not None or (rule_match is not None
+                                              and rule_match.confidence >= SEGMENT_RULE_ANCHOR_MIN
+                                              and rule_match.section_id != "system_overview"):
+            opening = False
 
         current_section = (
             cs.primary_classification.section_id
@@ -1246,9 +1301,12 @@ _REMEDY_START_RE = re.compile(
     r"|fail\s+over|failover|roll\s+back|revert|redeploy|reboot|kill|delete|increase|raise|bump|rotate|renew|swap"
     r"|switch|resubmit|replay|reprocess|requeue|free|clean|recreate|rebuild|restore|check|run|stop|disable|enable)\b",
     re.IGNORECASE)
+# "Oracle sessions table grows and slows logins" is a failure too: the fix
+# after it ("Run the purge job, ...") went to the calendar (dev d04).
 _FAILURE_RE = re.compile(
     r"\b(?:fail\w*|error\w*|outage|time\s?outs?|crash\w*|down|drops|dropped|backs\s+up|backed\s+up|offline|stuck"
-    r"|hang\w*|reject\w*|lag\w*|exhaust\w*|leak\w*|slow|break\w*|broken|problem|issue)\b", re.IGNORECASE)
+    r"|hang\w*|reject\w*|lag\w*|exhaust\w*|leak\w*|slow\w*|break\w*|broken|problem|issue|throttl\w*|stall\w*"
+    r"|saturat\w*|fill(?:s|ed)?\s+up|runs?\s+out\s+of|ran\s+out\s+of|stale|degrad\w*)\b", re.IGNORECASE)
 
 
 def _gives_instruction(text: str) -> bool:
@@ -1268,6 +1326,28 @@ def _is_step(text: str) -> bool:
         return True
     first = _FIRST_STEP_RE.search(text or "")
     return bool(first and first.group("word").lower() not in _NOT_AN_INSTRUCTION) or _is_imperative(text or "")
+
+
+def _assign_section(cs, section_id, schema_metadata, idx, reason, Classification, ExplainabilityLog, datetime) -> None:
+    """Place a unit in a named section for a continuation reason (kept by
+    restore_sections_emptied_by_topic, which reconsiders only the classifier's
+    own picks)."""
+    cs.primary_classification = Classification(
+        section_id=section_id,
+        section_title=(schema_metadata.get(section_id) or {}).get("title", section_id),
+        confidence=RULE_OVERRIDE_CONFIDENCE,
+        similarity_score=RULE_OVERRIDE_CONFIDENCE,
+        reason=reason,
+    )
+    cs.is_unassigned = False
+    cs.explainability_log = ExplainabilityLog(
+        action="continuation",
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        sentence_id=idx,
+        section_id=section_id,
+        reasoning=reason,
+        confidence=RULE_OVERRIDE_CONFIDENCE,
+    )
 
 
 def _inherit_section(cs, source, idx, reason, Classification, ExplainabilityLog, datetime) -> None:
@@ -1300,6 +1380,23 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
         raw = (cs.sentence.raw_text or cs.sentence.text or "").strip()
         text = (cs.sentence.text or "").strip()
         if not text:
+            continue
+        # "Security wise, the service account only has read access to
+        # BigQuery, and the API sits behind Identity-Aware Proxy for the admin
+        # endpoints": the speaker named the topic of the whole sentence, and
+        # each fact cut from it belongs there, unless a rule of its own
+        # claims it (a never-do rule stays a never-do rule). The second fact
+        # went to Architecture, and "... the certs are rotated every year by
+        # the roadside team" after "security," to Ownership (dev d02, d03).
+        fronted = topic_anchor((getattr(cs.sentence, "source_text", None) or text).strip())
+        if fronted and fronted[0] == "fronted" and fronted[1] and fronted[1] in schema_metadata:
+            own = match_section_rules(text)
+            current = getattr(cs.primary_classification, "section_id", None)
+            if current != fronted[1] and not (own and own.section_id != fronted[1]
+                                              and own.confidence >= RULE_OVERRIDE_CONFIDENCE):
+                _assign_section(cs, fronted[1], schema_metadata, idx,
+                                "Continuation: the topic the speaker named for this sentence",
+                                Classification, ExplainabilityLog, datetime)
             continue
         # Half of a two-topic sentence: split off because its own rule claims
         # it for another section. Its raw text starts lowercase ("all secrets

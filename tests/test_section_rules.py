@@ -346,3 +346,74 @@ def test_escalation_contacts_are_ownership_and_escalation():
                                 "undocumented.")
     assert match.section_id == "ownership_escalation"
     assert match_section_rules("Escalation paths are clear.") is None
+
+
+def _classified(text, section_id, source=None):
+    from types import SimpleNamespace
+
+    from context_mapper import Classification, Sentence
+
+    primary = Classification(section_id=section_id, section_title=section_id, confidence=0.6, reason="",
+                             similarity_score=0.6)
+    return SimpleNamespace(sentence=Sentence(text=text, start=0.0, end=0.0, source_text=source),
+                           primary_classification=primary, is_unassigned=False, explainability_log=None)
+
+def test_a_topic_named_at_the_head_of_a_sentence_holds_for_every_fact_cut_from_it():
+    """Dev d02 and d03: "Security wise, the service account only has read
+    access to BigQuery, and the API sits behind Identity-Aware Proxy ..." and
+    "uh security, ..., and the certs are rotated every year by the roadside
+    team": the second fact went to Architecture and to Ownership."""
+    from section_rules import apply_continuation_rules
+
+    meta = {sid: {"title": sid} for sid in ("security_controls", "architecture_reference", "danger_zones",
+                                            "ownership_escalation")}
+    said = "Security wise, the service account only has read access to BigQuery, and the API sits behind " \
+           "Identity-Aware Proxy for the admin endpoints."
+    facts = [_classified("Security wise, the service account only has read access to BigQuery.", "security_controls",
+                         said),
+             _classified("The API sits behind Identity-Aware Proxy for the admin endpoints.", "architecture_reference",
+                         said)]
+    apply_continuation_rules(facts, meta)
+    assert [f.primary_classification.section_id for f in facts] == ["security_controls"] * 2
+    # A rule of the fact's own still wins: a never-do rule is a danger zone.
+    said = "Security wise, the keys live in Vault, and never share the root token."
+    facts = [_classified("Never share the root token.", "danger_zones", said)]
+    apply_continuation_rules(facts, meta)
+    assert facts[0].primary_classification.section_id == "danger_zones"
+
+def test_a_sentence_about_one_environment_is_environments_and_keeps_the_topic():
+    """Dev d03: "staging uses recorded gantry traffic from last year" went to
+    Deployment. Dev d01: once that rule moved the topic, "Releases are
+    performed with Azure DevOps" after it followed into Environments."""
+    from section_rules import segment_topics
+
+    for text in ["staging uses recorded gantry traffic from last year so you can replay a busy day there.",
+                 "The test environment receives anonymised statement files from two of our banks.",
+                 "Prod has five replicas behind the load balancer."]:
+        rule = match_section_rules(text)
+        assert rule and rule.section_id == "environments", (text, rule)
+    # What a deploy does there, or a stronger rule, is not an environment fact.
+    assert match_section_rules("Staging deploys automatically on every merge.").section_id != "environments"
+    rule = match_section_rules("Production has point in time recovery switched on, seven days.")
+    assert rule and rule.section_id == "disaster_recovery"
+    assert segment_topics(["Releases are done in Azure DevOps.", "The test environment receives masked files.",
+                           "Releases are performed with Azure DevOps."])[-1] != "environments"
+
+def test_the_kts_opening_definition_of_the_system_is_its_overview():
+    """Dev d06: "Brightline is our data pipeline that loads sales and
+    inventory data from the stores into Snowflake, and the finance and
+    merchandising teams build all their reports on top of it" went to
+    Architecture (a data-flow rule)."""
+    from section_rules import apply_rule_overrides
+
+    meta = {sid: {"title": sid} for sid in ("system_overview", "architecture_reference", "disaster_recovery")}
+    said = "Brightline is our data pipeline that loads sales and inventory data from the stores into Snowflake."
+    units = [_classified(said, "architecture_reference", said),
+             _classified("Backups, Snowflake keeps time travel for a day.", "disaster_recovery"),
+             _classified("Kafka is our event pipeline that writes orders into Snowflake.", "architecture_reference")]
+    apply_rule_overrides(units, meta)
+    assert units[0].primary_classification.section_id == "system_overview"
+    # After a topic is named, the same form describes a component.
+    assert units[2].primary_classification.section_id == "architecture_reference"
+    rule = match_section_rules("the finance and merchandising teams build all their reports on top of it")
+    assert rule and rule.section_id == "system_overview"

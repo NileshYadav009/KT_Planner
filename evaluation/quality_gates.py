@@ -168,7 +168,8 @@ def run(label, replay=False, accuracy=None, matrix=None, out_dir=None):
     if accuracy:
         with open(os.path.join(RESULTS, f"{accuracy}.json"), encoding="utf-8") as fh:
             acc = json.load(fh)
-        result["accuracy"] = {"label": accuracy, **{k: acc[k] for k in ("tuning", "dev", "holdout", "blind2") if k in acc}}
+        result["accuracy"] = {"label": accuracy, **{k: acc[k] for k in ("tuning", "dev", "holdout", "blind2", "blind3")
+                                                    if k in acc}}
     if matrix:
         with open(os.path.join(RESULTS, f"matrix-{matrix}.json"), encoding="utf-8") as fh:
             result["matrix"] = {"label": matrix, **json.load(fh)["summary"]}
@@ -265,12 +266,13 @@ def report(before_label, after_label):
         acc = after["accuracy"]
         lines += ["## Placement on other KTs (no LLM)", "",
                   f"From `evaluation/accuracy.py` run `{acc['label']}`. Holdouts and blind KTs are unseen and are",
-                  "reported in aggregate only. The target is 90% on unseen KTs.", "",
+                  "reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with",
+                  "Groq's section check, as the app runs, see the latest accuracy section of the audit.", "",
                   "| Set | Correct | Facts | Placement | Lost | Unseen: 90% |", "|---|---|---|---|---|---|"]
-        for name in ("tuning", "dev", "holdout", "blind2"):
+        for name in ("tuning", "dev", "holdout", "blind2", "blind3"):
             if name in acc:
                 s = acc[name]
-                verdict = ("pass" if s["accuracy"] >= 0.9 else "FAIL") if name in ("holdout", "blind2") else "tuned on"
+                verdict = ("pass" if s["accuracy"] >= 0.9 else "FAIL") if name in ("holdout", "blind2", "blind3")                     else "tuned on"
                 lines.append(f"| {name} | {s['correct']} | {s['facts']} | {s['accuracy']:.1%} | {s['lost']} | {verdict} |")
         lines.append("")
     if after.get("matrix"):

@@ -1,6 +1,6 @@
 """Round-6 accuracy runner (no LLM, copy edit off, scratch state).
 
-    python evaluation/accuracy.py LABEL SETS     # SETS: comma list of dev,tuning,e2e,holdout
+    python evaluation/accuracy.py LABEL SETS     # SETS: comma list of dev,tuning,e2e,holdout,blind2,blind3
 
 dev      the six round-6 KTs in ./dev (per-fact detail)
 tuning   non-holdout goldens in tests/goldens (per-fact detail)
@@ -102,6 +102,12 @@ if "blind2" in sets:
     out["blind2"] = tally(scores)
     del scores
     print("blind2 (aggregate only)", out["blind2"], flush=True)
+if "blind3" in sets:
+    # Round-7 blind KTs (./blind3, written 25 Oct): aggregate only, nothing per fact.
+    scores = golden_eval.run_all(load_dir(os.path.join(HERE, "blind3")))
+    out["blind3"] = tally(scores)
+    del scores
+    print("blind3 (aggregate only)", out["blind3"], flush=True)
 if "holdout" in sets:
     scores = golden_eval.run_all([g for g in goldens if g.get("holdout")])
     out["holdout"] = tally(scores)

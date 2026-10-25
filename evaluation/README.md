@@ -18,6 +18,7 @@ python evaluation/accuracy.py LABEL SETS
 | `dev` | `evaluation/dev`: 6 KTs in styles the goldens lack (formal, meeting, noisy speech-to-text, read-aloud notes, Q&A, rambling) | per fact |
 | `holdout` | `tests/goldens` h12-h14 | **aggregate only** |
 | `blind2` | `evaluation/blind`: b01-b03 | **aggregate only** |
+| `blind3` | `evaluation/blind3`: b04-b07, written 25 Oct before any result on them (`blind3_kts.py` regenerates them): question and answer, noisy speech, a formal document, a rambling KT with a correction | **aggregate only** |
 | `e2e` | `tests/e2e_kts` (six KTs: AWS, Azure, GCP, an ambiguous handover, and the user's QuickBite and online learning KTs) through `tests/e2e_eval.py` | problems only |
 
 The results go to `evaluation/results/LABEL.json`, which is git-ignored.

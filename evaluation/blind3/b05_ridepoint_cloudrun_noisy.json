@@ -1,0 +1,252 @@
+{
+ "id": "b05_ridepoint_cloudrun_noisy",
+ "title": "Ridepoint payouts: GCP Cloud Run, recording-style speech with fillers and restarts",
+ "proves": "Fillers, repeated words and restarts as speech-to-text leaves them; a guess about RTO/RPO; a never-do said as 'really important'.",
+ "transcript": "Okay so um, this is Ridepoint payouts. It's the service that pays our drivers every week, uh, about forty thousand drivers in three countries. If payouts are late, drivers notice within an hour and support gets flooded.\nSo the, the main thing is a Go service on Cloud Run. It reads the completed trips from Pub/Sub, works out what each driver earned, and writes the balances into Cloud SQL, which is Postgres. On Thursday night a scheduled job, it's Cloud Scheduler, triggers the payout run and we send the transfers to Adyen.\nDeploys, um, Cloud Build builds on every merge and deploys to staging by itself. For prod you promote the same image with the gcloud command in the runbook, and if it's bad you just send traffic back to the previous revision, which takes a minute.\nWe've got staging and prod. Staging talks to the Adyen test environment so no real money moves there.\nMonitoring is Cloud Monitoring and we, uh, we have alerts in Opsgenie for the payout run failing and for the Pub/Sub backlog growing.\nThings that go wrong. Adyen rate limits us when the run starts, you'll see four twenty nines in the logs. The job retries by itself, just let it finish, don't start a second run. And sometimes a driver's bank details are invalid and that payout fails, those go to the finance ops queue and they fix it by hand.\nBackups, Cloud SQL has point in time recovery switched on, seven days. We haven't written down an RPO or RTO, I'd guess a few hours but don't quote me on that.\nBank details are encrypted with Cloud KMS and only the payout service account can decrypt them.\nReally important: never rerun a payout run for the same week. It pays the drivers twice and getting money back is a nightmare.\nCost wise it's cheap, the only thing is Cloud SQL, we sized it down last quarter.\nThursday night and the first payout after a public holiday are the busy ones, avoid deploying then.\nIt's our team, payments platform. For Adyen problems contact their support through the merchant portal. If the run fails at night, page the on-call and then Lucia, she's the team lead.\nThere's still a half finished migration to Adyen's new payout API, the new client is written but not switched on.\nFirst week get access to the GCP project and Opsgenie. By the end of the month you should run a payout week end to end with someone watching.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the service that pays our drivers every week",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "about forty thousand drivers in three countries",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "If payouts are late, drivers notice within an hour and support gets flooded",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "a Go service on Cloud Run",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "It reads the completed trips from Pub/Sub, works out what each driver earned, and writes the balances into Cloud SQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "triggers the payout run",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "we send the transfers to Adyen",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Cloud Build builds on every merge and deploys to staging by itself",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "For prod you promote the same image with the gcloud command in the runbook",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "if it's bad you just send traffic back to the previous revision, which takes a minute",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "We've got staging and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Staging talks to the Adyen test environment so no real money moves there",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Monitoring is Cloud Monitoring",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "alerts in Opsgenie for the payout run failing and for the Pub/Sub backlog growing",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Adyen rate limits us when the run starts",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "The job retries by itself, just let it finish, don't start a second run",
+   "in": [
+    "common_failures",
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "a driver's bank details are invalid and that payout fails",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "those go to the finance ops queue and they fix it by hand",
+   "in": [
+    "common_failures",
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Cloud SQL has point in time recovery switched on, seven days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "We haven't written down an RPO or RTO",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Bank details are encrypted with Cloud KMS and only the payout service account can decrypt them",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "never rerun a payout run for the same week",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "It pays the drivers twice and getting money back is a nightmare",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the only thing is Cloud SQL, we sized it down last quarter",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Thursday night and the first payout after a public holiday are the busy ones, avoid deploying then",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "It's our team, payments platform",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "For Adyen problems contact their support through the merchant portal",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "If the run fails at night, page the on-call and then Lucia, she's the team lead",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the new client is written but not switched on",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "First week get access to the GCP project and Opsgenie",
+   "in": [
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "By the end of the month you should run a payout week end to end with someone watching",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "cost_optimization",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 7 (25 Oct), blind (synthetic)",
+ "holdout": true
+}

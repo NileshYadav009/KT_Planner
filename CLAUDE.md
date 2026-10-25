@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aaz is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aba is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -26,8 +26,10 @@ table. `docs/progress.md` is the plain-language log.
    rules-only result.
 
 Placement accuracy is a quality target, not an invariant: 90% or better on
-unseen KTs. Without an LLM it is 86/95 on the holdouts and 95/114 on the blind
-set. With Groq it was about 94% (audit §9aal).
+unseen KTs. Without an LLM it is 87/95 on the holdouts, 97/114 on the blind
+set and 112/132 on the second blind set (b04-b07, §9aba). With Groq it was
+about 94% (audit §9aal); with Groq's section check measured again in §9aba,
+91/95, 108/114 and 122/132 (321/341, 94.1%).
 
 ## Pipeline map (a pasted transcript; a recording first goes through `pipeline.transcribe_recording`)
 
@@ -82,9 +84,10 @@ overnight and only when asked. Use targeted runs, from the repo root with
 | Knowledge and coverage | `tests/test_knowledge_builders.py tests/test_fact_units.py tests/test_dialogue.py` | about 3 min |
 | End to end, with recorded Groq replay | `tests/test_e2e_kts.py` | about 13 min |
 
-Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
-(about 4 min; see `evaluation/README.md`). Every placement or coverage change
-is measured on all five sets.
+Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,blind3,e2e`
+(about 5 min; see `evaluation/README.md`). Every placement or coverage change
+is measured on all six sets; holdout, blind2 and blind3 are read in
+aggregate only.
 
 Quality gates: `python evaluation/quality_gates.py LABEL --replay --accuracy ACC
 --matrix M` (about 25 min): the release thresholds counted on the PDFs of the
@@ -129,7 +132,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | T1 | Low | 4 field-populator tests assumed one call per field after batching became the default | Fixed, §9aao |
 | L1 | Med | A correction split across sentences ("The limit is 500. Sorry, not 500, ... 300.") shows both values | Fixed, §9aap (`merge_spoken_corrections`; sources quote both sentences) |
 | L2 | Med | A sentence of two commands ("get access ..., and spend the first weeks watching ...") is one fact, so its second topic is unplaced | Open: only 2 more such sentences in the visible KTs, both correct unsplit; splitting commands risks scattering procedures |
-| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Measured twice, +1 each time, no loss: dev +1/224 (§9aap); holdouts and blind with only the section check live, 199 vs 198 of 209 (§9aar). Costs about 25% more tokens in the check. Off by default (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1`); switching needs a replay re-record. The user's call. |
+| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Measured twice, +1 each time, no loss: dev +1/224 (§9aap); holdouts and blind with only the section check live, 199 vs 198 of 209 (§9aar). Costs about 25% more tokens in the check. Measured a third time with the user's go-ahead (§9aba, section check only): 322 vs 321 of 341 unseen facts, one more section wrongly Missing, 37% more tokens on the check. Kept off (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1` to switch; a replay re-record follows). |
 | L4 | Med | With Groq: repeated lines and unsourced facts | Fixed, §9aap. The calendar copied every cost lever; a paragraph or row cited too few sources. Dev 4 to 0 and 2 to 0, by replay. |
 | L5 | Low | Topic memory can raise a second candidate above the chosen section without swapping them | Closed: logs only. Alternatives are read only by multi-section mapping, which is off (`ENABLE_MULTI_SECTION_MAPPING`). |
 | P1 | Product | Custom templates are not supported (routes not mounted; rules and prompts name the default section ids) | Needs a product decision |
@@ -197,3 +200,8 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X61 | Low | A deployment chain said in one sentence ("GitHub Actions runs tests, Amazon ECR stores images, and ArgoCD deploys to EKS") is one step, with and without an LLM | Open: splitting it drops the joining words, which breaks the verbatim checks of every golden set (holdouts and blind included); the steps are the speaker's words in order |
 | X62 | Low | The Architecture Knowledge name list repeats the Technology summary and the diagram | Open: component-name facts may be found only through it; measure before removing |
 | P2 | Product | Optional sections (Environments, Cost Optimization) not discussed were left out of the coverage report and the follow-up list | Done, §9aaz, the user's decision: a "Not discussed" row each (`OPTIONAL_NOT_DISCUSSED`, `full_schema`) and a follow-up line asking whether it applies; not counted as a section not covered; no section added to the body. Matrix R06 |
+| X63 | Med | A topic the speaker put at the head of a sentence ("Security wise, ... and the API sits behind Identity-Aware Proxy ...", "security, ... and the certs are rotated every year by the roadside team") was lost by the second fact cut from it, which went to Architecture or Ownership | Fixed, §9aba (`apply_continuation_rules`: the fronted topic holds for every fact of its sentence unless a strong rule of the fact's own claims it) |
+| X64 | Med | A sentence about one environment ("staging uses recorded gantry traffic from last year") went to Deployment | Fixed, §9aba (environment-subject rule, 0.945, below recovery, monitoring and security rules; it does not move the topic) |
+| X65 | Low | The fix after a failure said without a failure word ("... grows and slows logins. Run the purge job, it is safe in business hours.") went to the calendar | Fixed, §9aba (`_FAILURE_RE`: slows, throttled, stalls, saturated, runs out of, stale, degraded) |
+| X66 | Med | The KT's opening definition ("Brightline is our data pipeline that loads ... into Snowflake") and who builds on it ("... teams build all their reports on top of it") went to Architecture | Fixed, §9aba (only before any topic is named, so a component defined later stays Architecture) |
+| X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Open: aggregate only; find the cause on visible KTs written in the same styles, never on the blind set |

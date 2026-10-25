@@ -1,0 +1,278 @@
+{
+ "id": "b07_tasteful_sagemaker_ramble",
+ "title": "Tasteful: AWS SageMaker recommendations, a rambling KT with a correction",
+ "proves": "Run-on sentences, a correction mid-sentence ('every week, sorry, every night now'), an unknown fix, an idea that is not yet work.",
+ "transcript": "Right, so Tasteful is the recommendation service for the recipe app, it decides which recipes you see on the home screen. Something like two million people open the app a week, and if recommendations break the app falls back to the most popular recipes, so it's not an outage, but engagement drops.\nHow it works, there's a feature service, Python on EKS, that reads user history from Redis and calls a SageMaker endpoint for the model. Training data lands in S3 every night from the events pipeline. Airflow, the managed one on AWS, MWAA, runs the training. We retrain every week, sorry, every night now, we changed that in March.\nThe model is deployed by an Airflow task that registers it and updates the SageMaker endpoint, but only if the offline metrics beat the current model. The feature service itself goes out through GitHub Actions and Argo CD. If a new model is bad, you point the endpoint back at the previous model version in the registry.\nInfra is all Terraform, one workspace per environment. We have dev and prod, there's no staging for the model, dev uses a ten percent sample of the data.\nDatadog has the dashboards. The alert I care about is the click-through rate dropping more than twenty percent day on day, that goes to Slack, not paging.\nWhat breaks, the nightly training fails when the events pipeline is late, then the old model just stays, which is fine for a day or two. Rerun the DAG once the data is there. The feature service sometimes times out calling SageMaker during the evening peak, we added autoscaling on the endpoint but it still happens now and then; I don't know the proper fix yet.\nBackups, the models are versioned in the SageMaker model registry and the training data stays in S3 for ninety days. If Redis is lost the features rebuild from S3 overnight.\nThe endpoint isn't public, the feature service calls it through a VPC endpoint, and user ids are hashed before they go into training data.\nNever train on unhashed user data, legal were very clear about that.\nSageMaker endpoints are the big bill. We use a spot training job, which halved the training cost.\nEvenings between six and nine are the peak, and Sunday is the biggest day for cooking, so we don't release on Sundays.\nI own it with one other engineer, Mo. The data platform team owns the events pipeline. If recommendations are down for real, ping Mo, and then the head of data, Grace.\nOpen stuff: we want to add an A/B testing framework but it's only an idea right now, no ticket.\nDay one, get the AWS role and Datadog. In your first month, ship one model change through the whole pipeline.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "it decides which recipes you see on the home screen",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "two million people open the app a week",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the app falls back to the most popular recipes, so it's not an outage, but engagement drops",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "reads user history from Redis and calls a SageMaker endpoint for the model",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "Training data lands in S3 every night from the events pipeline",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "runs the training",
+   "terms": [
+    "MWAA",
+    "runs the training"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "every night now, we changed that in March",
+   "in": [
+    "architecture_reference",
+    "system_overview",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "The model is deployed by an Airflow task that registers it and updates the SageMaker endpoint, but only if the offline metrics beat the current model",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "The feature service itself goes out through GitHub Actions",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "If a new model is bad, you point the endpoint back at the previous model version in the registry",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Infra is all Terraform, one workspace per environment",
+   "in": [
+    "environments",
+    "architecture_reference",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "there's no staging for the model",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "dev uses a ten percent sample of the data",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Datadog has the dashboards",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "the click-through rate dropping more than twenty percent day on day, that goes to Slack, not paging",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "the nightly training fails when the events pipeline is late",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "Rerun the DAG once the data is there",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "The feature service sometimes times out calling SageMaker during the evening peak",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "I don't know the proper fix yet",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the models are versioned in the SageMaker model registry and the training data stays in S3 for ninety days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "If Redis is lost the features rebuild from S3 overnight",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "the feature service calls it through a VPC endpoint",
+   "in": [
+    "security_controls",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "user ids are hashed before they go into training data",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Never train on unhashed user data",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "SageMaker endpoints are the big bill",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "We use a spot training job, which halved the training cost",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Evenings between six and nine are the peak",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Sunday is the biggest day for cooking, so we don't release on Sundays",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "I own it with one other engineer, Mo",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "The data platform team owns the events pipeline",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "If recommendations are down for real, ping Mo, and then the head of data, Grace",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "we want to add an A/B testing framework but it's only an idea right now, no ticket",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "get the AWS role and Datadog",
+   "in": [
+    "day1_survival_checklist"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "ship one model change through the whole pipeline",
+   "in": [
+    "first_30_day_ownership"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "cost_optimization",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 7 (25 Oct), blind (synthetic)",
+ "holdout": true
+}
