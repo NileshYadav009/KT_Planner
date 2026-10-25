@@ -167,3 +167,51 @@ def test_the_pdf_is_set_in_the_bundled_typeface():
              for font in (page["/Resources"].get("/Font") or {}).values()}
     assert any(n.split("+")[-1] in ("Inter", "Inter-Regular") for n in names), names
     assert any("Inter-Bold" in n or "Inter-SemiBold" in n for n in names), names
+
+
+def _boxes_past_their_edge(html):
+    """(what, points over) for every box that reaches past the page's content
+    area, or content wider than its own table cell."""
+    from pdf_rendering import _layout
+
+    out = []
+    for page in _layout(html).pages:
+        root = page._page_box
+        right = root.content_box_x() + root.width
+        for box in root.descendants():
+            if not hasattr(box, "margin_width"):
+                continue
+            edge = box.position_x + box.margin_width()
+            tag = getattr(box, "element_tag", "")
+            if edge > right + 0.5 and tag in ("table", "td", "th"):
+                out.append((tag, round(edge - right, 1)))
+            if tag in ("td", "th"):
+                for inner in box.descendants():
+                    if inner is not box and hasattr(inner, "margin_width") and \
+                            inner.position_x + inner.margin_width() > edge + 0.5:
+                        out.append(("in-" + tag, round(inner.position_x + inner.margin_width() - edge, 1)))
+                        break
+    return out
+
+
+def test_tables_fit_the_page_and_their_cells():
+    # A user's KT (25 Oct): the connections table ran 18pt past the page edge
+    # (column widths of 100% plus cell padding), and the "After review" badge
+    # spilled out of the coverage table's status column.
+    from renderers.sections.architecture_reference import CONNECTIONS_TABLE_TITLE
+
+    rows = [{"From": "Online Learning Platform (Amazon EKS)", "Connection": "caches in", "To": "Redis",
+             "Said in the KT": "Online Learning Platform caches course information in Redis."}] * 3
+    sections = [
+        {"section_id": "architecture_reference", "section_title": "Architecture Reference",
+         "blocks": [{"type": "DecisionTable", "title": CONNECTIONS_TABLE_TITLE,
+                     "columns": ["From", "Connection", "To", "Said in the KT"], "rows": rows}]},
+        {"section_id": "kt_coverage", "section_title": "KT Coverage & Knowledge Gaps",
+         "blocks": [{"type": "DecisionTable", "title": "Coverage matrix", "columns": ["Domain", "Coverage", "Assessment"],
+                     "rows": [{"Domain": "Sign-off", "Coverage": "After review",
+                               "Assessment": "Recorded when the document is reviewed and signed."},
+                              {"Domain": "Open Responsibilities & Transition Plan", "Coverage": "Partial",
+                               "Assessment": "1 of 3 topics covered."}]}]},
+    ]
+    html = render_pdf_html(title="T", job_id="layout-0001", rendered_sections=sections, coverage={}, date_str="d")
+    assert _boxes_past_their_edge(html) == []

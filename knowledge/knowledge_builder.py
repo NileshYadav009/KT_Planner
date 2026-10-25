@@ -1887,7 +1887,10 @@ _ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+
 _FAILURE_INTRO_RE = re.compile(
     r"^(?:(?:one|another|a|an|the|our)\s+)?(?:[\w-]+\s+){0,4}?"
     r"(?:problem|issue|failure(?:\s+mode)?|error|incident|gotcha|outage)s?\s+"
-    r"(?:is|was|we\s+(?:see|hit|get)(?:\s+is)?|that\s+(?:comes\s+up|happens)\s+is)\s+"
+    # "A common issue occurs when database connections are exhausted ..." (a
+    # user's KT, 25 Oct: its check was carded as "Where to look first").
+    r"(?:is|was|we\s+(?:see|hit|get)(?:\s+is)?|that\s+(?:comes\s+up|happens)\s+is|"
+    r"(?:occurs|happens|arises|comes\s+up|shows\s+up)\s+(?:when|if|whenever))\s+"
     r"(?P<what>.+?)\s*(?:[;,]\s*(?P<rest>.+))?$", re.IGNORECASE)
 # The subject-first form: "Airflow DAG failure is another common issue",
 # "Schema change is another important failure scenario because ...".
@@ -1987,6 +1990,24 @@ def _clause(text: str) -> str:
     return _tidy(re.sub(r"^(?:which|that|so)\s+", "", text.strip(), flags=re.IGNORECASE))
 
 
+_BEFORE_STEP_RE = re.compile(r"\bbefore\s+(?P<step>[a-z]+ing\b[^.;,]{0,50})", re.IGNORECASE)
+
+
+def _step_after_checks(check: str, sentences: List[str]) -> str:
+    """The step a speaker said comes after the checks, in the words said:
+    "restarting services" in "Check connection-pool usage and application
+    errors before restarting services". Empty when no sentence that names
+    most of the checks says one."""
+    words = {w[:5] for w in re.findall(r"[a-z]{4,}", check.lower())}
+    for sentence in sentences:
+        match = _BEFORE_STEP_RE.search(sentence)
+        said = {w[:5] for w in re.findall(r"[a-z]{4,}", sentence[:match.start()].lower())} if match else set()
+        shared = len(words & said)
+        if match and shared >= 2 and shared * 2 >= len(words):
+            return match.group("step").strip()
+    return ""
+
+
 def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]:
     """(symptom, what to do) pairs from Common Failures: the structured
     list when the LLM produced one, otherwise the speaker's own sentences,
@@ -1999,8 +2020,14 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
                 fix = str(item.get("fix") or "").strip()
                 check = str(item.get("first_checks") or "").strip()
                 if not fix and check:
-                    # What the KT did say: where to look first.
-                    fix = f"First check: {check.rstrip('.')}. No fix was stated in the KT; ask the outgoing owner."
+                    # What the KT did say: where to look first, and the step
+                    # the speaker put after it ("Check connection-pool usage
+                    # and application errors before restarting services";
+                    # the card said no fix was stated: a user's KT, 25 Oct).
+                    step = _step_after_checks(check, _qr_sentences(section, skip))
+                    fix = (f"First check: {check.rstrip('.')}, before {step}. No other fix was stated in the KT; "
+                           f"ask the outgoing owner." if step else
+                           f"First check: {check.rstrip('.')}. No fix was stated in the KT; ask the outgoing owner.")
                 pairs.append((str(item["symptom"]).strip(), fix or _NO_FIX_STATED))
         return pairs[:_QR_MAX_FAILURES]
 

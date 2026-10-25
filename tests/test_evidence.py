@@ -293,3 +293,32 @@ def test_a_category_value_is_sourced_by_what_its_label_names():
               "rows": [{"label": "Business criticality", "value": "High"}]}, section_id="system_overview")
     assert attach_evidence(ko, sentences)["unsourced"] == 0
 
+
+def test_a_greeting_is_never_cited_and_table_labels_are_not_facts():
+    # A user's KT (25 Oct): "Hi team, today I'm handing over our online learning
+    # platform." was cited for "Online Learning Platform caches in Redis";
+    # "Application ownership | Developers" and the handover check's "Not
+    # covered during KT" lines were printed "no source"; a list of 16 names
+    # cited three sentences.
+    said = ["Hi team, today I'm handing over our online learning platform.",
+            "The backend uses Python FastAPI and Redis for caching course information.",
+            "Prometheus and Grafana monitor application performance.",
+            "Developers own application code, while Platform Engineering manages Kubernetes."]
+    sentences = transcript_sentences("", [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(said)])
+    ko = {"system_name": "Online Learning Platform", "rendered_sections": [
+        {"section_id": "architecture_reference", "section_title": "Architecture Reference", "blocks": [
+            {"type": "DecisionTable", "title": "Connections stated in the KT",
+             "columns": ["From", "Connection", "To", "Said in the KT"],
+             "rows": [{"From": "Online Learning Platform (Amazon EKS)", "Connection": "caches in", "To": "Redis",
+                       "Said in the KT": said[1]}]},
+            {"type": "NarrativeBlock", "title": "Architecture Knowledge", "paragraphs": ["FastAPI, Redis, Prometheus, Grafana"]}]},
+        {"section_id": "ownership_escalation", "section_title": "Ownership & Escalation", "blocks": [
+            {"type": "OwnershipTable", "title": "Ownership & Escalation",
+             "rows": [{"role": "Application ownership", "team": "Developers"}]}]},
+        {"section_id": "handover_completion", "section_title": "Handover Completion Check", "blocks": [
+            {"type": "ChecklistBlock", "title": "Handover readiness", "items": [
+                "Replacement can deploy safely: Not covered during KT"]}]}]}
+    assert attach_evidence(ko, sentences)["unsourced"] == 0
+    cited = {q for qs in dict(evidence_pairs(ko)).values() for q in qs}
+    assert said[0] not in cited
+    assert said[2] in cited and said[3] in cited

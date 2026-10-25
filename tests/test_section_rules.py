@@ -339,3 +339,10 @@ def test_what_happens_when_that_happens_stays_with_the_failure():
     apply_continuation_rules(pair, {})
     assert pair[1].primary_classification.section_id == "common_failures"
 
+
+def test_escalation_contacts_are_ownership_and_escalation():
+    # A user's KT (25 Oct): went to Handover Completion Check.
+    match = match_section_rules("The video-processing recovery procedure and formal escalation contacts are still "
+                                "undocumented.")
+    assert match.section_id == "ownership_escalation"
+    assert match_section_rules("Escalation paths are clear.") is None

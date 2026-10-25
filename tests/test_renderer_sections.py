@@ -602,6 +602,21 @@ def test_disaster_recovery_omits_testing_frequency_line_when_not_captured():
     assert not any(b["type"] == "NarrativeBlock" for b in result["blocks"])
 
 
+def test_backup_details_are_not_listed_as_recovery_actions():
+    # A user's KT (25 Oct): "Database backups run daily and are retained for 14
+    # days" (the rpo_steps field) was listed under "Recovery actions" on a KT
+    # that said RTO and RPO were not documented.
+    section = {
+        "id": "disaster_recovery", "title": "DISASTER RECOVERY",
+        "fields": {"rpo_steps": {"value": "Database backups run daily\nRetained for 14 days"},
+                   "rto_steps": {"value": "Restore the latest snapshot"}},
+        "coverage_content": [],
+    }
+    blocks = {b["title"]: b for b in render_disaster_recovery(section)["blocks"]}
+    assert blocks["Backups"]["items"] == ["Database backups run daily", "Retained for 14 days"]
+    assert blocks["Recovery actions"]["items"] == ["Restore the latest snapshot"]
+
+
 def test_disaster_recovery_renders_rto_rpo_metric_as_labeled_lines_alongside_procedure():
     # Regression test for a real bug found comparing two live-generated KT
     # PDFs of the same transcript: rto_metric/rpo_metric (field_populator.

@@ -253,3 +253,12 @@ def test_an_instruction_about_the_document_is_not_content():
                                    "values.")
     assert not is_document_instruction("Make sure the backups are tested every month.")
     assert not is_document_instruction("Ensure the pods are healthy before switching traffic.")
+
+
+def test_something_still_undocumented_is_a_stated_gap():
+    # A user's KT (25 Oct): left off the follow-up list, and its "escalation
+    # contacts" counted Ownership & Escalation as covered.
+    assert is_gap_statement("The video-processing recovery procedure and formal escalation contacts are still "
+                            "undocumented.")
+    assert is_gap_statement("The failover runbook remains untested.")
+    assert not is_gap_statement("Recovery testing is performed twice a year.")

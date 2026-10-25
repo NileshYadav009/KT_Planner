@@ -238,19 +238,24 @@ table.wide-table th, table.wide-table td {
 
 /* Coverage assessment: the assessment gets the room. In equal thirds every
    note wrapped to 5-7 lines and the table ran over two pages. */
+/* The status column fits its widest badge ("After review" spilled 4pt into
+   the assessment, 25 Oct). */
 #kt_coverage .grid-table th:nth-child(1), #kt_coverage .grid-table td:nth-child(1) { width: 24%; }
-#kt_coverage .grid-table th:nth-child(2), #kt_coverage .grid-table td:nth-child(2) { width: 11%; }
-#kt_coverage .grid-table th:nth-child(3), #kt_coverage .grid-table td:nth-child(3) { width: 58%; }
+#kt_coverage .grid-table th:nth-child(2), #kt_coverage .grid-table td:nth-child(2) { width: 14%; }
+#kt_coverage .grid-table th:nth-child(3), #kt_coverage .grid-table td:nth-child(3) { width: 55%; }
 #kt_coverage .grid-table th, #kt_coverage .grid-table td { padding: 4px 8px; font-size: 0.9em; line-height: 1.35; }
 
 /* Connections: the last column is a sentence number, not the sentence, so
    the names get the room ("Streamline (Google Kubernetes Engine)"). */
-table.connections-table th:nth-child(1), table.connections-table td:nth-child(1) { width: 33%; }
-table.connections-table th:nth-child(2), table.connections-table td:nth-child(2) { width: 20%; }
-table.connections-table th:nth-child(3), table.connections-table td:nth-child(3) { width: 33%; }
-table.connections-table th:nth-child(4), table.connections-table td:nth-child(4) { width: 14%; }
+/* The widths are content widths, so with cell padding 100% ran the table
+   18pt past the page edge (25 Oct). Like the tables above, they leave
+   room for the padding; the sentence numbers may wrap. */
+table.connections-table th:nth-child(1), table.connections-table td:nth-child(1) { width: 27%; }
+table.connections-table th:nth-child(2), table.connections-table td:nth-child(2) { width: 16%; }
+table.connections-table th:nth-child(3), table.connections-table td:nth-child(3) { width: 27%; }
+table.connections-table th:nth-child(4), table.connections-table td:nth-child(4) { width: 17%; }
 table.connections-table th, table.connections-table td { padding: 5px 8px; }
-table.connections-table td.sentence-ref { white-space: nowrap; font-size: 0.85em; color: #6b7280; }
+table.connections-table td.sentence-ref { font-size: 0.85em; color: #6b7280; }
 
 /* Short documents list their sections on the cover instead of a contents page. */
 .cover-contents { margin-top: 2rem; font-size: 9.5pt; color: #374151; }

@@ -44,7 +44,12 @@ _PLACEHOLDER = re.compile(
     r"\s*\.?\s*$", re.IGNORECASE)
 # A section's note on what the KT left out ("Not covered in the KT session:
 # Fixes or workarounds ...") names topics; it states nothing about the system.
-_GAP_NOTE = re.compile(r"^\s*not covered in the kt session\s*:|\bwere not covered in the session\b", re.IGNORECASE)
+_GAP_NOTE = re.compile(
+    r"^\s*not covered in the kt session\s*:|\bwere not covered in the session\b"
+    # "Replacement can deploy safely: Not covered during KT", and the handover
+    # section's own note: printed "no source" (a user's KT, 25 Oct).
+    r"|^[^:]{2,60}:\s*not (?:covered|discussed)(?: during(?: the)? kt| in the kt(?: session)?)?\s*\.?\s*$"
+    r"|^\s*note:\s*this closing remark does not by itself confirm\b", re.IGNORECASE)
 _WORD = re.compile(r"[a-z0-9]+(?:[.\-][a-z0-9]+)*")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
@@ -287,6 +292,15 @@ class _Index:
         self.keys = [set(_content_keys(c)) for c in canonical]
         self.numbers = [_numbers(c) for c in canonical]
         self.flat = [f" {_flat(c)} " for c in canonical]
+        # A greeting or a sentence that only announces the handover says
+        # nothing about the system: "Hi team, today I'm handing over our online
+        # learning platform." was cited for "Online Learning Platform caches in
+        # Redis", because it is the one sentence naming the platform.
+        from dialogue import is_greeting_only, is_handover_announcement
+        for i, s in enumerate(sentences):
+            quote = s.get("quote") or ""
+            if is_handover_announcement(quote) or is_greeting_only(quote):
+                self.keys[i], self.numbers[i], self.flat[i] = set(), set(), " "
         # The document's own headings ("COMMON FAILURES & FIXES"): a table
         # cell that is one of them is a pointer, not something said.
         self.labels = {_spelling_key(label) for label in labels if label}
@@ -323,6 +337,12 @@ class _Index:
 
     def sources_for(self, text: str) -> List[int]:
         """Indexes of the sentences that state `text`, or [] if none do."""
+        # A list of names cites the sentence of each name: matched whole,
+        # "FastAPI, PostgreSQL, ..., Prometheus, Grafana, PagerDuty, Amazon SQS"
+        # cited three sentences and left out the monitoring one (a user's KT).
+        names = self._sources_for_names(text)
+        if names:
+            return names
         found = self._sources_for(text)
         if not found:
             # A unit that quotes what was said around the document's own
@@ -348,6 +368,15 @@ class _Index:
                 return found
             chosen.update(got)
         return sorted(chosen | set(found))
+
+    def sentence_naming(self, words: str, row_text: str) -> List[int]:
+        """The sentence that says all of `words` and shares most with the row."""
+        keys = set(_content_keys(self._strip(words)))
+        if not keys:
+            return []
+        row_keys = set(_content_keys(_canonical(row_text)))
+        holders = [i for i, k in enumerate(self.keys) if keys <= k]
+        return [max(holders, key=lambda i: (len(self.keys[i] & row_keys), -i))] if holders else []
 
     def _sources_for_quotes(self, text: str) -> List[int]:
         """The sentences quoted in `text`, when every quote is one."""
@@ -516,6 +545,12 @@ def attach_evidence(knowledge_object: Dict[str, Any], sentences: List[Dict[str, 
                     refs.append([])
                     continue
                 found = index.sources_for_row(cells[position]) if cells else index.sources_for(text)
+                if not found and block.get("type") == "OwnershipTable":
+                    # "Application ownership | Developers": the role is the
+                    # document's label, the team is what was said ("Developers
+                    # own application code"), even when it is a common word.
+                    row = (block.get("rows") or [{}])[position]
+                    found = index.sentence_naming(str(row.get("team") or ""), text)
                 if not found and block.get("type") == "TechnologyGrid" and _CATEGORY.match(text.strip()):
                     # A category chosen from what was said ("Business
                     # criticality: High" from "It is business critical ...")

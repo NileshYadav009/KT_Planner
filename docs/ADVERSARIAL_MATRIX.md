@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base u9aaxc`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1 olpfinal2`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `u9aaxc`.
+brackets). After: run `olpfinal2`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
@@ -26,6 +26,9 @@ the document shows as a row (“Kubernetes infrastructure | Platform team”), s
 those four now name the team (their first run counts them as failed); U03's
 two conflict checks were added after its document showed a false
 “Conflicting guidance” warning, so its first run does not include them.
+U07 is a user's KT whose checks were written after reviewing its PDF; its
+first run was on the fixed code (replayed before the fixes, it failed at
+least four of them).
 
 | ID | Category | Scenario | Expected | Before | After | Regression test |
 |---|---|---|---|---|---|---|
@@ -99,6 +102,7 @@ two conflict checks were added after its document showed a false
 | U04 | U user KT | The user's KT 4 (a CI/CD pipeline): approvals, a release blocker, a retired practice, a plan not started, stated unknowns | never shows alone “manual deployments” (without “retired” or “previously”); never shows alone “automated rollback” (without “planning” or “plan” or “next quarter” or “not started”); in “Production deployment requires approval from the release manager” in deployment_and_rollback, ownership_escalation, security_controls; in “the release must not proceed” in danger_zones, security_controls, deployment_and_rollback; in “Trivy scans the container image” in security_controls, deployment_and_rollback, architecture_reference; in “Pipeline failures generate Slack notifications” in monitoring_observability, common_failures, deployment_and_rollback; in “vulnerability exceptions” in ownership_escalation, security_controls; the Not Covered list matches the coverage matrix; flags “emergency approval process” (should); flags “repository links” (should); no fact marked “no source” (should) | 7/8 must, 1/3 should (u_base) | 8/8 must, 3/3 should | tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_evidence.py::test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said |
 | U05 | U user KT | The user's KT 5 (customer database recovery): a changed backup policy, an untested recovery estimate, an RPO to confirm, stated unknowns | never shows alone “daily backups” (without “changed” or “old documentation” or “six hours”); never shows alone “one hour” (without “not been tested” or “expect” or “estimate” or “confirm” or “verified”); never shows alone “four hours” (without “confirm” or “previous document” or “at least”); in “standby replica in another availability zone” in disaster_recovery; in “Backups run every six hours and are retained for 14 days” in disaster_recovery; in “The Data Engineering team owns database restoration” in ownership_escalation, disaster_recovery; coverage of “disaster_recovery” is not Missing; the Not Covered list matches the coverage matrix; flags “four hours” (should); flags “recovery test” (should); no fact marked “no source” (should) | 7/8 must, 1/3 should (u_base) | 8/8 must, 3/3 should | tests/test_dialogue.py::test_a_doubted_objective_does_not_fill_a_field; tests/test_section_rules.py::test_a_stated_limit_is_architecture_and_a_document_caveat_is_no_danger_zone |
 | U06 | U user KT | The user's KT 6 (monitoring and incidents): an alert threshold that replaced an old one, a never-do rule, an escalation, stated unknowns | never shows alone “10%” (without “previously” or “5%”); exactly “Never restart the production database without approval from the incident commander.”; in “Never restart the production database” in danger_zones; in “PagerDuty alerts the on-call engineer when the API error rate remains above 5%” in monitoring_observability; in “escalate to the relevant service owner” in ownership_escalation; in “high CPU happens during scheduled reporting jobs” in common_failures, known_bad_days, monitoring_observability; in “The operations team reviews Grafana dashboards daily” in monitoring_observability, operational_calendar, ownership_escalation; the Not Covered list matches the coverage matrix; flags “weekend escalation” (should); flags “dashboard URL” (should); no fact marked “no source” (should) | 8/8 must, 1/3 should (u_base) | 8/8 must, 3/3 should | tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_evidence.py::test_a_quote_or_a_list_of_names_in_a_paragraph_cites_what_was_said |
+| U07 | U user KT | The user's KT 7 (an online learning platform, 25 Oct; checks written after reviewing its PDF): users using the product, a gap said as 'still undocumented', escalation contacts | title names “online learning platform”; never shows “today i.m handing over”; coverage of “security_controls” is Missing; coverage of “ownership_escalation” is not Strong; flags “escalation contacts”; flags “RTO and RPO have not been documented”; in “escalation contacts are still undocumented” in ownership_escalation; exactly “Never modify Terraform state manually.”; the Not Covered list matches the coverage matrix; no fact marked “no source” (should) | 9/9 must, 1/1 should (olp1) | 9/9 must, 1/1 should | tests/test_coverage_topics.py::test_people_using_the_product_is_not_access_control; tests/test_dialogue.py::test_something_still_undocumented_is_a_stated_gap; tests/test_section_rules.py::test_escalation_contacts_are_ownership_and_escalation; tests/test_evidence.py::test_a_greeting_is_never_cited_and_table_labels_are_not_facts |
 
 ## Still failing after the fixes
 

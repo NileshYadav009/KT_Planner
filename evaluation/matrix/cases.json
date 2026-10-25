@@ -1069,6 +1069,26 @@
         {"check": "sourced", "level": "should"}
       ],
       "pdf": true
+    },
+    {
+      "id": "U07", "category": "U user KT", "title": "The user's KT 7 (an online learning platform, 25 Oct; checks written after reviewing its PDF): users using the product, a gap said as 'still undocumented', escalation contacts",
+      "regression": "tests/test_coverage_topics.py::test_people_using_the_product_is_not_access_control; tests/test_dialogue.py::test_something_still_undocumented_is_a_stated_gap; tests/test_section_rules.py::test_escalation_contacts_are_ownership_and_escalation; tests/test_evidence.py::test_a_greeting_is_never_cited_and_table_labels_are_not_facts",
+      "transcript": [
+        "Hi team, today I’m handing over our online learning platform. It serves around 20,000 active users daily. Students access the React application through CloudFront and an Application Load Balancer, which routes requests to services running on Amazon EKS. The backend uses Python FastAPI, PostgreSQL on Amazon RDS, and Redis for caching course information. GitHub Actions runs automated tests, Amazon ECR stores container images, and ArgoCD deploys releases to EKS. Terraform manages infrastructure. Prometheus and Grafana monitor application performance, while PagerDuty handles alerts. A common issue occurs when database connections are exhausted during examination periods. Check connection-pool usage and application errors before restarting services. Another issue is delayed video processing when background jobs accumulate in Amazon SQS. Database backups run daily and are retained for 14 days. Recovery testing is performed twice a year, but RTO and RPO have not been documented. Developers own application code, while Platform Engineering manages Kubernetes and deployment pipelines. Never modify Terraform state manually. The video-processing recovery procedure and formal escalation contacts are still undocumented."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "online learning platform", "level": "must"},
+        {"check": "absent_re", "pattern": "today i.m handing over", "level": "must"},
+        {"check": "coverage", "section": "security_controls", "is": ["Missing"], "level": "must"},
+        {"check": "coverage", "section": "ownership_escalation", "not": ["Strong"], "level": "must"},
+        {"check": "flagged", "texts": ["escalation contacts"], "level": "must"},
+        {"check": "flagged", "texts": ["RTO and RPO have not been documented"], "level": "must"},
+        {"check": "in_section", "text": "escalation contacts are still undocumented", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "verbatim", "text": "Never modify Terraform state manually.", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"},
+        {"check": "sourced", "level": "should"}
+      ],
+      "pdf": true
     }
   ]
 }

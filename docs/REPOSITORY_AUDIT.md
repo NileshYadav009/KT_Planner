@@ -5981,6 +5981,51 @@ now expect the new ones (`field_populator.name_with_descriptor`).
 
 **Still open.** X18 and L2.
 
+### 9aay. A user's KT on an online learning platform, reviewed (25 Oct)
+
+The user ran a KT with Groq (job e4c10724, 16 calls) and asked for its gaps,
+PDF font and alignment, section mapping and accuracy. The run was replayed
+from the app's LLM cache (16 answers replayed, nothing sent) and without an
+LLM, and its PDF laid out and measured box by box.
+
+**Defects and fixes (ledger X43 to X50).**
+
+| ID | What the PDF showed | Root cause | Fix |
+|---|---|---|---|
+| X43 | Security "came up in passing" (Partial; a "Mentioned elsewhere" note) from "Students access the React application through CloudFront ..." | The access-control topic matched any "access" | Not after a word for the product's users (users, students, customers, ...); "only admins can access the bucket" still counts (`coverage_topics`) |
+| X44 | "The video-processing recovery procedure and formal escalation contacts are still undocumented" was not on the follow-up list, and Ownership & Escalation was Strong ("All 3 topics covered"), counting it as the escalation topic | "still undocumented" was not a stated gap | `dialogue`: "is/are/remains (still) undocumented, undefined, untested, unassigned, unowned" |
+| X45 | That sentence was filed under Handover Completion Check (with Groq), which then read "stated as not in place" | No rule named escalation contacts | The Ownership routing rule takes "escalation contacts / list / policy / procedure" |
+| X46 | The connections table cited the greeting ("Hi team, today I'm handing over our online learning platform.") for "Online Learning Platform caches in Redis" | The one sentence naming the system matched a cell holding the system's name | A greeting or a handover announcement is never a source (`knowledge/evidence.py`) |
+| X47 | "no source" on "Application ownership: Developers" and on the handover check's five "Not covered during KT" lines and its own note; a list of 16 tool names cited 3 of its 6 sentences | Sources for a common-word team, and non-facts counted as facts; a list matched whole | The team cell is found in the sentence that says it; labelled placeholders and the section's note are not facts; a list cites each name's sentence |
+| X48 | "Database backups run daily" and "Retained for 14 days" under "Recovery actions", on a KT that said RTO and RPO were not documented | The renderer listed the backup details (`rpo_steps`, as the prompt defines it) with the recovery procedure | Listed under "Backups" (`renderers/sections/disaster_recovery.py`); no prompt change |
+| X49 | PDF: the connections table ran 18pt past the page edge (pages 5 and 6); the "After review" badge spilled 4pt out of its column | Column widths are content widths: 100% plus cell padding; a 11% status column | Widths leave room for padding (as the other tables do); a 14% status column. A test lays a document out and fails on any box past the page or its cell |
+| X50 | The card said "No fix was stated" for exhausted database connections, though the speaker said to check "before restarting services"; without an LLM the row was titled "Where to look first" | The step after the checks was dropped; "A common issue occurs when ..." did not name a failure | The card keeps the step as said ("..., before restarting services. No other fix was stated"); "occurs/happens when" names the failure |
+
+**Checked and left as they are.** The font is Inter throughout, and no box
+overflows the page or its table cell. "Never modify Terraform…" in Tribal
+Knowledge is cut on purpose: the row points to the full rule in Danger Zones
+rather than printing it twice. The diagram's user box says "customers"
+whatever the users are called; the Architecture Knowledge list repeats the
+Technology summary; "It serves around 20,000 active users daily" sits under
+the "Business volume" row that quotes it. Minor, and not changed.
+
+**Results.**
+
+- **The KT, replayed:** Security is Not Covered (it was Partial); Ownership &
+  Escalation is Partial with the escalation path to follow up (it was
+  Strong); the undocumented procedure and contacts are on the follow-up list;
+  no "no source" marks; no source is the greeting; the cover reads 3 covered
+  well, 5 partly, 6 not covered, 12 to confirm (was 4, 6, 4, 11). Twelve of
+  the job's Groq answers still replay; four inputs changed with the fixes.
+- **Adversarial matrix:** 71 cases, 243/243 must and 44/49 should (the five open should checks are the earlier ones). U07 is this KT, with checks
+  written after the review; replayed before the fixes, the job failed at
+  least four of them (Security Partial, Ownership Strong, the gap neither
+  flagged nor filed under Ownership).
+- **Accuracy (no LLM):** unchanged: tuning 534/534, dev 217/224, holdouts
+  86/95, blind 95/114, end-to-end 100%.
+- **Tests:** 365 passed in the twelve affected files (renderer sections, PDF export, security and helpers, evidence, dialogue, coverage topics, section rules, knowledge builders, de-duplication, incident card, and the end-to-end replay); after the last card change, 145 passed in the end-to-end, knowledge-builder and incident-card files. The layout test fails on the old stylesheet (17pt and 2pt overflows).
+- No Groq quota used.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

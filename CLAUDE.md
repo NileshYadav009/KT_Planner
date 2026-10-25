@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9aax is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9aay is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -86,7 +86,7 @@ Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,e2e`
 (about 4 min; see `evaluation/README.md`). Every placement or coverage change
 is measured on all five sets.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (70 short KTs,
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (71 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -170,3 +170,11 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X41 | Med | A condition cut from its sentence ("because if the platform becomes unavailable."); a greeting left under System Overview | Fixed, §9aax (`fact_units`, `copyedit.problems`, `dialogue.is_greeting_only`) |
 | X42 | Med | Eight Whisper mishearings on the user's recordings ("Diplomats must be avoided", "pavement orchestration", ...) | Fixed, §9aax (gated corrections) |
 | T2 | Product | Titles dropped "platform"/"system" from names of more than one word ("Online Grocery") | Fixed, §9aax, the user's decision: the name as said ("Online Grocery Platform"); a capitalised proper name stands alone ("CorePay", "Bank of the West") (`field_populator.name_with_descriptor`) |
+| X43 | Med | Security "came up in passing" because "Students access the React application" (a user's KT) | Fixed, §9aay (`coverage_topics`) |
+| X44 | High | "... are still undocumented" was not a stated gap: missing from the follow-up list, and its escalation contacts counted Ownership & Escalation as covered | Fixed, §9aay (`dialogue`) |
+| X45 | Med | "escalation contacts" was filed under Handover Completion Check | Fixed, §9aay (Ownership routing rule) |
+| X46 | Low | The greeting was cited as the source of a connection | Fixed, §9aay (`knowledge/evidence.py`) |
+| X47 | Low | "no source" on an ownership team cell and on the handover check's placeholders; a long tool list cited half its sentences | Fixed, §9aay (`knowledge/evidence.py`) |
+| X48 | Low | Backup details listed as "Recovery actions" | Fixed, §9aay (`renderers/sections/disaster_recovery.py`) |
+| X49 | Med | PDF: the connections table ran 18pt past the page edge; a status badge spilled out of its column | Fixed, §9aay (CSS; a layout test measures every box) |
+| X50 | Low | The card dropped "before restarting services" ("No fix was stated"); without an LLM, "A common issue occurs when ..." was not a named failure | Fixed, §9aay (`knowledge_builder`) |

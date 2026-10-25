@@ -19,13 +19,18 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     fields = section.get("fields", {})
 
     checklist_items: List[str] = []
+    backup_items: List[str] = []
     warnings: List[str] = []
     paragraphs: List[str] = []
 
+    # rto_steps is the recovery procedure; rpo_steps holds the backup details
+    # (schedule, retention: llm/prompts.py). Both were listed as "Recovery
+    # actions", so "Database backups run daily" read as a recovery step on a
+    # KT that said RTO and RPO were not documented (a user's KT, 25 Oct).
     if fields.get("rto_steps", {}).get("value"):
         checklist_items.extend([x.strip() for x in str(fields["rto_steps"]["value"]).split("\n") if x.strip()])
     if fields.get("rpo_steps", {}).get("value"):
-        checklist_items.extend([x.strip() for x in str(fields["rpo_steps"]["value"]).split("\n") if x.strip()])
+        backup_items.extend([x.strip() for x in str(fields["rpo_steps"]["value"]).split("\n") if x.strip()])
     if fields.get("known_failure_scenarios", {}).get("value"):
         warnings.extend([x.strip() for x in str(fields["known_failure_scenarios"]["value"]).split("\n") if x.strip()])
     if fields.get("recovery_contact", {}).get("value"):
@@ -45,6 +50,8 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     blocks = []
     if checklist_items:
         blocks.append(build_checklist_block("Recovery actions", checklist_items))
+    if backup_items:
+        blocks.append(build_checklist_block("Backups", backup_items))
     if warnings:
         blocks.append(build_warning_block("Known failure scenarios", warnings))
     if paragraphs:

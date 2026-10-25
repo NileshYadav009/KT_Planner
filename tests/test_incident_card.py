@@ -233,3 +233,32 @@ def test_a_long_safety_row_is_never_shortened():
     row = next(r for r in rows if r["Situation"] == "Do not deploy")
     assert len(row["What to do"].split()) > 45
     assert row["What to do"] == freeze
+
+
+def test_the_step_said_after_the_checks_is_kept_on_the_card():
+    # A user's KT (25 Oct): "Check connection-pool usage and application errors
+    # before restarting services." The card said no fix was stated.
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["A common issue occurs when database connections are exhausted during examination periods.",
+            "Check connection-pool usage and application errors before restarting services."]
+    section = {"coverage_content": said, "_structured": {"failures": [
+        {"symptom": "Database connections exhausted", "first_checks": "Connection-pool usage; application errors"},
+        {"symptom": "Disk full", "first_checks": "Disk usage"}]}}
+    rows = dict(_known_failures(section))
+    assert rows["Database connections exhausted"] == (
+        "First check: Connection-pool usage; application errors, before restarting services. "
+        "No other fix was stated in the KT; ask the outgoing owner.")
+    assert rows["Disk full"] == "First check: Disk usage. No fix was stated in the KT; ask the outgoing owner."
+
+
+def test_a_failure_said_to_occur_when_is_named_on_the_card():
+    # A user's KT (25 Oct), without an LLM: "A common issue occurs when ..." was
+    # not read as naming a failure, and its check was carded as "Where to look first".
+    from knowledge.knowledge_builder import _known_failures
+
+    said = ["A common issue occurs when database connections are exhausted during examination periods.",
+            "Check connection-pool usage and application errors before restarting services."]
+    assert _known_failures({"coverage_content": said}) == [
+        ("Database connections are exhausted during examination periods",
+         "Check connection-pool usage and application errors before restarting services.")]

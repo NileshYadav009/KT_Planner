@@ -123,3 +123,16 @@ def test_environments_compared_are_a_stated_difference():
                  "Dev runs on one node; production runs on six."]:
         assert "Differences between environments" in _discussed("environments", said), said
     assert "Differences between environments" not in _discussed("environments", "Production runs five replicas.")
+
+
+def test_people_using_the_product_is_not_access_control():
+    # A user's KT (25 Oct): "Students access the React application through
+    # CloudFront ..." made Security "came up in passing" (Partial).
+    from coverage_topics import _COMPILED
+
+    rx = next(r for label, _, r in _COMPILED["security_controls"] if label == "Access control")
+    for said in ["Students access the React application through CloudFront.", "Users access the portal from mobile."]:
+        assert not rx.search(said), said
+    for said in ["Only admins can access the production bucket.", "Production access goes through Okta SSO.",
+                 "The service account only has read access to BigQuery."]:
+        assert rx.search(said), said

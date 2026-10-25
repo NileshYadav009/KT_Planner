@@ -1727,3 +1727,20 @@ Results:
 - **Titles name the system as said:** "Online Grocery Platform", not "Online
   Grocery".
 - Groq, one approved run (about 49k tokens): the tests' recorded Groq answers are re-recorded, and your Order Service KT passed every check live.
+
+## Your online learning platform KT reviewed (audit §9aay, 25 Oct)
+
+- **Gaps are honest:** Security is no longer "partly covered" because
+  students access the app; "still undocumented" is a stated gap, so the
+  video-processing procedure and escalation contacts are on the follow-up
+  list and Ownership & Escalation is no longer "covered well".
+- **Sources:** the greeting is never cited; no "no source" marks on ownership
+  or on the handover check's "not covered" lines; a list of tools cites every
+  sentence it comes from.
+- **PDF layout:** the connections table no longer runs off the page, and the
+  "After review" badge fits its column; a test now measures every box.
+- **Quick Reference:** keeps "before restarting services" after the checks,
+  and names the failure without an LLM too.
+- **Disaster Recovery:** backup details are listed as "Backups", not as
+  recovery actions.
+- Accuracy unchanged; no Groq quota used.

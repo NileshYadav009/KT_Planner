@@ -122,6 +122,10 @@ _GAP_RES = [
     re.compile(r"\b(?:dates?|values?|numbers?|contacts?|owners?|urls?|links?|details?|revisions?|versions?|targets?|"
                r"figures?|schedules?|times?|names?)\s+(?:is|are)\s+(?:still\s+|currently\s+)?"
                r"(?:unavailable|unknown|not\s+(?:available|known))\b", re.IGNORECASE),
+    # "The video-processing recovery procedure and formal escalation contacts
+    # are still undocumented." (a user's KT, 25 Oct).
+    re.compile(r"\b(?:is|are|was|were|remains?|stays?)\s+(?:still\s+|currently\s+|also\s+|largely\s+|so\s+far\s+)?"
+               r"(?:undocumented|undefined|untested|unassigned|unowned|unwritten)\b", re.IGNORECASE),
     # "We do not have a confirmed rollback revision in the runbook."
     re.compile(r"\b(?:we|i|they|the\s+team)\s+(?:do\s+not|don'?t|does\s+not|doesn'?t)\s+(?:yet\s+|currently\s+)?have\s+"
                r"(?:a|an|any)\s+(?:confirmed|documented|agreed|defined|tested|written|current|up-to-date|verified)\b",

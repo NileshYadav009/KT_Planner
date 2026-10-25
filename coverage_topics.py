@@ -92,8 +92,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"|\b(?:secrets?|credentials?|passwords?|api\s+keys?)\s+(?:are\s+|is\s+)?(?:all\s+)?(?:stored|kept|managed|"
          r"rotated|held|injected|loaded|pulled|read|fetched|live|lives|come|comes)\b"
          r"|\b(?:stor\w*|keep\w*|manag\w*|rotat\w*)\s+(?:the\s+|all\s+|our\s+)?(?:secrets?|credentials?)\b"),
+        # Not people using the product: "Students access the React application
+        # through CloudFront" made Security "came up in passing" (a user's KT,
+        # 25 Oct). "Only admins can access the bucket" still counts.
         ("Access control", (),
-         r"\b(?:access|iam|rbac|least\s+privilege|permissions?|service\s+accounts?|workload\s+identity|sso)\b"),
+         r"\b(?:(?<!users\s)(?<!students\s)(?<!customers\s)(?<!clients\s)(?<!patients\s)(?<!people\s)"
+         r"(?<!visitors\s)(?<!members\s)(?<!learners\s)(?<!shoppers\s)(?<!buyers\s)access|iam|rbac|"
+         r"least\s+privilege|permissions?|service\s+accounts?|workload\s+identity|sso)\b"),
         ("Security scanning", ("security_scan_config",),
          r"\b(?:scan\w*|trivy|snyk|sonarqube|dependabot|checkov|vulnerab\w*)\b"),
     ],

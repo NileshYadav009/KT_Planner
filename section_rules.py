@@ -113,7 +113,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # Any "<the X team> owns ..." statement, not only the two team
             # names a past transcript happened to use.
             r"\b(?:team|group|squad|engineers?)\s+(?:is\s+responsible\s+for|owns?)\b",
-            r"\bescalation\s+(?:path|chain|point|goes|matrix)\b",
+            # "... and formal escalation contacts are still undocumented" went
+            # to Handover Completion Check (a user's KT, 25 Oct).
+            r"\bescalation\s+(?:path|chain|point|goes|matrix|contacts?|list|policy|procedure|process|rota)\b",
             r"\bescalated?\s+to\b",
             r"\bdesklation\s+path\b",
             # A role NAMED in a sentence is not evidence the sentence is about
