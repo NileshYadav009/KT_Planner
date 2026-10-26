@@ -9,16 +9,17 @@ project environment (`.venv-1`).
 python evaluation/accuracy.py LABEL SETS
 ```
 
-`SETS` is a comma list. A run of all five takes about 4 minutes once
+`SETS` is a comma list. A run of the usual six takes about 4 minutes once
 `evaluation/.cache/` is warm.
 
 | Set | What | Detail printed |
 |---|---|---|
 | `tuning` | `tests/goldens` without the holdouts | per fact |
-| `dev` | `evaluation/dev`: 6 KTs in styles the goldens lack (formal, meeting, noisy speech-to-text, read-aloud notes, Q&A, rambling) | per fact |
+| `dev` | `evaluation/dev`: 10 KTs in styles the goldens lack (formal, meeting, noisy speech-to-text, read-aloud notes, Q&A, rambling); d07-d10 (26 Oct) repeat the four styles of b04-b07, taken from this table only | per fact |
 | `holdout` | `tests/goldens` h12-h14 | **aggregate only** |
 | `blind2` | `evaluation/blind`: b01-b03 | **aggregate only** |
 | `blind3` | `evaluation/blind3`: b04-b07, written 25 Oct before any result on them (`blind3_kts.py` regenerates them): question and answer, noisy speech, a formal document, a rambling KT with a correction | **aggregate only** |
+| `blind4` | `evaluation/blind4`: b08-b11, written 26 Oct and sealed (`blind4_kts.py`): a giver and receiver conversation with a wrong guess, terse notes for an on-premises system, a screen-share walkthrough, a rambling KT with three sections undiscussed. Read once per batch of changes, at its end, never while choosing between designs | **aggregate only** |
 | `e2e` | `tests/e2e_kts` (six KTs: AWS, Azure, GCP, an ambiguous handover, and the user's QuickBite and online learning KTs) through `tests/e2e_eval.py` | problems only |
 
 The results go to `evaluation/results/LABEL.json`, which is git-ignored.
@@ -36,7 +37,11 @@ Each set reports:
   Their aggregate is the only honest estimate of accuracy on unseen KTs. Once
   a fix has been tuned on them, they stop being blind.
 - **A fix must be generic.** Nothing may name a KT, a system or a transcript.
-  Measure every fix on all five sets.
+  Measure every fix on all six usual sets.
+- **Designs are chosen on visible KTs.** When several versions of a change
+  are compared (weights, thresholds, a learned model), they are compared on
+  the tuning and dev KTs only, holding out one KT at a time; the holdout and
+  blind sets then measure the chosen one.
 - **No live LLM runs here.** An LLM-mode run needs a key, spends quota and
   must be agreed first.
 
@@ -46,6 +51,7 @@ Each set reports:
 |---|---|
 | `quality_gates.py LABEL [--replay] [--accuracy ACC] [--matrix M]` | The release gates on the e2e KTs, counted on the PDF: fact retention, silent loss, unsupported claims, misattributed sources, placement, sources, stated connections, false “no source” marks, false sign-off, safety rules, honest gaps, PDF layout (`pdf_rendering.layout_overflows`) and repeats. No LLM, and with `--replay` the recorded Groq answers (nothing sent; a KT with none is listed as blocked). `--accuracy` and `--matrix` add an earlier run's figures. Results: `results/gates-LABEL.json`; `--report BEFORE AFTER` writes `docs/QUALITY_GATES.md`. About 25 minutes for both modes. |
 | `kodiag.py KT_ID SECTION[,...]` | One dev or tuning KT: what a section contains and why the coverage table rates it so. Refuses holdout and blind KTs. |
+| `../scripts/build_section_model.py [--enc-cache]` | Rebuilds `section_model.npz`, the classifier's learned section model, from the synthetic tuning goldens and the dev KTs (never a holdout, blind or customer KT). Rebuild after adding training KTs or changing how transcripts are cut into facts, then measure. |
 | `adversarial.py` | A probe KT with distinctions the goldens under-test, listed below. |
 | `matrix.py LABEL [IDS] [--dump]` | The adversarial matrix: short KTs in `matrix/cases.json`, one per failure (corrections, ambiguity, hedges, contradictions, several facts in a sentence, duplicates, negation, numbers, order, coverage, injection, noise, PDF text), each with exact checks on the rendered document. `must` checks are a wrong document; `should` checks are behaviour not promised yet. About 2 to 6 minutes for all cases. Results: `results/matrix-LABEL.json`. |
 | `trace.py MODULE.VAR [FILTER]` | Mapper decision path per fact for a probe transcript, e.g. `adversarial_text.TRANSCRIPT`. |

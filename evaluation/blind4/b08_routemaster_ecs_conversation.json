@@ -1,0 +1,322 @@
+{
+ "id": "b08_routemaster_ecs_conversation",
+ "title": "Routemaster: ECS dispatch, giver and receiver conversation",
+ "proves": "Two speakers; the receiver's wrong guess is corrected; answers carry the facts.",
+ "transcript": "Tom: Thanks for making time, Aisha. This is the handover for Routemaster before I move to the payments team.\nAisha: Sure. I've used the driver app but never looked at the backend.\nTom: Routemaster assigns delivery jobs to drivers for our three warehouses. Dispatchers use it all day, and the driver app polls it for the next stop. On a normal day it plans around eighteen thousand stops.\nAisha: Where does it run?\nTom: It's on Amazon ECS with Fargate. The dispatch API is a Node.js service, and route optimisation runs as a separate Python worker.\nAisha: So the jobs are stored in Postgres, right?\nTom: No, the jobs table is in DynamoDB. Postgres was the old system before the rewrite.\nAisha: Got it. And how do the workers get the work?\nTom: The API puts each planning request on an SQS queue, and the optimiser workers pull from that queue. Driver locations come in through API Gateway and a Lambda function that writes them to DynamoDB.\nAisha: How do you release?\nTom: GitHub Actions builds the container image and pushes it to ECR, then the pipeline updates the ECS service with a rolling deployment. If a release goes bad, redeploy the previous task definition revision from the ECS console. Releases to production need a second engineer to approve the pull request.\nAisha: How many environments?\nTom: Staging and production. Staging uses a copy of last month's warehouse data, so you can test route plans there safely.\nAisha: And monitoring?\nTom: CloudWatch dashboards show queue depth and API latency. There's an alarm when the SQS queue has more than five hundred messages waiting, and it pages whoever is on call through Opsgenie.\nAisha: What breaks?\nTom: The usual one is the optimiser running out of memory on very large routes, and then the queue backs up. Increase the task memory to eight gigabytes and restart the workers. The other is DynamoDB throttling when the morning planning starts; we switched that table to on-demand capacity and it has mostly stopped.\nAisha: What about backups?\nTom: Point-in-time recovery is turned on for the DynamoDB tables, which gives us thirty five days. We can recover the service within two hours, but we've never practised a full restore.\nAisha: Security?\nTom: Each ECS task has its own IAM role, and the Google Maps API key lives in Secrets Manager. Drivers sign in through Cognito. One warning: never purge the SQS queue during the day, because the dispatchers lose every plan that's waiting.\nAisha: When is it busiest?\nTom: The week before Christmas is the worst, volumes double. And Monday mornings are heavy because weekend orders all land at once.\nAisha: What does it cost?\nTom: Around nine thousand dollars a month, mostly Fargate. We moved the optimiser workers to Fargate Spot, which cut that part by about half.\nAisha: Who owns it?\nTom: The logistics platform team owns Routemaster. If something is on fire, escalate to Rachel Kim, the logistics engineering manager. Something unfinished: the move to the new traffic data provider is half done. The contract is signed but the integration hasn't started.\nAisha: What should I do first?\nTom: On day one, get access to the AWS production account and join the Opsgenie rotation. In the first month, plan and run one release yourself.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Routemaster assigns delivery jobs to drivers for our three warehouses",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Dispatchers use it all day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the driver app polls it for the next stop",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "On a normal day it plans around eighteen thousand stops",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "It's on Amazon ECS with Fargate",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "The dispatch API is a Node.js service",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "route optimisation runs as a separate Python worker",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "the jobs table is in DynamoDB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "The API puts each planning request on an SQS queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "the optimiser workers pull from that queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Driver locations come in through API Gateway and a Lambda function that writes them to DynamoDB",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "GitHub Actions builds the container image and pushes it to ECR",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "the pipeline updates the ECS service with a rolling deployment",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "redeploy the previous task definition revision from the ECS console",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Releases to production need a second engineer to approve the pull request",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Staging and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "Staging uses a copy of last month's warehouse data",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "CloudWatch dashboards show queue depth and API latency",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "There's an alarm when the SQS queue has more than five hundred messages waiting",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "it pages whoever is on call through Opsgenie",
+   "in": [
+    "monitoring_observability",
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "the optimiser running out of memory on very large routes",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Increase the task memory to eight gigabytes and restart the workers",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "DynamoDB throttling when the morning planning starts",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "we switched that table to on-demand capacity",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Point-in-time recovery is turned on for the DynamoDB tables",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "We can recover the service within two hours",
+   "alt": [
+    "two hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "we've never practised a full restore",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Each ECS task has its own IAM role",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the Google Maps API key lives in Secrets Manager",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Drivers sign in through Cognito",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "never purge the SQS queue during the day",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The week before Christmas is the worst, volumes double",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Monday mornings are heavy because weekend orders all land at once",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "Around nine thousand dollars a month, mostly Fargate",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "We moved the optimiser workers to Fargate Spot",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "The logistics platform team owns Routemaster",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "escalate to Rachel Kim, the logistics engineering manager",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "the move to the new traffic data provider is half done",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "get access to the AWS production account and join the Opsgenie rotation",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "plan and run one release yourself",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 8 (synthetic, sealed)",
+ "holdout": true
+}

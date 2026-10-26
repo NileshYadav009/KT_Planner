@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9abc is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abd is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -26,10 +26,11 @@ table. `docs/progress.md` is the plain-language log.
    rules-only result.
 
 Placement accuracy is a quality target, not an invariant: 90% or better on
-unseen KTs. Without an LLM it is 87/95 on the holdouts, 97/114 on the blind
-set and 112/132 on the second blind set (b04-b07, §9aba). With Groq it was
-about 94% (audit §9aal); with Groq's section check measured again in §9aba,
-91/95, 108/114 and 122/132 (321/341, 94.1%).
+unseen KTs. Without an LLM it is 88/95 on the holdouts, 109/114 on the blind
+set, 118/132 on the second blind set (b04-b07) and 151/160 on the sealed
+third (b08-b11): 466/501, 93.0% (§9abd; 441/501 before). With Groq's section
+check, 93/95, 110/114, 125/132 and 154/160: 482/501, 96.2% (§9abd; 321/341 on
+the first three before).
 
 ## Pipeline map (a pasted transcript; a recording first goes through `pipeline.transcribe_recording`)
 
@@ -37,10 +38,10 @@ about 94% (audit §9aal); with Groq's section check measured again in §9aba,
 |---|---|
 | Upload, queue | `api/routes.py`, `job_queue.py`, `worker.py` |
 | Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` |
-| Speakers and roles (a conversation) | `speaker_roles.turn_segments` (pasted "Name:" turns), `detect_roles`, `apply_roles` (in `segment_sentences`): facts from the giver; the receiver's words only where the giver confirmed them |
+| Speakers and roles (a conversation) | `captions.to_turns` (a Teams or Zoom WebVTT/SRT file as "Name:" turns), `speaker_roles.turn_segments` (pasted "Name:" turns), `detect_roles`, `apply_roles` (in `segment_sentences`): facts from the giver; the receiver's words only where the giver confirmed them. Speakers are named afterwards with `POST /kt/{id}/speakers` (`sessions.rename_speakers`) |
 | Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`), `fact_units.split_into_facts` |
 | Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `merge_spoken_corrections`, `copyedit.copyedit_sentences` |
-| Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments) |
+| Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments, and the learned section model `section_model.npz`: `SECTION_MODEL_WEIGHT` x its probability; rebuilt by `scripts/build_section_model.py`) |
 | Close calls to the LLM | `ContextClassifier.verify_in_batches` |
 | Routing rules | `section_rules.SECTION_RULES`, `apply_rule_overrides` |
 | Regroup facts, coverage | `rejoin_classified`, `restore_sections_emptied_by_topic`, `assemble_kt` |
@@ -84,12 +85,17 @@ overnight and only when asked. Use targeted runs, from the repo root with
 | Fields | `tests/test_field_populator.py` | about 15 s |
 | Knowledge and coverage | `tests/test_knowledge_builders.py tests/test_fact_units.py tests/test_dialogue.py` | about 3 min |
 | Web page structure (ids, tabs, coverage source) | `tests/test_frontend_accessibility.py` | seconds |
+| Learned section model, examples | `tests/test_section_model.py tests/test_section_examples.py` | about 20 s |
+| Speaker names, caption files, giver choice | `tests/test_speaker_names.py tests/test_giver_choice.py` | about 5 min |
 | End to end, with recorded Groq replay | `tests/test_e2e_kts.py` | about 13 min |
 
 Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,blind3,e2e`
 (about 5 min; see `evaluation/README.md`). Every placement or coverage change
 is measured on all six sets; holdout, blind2 and blind3 are read in
-aggregate only.
+aggregate only. `blind4` (b08-b11) is sealed: read once, at the end of a
+batch of changes, never while choosing between designs. A choice between
+designs (a weight, a threshold, a learned model) is made leave-one-KT-out
+on the visible tuning and dev KTs.
 
 Quality gates: `python evaluation/quality_gates.py LABEL --replay --accuracy ACC
 --matrix M` (about 25 min): the release thresholds counted on the PDFs of the
@@ -134,7 +140,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | T1 | Low | 4 field-populator tests assumed one call per field after batching became the default | Fixed, §9aao |
 | L1 | Med | A correction split across sentences ("The limit is 500. Sorry, not 500, ... 300.") shows both values | Fixed, §9aap (`merge_spoken_corrections`; sources quote both sentences) |
 | L2 | Med | A sentence of two commands ("get access ..., and spend the first weeks watching ...") is one fact, so its second topic is unplaced | Open: only 2 more such sentences in the visible KTs, both correct unsplit; splitting commands risks scattering procedures |
-| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Measured twice, +1 each time, no loss: dev +1/224 (§9aap); holdouts and blind with only the section check live, 199 vs 198 of 209 (§9aar). Costs about 25% more tokens in the check. Measured a third time with the user's go-ahead (§9aba, section check only): 322 vs 321 of 341 unseen facts, one more section wrongly Missing, 37% more tokens on the check. Kept off (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1` to switch; a replay re-record follows). |
+| L3 | Med | The classifier makes 21 of the 22 placement errors on unseen KTs; the LLM check sees only ids and titles, and only the top 3 | Measured twice, +1 each time, no loss: dev +1/224 (§9aap); holdouts and blind with only the section check live, 199 vs 198 of 209 (§9aar). Costs about 25% more tokens in the check. Measured a third time with the user's go-ahead (§9aba, section check only): 322 vs 321 of 341 unseen facts, one more section wrongly Missing, 37% more tokens on the check. Kept off (`LLM_VERIFY_CANDIDATES=5`, `LLM_VERIFY_PURPOSE=1` to switch; a replay re-record follows). The classifier change that paid is the learned section model (X83, §9abd). |
 | L4 | Med | With Groq: repeated lines and unsourced facts | Fixed, §9aap. The calendar copied every cost lever; a paragraph or row cited too few sources. Dev 4 to 0 and 2 to 0, by replay. |
 | L5 | Low | Topic memory can raise a second candidate above the chosen section without swapping them | Closed: logs only. Alternatives are read only by multi-section mapping, which is off (`ENABLE_MULTI_SECTION_MAPPING`). |
 | P1 | Product | Custom templates are not supported (routes not mounted; rules and prompts name the default section ids) | Needs a product decision |
@@ -206,7 +212,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X64 | Med | A sentence about one environment ("staging uses recorded gantry traffic from last year") went to Deployment | Fixed, §9aba (environment-subject rule, 0.945, below recovery, monitoring and security rules; it does not move the topic) |
 | X65 | Low | The fix after a failure said without a failure word ("... grows and slows logins. Run the purge job, it is safe in business hours.") went to the calendar | Fixed, §9aba (`_FAILURE_RE`: slows, throttled, stalls, saturated, runs out of, stale, degraded) |
 | X66 | Med | The KT's opening definition ("Brightline is our data pipeline that loads ... into Snowflake") and who builds on it ("... teams build all their reports on top of it") went to Architecture | Fixed, §9aba (only before any topic is named, so a component defined later stays Architecture) |
-| X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Open: aggregate only; find the cause on visible KTs written in the same styles, never on the blind set |
+| X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Partly fixed, §9abd: four dev KTs in its styles (d07-d10) showed one cause (X77, fixed); b04-b07 now report 3 (with the learned model; 4 with the rule fixes alone). The rest is open: aggregate only, never inspected |
 | X68 | High | A conversation's receiver was a source like the giver: "So it stores invoices in MySQL, right?" printed as "It stores invoices in MySQL." after "No, it's PostgreSQL"; the receiver's corrected "30 days" stayed; the giver's "three nodes" stayed after he agreed it was five; an unanswered "Isn't it PagerDuty now?" made PagerDuty the alerting tool | Fixed, §9abb (`speaker_roles.py`: roles, then what counts; matrix S01) |
 | X69 | High | Pasted "Name:" labels were stripped for display but never recorded: no speaker in Sources, so nothing could tell giver from receiver | Fixed, §9abb (`turn_segments`, also on a session rebuild) |
 | X70 | High | The cleaner turned a tag question into a statement ("..., right?" to "."), so a receiver's wrong guess read as a fact | Fixed, §9abb: in a conversation the question keeps its mark (`remove_fillers(keep_tag_questions)`) |
@@ -216,3 +222,13 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | T3 | Product | The user's decision: the giver is detected, shown on the KT page and in the document, and can be changed, which rebuilds the document as a new version | Done, §9abb (`POST /kt/{job_id}/giver`, "Who is handing over" card) |
 | X74 | Med | The web page counted the classifier's per-section statuses, not the coverage matrix: a KT's page said 13 sections "weak" and none covered while its PDF said 4 covered well, 9 partly and 2 not; Sign-off was listed as a missing critical section | Fixed, §9abc (`static/index.html` reads `_coverage_rows` and `_knowledge_gaps`, as `pdf_rendering.handover_glance`) |
 | X75 | Low | Web page: one long page (the upload card above every KT, empty cards, the job ID, schema and form buttons); no link to a KT or a tab; at phone width the KT list was hidden with no way to open it | Fixed, §9abc (start page and one page per KT with tabs; `?job=` and `#tab` links; menu button) |
+| X76 | High | The cleaner changed meaning: "Dev uses Stripe's test mode" became "Dev uses stress test mode" (the fuzzy term corrector scored "stripe's test" 0.92 against "stress test") | Fixed, §9abd: a word with an apostrophe is never a garbled term (`apply_fuzzy_term_corrections`) |
+| X77 | Med | A sentence opening with the new owner's time frame went elsewhere and First 30-Day Ownership was reported Missing: "In the first month take over the black friday preparation" (calendar), "Within the first month, the new owner should ..." (Ownership), "First day get access to ..." (dev d08, d09; the X67 symptom on visible KTs) | Fixed, §9abd (`section_rules.ONBOARDING_MONTH_RX`, `ONBOARDING_DAY_RX`, 0.97; not "the first week of January") |
+| X78 | Med | A numbered heading read aloud ("Section eleven, costs.") named no topic; the cost after it went to System Overview | Fixed, §9abd (`topic_anchor` drops the number) |
+| X79 | Low | "Twilio rate limits us when there's a big batch like on black friday" went to the Operational Calendar | Fixed, §9abd (common-failures rule: "rate limits us", "throttles us") |
+| X80 | Med | Open Responsibilities holding only "The failover procedure and recovery runbook are still missing" was reported Missing beside it (QuickBite e2e, once the learned model filed the sentence there) | Fixed, §9abd: there a stated gap is the section's content, its "Open work" topic (`coverage_topics.GAPS_ARE_CONTENT_SECTIONS`), and it stays on the follow-up list ("still to do") |
+| X81 | Low | `section_examples.json` was out of date with the goldens since 5c0e5d7 ("roll back" respelled); its test failed | Fixed, §9abd (rebuilt) |
+| X82 | Low | A heading read aloud ("Known problems.", "Section two, architecture.") is printed as a bullet in its section | Open: leaving headings out changes which topics count as discussed; measure first |
+| X83 | High | Without an LLM, placement on unseen KTs was 86.8% (296/341), under the 90% target; the classifier's own first choice made most of the errors (L3) | Fixed, §9abd: a learned section model (`section_model.npz`: logistic regression over the fact's and its context's embeddings, trained on the synthetic tuning and dev KTs; `SECTION_MODEL_WEIGHT` 0.1), chosen leave-one-KT-out on visible KTs. Unseen 441 to 466 of 501 (93.0%) with X76-X79; the sealed set b08-b11 145 to 151 of 160 |
+| X84 | Med | Deployment steps cut a corrected unit into one step per sentence, so "The deploy freeze starts at 6 pm on Fridays." stood alone before its correction (matrix A10, once the learned model filed the pair under Deployment); "deploy freeze" was not a calendar freeze | Fixed, §9abd (`renderers/sections/deployment._steps` keeps a correcting sentence with its step; the freeze rule reads "deploy freeze") |
+| T4 | Product | A recording's speakers showed as "Speaker 1, 2"; a Teams or Zoom transcript file was pasted with its timings and tags and nobody named | Done, §9abd, the user's decision: name speakers on the KT page (`POST /kt/{job_id}/speakers`, a new version), WebVTT and SRT files read as speaker turns (`captions.py`), people listed on upload offered as names. Fetching them through the Teams or Zoom API is not done (needs an app registration) |

@@ -389,6 +389,25 @@ def test_a_value_kept_with_its_hedged_correction_still_covers_its_topic():
     assert row["Coverage"] != "Missing", row
 
 
+def test_work_still_missing_is_the_content_of_open_responsibilities_not_a_gap_in_it():
+    """The QuickBite e2e KT (26 Oct): Open Responsibilities held only "The
+    payment-provider failover procedure and courier-tracking recovery runbook
+    are still missing." and was reported Missing beside it. Under Disaster
+    Recovery the same sentence is a stated gap."""
+    unit = "The payment-provider failover procedure and courier-tracking recovery runbook are still missing."
+    for section_id, expected in (("open_responsibilities", "Partial"), ("disaster_recovery", "Missing")):
+        ko = {"sections": [{"id": section_id, "title": section_id, "fields": {}}], "summary": {}}
+        schema = [{"id": section_id, "title": section_id, "fields": []}]
+        result = append_coverage_matrix_section(ko, {section_id: _cov(unit)}, schema)
+        row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+        assert row["Coverage"] == expected, row
+        if section_id == "open_responsibilities":
+            assert "Open work" not in row["Assessment"], row
+        # Either way it is on the list of what to ask the outgoing owner.
+        gaps = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_knowledge_gaps"]
+        assert any("courier-tracking recovery runbook" in g for g in gaps), gaps
+
+
 def test_a_technology_named_only_in_a_plan_or_a_guess_is_not_a_current_component():
     """Adversarial matrix C01, C02: "We are planning to migrate to Kubernetes
     next quarter" listed Kubernetes as current compute in the Technology

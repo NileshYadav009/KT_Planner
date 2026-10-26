@@ -67,6 +67,28 @@ _ENVIRONMENT_SUBJECT_RX = (
     r"single|cheaper|scaled))\b")
 _NOT_TOPIC_ANCHORS = {_ENVIRONMENT_SUBJECT_RX}
 
+# The new owner's own time frame, opening the sentence: "In the first month,
+# ...", "Within the first month, the new owner should ...", "First day get
+# access to ..." (speech to text, no comma), "After a month I'd like you to
+# ...". In SECTION_RULES below, above the calendar's peak-day rules: "In the
+# first month take over the black friday preparation" went to the
+# Operational Calendar, "Within the first month, the new owner should
+# complete one release" to Ownership, and the First 30-Day plan was reported
+# Missing although it was discussed (X67, dev d08 and d09). Not "the first
+# week of January" or "the first month after launch", and a bare "after a
+# month" only with a person ("After a month, old logs are deleted" is
+# retention).
+_ONBOARDING_LEAD = r"^\W*(?:(?:so|and|then|okay|ok|right|now|um+|uh+)[\s,]+)*"
+_ONBOARDING_FIRST = r"(?:(?:on|in|for|during|within|over|by\s+the\s+end\s+of)\s+(?:the\s+|your\s+)?|your\s+)?(?:very\s+)?first\s+"
+_NOT_ONBOARDING_TAIL = r"(?!\s+(?:of|after|back)\b)"
+ONBOARDING_MONTH_RX = (
+    _ONBOARDING_LEAD + r"(?:" + _ONBOARDING_FIRST + r"(?:month|(?:four|few|couple\s+of)\s+weeks|(?:30|thirty)\s+days)\b"
+    + _NOT_ONBOARDING_TAIL + r"|(?:after|within)\s+(?:a|one)\s+month\b[\s,]+(?:i'?d\s+like\s+you|you|the\s+new\s+"
+    r"(?:owner|engineer|lead))\b)")
+ONBOARDING_DAY_RX = (
+    _ONBOARDING_LEAD + r"(?:" + _ONBOARDING_FIRST + r"(?:day|week|couple\s+of\s+days)\b|(?:on\s+)?day\s+(?:one|1)\b)"
+    + _NOT_ONBOARDING_TAIL)
+
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
         "danger_zones",
@@ -189,6 +211,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # annoying failure: a store sends an empty file".
             r"\b(?:classic|typical|usual|biggest|most\s+(?:common|frequent|annoying|painful))\s+"
             r"(?:failure|problem|issue|incident|outage)\b",
+            # A provider limiting us is a failure even when the sentence names
+            # the day it happens: "Twilio rate limits us when there's a big
+            # batch like on black friday" went to the calendar (dev d08).
+            r"\b(?:rate[\s-]?limit(?:s|ed|ing)?|throttl(?:es|ed|ing))\s+us\b",
         ],
         0.96,
     ),
@@ -204,7 +230,7 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # Change freezes are calendar rules regardless of who can grant
             # an exception to them.
             r"\bdeployments?\s+(?:are|is)\s+(?:also\s+)?frozen\b",
-            r"\b(?:deployment|change|code|release)\s+freezes?\b",
+            r"\b(?:deploy(?:ment)?|change|code|release)\s+freezes?\b",
             RISING_LOAD_PERIOD,
         ],
         0.96,
@@ -451,6 +477,9 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
         ],
         0.94,
     ),
+    # The new owner's time frame opening the sentence (ONBOARDING_MONTH_RX).
+    ("first_30_day_ownership", [ONBOARDING_MONTH_RX], 0.97),
+    ("day1_survival_checklist", [ONBOARDING_DAY_RX], 0.97),
     (
         "handover_completion",
         [
@@ -895,7 +924,8 @@ _SEGMENT_EXTRA_TOPICS = [
                                r"\bcomponents?\b|\bhow\s+does\s+(?:it|\w+)\s+work\b|\bmessaging\b|\binfrastructure\b|"
                                r"\bdesign\b|\bdata\s+flow\b"),
     ("common_failures", r"\b(?:known\s+)?(?:problems?|issues?|incidents?|failures?|outages?)\b|\bbreaks?\b|\bgoes\s+wrong\b"),
-    ("danger_zones", r"\bdo\s+not\s+touch\b|\bdon'?t\s+touch\b|\bnever\s+do\b|\bshould\s+(?:i\s+)?never\b|\bwatch\s+out\b"),
+    ("danger_zones", r"\bdo\s+not\s+touch\b|\bdon'?t\s+touch\b|\bnever\s+do\b|\bshould\s+(?:i\s+)?never\b|\bwatch\s+out\b|"
+                     r"\brestrictions?\b"),
     ("known_bad_days", r"\bcalendar\b|\bpeak\s+(?:season|times?)\b|\bbusy\b|\bblackout\b|\bchange\s+freeze\b"),
     ("deployment_and_rollback", r"\brelease\s+process\b|\bpipeline\b"),
     ("day1_survival_checklist", r"\bfirst\s+(?:steps?|week|things?)\b|\bonboarding\b|\baccess\b"),
@@ -924,6 +954,11 @@ _SEGMENT_FRONTED_RE = re.compile(
     r"(?:\s+(?:wise|side))?\s*[,:]", re.IGNORECASE)
 
 
+_NUMBERED_HEADING_RE = re.compile(
+    r"^\W*(?:section|part|chapter|item|point|topic)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b\s*[,:.-]\s*", re.IGNORECASE)
+
+
 def _segment_topic_of(phrase: str) -> Optional[str]:
     hits = [(m.start(), sid) for sid, rx in _SEGMENT_TOPIC_RES for m in [rx.search(phrase)] if m]
     return min(hits)[1] if hits else None
@@ -941,6 +976,8 @@ def topic_anchor(text: str) -> Optional[Tuple[str, Optional[str]]]:
         if topic:
             return ("fronted", topic)
     body = _SPEAKER_PREFIX_RE.sub("", text or "", count=1).strip()
+    # A document read aloud numbers its headings: "Section eleven, costs."
+    body = _NUMBERED_HEADING_RE.sub("", body, count=1) or body
     match = _SEGMENT_QUESTION_RE.match(body)
     if match and len(match.group(1).split()) <= 10:
         return ("question", _segment_topic_of(match.group(1)))

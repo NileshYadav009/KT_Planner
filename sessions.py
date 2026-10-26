@@ -27,7 +27,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 MAX_SESSIONS = 20
 # Job fields that belong to the KT, not to one pipeline run.
-_KT_FIELDS = ("tenant_id", "created_by", "created_by_id", "signoff", "document_version", "title")
+_KT_FIELDS = ("tenant_id", "created_by", "created_by_id", "signoff", "document_version", "title", "participants")
+# A speaker's name. In a pasted transcript it is a turn label, which
+# speaker_roles reads as one to three capitalised words ("Priya Sharma:").
+MAX_NAME = 60
+_LABEL_NAME_RE = re.compile(r"[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}")
 
 
 class SessionError(Exception):
@@ -80,17 +84,69 @@ def speakers_of(job: Dict[str, Any]) -> List[str]:
     return [s.get("name") for s in roles.get("speakers") or [] if s.get("name")]
 
 
-def check_can_set_giver(job: Optional[Dict[str, Any]], giver: Optional[str]) -> None:
+def speakers_said(job: Dict[str, Any]) -> List[str]:
+    """Everyone who speaks in the KT, in order: a recording's diarised
+    speakers ("Speaker 1") and a pasted transcript's labels. Unlike
+    speakers_of, also one speaker alone."""
+    from speaker_roles import turn_segments
+
+    listed = job.get("sessions") or [{"transcript": job.get("transcript"), "segments": job.get("segments")}]
+    names: List[str] = []
+    for session in listed:
+        for seg in session.get("segments") or turn_segments(session.get("transcript") or "") or []:
+            name = seg.get("speaker")
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+def _check_can_rebuild(job: Optional[Dict[str, Any]]) -> None:
     if job is None:
         raise SessionError("Job not found", 404)
     if job.get("status") not in ("completed", "completed_with_warnings"):
         raise SessionError("The KT is not finished yet", 409)
-    if job.get("session_pending") or job.get("giver_pending"):
+    if job.get("session_pending") or job.get("giver_pending") or job.get("speakers_pending"):
         raise SessionError("The KT is already being rebuilt", 409)
     if (job.get("signoff") or {}).get("signed_version"):
         raise SessionError("A signed KT cannot be rebuilt", 409)
+
+
+def check_can_set_giver(job: Optional[Dict[str, Any]], giver: Optional[str]) -> None:
+    _check_can_rebuild(job)
     if giver is not None and giver not in speakers_of(job):
         raise SessionError("That person did not speak in this KT", 400)
+
+
+def check_can_rename_speakers(job: Optional[Dict[str, Any]], names: Any) -> Dict[str, str]:
+    """The renames to make ({"Speaker 1": "Priya Sharma"}), checked: each
+    speaker spoke in the KT, each name is a name, and no two people end up
+    with the same one."""
+    _check_can_rebuild(job)
+    if not isinstance(names, dict) or not names:
+        raise SessionError("names must map each speaker to a person's name")
+    speakers = speakers_said(job)
+    # A pasted session has no segments, or (once rebuilt) untimed turns.
+    pasted = any(all(seg.get("untimed") for seg in s.get("segments") or [])
+                 for s in (job.get("sessions") or [{"segments": job.get("segments")}]))
+    renames: Dict[str, str] = {}
+    for old, new in names.items():
+        if old not in speakers:
+            raise SessionError(f"{old} did not speak in this KT")
+        if not isinstance(new, str) or not new.strip():
+            raise SessionError(f"Give {old} a name")
+        new = " ".join(new.split())
+        if len(new) > MAX_NAME or ":" in new:
+            raise SessionError(f"A name has at most {MAX_NAME} characters and no colon")
+        if pasted and not _LABEL_NAME_RE.fullmatch(new):
+            raise SessionError("In a pasted transcript a name is one to three words, each starting with a capital letter")
+        if new != old:
+            renames[old] = new
+    final = [renames.get(s, s) for s in speakers]
+    if len(set(final)) != len(final):
+        raise SessionError("Two speakers cannot have the same name")
+    if not renames:
+        raise SessionError("Nothing to rename")
+    return renames
 
 
 def set_giver(job_id: str, payload: Dict[str, Any]) -> None:
@@ -132,6 +188,57 @@ def set_giver(job_id: str, payload: Dict[str, Any]) -> None:
         pipeline.JOB_QUEUE[job_id] = after
     except Exception as exc:
         before["giver_error"] = f"The document could not be rebuilt with that person handing over: {exc}"
+        pipeline.JOB_QUEUE[job_id] = before
+
+
+def rename_speakers(job_id: str, payload: Dict[str, Any]) -> None:
+    """Worker task: rebuild a finished KT with its speakers named (payload
+    {"names": {"Speaker 1": "Priya Sharma"}}). Every session is renamed, so
+    later sessions and rebuilds keep the names, and so is a chosen giver.
+    Like a new session: the document as it was stays in History, and the KT
+    keeps its workspace, owner and sign-off record."""
+    import document_model
+    import pipeline
+    import signoff
+    from speaker_roles import rename_turn_labels
+
+    before = pipeline.JOB_QUEUE.get(job_id)
+    if before is None:
+        return
+    before = copy.deepcopy(before)
+    before.pop("speakers_pending", None)
+    actor = str(payload.get("set_by") or "speakers")
+    names = dict(payload.get("names") or {})
+    try:
+        renamed = []
+        for session in sessions_of(before):
+            # A pasted turn keeps its label in its text ("Speaker 1: ...").
+            session["segments"] = [
+                dict(seg, speaker=names.get(seg.get("speaker"), seg.get("speaker")),
+                     text=rename_turn_labels(seg.get("text") or "", names) if seg.get("untimed") else seg.get("text"))
+                for seg in session.get("segments") or []] or None
+            session["transcript"] = rename_turn_labels(session.get("transcript") or "", names)
+            renamed.append(session)
+        giver = names.get(before.get("giver"), before.get("giver"))
+        document_model.ensure_first_version(pipeline, job_id, before)
+        transcript, segments = combined_input(renamed)
+        pipeline.run_kt_pipeline(job_id, transcript, segments, giver=giver)
+        after = pipeline.JOB_QUEUE.get(job_id) or {}
+        if after.get("status") not in pipeline.COMPLETED_STATUSES:
+            raise RuntimeError(after.get("error") or "the document could not be rebuilt")
+        for field in _KT_FIELDS:
+            if field in before:
+                after[field] = before[field]
+        after["sessions"] = renamed
+        version = document_model.current_version(before) + 1
+        summary = "Speakers named: " + ", ".join(f"{old} as {new}" for old, new in names.items())
+        pipeline.JOB_STORE.save_version(job_id, version, actor, summary,
+                                        document_model.snapshot(after.get("knowledge_object") or {}))
+        after["document_version"] = version
+        signoff.on_new_version(after, version, actor)
+        pipeline.JOB_QUEUE[job_id] = after
+    except Exception as exc:
+        before["speakers_error"] = f"The document could not be rebuilt with those names: {exc}"
         pipeline.JOB_QUEUE[job_id] = before
 
 

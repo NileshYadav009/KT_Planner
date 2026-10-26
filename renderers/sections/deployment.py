@@ -22,6 +22,26 @@ def _normalized_key(text: str) -> str:
     return " ".join(str(text or "").split()).lower()[:120]
 
 
+def _steps(line: str) -> List[str]:
+    """One step per sentence, but a sentence that corrects the one before it
+    stays with it: "The deploy freeze starts at 6 pm on Fridays. Forget what
+    I said earlier about the freeze, it starts at 4 pm on Fridays." is kept
+    whole by the mapper, and cut into two steps the withdrawn 6 pm stood
+    alone (adversarial matrix A10)."""
+    from devops_transcription import corrects_statement_before, points_back_to, replaces_value_before
+
+    steps: List[str] = []
+    for sentence in (s.strip() for s in _STEP_SPLIT_RE.split(line)):
+        if not sentence:
+            continue
+        if steps and (replaces_value_before(steps[-1], sentence) or points_back_to(steps[-1], sentence)
+                      or corrects_statement_before(steps[-1], sentence)):
+            steps[-1] = f"{steps[-1]} {sentence}"
+        else:
+            steps.append(sentence)
+    return steps
+
+
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Deployment & Rollback")
     fields = section.get("fields", {})
@@ -60,8 +80,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
             # sentences into one line, and a recorded KT's deployment steps
             # rendered as a single ten-sentence bullet whose source links
             # could not cover all of it.
-            checklist = [sentence.strip() for line in str(deployment_value).split("\n")
-                         for sentence in _STEP_SPLIT_RE.split(line) if sentence.strip()]
+            checklist = [step for line in str(deployment_value).split("\n") for step in _steps(line)]
 
     if not checklist and not decision_rows and coverage_content:
         for item in coverage_content:

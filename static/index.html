@@ -331,6 +331,17 @@
     }
     .transcript-input:focus{outline:none;border-color:var(--blue);background:var(--surface);box-shadow:0 0 0 3px var(--focus)}
     .transcript-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text3);margin-top:6px}
+    .transcript-meta .link-btn{background:none;border:0;padding:0;font:inherit;color:var(--blue);font-weight:600;cursor:pointer}
+    .transcript-meta .link-btn:hover{text-decoration:underline}
+    .participants{margin-top:12px}
+    .participants label,.speaker-row label{display:block;font-size:12.5px;font-weight:600;color:var(--text2);margin-bottom:4px}
+    .participants label span{font-weight:400;color:var(--text3)}
+    .participants input,.speaker-row input{width:100%;font-size:13px;color:var(--text);background:var(--surface-2);
+      border:1.5px solid var(--border);border-radius:8px;padding:8px 10px}
+    .participants input:focus,.speaker-row input:focus{outline:none;border-color:var(--blue);background:var(--surface);box-shadow:0 0 0 3px var(--focus)}
+    .participants p{font-size:12px;color:var(--text3);margin-top:4px;line-height:1.5}
+    .speaker-row{margin-top:8px}
+    .speaker-row input{font-size:12.5px;padding:6px 9px;background:var(--surface)}
     .upload-foot{display:flex;align-items:center;justify-content:flex-end;gap:14px;margin-top:14px;flex-wrap:wrap}
     .upload-foot .hint{font-size:12.5px;color:var(--text3);margin-right:auto}
     .role-note{font-size:12.5px;color:var(--text3);margin-right:auto}
@@ -798,7 +809,12 @@
         <div id="transcriptPane" role="tabpanel" aria-labelledby="modeTranscript" hidden>
           <textarea id="transcriptInput" class="transcript-input" spellcheck="false" aria-label="Transcript"
             placeholder="Paste the KT transcript, e.g. an exported meeting transcript. Keep the speaker names (&quot;Priya: …&quot;) so Continuum can tell who is handing over."></textarea>
-          <div class="transcript-meta"><span>Plain text. Speaker names at the start of each turn help.</span><span id="transcriptCount">0 words</span></div>
+          <div class="transcript-meta">
+            <span>Plain text, or a Teams or Zoom transcript file. Speaker names at the start of each turn help.
+              <button type="button" class="link-btn" id="transcriptFileBtn">Open a transcript file</button></span>
+            <span id="transcriptCount">0 words</span>
+          </div>
+          <input id="transcriptFile" type="file" accept=".vtt,.srt,.txt,text/vtt,text/plain"/>
         </div>
 
         <div id="recordingPane" role="tabpanel" aria-labelledby="modeRecording">
@@ -813,6 +829,11 @@
             </div>
           </label>
           <input id="file" type="file" accept="audio/*,video/*"/>
+          <div class="participants">
+            <label for="participantsInput">People in the meeting <span>(optional)</span></label>
+            <input id="participantsInput" type="text" autocomplete="off" placeholder="Priya Sharma, Tom Lee"/>
+            <p>Separate names with commas. A recording shows its voices as Speaker 1, 2 and so on; you can name them from this list on the KT page.</p>
+          </div>
         </div>
 
         <div class="upload-foot">
@@ -1014,6 +1035,19 @@
             <select id="giverSelect"></select>
             <button id="giverApplyBtn" class="btn btn-ghost btn-sm btn-block" type="button" style="margin-top:8px">Rebuild with this person</button>
             <p class="rail-note" id="giverStatus" aria-live="polite"></p>
+          </div>
+
+          <!-- Speakers' names: a recording's Speaker 1, 2 or a pasted transcript's labels -->
+          <div class="rail-card" id="speakersCard" hidden>
+            <div class="rail-h">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Speakers
+            </div>
+            <p class="rail-text" id="speakersSummary"></p>
+            <div id="speakersRows"></div>
+            <datalist id="participantsList"></datalist>
+            <button id="speakersApplyBtn" class="btn btn-ghost btn-sm btn-block" type="button" style="margin-top:10px">Save names and rebuild</button>
+            <p class="rail-note" id="speakersStatus" aria-live="polite"></p>
           </div>
 
           <!-- KT sessions (P2-1): a KT built from several sessions -->
@@ -1245,7 +1279,7 @@ function resetKtView(jobId, tab = 'doc'){
   sessionJob.textContent = jobId;
   document.getElementById('ktGrid').hidden = true;
   document.getElementById('ktBanners').innerHTML = '';
-  ['giverCard', 'sessionsCard', 'screensCard', 'docAskResult', 'docHistory'].forEach(id => { document.getElementById(id).hidden = true; });
+  ['giverCard', 'speakersCard', 'sessionsCard', 'screensCard', 'docAskResult', 'docHistory'].forEach(id => { document.getElementById(id).hidden = true; });
   setActionsEnabled(false);
   updateKtHeader({status: row.status || 'queued'});
   setTab(tab);
@@ -1399,6 +1433,24 @@ modeTranscriptBtn.addEventListener('click', ()=>setInputMode('transcript'));
 transcriptInput.addEventListener('input', ()=>{
   const words = (transcriptInput.value.trim().match(/\S+/g) || []).length;
   transcriptCount.textContent = words.toLocaleString() + (words === 1 ? ' word' : ' words');
+});
+/* A Teams or Zoom transcript file (.vtt, .srt) or a text file: read here,
+   turned into speaker turns by the server (captions.py). */
+const transcriptFile = document.getElementById('transcriptFile');
+document.getElementById('transcriptFileBtn').addEventListener('click', () => transcriptFile.click());
+transcriptFile.addEventListener('change', () => {
+  const f = transcriptFile.files[0];
+  if(!f) return;
+  if(f.size > 5 * 1024 * 1024){ showToast('That file is larger than 5 MB', 6000, 'error'); transcriptFile.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    transcriptInput.value = String(reader.result || '');
+    transcriptInput.dispatchEvent(new Event('input'));
+    transcriptFile.value = '';
+    showToast(`Loaded ${f.name}`);
+  };
+  reader.onerror = () => showToast('Could not read that file', 6000, 'error');
+  reader.readAsText(f);
 });
 
 /* Section id -> human title, from the loaded schema (falls back to the id). */
@@ -2382,6 +2434,7 @@ function pollJobStatus(jobId){
         updateKtHeader(data);
         loadSessions(jobId);
         renderGiver(jobId, data);
+        renderSpeakers(jobId, data);
         renderTranscript(data);
         renderCoverage(data.coverage||{});
         renderScreenCaptures(data);
@@ -2438,6 +2491,8 @@ uploadBtn.addEventListener('click',async()=>{
     if(!f){ showToast('Choose a recording first'); return; }
     useLocalRecording(f);          // sources play from this file, in the browser (P1-2)
     const fd=new FormData(); fd.append('file',f);
+    const people = document.getElementById('participantsInput').value.trim();
+    if(people) fd.append('participants', people);
     request = fetch('/upload',{method:'POST',body:fd,
       headers:{'Idempotency-Key': submissionKey(['file', f.name, f.size, f.lastModified].join(':'))}});
   }
@@ -2459,6 +2514,7 @@ uploadBtn.addEventListener('click',async()=>{
     // The form is ready for the next KT; this one opens and builds.
     transcriptInput.value = ''; transcriptInput.dispatchEvent(new Event('input'));
     fileInput.value = ''; fileInput.dispatchEvent(new Event('change'));
+    document.getElementById('participantsInput').value = '';
     JOBS[data.job_id] = Object.assign({job_id: data.job_id, status: data.status, created_at: Date.now() / 1000, can_delete: true}, JOBS[data.job_id] || {});
     openKt(data.job_id);
     loadHistory();
@@ -2909,6 +2965,21 @@ document.getElementById('addSessionBtn')?.addEventListener('click', async () => 
   loadSessions(jobId);
 });
 
+/* A request that rebuilds the document (giver, speakers' names). The KT
+   shows as complete while its worker still saves the PDF for a few seconds,
+   and a rebuild asked for then is refused ("still being processed"): wait
+   and ask again, up to about 30 seconds, instead of failing. */
+async function postRebuild(url, body, statusEl){
+  for(let attempt = 0; ; attempt++){
+    const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if(resp.status !== 409 || attempt >= 10) return resp;
+    const detail = (await resp.clone().json().catch(() => ({}))).detail || '';
+    if(!/still being processed/i.test(detail)) return resp;
+    statusEl.textContent = 'Waiting for the document to finish saving…';
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
 /* Who is handing over (speaker_roles). In a conversation the giver is
    detected (the person who states the most); what the receiver said counts
    only where the giver confirmed it. Choosing another person rebuilds the
@@ -2958,11 +3029,14 @@ document.getElementById('giverApplyBtn')?.addEventListener('click', async () => 
   if(!jobId) return;
   const value = document.getElementById('giverSelect').value;
   let resp;
+  document.getElementById('giverApplyBtn').disabled = true;
   try{
-    resp = await fetch(`/kt/${encodeURIComponent(jobId)}/giver`, {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({giver: value || null})});
-  }catch(e){ showToast('Could not rebuild the document', 6000, 'error'); return; }
+    resp = await postRebuild(`/kt/${encodeURIComponent(jobId)}/giver`, {giver: value || null},
+                             document.getElementById('giverStatus'));
+  }catch(e){ document.getElementById('giverApplyBtn').disabled = false; showToast('Could not rebuild the document', 6000, 'error'); return; }
   if(!resp.ok){
+    document.getElementById('giverApplyBtn').disabled = false;
+    document.getElementById('giverStatus').textContent = '';
     const detail = (await resp.json().catch(() => ({}))).detail;
     showToast(detail || `Could not rebuild the document (HTTP ${resp.status})`, 8000, 'error');
     return;
@@ -2970,6 +3044,90 @@ document.getElementById('giverApplyBtn')?.addEventListener('click', async () => 
   document.getElementById('giverApplyBtn').disabled = true;
   document.getElementById('giverStatus').textContent = 'Rebuilding the document; the earlier version stays in History.';
   waitForGiver(jobId);
+});
+
+/* Speakers' names. A recording's voices are Speaker 1, 2 ... until named
+   (from the people listed on upload, or typed); a pasted transcript's labels
+   can be corrected. Saving rebuilds the document as a new version. */
+let speakersTimer = null;
+function renderSpeakers(jobId, data){
+  const card = document.getElementById('speakersCard');
+  const speakers = (data && data.speaker_names) || [];
+  if(!card) return;
+  if(!speakers.length){ card.hidden = true; return; }
+  card.hidden = false;
+  const unnamed = speakers.filter(n => /^Speaker \d+$/.test(n)).length;
+  document.getElementById('speakersSummary').textContent = unnamed
+    ? `${unnamed} voice${unnamed === 1 ? ' is' : 's are'} not named yet. Type a name for each; the document is rebuilt with them.`
+    : 'Correct a name if it is wrong; the document is rebuilt with it.';
+  const list = document.getElementById('participantsList');
+  list.innerHTML = '';
+  for(const p of data.participants || []){
+    const opt = document.createElement('option'); opt.value = p; list.appendChild(opt);
+  }
+  const rows = document.getElementById('speakersRows');
+  // A re-render (another status poll) keeps what was being typed.
+  const typed = {};
+  rows.querySelectorAll('input').forEach(input => { if(input.value) typed[input.dataset.speaker] = input.value; });
+  rows.innerHTML = '';
+  speakers.forEach((name, i) => {
+    const row = document.createElement('div');
+    row.className = 'speaker-row';
+    const label = document.createElement('label');
+    label.htmlFor = `speakerName${i}`;
+    label.textContent = name;
+    const input = document.createElement('input');
+    input.type = 'text'; input.id = `speakerName${i}`; input.dataset.speaker = name;
+    input.setAttribute('list', 'participantsList'); input.autocomplete = 'off';
+    input.placeholder = /^Speaker \d+$/.test(name) ? 'Name' : 'New name';
+    if(typed[name]) input.value = typed[name];
+    row.append(label, input);
+    rows.appendChild(row);
+  });
+  document.getElementById('speakersStatus').textContent = data.speakers_error || '';
+  document.getElementById('speakersApplyBtn').disabled = !!data.speakers_pending;
+}
+async function waitForSpeakers(jobId){
+  clearTimeout(speakersTimer);
+  try{
+    const resp = await fetch(`/status/${encodeURIComponent(jobId)}`);
+    if(resp.ok){
+      const data = await resp.json();
+      if(data.speakers_pending){ speakersTimer = setTimeout(() => waitForSpeakers(jobId), 4000); return; }
+      document.getElementById('speakersApplyBtn').disabled = false;
+      if(data.speakers_error){ document.getElementById('speakersStatus').textContent = data.speakers_error; return; }
+      showToast('Document rebuilt with the names');
+      pollJobStatus(jobId);
+      return;
+    }
+  }catch(e){}
+  speakersTimer = setTimeout(() => waitForSpeakers(jobId), 6000);
+}
+document.getElementById('speakersApplyBtn')?.addEventListener('click', async () => {
+  const jobId = currentJobId;
+  if(!jobId) return;
+  const names = {};
+  document.querySelectorAll('#speakersRows input').forEach(input => {
+    const value = input.value.trim();
+    if(value && value !== input.dataset.speaker) names[input.dataset.speaker] = value;
+  });
+  if(!Object.keys(names).length){ showToast('Type a name first'); return; }
+  let resp;
+  document.getElementById('speakersApplyBtn').disabled = true;
+  try{
+    resp = await postRebuild(`/kt/${encodeURIComponent(jobId)}/speakers`, {names},
+                             document.getElementById('speakersStatus'));
+  }catch(e){ document.getElementById('speakersApplyBtn').disabled = false; showToast('Could not rebuild the document', 6000, 'error'); return; }
+  if(!resp.ok){
+    document.getElementById('speakersApplyBtn').disabled = false;
+    document.getElementById('speakersStatus').textContent = '';
+    const detail = (await resp.json().catch(() => ({}))).detail;
+    showToast(detail || `Could not rebuild the document (HTTP ${resp.status})`, 8000, 'error');
+    return;
+  }
+  document.getElementById('speakersApplyBtn').disabled = true;
+  document.getElementById('speakersStatus').textContent = 'Rebuilding the document; the earlier version stays in History.';
+  waitForSpeakers(jobId);
 });
 
 document.getElementById('downloadMdBtn').addEventListener('click',()=>downloadKtFile('markdown'));

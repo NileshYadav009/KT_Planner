@@ -996,6 +996,34 @@ TOPIC_SEGMENT_BOOST = 0.04
 RECOVERY_WITHOUT_EVIDENCE_PENALTY = 0.03
 
 
+_SECTION_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "section_model.npz")
+# A learned section model (scripts/build_section_model.py): a logistic
+# regression over the fact's embedding and its context's, trained on the
+# synthetic tuning goldens and the development KTs. This weight times its
+# probability is added to every section's score. Chosen leave-one-KT-out on
+# those KTs (audit 9abd): on all 801 labelled facts scored by the classifier
+# alone, 760 right without it and 784 with it; through the whole pipeline,
+# 900 and 903 of 909. Trained on the fact alone, without its context, it did
+# worse than none (896). SECTION_MODEL_WEIGHT=0 turns it off.
+SECTION_MODEL_WEIGHT = float(os.getenv("SECTION_MODEL_WEIGHT", "0.1"))
+
+
+def load_section_model(path: str = _SECTION_MODEL_PATH):
+    """(sections, weights, intercepts) of the learned section model, or None
+    when the file is missing or unreadable: sections then score without it."""
+    try:
+        import numpy
+        with numpy.load(path, allow_pickle=False) as data:
+            sections = [str(c) for c in data["classes"]]
+            coef = data["coef"].astype("float32")
+            intercept = data["intercept"].astype("float32")
+        if coef.shape[0] != len(sections) or intercept.shape[0] != len(sections):
+            return None
+        return sections, coef, intercept
+    except Exception:
+        return None
+
+
 def load_section_examples(path: str = _SECTION_EXAMPLES_PATH) -> Dict[str, List[str]]:
     """Labelled example statements per section (scripts/build_section_examples.py).
     Missing or unreadable: no examples, and sections score as before."""
@@ -1118,6 +1146,7 @@ class ContextClassifier:
         self.section_metadata = {}
         self._example_embeddings = None  # labelled section examples, set by index_schema
         self._example_sections: List[str] = []
+        self._section_model = load_section_model()
         self._section_hints = {}  # Initialize for keyword matching
 
         # Initialize entity extractor for GLiNER-based entity extraction
@@ -1203,6 +1232,32 @@ class ContextClassifier:
             by_section[sec_id].append(sim)
         return {sec_id: sum(sorted(v, reverse=True)[:SECTION_EXAMPLE_TOP_K]) / min(len(v), SECTION_EXAMPLE_TOP_K)
                 for sec_id, v in by_section.items()}
+
+    def _learned_probabilities(self, sent_embedding, context_embedding=None) -> Dict[str, float]:
+        """Per section, the learned section model's probability for the fact
+        (load_section_model), from its embedding and its context's (the fact's
+        own when there is no context)."""
+        model = getattr(self, "_section_model", None)
+        if not model or not SECTION_MODEL_WEIGHT or sent_embedding is None:
+            return {}
+        try:
+            import numpy
+
+            def flat(x):
+                if hasattr(x, "detach"):
+                    x = x.detach().cpu().numpy()
+                return numpy.asarray(x, dtype="float32").reshape(-1)
+
+            sections, coef, intercept = model
+            sent = flat(sent_embedding)
+            features = numpy.concatenate([sent, flat(context_embedding) if context_embedding is not None else sent])
+            if features.shape[0] != coef.shape[1]:
+                return {}
+            logits = coef @ features + intercept
+            weights = numpy.exp(logits - logits.max())
+            return dict(zip(sections, (float(w) for w in weights / weights.sum())))
+        except Exception:
+            return {}
 
     def classify_sentence(
         self,
@@ -1500,6 +1555,7 @@ class ContextClassifier:
         classifications = []
         sent_text_lower = (sentence.text or "").lower()
         example_sims = self._example_similarities(sent_embedding)
+        learned = self._learned_probabilities(sent_embedding, context_embedding)
         no_recovery_words = not RECOVERY_EVIDENCE_RE.search(sentence.text or "")
 
         for sec_id, sec_embedding in self.section_embeddings.items():
@@ -1543,11 +1599,14 @@ class ContextClassifier:
             entity_boost, entity_note = entity_affinity_boost(sec_id, extracted_entities, sentence.text)
 
             topic_boost = TOPIC_SEGMENT_BOOST if topic_section and sec_id == topic_section else 0.0
+            learned_boost = SECTION_MODEL_WEIGHT * learned.get(sec_id, 0.0)
             combined = float(alpha * base_sim + beta * context_sim + keyword_boost + entity_boost + topic_boost
-                             - penalty)
+                             + learned_boost - penalty)
             reason = f"Semantic={base_sim:.3f}, Context={context_sim:.3f}, Keywords={keyword_boost:.3f}"
             if topic_boost:
                 reason += f", Topic=+{topic_boost:.2f}"
+            if learned_boost:
+                reason += f", Learned=+{learned_boost:.3f}"
             if example_sim is not None:
                 reason += f", Examples={example_sim:.3f}"
             if entity_boost:

@@ -417,3 +417,40 @@ def test_the_kts_opening_definition_of_the_system_is_its_overview():
     assert units[2].primary_classification.section_id == "architecture_reference"
     rule = match_section_rules("the finance and merchandising teams build all their reports on top of it")
     assert rule and rule.section_id == "system_overview"
+
+
+@pytest.mark.parametrize("said, section", [
+    # Dev d08 (speech to text: no comma, no "on") and d09; the First 30-Day
+    # plan was reported Missing although it was discussed (X67).
+    ("First day get access to the prod project and the Twilio console.", "day1_survival_checklist"),
+    ("In the first month take over the black friday preparation.", "first_30_day_ownership"),
+    ("Within the first month, the new owner should complete one release and one dead-letter queue recovery.",
+     "first_30_day_ownership"),
+    ("In your first month, run the Sunday training on your own.", "first_30_day_ownership"),
+    ("After a month I'd like you to be the first responder on your own.", "first_30_day_ownership"),
+    ("For your first week, get Vault access and get added to the PagerDuty schedule.", "day1_survival_checklist"),
+])
+def test_the_new_owners_time_frame_opening_a_sentence_is_the_onboarding_plan(said, section):
+    rule = match_section_rules(said)
+    assert rule and rule.section_id == section, (said, rule)
+
+
+@pytest.mark.parametrize("said", [
+    "The first week of January is the worst week.",
+    "In the first month after launch, traffic doubled.",
+    "After a month, old logs are deleted.",
+    "On day one of an incident, page the lead.",
+])
+def test_a_calendar_or_retention_time_frame_is_not_onboarding(said):
+    rule = match_section_rules(said)
+    assert rule is None or rule.section_id not in ("day1_survival_checklist", "first_30_day_ownership"), (said, rule)
+
+
+def test_a_provider_limiting_us_is_a_failure_whatever_day_it_names():
+    """Dev d08: "Twilio rate limits us when there's a big batch like on black
+    friday" went to the Operational Calendar."""
+    rule = match_section_rules("Twilio rate limits us when there's a big batch like on black friday and messages "
+                               "get delayed.")
+    assert rule and rule.section_id == "common_failures"
+    rule = match_section_rules("Black Friday is our busiest day.")
+    assert rule and rule.section_id == "known_bad_days"

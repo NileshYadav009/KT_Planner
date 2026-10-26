@@ -15,7 +15,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.environ.get("CONTINUUM_REPO", os.path.dirname(HERE))
 kt_id = sys.argv[1]
-if kt_id.startswith(("h12", "h13", "h14", "b0")):
+if kt_id.startswith(("h12", "h13", "h14", "b0", "b1")):
     raise SystemExit("holdout/blind KT: aggregate only")
 
 state = tempfile.mkdtemp(prefix="groq-diag-")

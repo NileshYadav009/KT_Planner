@@ -42,7 +42,7 @@ def find(kt):
 
 
 golden = find(kt_id)
-if golden.get("holdout") or kt_id.startswith(("h12", "h13", "h14", "b0")):
+if golden.get("holdout") or kt_id.startswith(("h12", "h13", "h14", "b0", "b1")):
     raise SystemExit("holdout/blind KT: aggregate only")
 
 import ai  # noqa: E402

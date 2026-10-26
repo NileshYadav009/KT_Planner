@@ -18,7 +18,7 @@ from datetime import datetime
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, UploadFile, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
@@ -29,6 +29,7 @@ from auth import (
 )
 import ask
 import atlassian
+import captions
 import dependencies
 import document_diff
 import document_model
@@ -302,9 +303,27 @@ def kt_asset(job_id: str, name: str, exp: Optional[int] = None, sig: Optional[st
     return FileResponse(path, media_type="image/jpeg")
 
 
-def _new_job(principal: Principal) -> dict:
-    return {"status": "queued", "progress": 0, "tenant_id": principal.tenant_id,
-            "created_by": principal.key_label, "created_by_id": principal.actor}
+def _new_job(principal: Principal, participants=None) -> dict:
+    job = {"status": "queued", "progress": 0, "tenant_id": principal.tenant_id,
+           "created_by": principal.key_label, "created_by_id": principal.actor}
+    names = _participants(participants)
+    if names:
+        job["participants"] = names
+    return job
+
+
+def _participants(value) -> list:
+    """The people in the meeting, as typed on upload ("Priya Sharma, Tom
+    Lee" or a list): offered when the speakers are named. At most 20 names
+    of up to 60 characters, no repeats."""
+    if isinstance(value, str):
+        value = re.split(r"[,;\n]", value)
+    names = []
+    for name in value if isinstance(value, list) else []:
+        name = " ".join(str(name).split())[:sessions.MAX_NAME].replace(":", "")
+        if name and name not in names:
+            names.append(name)
+    return names[:20]
 
 
 def _idempotency_key(request: Request) -> Optional[str]:
@@ -338,7 +357,8 @@ async def _reserve(principal: Principal, key: Optional[str], job_id: str) -> Opt
 
 
 @router.post("/upload")
-async def upload(file: UploadFile, request: Request, principal: Principal = Depends(require_permission("kt:create"))):
+async def upload(file: UploadFile, request: Request, participants: Optional[str] = Form(None),
+                 principal: Principal = Depends(require_permission("kt:create"))):
     if not file:
         raise HTTPException(status_code=400, detail="No file uploaded.")
     key = _idempotency_key(request)
@@ -356,7 +376,7 @@ async def upload(file: UploadFile, request: Request, principal: Principal = Depe
         media = await run_in_threadpool(media_guard.probe, input_path)
 
         with pipeline.JOB_LOCK:
-            pipeline.JOB_QUEUE[job_id] = _new_job(principal)
+            pipeline.JOB_QUEUE[job_id] = _new_job(principal, participants)
         # A worker transcribes and builds it (worker.py); the file is deleted
         # when the task ends.
         pipeline.TASKS.enqueue(job_id, "upload", {"input_path": input_path, "media_format": media["format"]})
@@ -386,6 +406,8 @@ async def kt_from_transcript(payload: dict, request: Request,
     if not isinstance(transcript, str) or not transcript.strip():
         raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
     key = _idempotency_key(request)
+    # A Teams or Zoom transcript file (WebVTT, SRT): its speaker turns.
+    transcript = captions.to_turns(transcript) or transcript
 
     # Same normalization real audio gets, so this path actually exercises the
     # vocabulary-correction pipeline being tested.
@@ -403,7 +425,7 @@ async def kt_from_transcript(payload: dict, request: Request,
     if earlier:
         return _queued_response(earlier, "Already submitted. Poll /status/{job_id} for results.", duplicate=True)
     with pipeline.JOB_LOCK:
-        pipeline.JOB_QUEUE[job_id] = _new_job(principal)
+        pipeline.JOB_QUEUE[job_id] = _new_job(principal, payload.get("participants"))
     pipeline.TASKS.enqueue(job_id, "transcript", {
         "transcript": cleaned_transcript, "warnings": gate["reasons"] if gate["verdict"] != "ok" else []})
     return _queued_response(job_id, "Transcript queued for processing. Poll /status/{job_id} for results.")
@@ -474,13 +496,36 @@ async def set_kt_giver(job_id: str, payload: dict, principal: Principal = Depend
     return {"status": "queued", "job_id": job_id, "giver": giver}
 
 
+@router.post("/kt/{job_id}/speakers")
+async def name_kt_speakers(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:correct"))):
+    """Name the speakers of a finished KT ({"names": {"Speaker 1": "Priya
+    Sharma"}}): a recording's diarised speakers or a pasted transcript's
+    labels. A worker rebuilds the document with the names as a new version,
+    the earlier one kept in History."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        try:
+            names = sessions.check_can_rename_speakers(job, payload.get("names"))
+        except sessions.SessionError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+        try:
+            pipeline.TASKS.enqueue(job_id, "speakers", {"names": names, "set_by": principal.key_label})
+        except ValueError:
+            raise HTTPException(status_code=409, detail="This KT is still being processed")
+        job["speakers_pending"] = True
+        job.pop("speakers_error", None)
+        pipeline.JOB_QUEUE[job_id] = job
+    audit(principal.tenant_id, principal.key_label, "kt_speakers_named", {"job_id": job_id, "names": names})
+    return {"status": "queued", "job_id": job_id, "names": names}
+
+
 @router.post("/kt/{job_id}/sessions")
 async def add_kt_session(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:create"))):
     """Add a pasted follow-up session to a finished KT."""
     transcript = payload.get("transcript", "")
     if not isinstance(transcript, str) or not transcript.strip():
         raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
-    cleaned = clean_transcript(transcript)
+    cleaned = clean_transcript(captions.to_turns(transcript) or transcript)
     gate = assess_transcript(cleaned, source="paste")
     if gate["verdict"] == "reject" and not payload.get("force"):
         raise HTTPException(status_code=422, detail=" ".join(gate["reasons"]))
@@ -766,7 +811,9 @@ def _with_signoff_view(job: dict) -> dict:
             ko["rendered_sections"], job, version))
         job["document_version"] = version
     # Whisper's segments and each session's own transcript are kept for
-    # rebuilding the document (P2-1); the page needs only the session list.
+    # rebuilding the document (P2-1); the page needs only the session list,
+    # and who speaks, to name them.
+    job["speaker_names"] = sessions.speakers_said(job)
     job.pop("segments", None)
     if job.get("sessions"):
         job["sessions"] = _session_view(job)["sessions"]

@@ -1315,6 +1315,12 @@ def apply_fuzzy_term_corrections(text: str, threshold: float = 0.88) -> Tuple[st
             # more coincidental collisions.
             if any(w.lower() in known_terms_set for w in ngram_words):
                 continue
+            # A possessive or a contraction ("Stripe's", "it's") is a word
+            # spelled as meant, never a garbled term: "Dev uses Stripe's test
+            # mode" became "Dev uses stress test mode" (0.92 against
+            # "stress test").
+            if any("'" in w for w in ngram_words):
+                continue
             best_term = None
             best_score = 0.0
             for target in candidates_for_ngram(terms_by_word_count, n, phrase):

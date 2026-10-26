@@ -1,0 +1,315 @@
+{
+ "id": "d07_millbrook_onprem_qa",
+ "title": "Millbrook: on-premises student records, questions and answers without labels",
+ "proves": "Each topic opened by the receiver's question, answered in the same paragraph; no speaker labels.",
+ "transcript": "So what is Millbrook exactly? Millbrook is the student records system for the university. Registry staff use it to enrol students, record marks and produce transcripts. About thirty thousand students are in it at any time.\n\nWhat does it run on? It's all on premises. The application is Java running on Oracle WebLogic, on four Red Hat virtual machines. The database is Oracle 19c on a two-node RAC cluster. Students see their marks through the portal, which calls Millbrook's REST API. Nightly, a batch job exports enrolments to the finance system as a CSV file.\n\nHow do changes get deployed? We use Ansible playbooks from the GitLab repository. A change goes to the test server first, and the registry team signs it off before it goes live. Deployments happen on Thursday evenings. If something goes wrong, we run the rollback playbook, which puts back the previous WAR file.\n\nAre there other environments? There's test and production, plus a training copy that the registry uses for new staff.\n\nHow do you know if it's broken? Nagios checks the WebLogic servers and the database listener every five minutes. If the portal can't reach the API, Nagios emails the infrastructure team and sends a text to the on-call person.\n\nWhat usually goes wrong? The WebLogic managed servers run out of heap during results week, and pages time out. We restart the managed servers one at a time so nobody notices. The other one is the finance export failing when a student record has a comma in the address; we fix the record and rerun the export by hand.\n\nWhat about backups? RMAN takes a full backup every Sunday and incrementals every night, and they're copied to the second data centre. We can restore within six hours. The last restore test was in the summer.\n\nIs there anything about security I should know? Staff sign in with their university account through Shibboleth. Only registry managers can change a final mark, and every change is logged. Student data must never leave the UK.\n\nAnything I should never do? Never run the end-of-year rollover job twice. It advances every student a year, and undoing it means a database restore.\n\nWhen are the busy times? Results week in June is the worst, then enrolment in September. Avoid any change in those weeks.\n\nWho owns it? The student systems team in IT owns Millbrook. The registry owns the data. If you need to escalate, go to Peter Hall, the head of student systems.\n\nWhat's still in progress? We're replacing the finance CSV export with an API, and it's about half done. Also the Oracle licence renewal is due in December.\n\nWhat should I do first? In the first week, get an account on the WebLogic console and read-only access to the database. By the end of the month, run a Thursday deployment yourself.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Millbrook is the student records system for the university",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Registry staff use it to enrol students, record marks and produce transcripts",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "About thirty thousand students are in it at any time",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "It's all on premises",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The application is Java running on Oracle WebLogic, on four Red Hat virtual machines",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "The database is Oracle 19c on a two-node RAC cluster",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Students see their marks through the portal, which calls Millbrook's REST API",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "a batch job exports enrolments to the finance system as a CSV file",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "We use Ansible playbooks from the GitLab repository",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "A change goes to the test server first",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "the registry team signs it off before it goes live",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Deployments happen on Thursday evenings",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "we run the rollback playbook, which puts back the previous WAR file",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "There's test and production, plus a training copy that the registry uses for new staff",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Nagios checks the WebLogic servers and the database listener every five minutes",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Nagios emails the infrastructure team and sends a text to the on-call person",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "The WebLogic managed servers run out of heap during results week",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "We restart the managed servers one at a time",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "the finance export failing when a student record has a comma in the address",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "we fix the record and rerun the export by hand",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "RMAN takes a full backup every Sunday and incrementals every night",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "they're copied to the second data centre",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "We can restore within six hours",
+   "alt": [
+    "six hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "The last restore test was in the summer",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Staff sign in with their university account through Shibboleth",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Only registry managers can change a final mark",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "every change is logged",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Student data must never leave the UK",
+   "in": [
+    "security_controls",
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Never run the end-of-year rollover job twice",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "undoing it means a database restore",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Results week in June is the worst, then enrolment in September",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Avoid any change in those weeks",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "The student systems team in IT owns Millbrook",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "The registry owns the data",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "go to Peter Hall, the head of student systems",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "We're replacing the finance CSV export with an API",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "the Oracle licence renewal is due in December",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "get an account on the WebLogic console and read-only access to the database",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "run a Thursday deployment yourself",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization"
+ ],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

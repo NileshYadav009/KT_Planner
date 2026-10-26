@@ -6337,6 +6337,196 @@ No API or pipeline change. Ledger X74, X75.
 there. `static/review.html` calls a `/reviews` route that does not exist; it
 is left as it was. The browser check is not in CI.
 
+### 9abd. Accuracy: the enterprise checklist's P0 and P1 (26 Oct)
+
+The user asked to work on the Accuracy items of the enterprise readiness
+checklist, P0 first, then P1, and decided the open questions one at a
+time:
+
+- **Measure on a sealed set.** A new blind set, written before any change
+  and read at the end. Designs are chosen leave-one-KT-out on the visible
+  KTs only.
+- **Groq:** up to 120k tokens, one run before the work and one after.
+- **Self-hosted LLM:** deferred.
+- **Transcription:** a clean-voice proxy now, real meeting recordings later.
+- **Speakers:** name them on the KT page, keep the names in Teams and Zoom
+  transcript files, take a participant list on upload.
+
+**A sealed blind set first.** `evaluation/blind4` (b08-b11, 160 facts;
+`blind4_kts.py`):
+
+- a giver and receiver conversation in which the receiver guesses wrong;
+- terse spoken notes for an on-premises Windows system, with
+  self-corrections;
+- a screen-share walkthrough;
+- a rambling, hedged KT with three sections undiscussed.
+
+It was written by the same author as the fixes, so it is not independent of
+them. Before anything ran on it, every quote was checked against the
+cleaned transcript (a format check). Two quotes needed the cleaner's
+"frontend" spelling, and the check found a cleaner defect (X76).
+
+**Groq before (section check only).** No request was sent: every prompt was
+already in the cache from 25 Oct, so today's code asks Groq what it asked
+then. 321/341 (94.1%), unchanged, 0 tokens.
+
+**X67 on visible KTs.** Four dev KTs in the styles of blind set b04-b07
+(d07-d10, 151 facts; the styles from `evaluation/README.md`, not from that
+set) placed 137/151, and two discussed sections were reported Missing, both
+First 30-Day Ownership.
+
+| ID | What | Cause | Fix |
+|---|---|---|---|
+| X77 | "In the first month take over the black friday preparation" went to the calendar; "Within the first month, the new owner should complete one release ..." and "First day get access to the prod project ..." (no comma, no "on") to Ownership | No rule for the new owner's time frame opening a sentence; the calendar's peak-day rule (0.96) and "owner" won | `section_rules.ONBOARDING_MONTH_RX` and `ONBOARDING_DAY_RX` at 0.97; not "the first week of January", "the first month after launch" or "After a month, old logs are deleted" |
+| X78 | "Section eleven, costs." named no topic, and the monthly cost after it went to System Overview | The topic finder read "Section eleven" as the heading | `topic_anchor` drops a spoken number ("Section six,", "Part 3:") first |
+| X79 | "Twilio rate limits us when there's a big batch like on black friday" went to the calendar | No failure wording matched; "black friday" did | Common-failures rule: "rate limits us", "throttles us" |
+| X76 | The cleaner turned "Dev uses Stripe's test mode" into "Dev uses stress test mode" | The fuzzy term corrector scored "stripe's test" 0.92 against "stress test" | A word with an apostrophe (a possessive or a contraction) is never a garbled term |
+
+Dev went from 360 to 368 of 375, and false Missing from 2 to 0.
+
+**P0: a learned section model.** The classifier's own first choice makes
+most placement errors (L3). On the visible KTs the hand rules decide most
+facts, so the whole pipeline scores 900/909 there even with each KT's own
+examples held out, which cannot tell designs apart. Designs were compared
+leave-one-KT-out over the 32 visible KTs in two ways:
+
+- on the classifier alone, over the 801 labelled units, as if no rule
+  existed, and over the 407 that no rule decides;
+- through the whole pipeline (909 facts).
+
+| Design | Classifier alone, 801 units | No rule decides, 407 | Whole pipeline, 909 |
+|---|---|---|---|
+| Today (labelled examples only) | 760 | 392 | 900 |
+| Model on the fact alone (weight 0.1 to 0.2) | 766 to 773 | 391 to 394 | 896 to 898 |
+| Model on fact and context, weight 0.15, C 1 | 777 | | |
+| **Model on fact and context, weight 0.1, C 4 (chosen)** | **784** | **400** | **903** |
+| Model on fact and context, weight 0.15, C 4 | 785 | 399 | 902 |
+
+The model is a logistic regression over the fact's embedding and its
+context's (the two embeddings the classifier already computes).
+
+- **Training data:** the synthetic tuning goldens and the dev KTs, 777
+  units of 31 KTs (`scripts/build_section_model.py`). Holdout, blind and
+  customer KTs are never trained on, and a test checks this.
+- **File:** `section_model.npz`, 124 KB.
+- **Use:** the classifier adds `SECTION_MODEL_WEIGHT` (0.1) times its
+  probability to each section's score. It reads the file with numpy only,
+  and `SECTION_MODEL_WEIGHT=0` turns it off.
+
+**Two side effects, fixed.**
+
+- **X80.** QuickBite's "The payment-provider failover procedure and
+  courier-tracking recovery runbook are still missing." moved to Open
+  Responsibilities (its key allows that section), and the section was
+  reported Missing beside it. In Open Responsibilities a stated gap is the
+  content, work left to do. It now counts as the section's "Open work"
+  topic and stays on the follow-up list ("still to do"). Under Disaster
+  Recovery the same sentence is still a stated gap.
+- **X84.** Matrix A10: the learned model filed "The deploy freeze starts at
+  6 pm on Fridays." and its later correction (kept whole by the mapper)
+  under Deployment, whose steps are one per sentence, so 6 pm stood alone.
+  - A sentence that corrects the step before it now stays with that step
+    (`renderers/sections/deployment._steps`).
+  - "Deploy freeze" is now a calendar freeze, as "deployment freeze" was.
+
+**Found on the way (X81).** `section_examples.json` had been out of date
+with the goldens since 5c0e5d7 (quotes respelled "roll back"), and its test
+failed. It is rebuilt.
+
+**Results without an LLM.**
+
+| Set | Before | Rule fixes only (X76-X79) | After |
+|---|---|---|---|
+| Holdouts (h12-h14) | 87/95 | 87/95 | 88/95 |
+| Blind b01-b03 | 97/114 | 99/114 | 109/114 |
+| Blind b04-b07 | 112/132, 4 false Missing | 115/132, 4 | 118/132, 3 |
+| These three | 296/341 (86.8%) | 301/341 (88.3%) | 315/341 (92.4%) |
+| Sealed b08-b11 (new) | 145/160 (90.6%), on the previous commit | | 151/160 (94.4%) |
+| All unseen | 441/501 (88.0%) | | 466/501 (93.0%) |
+| Dev (10 KTs, the model's training data) | 360/375 | 368/375 | 373/375 |
+| Tuning, e2e | 534/534, 6 KTs 100% | | unchanged |
+
+The sealed set has 1 false Covered and 1 unsourced fact, before and after.
+It was read twice, both times after every design choice: once at the end,
+and once more after the A10 fix (no number changed). Nothing was chosen by
+its result.
+
+**With Groq (section check only), after.** 37 requests, about 80k tokens (76.8k in, 3.1k out); with the
+0-token run before, 80k of the 120k approved.
+
+| Unseen set | No LLM | Groq before | Groq after |
+|---|---|---|---|
+| Holdouts | 88/95 | 91/95 | 93/95 |
+| Blind b01-b03 | 109/114 | 108/114 | 110/114 |
+| Blind b04-b07 | 118/132 | 122/132 (126 lenient) | 125/132 (129 lenient) |
+| These three | 315/341 (92.4%) | 321/341 (94.1%) | 328/341 (96.2%) |
+| Sealed b08-b11 | 151/160 | | 154/160 |
+| All unseen | 466/501 (93.0%) | | 482/501 (96.2%) |
+
+**P1: transcription accuracy (a proxy).** No reference text exists for the
+four MP3s in `real_kts`: each scored above 200% word error against every
+one of the six scripts there. So Windows' built-in voices read the six
+scripts aloud, two voices, about 75 seconds each, in the scratchpad only.
+Results with beam 2 and the Silero VAD, on this laptop's 2-core CPU
+(`scripts/asr_benchmark.py`, which now takes `--models` and MP3 or MP4):
+
+| Model | Word error | DevOps terms heard | Real-time factor |
+|---|---|---|---|
+| small (the default) | 2.5% | 89/92 | 0.49 |
+| medium | 3.3% | 88/92 | 1.49 |
+| large-v3-turbo (downloaded, 1.6 GB) | 9.9% | 83/92 | 2.32 |
+
+On clear speech the default loses little, and a larger model is no better.
+Large-v3-turbo's worst files are a known Whisper failure: subtitle-credit
+text invented over the silence at the end ("Sub indo by breaking into
+play."), different from run to run. This says nothing about meetings
+(accents, crosstalk, room noise). The item stays open until two or three
+real recordings with corrected transcripts are measured.
+
+**P1: naming speakers.**
+
+- **Teams and Zoom files** (`captions.py`): a WebVTT file with voice tags
+  (Teams) or "Name:" cues (Zoom), or an SRT file, pasted or opened on the
+  start page, becomes "Name: ..." turns. Cue numbers, timings, NOTE blocks
+  and tags are left out.
+- **People in the meeting:** an optional list on the recording upload,
+  offered as names on the KT page.
+- **Naming speakers:** `POST /kt/{id}/speakers` (`{"names": {"Speaker 1":
+  "Priya Sharma"}}`) renames every session's speakers (a recording's
+  segments, a pasted transcript's labels) and the chosen giver, then
+  rebuilds the document as a new version, like changing the giver. A
+  "Speakers" card on the KT page does this. In a pasted transcript a name
+  must stay a turn label (one to three capitalised words).
+- Fetching participants from Teams or Zoom needs an app registration and
+  is not done.
+
+**Checks.**
+
+- **Tests:** 331 passed in the renderer, rule, topic, coverage, knowledge,
+  fact, dialogue, model, examples and cleaner files; 271 in the LLM-control,
+  field and page files; 12 in the speaker and giver files.
+- **End to end:** the suite with recorded Groq answers, 67 passed and 1
+  skipped (as before).
+- **Matrix:** 80 cases, 284/284 must and 44/49 should, unchanged. The model
+  first broke A10 (a must) and one U04 should; that led to X84 and the
+  follow-up line of X80.
+- **Gates:** all pass in both modes (`docs/QUALITY_GATES.md`; QuickBite
+  went from 11 to 12 pages).
+- **Replay coverage:** facts moving between sections changed what the LLM
+  stages are asked, so fewer recorded answers apply. QuickBite used 17
+  recorded answers with 2 missing before, and 5 with 14 missing now; the
+  rest ran rules-only. Re-recording them would spend more Groq quota (25k to 50k tokens at the earlier re-records) and is left to the user.
+- **Browser:** headless Edge on a scratch server with no LLM keys. The 54 checks of the main flow pass, and 13 new ones: a Teams file opened into the paste box, its speakers listed and the giver detected, a speaker renamed and rebuilt as version 2, and a recording uploaded with the people in the meeting. They found one defect, fixed: a KT shows as complete while its worker still saves the PDF, and a rebuild asked for in those seconds (a rename, or the giver change) was refused. The page now waits and asks again, and keeps what was typed when the card is redrawn.
+
+**Limits.**
+
+- The sealed set and the dev additions were written by the same author as
+  the fixes. Real customer KTs are still needed for an independent figure.
+- The transcription figure is synthetic speech, not a meeting.
+- A heading read aloud is printed as a bullet in its section (X82, open).
+- The self-hosted LLM item is deferred.
+- Three discussed sections of b04-b07 are still reported Missing (X67).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

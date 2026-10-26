@@ -1,0 +1,317 @@
+{
+ "id": "d09_saltmarsh_azure_formal",
+ "title": "Saltmarsh: Azure housing repairs, formal document read aloud",
+ "proves": "Numbered section headings said aloud, passive voice, one topic per section.",
+ "transcript": "Saltmarsh handover document, version two. Section one, purpose. Saltmarsh is the housing repairs system used by the council's housing department. Tenants report repairs through the website or the contact centre, and Saltmarsh schedules the work with the repair contractors. The system handles approximately one thousand two hundred repair requests per week.\n\nSection two, architecture. The web front end is an Azure App Service running a .NET 8 application. Repair requests are stored in Azure SQL Database. Requests are sent to contractors through Azure Service Bus, and a Logic App forwards each job to the contractor's own system. Photographs uploaded by tenants are kept in Azure Blob Storage.\n\nSection three, environments. There are three environments: development, user acceptance testing, and production. User acceptance testing is connected to a test instance of each contractor's system.\n\nSection four, deployment. Deployments are performed through Azure DevOps release pipelines. Each release requires approval from the housing systems manager. Releases use deployment slots: the new version is deployed to the staging slot and swapped into production. Rollback is performed by swapping the slots back.\n\nSection five, monitoring. Application Insights records requests and exceptions. An alert is raised when more than twenty Service Bus messages are moved to the dead-letter queue within an hour. Alerts are sent by email to the housing systems support mailbox.\n\nSection six, known issues. Contractor systems occasionally reject jobs because of an unrecognised repair code. In that case, the job appears in the dead-letter queue; correct the repair code in the mapping table and resubmit the message. Additionally, the App Service can exhaust its SQL connection pool during storm events, when repair volumes spike. Scale out the App Service plan to four instances until volumes return to normal.\n\nSection seven, recovery. Azure SQL Database provides point-in-time restore for fourteen days. The recovery point objective is one hour and the recovery time objective is eight hours. Geo-replication to the UK West region is configured but has not been tested.\n\nSection eight, security. Staff authenticate through Microsoft Entra ID with multi-factor authentication. Tenant personal data is classified as confidential. Contractors can only see jobs assigned to them.\n\nSection nine, restrictions. The contractor mapping table must not be edited directly in production; changes are made through the admin screen so that they are audited.\n\nSection ten, operational calendar. Winter storms produce the highest repair volumes. The annual gas safety inspection campaign in October also doubles the number of jobs.\n\nSection eleven, costs. The monthly Azure cost is approximately two thousand five hundred pounds. Reserved capacity for Azure SQL Database was purchased last year and reduced the database cost by a third.\n\nSection twelve, ownership. The system is owned by the housing systems team. Escalations should be directed to Laura Bennett, Housing Systems Manager.\n\nSection thirteen, outstanding work. The integration with the new heating contractor is in progress and is expected to complete in January.\n\nSection fourteen, onboarding. On the first day, request access to the Azure DevOps project and the production resource group. Within the first month, the new owner should complete one release and one dead-letter queue recovery.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Saltmarsh is the housing repairs system used by the council's housing department",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Tenants report repairs through the website or the contact centre",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "Saltmarsh schedules the work with the repair contractors",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "The system handles approximately one thousand two hundred repair requests per week",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "The web front end is an Azure App Service running a .NET 8 application",
+   "alt": [
+    "The web frontend is an Azure App Service running a .NET 8 application"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Repair requests are stored in Azure SQL Database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Requests are sent to contractors through Azure Service Bus",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "a Logic App forwards each job to the contractor's own system",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Photographs uploaded by tenants are kept in Azure Blob Storage",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "There are three environments: development, user acceptance testing, and production",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "User acceptance testing is connected to a test instance of each contractor's system",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Deployments are performed through Azure DevOps release pipelines",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Each release requires approval from the housing systems manager",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "the new version is deployed to the staging slot and swapped into production",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Rollback is performed by swapping the slots back",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Application Insights records requests and exceptions",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "An alert is raised when more than twenty Service Bus messages are moved to the dead-letter queue within an hour",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Alerts are sent by email to the housing systems support mailbox",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Contractor systems occasionally reject jobs because of an unrecognised repair code",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "correct the repair code in the mapping table and resubmit the message",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "the App Service can exhaust its SQL connection pool during storm events",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "Scale out the App Service plan to four instances until volumes return to normal",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Azure SQL Database provides point-in-time restore for fourteen days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "The recovery point objective is one hour",
+   "alt": [
+    "one hour"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the recovery time objective is eight hours",
+   "alt": [
+    "eight hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Geo-replication to the UK West region is configured but has not been tested",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Staff authenticate through Microsoft Entra ID with multi-factor authentication",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Tenant personal data is classified as confidential",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "Contractors can only see jobs assigned to them",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "The contractor mapping table must not be edited directly in production",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Winter storms produce the highest repair volumes",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "The annual gas safety inspection campaign in October also doubles the number of jobs",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "The monthly Azure cost is approximately two thousand five hundred pounds",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "Reserved capacity for Azure SQL Database was purchased last year and reduced the database cost by a third",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "The system is owned by the housing systems team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "Escalations should be directed to Laura Bennett, Housing Systems Manager",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "The integration with the new heating contractor is in progress",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "request access to the Azure DevOps project and the production resource group",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "the new owner should complete one release and one dead-letter queue recovery",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

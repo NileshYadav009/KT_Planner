@@ -204,3 +204,14 @@ def test_disaster_recovery_needs_a_recovery_word_to_win_a_near_tie(monkeypatch):
     near_tie = [0.70, 0.72]
     assert _top(clf, "Spread the sends over an hour.", near_tie) == "common_failures"
     assert _top(clf, "Backups are copied to the second site every hour.", near_tie) == "disaster_recovery"
+
+
+def test_a_numbered_heading_read_aloud_names_its_topic():
+    """Dev d09, a handover document read aloud: "Section eleven, costs." named
+    nothing, and the cost figure after it went to System Overview."""
+    assert topic_anchor("Section eleven, costs.") == ("heading", "cost_optimization")
+    assert topic_anchor("Section six, known issues.") == ("heading", "common_failures")
+    assert topic_anchor("Section nine, restrictions.") == ("heading", "danger_zones")
+    assert topic_anchor("Part 3: deployment.") == ("heading", "deployment_and_rollback")
+    # A statement after the number is not a heading.
+    assert topic_anchor("Section two, the web front end is an Azure App Service.") is None

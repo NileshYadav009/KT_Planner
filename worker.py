@@ -72,6 +72,8 @@ def _run(task: Dict[str, Any], worker_id: str) -> Optional[str]:
             sessions.add_session(job_id, payload)         # a follow-up session of a finished KT (P2-1)
         elif kind == "giver":
             sessions.set_giver(job_id, payload)           # rebuilt with the person the user chose as giver
+        elif kind == "speakers":
+            sessions.rename_speakers(job_id, payload)     # rebuilt with the speakers the user named
         else:
             raise ValueError(f"unknown task kind {kind!r}")
     except Exception as exc:     # the pipeline records its own failures; this is anything else

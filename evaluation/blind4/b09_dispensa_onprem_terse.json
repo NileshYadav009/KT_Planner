@@ -1,0 +1,334 @@
+{
+ "id": "b09_dispensa_onprem_terse",
+ "title": "Dispensa: on-premises pharmacy system, terse spoken notes",
+ "proves": "Fragments without verbs, labels said aloud, self-corrections, a section not discussed.",
+ "transcript": "Right, quick handover for Dispensa before I go on leave. Dispensa is the pharmacy dispensing system for the four hospitals in the trust. Pharmacists check every prescription in it before anything leaves the pharmacy. Busy system, roughly six thousand prescriptions a day.\n\nStack. Front end is an ASP.NET web app on IIS, two web servers behind an F5 load balancer. Database is SQL Server 2019 in an Always On availability group, two nodes in the main data centre. The robot dispensers talk to it through a Windows service called RoboLink. Orders arrive from the electronic patient record over HL7 through the Rhapsody integration engine.\n\nEnvironments: test, training and live. Training is refreshed from live every Sunday with patient names scrambled.\n\nReleases. We use Octopus Deploy. Each release goes to test, then training, then live. Live releases happen on Tuesday evenings after eight, never during pharmacy opening hours. Rollback is Octopus redeploying the previous release; the database scripts have to be reversed by hand, so check with the DBA first.\n\nMonitoring: SCOM watches the servers and the RoboLink service. If RoboLink stops, SCOM emails the service desk. There's also a SQL Agent job that checks the HL7 queue every ten minutes, sorry, every five minutes, and raises an alert if more than fifty messages are stuck.\n\nProblems. Number one: RoboLink loses its connection to a robot after a network blip and the robot stops picking. Restart the RoboLink service on that hospital's server. Number two: HL7 messages stuck because of an invalid ward code. Fix the ward code in the mapping table in Rhapsody and resend the messages.\n\nBackups: full backup nightly, log backups every fifteen minutes, kept for thirty days. Recovery point objective fifteen minutes, recovery time objective four hours. The secondary node is in the same building, so a site loss would take the whole service down.\n\nSecurity: users log in with their NHS smartcard. Controlled drug records need two pharmacists to sign. Audit tables cannot be edited by anyone, including us.\n\nDo not restart the SQL Server primary during the day; a failover drops every pharmacist's session and the robots stop.\n\nWinter is the worst period, flu season doubles the discharges. Also the first Wednesday of August, when the new junior doctors start.\n\nOwned by the clinical applications team. Out of hours, call the on-call clinical apps engineer through the switchboard. Escalation after that is James Whitfield, head of clinical systems.\n\nStill open: the upgrade to SQL Server 2022, planned but not scheduled. And the supplier support contract renewal is due in March.\n\nFirst day: get your smartcard set up and admin rights on the test servers. First month: do one Tuesday release with me watching, sorry, with Kevin watching since I'll be away.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Dispensa is the pharmacy dispensing system for the four hospitals in the trust",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Pharmacists check every prescription in it before anything leaves the pharmacy",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "roughly six thousand prescriptions a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Front end is an ASP.NET web app on IIS",
+   "alt": [
+    "Frontend is an ASP.NET web app on IIS"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "two web servers behind an F5 load balancer",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Database is SQL Server 2019 in an Always On availability group",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "The robot dispensers talk to it through a Windows service called RoboLink",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "Orders arrive from the electronic patient record over HL7 through the Rhapsody integration engine",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "test, training and live",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Training is refreshed from live every Sunday with patient names scrambled",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "We use Octopus Deploy",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Each release goes to test, then training, then live",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Live releases happen on Tuesday evenings after eight",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "never during pharmacy opening hours",
+   "in": [
+    "deployment_and_rollback",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "Rollback is Octopus redeploying the previous release",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "the database scripts have to be reversed by hand",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "SCOM watches the servers and the RoboLink service",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "If RoboLink stops, SCOM emails the service desk",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "raises an alert if more than fifty messages are stuck",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "RoboLink loses its connection to a robot after a network blip",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Restart the RoboLink service on that hospital's server",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "HL7 messages stuck because of an invalid ward code",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Fix the ward code in the mapping table in Rhapsody and resend the messages",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "full backup nightly",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "log backups every fifteen minutes",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "Recovery point objective fifteen minutes",
+   "alt": [
+    "fifteen minutes"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "recovery time objective four hours",
+   "alt": [
+    "four hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "The secondary node is in the same building",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "users log in with their NHS smartcard",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Controlled drug records need two pharmacists to sign",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Audit tables cannot be edited by anyone",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Do not restart the SQL Server primary during the day",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Winter is the worst period, flu season doubles the discharges",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "the first Wednesday of August, when the new junior doctors start",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "Owned by the clinical applications team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "call the on-call clinical apps engineer through the switchboard",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "James Whitfield, head of clinical systems",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "the upgrade to SQL Server 2022, planned but not scheduled",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "the supplier support contract renewal is due in March",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "get your smartcard set up and admin rights on the test servers",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F41",
+   "quote": "do one Tuesday release",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization"
+ ],
+ "source": "written for round 8 (synthetic, sealed)",
+ "holdout": true
+}

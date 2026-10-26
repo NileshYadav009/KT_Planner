@@ -77,6 +77,16 @@ def test_ordinary_phrase_close_to_a_term_word_by_word_is_left_alone():
     assert corrections == []
 
 
+def test_a_possessive_is_not_a_garbled_term():
+    # "Stripe's test" scored 0.92 against "stress test" and passed every
+    # per-word check: the payment provider's test mode became a stress test.
+    from devops_transcription import apply_fuzzy_term_corrections
+    text = "Dev uses Stripe's test mode, so no real money moves."
+    corrected, corrections = apply_fuzzy_term_corrections(text)
+    assert corrected == text
+    assert corrections == []
+
+
 def test_genuine_multiword_fuzzy_corrections_still_work():
     # Guards against the Levenshtein guard being too strict and blocking
     # real corrections it wasn't meant to touch. Now lands on the canonical

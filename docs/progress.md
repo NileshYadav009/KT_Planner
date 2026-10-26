@@ -1821,3 +1821,33 @@ Results:
   menu button) and in dark mode.
 - **Checked:** 54 checks of the main flow in a real browser passed; no LLM
   used.
+
+## Accuracy work from the enterprise checklist (audit §9abd, 26 Oct)
+
+- **Without an LLM, 93% of facts now land in the right section on KTs the
+  rules were never tuned on** (466 of 501; it was 88% on the same KTs). The
+  target is 90%. On a new set kept sealed until the end it is 151 of 160
+  (94%).
+- **With Groq's section check:** 482 of 501 (96%). The measurement used
+  about 80k Groq tokens of the 120k approved.
+- **How:** a small learned model now helps the classifier pick a section
+  for each fact. It is trained only on our own synthetic KTs. Four generic
+  fixes found on new practice KTs:
+  - the new owner's first day or first month;
+  - numbered headings read aloud ("Section eleven, costs.");
+  - "rate limits us" counted as a failure;
+  - a cleaner bug that turned "Stripe's test mode" into "stress test
+    mode".
+- **Speakers can be named:**
+  - a recording's "Speaker 1, 2" can be named on the KT page, and the
+    document is rebuilt as a new version;
+  - a Teams or Zoom transcript file keeps its names;
+  - the people in the meeting can be listed when uploading.
+- **Transcription:** on clean synthetic speech the default Whisper model
+  makes 2.5% word errors, and a larger model is no better. Real meeting
+  recordings with corrected transcripts are still needed to measure what
+  matters.
+- **Not done:**
+  - a self-hosted LLM (deferred);
+  - real customer KTs for an independent test;
+  - real meeting recordings.

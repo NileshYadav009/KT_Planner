@@ -149,6 +149,19 @@ def turn_segments(transcript: str) -> Optional[List[Dict[str, Any]]]:
             for i, seg in enumerate(segments)]
 
 
+def rename_turn_labels(transcript: str, names: Dict[str, str]) -> str:
+    """A pasted transcript with its speakers renamed ({"Speaker 1": "Priya
+    Sharma"}): only the turn labels change, never what was said."""
+    def rename(match):
+        old = match.group(1)
+        if old not in names:
+            return match.group(0)
+        whole, start = match.group(0), match.start(0)
+        return whole[:match.start(1) - start] + names[old] + whole[match.end(1) - start:]
+
+    return _TURN_RE.sub(rename, transcript or "")
+
+
 # A greeting or the start of the session on its own: "Morning both.",
 # "Okay, let's begin." (left in System Overview).
 _SESSION_START_RE = re.compile(

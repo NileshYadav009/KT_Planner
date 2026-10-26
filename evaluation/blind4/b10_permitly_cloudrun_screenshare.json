@@ -1,0 +1,317 @@
+{
+ "id": "b10_permitly_cloudrun_screenshare",
+ "title": "Permitly: Cloud Run permits, screen-share walkthrough",
+ "proves": "Narration of what is on screen ('on the left', 'down here'), facts said while pointing.",
+ "transcript": "Okay, can everyone see my screen? Great. So this is Permitly, the parking permit system the city council uses. Residents apply for permits online, and the parking wardens check permits from their handheld devices. We have about ninety thousand active permits.\n\nLet me open the architecture diagram. On the left is the public website, which is a React app hosted on Firebase Hosting. In the middle is the API on Cloud Run. Applications are stored in Firestore, and uploaded documents like proof of address go into a Cloud Storage bucket. Payments go through Stripe. When a payment succeeds, Stripe calls our webhook, and the webhook publishes a message to Pub/Sub that the permit issuing service picks up.\n\nNow I'll switch to the Cloud Build page. Every merge to main triggers a build, and the new revision is deployed to Cloud Run with no traffic. Then we move traffic over gradually, ten percent first. If the new revision misbehaves, you shift all traffic back to the previous revision on this screen here. That takes seconds.\n\nThis is the projects list. We've got permitly-dev and permitly-prod. Dev uses Stripe's test mode, so no real money moves.\n\nHere's the monitoring dashboard. These charts are request count, error rate and latency for the API. Down here is the Pub/Sub backlog. We have an uptime check on the public site every minute, and alerts go to the team's Google Chat space.\n\nSo what goes wrong. You can see this spike in errors here; that was Stripe webhooks failing because the signing secret was rotated and not updated in our config. If that happens, update the secret in Secret Manager and redeploy. The other thing is permit renewals in January: the backlog in Pub/Sub grows and permits are issued late. Raise the maximum instances of the issuing service and it catches up.\n\nFirestore has daily exports to a separate bucket, kept for ninety days. I'm honestly not sure anyone has tried restoring one.\n\nSecurity. The wardens' devices authenticate with a client certificate. Only two people have the owner role on the production project. All personal data stays in the europe-west2 region.\n\nPlease never change the Firestore indexes by hand in production. They are managed in the repo, and a manual change gets overwritten and can break queries.\n\nJanuary is our peak because most permits renew at the start of the year. Also the week after a new parking zone is announced.\n\nCosts are small, about six hundred pounds a month. The biggest item is Cloud Run, and we set minimum instances to zero on dev.\n\nThe digital services team owns Permitly. Escalation goes to Amara Osei, the digital services lead.\n\nWe still have to switch off the old paper permit process, that's due in the spring. Also the wardens' app needs an update for the new Android version, and nobody has picked it up yet.\n\nFor your first day, ask for the Viewer role on prod and Editor on dev. In the first month, try to handle the January renewal peak with someone shadowing you.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Permitly, the parking permit system the city council uses",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "Residents apply for permits online",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the parking wardens check permits from their handheld devices",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "We have about ninety thousand active permits",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "the public website, which is a React app hosted on Firebase Hosting",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the API on Cloud Run",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Applications are stored in Firestore",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "uploaded documents like proof of address go into a Cloud Storage bucket",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Payments go through Stripe",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "the webhook publishes a message to Pub/Sub that the permit issuing service picks up",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "Every merge to main triggers a build",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "the new revision is deployed to Cloud Run with no traffic",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Then we move traffic over gradually, ten percent first",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "you shift all traffic back to the previous revision",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "We've got permitly-dev and permitly-prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Dev uses Stripe's test mode, so no real money moves",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "These charts are request count, error rate and latency for the API",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Down here is the Pub/Sub backlog",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "We have an uptime check on the public site every minute",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "alerts go to the team's Google Chat space",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Stripe webhooks failing because the signing secret was rotated and not updated in our config",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "update the secret in Secret Manager and redeploy",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "the backlog in Pub/Sub grows and permits are issued late",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "Raise the maximum instances of the issuing service and it catches up",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Firestore has daily exports to a separate bucket, kept for ninety days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "I'm honestly not sure anyone has tried restoring one",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "The wardens' devices authenticate with a client certificate",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Only two people have the owner role on the production project",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "All personal data stays in the europe-west2 region",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "never change the Firestore indexes by hand in production",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "January is our peak because most permits renew at the start of the year",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "the week after a new parking zone is announced",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "about six hundred pounds a month",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "we set minimum instances to zero on dev",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "The digital services team owns Permitly",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "Escalation goes to Amara Osei, the digital services lead",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "switch off the old paper permit process, that's due in the spring",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "the wardens' app needs an update for the new Android version",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "ask for the Viewer role on prod and Editor on dev",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "handle the January renewal peak with someone shadowing you",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 8 (synthetic, sealed)",
+ "holdout": true
+}

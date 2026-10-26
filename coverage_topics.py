@@ -218,6 +218,14 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
 # Sections recorded after the session, never a gap in the session itself.
 AFTER_REVIEW_SECTIONS = {"signoff"}
 
+# Sections about what is not done yet, and the topic a stated gap in them
+# covers: there, "the failover procedure and the recovery runbook are still
+# missing" is the content (work left to do), not a gap in the section. Open
+# Responsibilities holding only that sentence was reported Missing beside it
+# (the QuickBite e2e KT, 26 Oct). Only the section's own statements count:
+# the same sentence under Disaster Recovery does not cover open work.
+GAPS_ARE_CONTENT_SECTIONS = {"open_responsibilities": "Open work"}
+
 _COMPILED = {sid: [(label, fields, re.compile(rx, _I) if rx else None) for label, fields, rx in topics]
              for sid, topics in SECTION_TOPICS.items()}
 

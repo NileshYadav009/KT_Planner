@@ -234,7 +234,8 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
 
     # The tenant this job belongs to scopes the LLM cache and decides whether
     # transcript content may reach an external LLM at all (P0-9).
-    tenant_id = ((JOB_QUEUE.get(job_id) or {}) if job_id in JOB_QUEUE else {}).get("tenant_id") or "local"
+    job_record = (JOB_QUEUE.get(job_id) or {}) if job_id in JOB_QUEUE else {}
+    tenant_id = job_record.get("tenant_id") or "local"
     llm_policy = tenant_llm_policy(tenant_id)
     tenant_token = CURRENT_TENANT.set(tenant_id)
     policy_token = LLM_POLICY.set(llm_policy)
@@ -809,6 +810,8 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             # (None: detected). A rebuild keeps the choice.
             "speaker_roles": kt.speaker_roles,
             "giver": giver,
+            # The people listed on upload, offered when the speakers are named.
+            "participants": job_record.get("participants"),
             "dynamic_schema": dynamic_schema,
             "populated_fields": populated_fields,
             "validation_warnings": validation_warnings,

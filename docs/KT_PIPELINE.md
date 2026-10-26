@@ -85,6 +85,16 @@ follow-up (`StructuredKT.dialogue_findings`). The document names the giver
 (`POST /kt/{job_id}/giver`, `sessions.set_giver`). Corrections between
 speakers are in `docs/CORRECTIONS.md`.
 
+**Naming speakers** (§9abd): a Teams or Zoom transcript file (WebVTT with
+voice tags or "Name:" cues, or SRT) is turned into "Name: ..." turns before
+anything else (`captions.to_turns`, on paste and on a pasted session). A
+recording's diarised "Speaker 1, 2", or a pasted transcript's labels, are
+named on the KT page (`POST /kt/{job_id}/speakers`,
+`sessions.rename_speakers`): every session's segments and labels, and a
+chosen giver, are renamed and the document is rebuilt as a new version.
+The people listed on upload (`participants`) are offered as names; nothing
+maps them to voices automatically.
+
 **Stage 3.6 — one unit per sentence and section** (`rejoin_classified`):
 once every fact has its section, the facts of one sentence that sit side by
 side in one section become one unit again, shown as the spoken sentence.
@@ -103,6 +113,20 @@ cross-encoder reranker (`ms-marco-MiniLM-L-6-v2`) was removed in audit §9aam:
 against a section title it scored about -10 for nearly every pair and added
 nothing measurable. Scores keep the 0.4 scale its blend gave them
 (`CLASSIFIER_SCORE_SCALE`), which the thresholds were set on.
+
+**Learned section model** (`section_model.npz`, audit §9abd): a logistic
+regression over the fact's embedding and its context's (the two embeddings
+the classifier already computes), trained on the annotated facts of the
+synthetic tuning goldens and the development KTs
+(`scripts/build_section_model.py`). `SECTION_MODEL_WEIGHT` (0.1) times its
+probability is added to every section's score; `SECTION_MODEL_WEIGHT=0`
+turns it off, and a missing file leaves the scores as they were. It reads
+with numpy only. The weight and the regularisation were chosen
+leave-one-KT-out on those KTs; trained on the fact alone, without its
+context, it did worse than no model.
+
+A heading read aloud with a number ("Section eleven, costs.") names its
+topic like a plain one.
 
 **Topic segments** (`section_rules.segment_topics()`, audit §9aaj): every
 fact gets the topic the speaker last named, and that section gets

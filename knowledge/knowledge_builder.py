@@ -12,10 +12,11 @@ from field_populator import (
 )
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_unconfirmed, states_something,
+from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_question, is_unconfirmed,
+                      states_something,
                       states_something_before_gap,
                       without_session_framing)
-from coverage_topics import AFTER_REVIEW_SECTIONS, assess_topics
+from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics
 from fact_units import fact_texts
 
 
@@ -1614,7 +1615,8 @@ def append_coverage_matrix_section(
         # the session, not coverage (dialogue.py). A section discussed only
         # to say so is Missing, with the speaker's words as the reason.
         texts = [s.get("text", "") for s in (cov.get("sentences") or []) if isinstance(s, dict)]
-        stated_gaps = [t for t in texts if is_gap_statement(t)]
+        gaps_are_content = section_id in GAPS_ARE_CONTENT_SECTIONS
+        stated_gaps = [t for t in texts if is_gap_statement(t) and not gaps_are_content]
         only_stated_gaps = bool(texts) and len(stated_gaps) == len(texts) and \
             not any(states_something(t) for t in stated_gaps)
         if only_stated_gaps:
@@ -1624,7 +1626,7 @@ def append_coverage_matrix_section(
         field_objects = (section_obj or {}).get("fields") or {}
         knowledge_items = (section_obj or {}).get("_architecture_components") or []
         structured = cov.get("_structured") if isinstance(cov.get("_structured"), dict) else {}
-        own_texts = [t for t in texts if is_field_candidate(t)]
+        own_texts = [t for t in texts if is_field_candidate(t) or (gaps_are_content and not is_question(t))]
         # A fact saying something is missing ("the RTO and RPO have not been
         # documented") does not cover it: topics are assessed on the section's
         # facts without its stated gaps. Read whole, that sentence counted
@@ -1635,13 +1637,20 @@ def append_coverage_matrix_section(
         # as one gap, Disaster Recovery was reported Missing (matrix A18). A
         # question and its answer stay together (no cut at "?").
         own_facts = [f for t in own_texts for s in re.split(r"(?<=[.!])\s+", t) for f in fact_texts(s)
-                     if not is_gap_statement(f)]
+                     if gaps_are_content or not is_gap_statement(f)]
         # And whole: a comparison spans the facts it is cut into ("We have
         # three replicas in staging, but production runs five replicas"
         # states a difference between environments; a user's KT, 23 Oct).
         own_facts += [s for t in own_texts for s in re.split(r"(?<=[.!])\s+", t)
-                      if s not in own_facts and not is_gap_statement(s)]
+                      if s not in own_facts and (gaps_are_content or not is_gap_statement(s))]
         topic_states = assess_topics(section_id, field_objects, own_facts, other_texts_for(section_id), structured)
+        gap_topic = GAPS_ARE_CONTENT_SECTIONS.get(section_id)
+        if gap_topic and topic_states and any(is_gap_statement(t) for t in own_texts):
+            topic_states = [(label, "captured", None) if label == gap_topic and state == "missing" else (label, state, where)
+                            for label, state, where in topic_states]
+        if gap_topic:
+            # Work left to do is still something to ask the outgoing owner about.
+            gaps.extend(f"{title}: still to do (“{_short_quote(t)}”)" for t in own_texts if is_gap_statement(t))
         if topic_states and not own_texts:
             # A section the session never discussed as such, though one of its
             # topics came up elsewhere ("Secret Manager handles secrets" under

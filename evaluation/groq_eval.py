@@ -7,6 +7,7 @@ dev      per fact, saved to evaluation/results/LABEL.json
 holdout  h12-h14: AGGREGATE ONLY
 blind2   evaluation/blind (b01-b03): AGGREGATE ONLY
 blind3   evaluation/blind3 (b04-b07, written 25 Oct): AGGREGATE ONLY
+blind4   evaluation/blind4 (b08-b11, written 26 Oct, sealed): AGGREGATE ONLY
 
 Stops before a KT once GROQ_BUDGET live requests (default 150) were sent.
 Unchanged prompts are answered from evaluation/.cache/llm_cache.sqlite and
@@ -92,7 +93,8 @@ goldens = golden_eval.load_goldens()
 docs = {"dev": load_dir(os.path.join(HERE, "dev")),
         "holdout": [g for g in goldens if g.get("holdout")],
         "blind2": load_dir(os.path.join(HERE, "blind")),
-        "blind3": load_dir(os.path.join(HERE, "blind3"))}
+        "blind3": load_dir(os.path.join(HERE, "blind3")),
+        "blind4": load_dir(os.path.join(HERE, "blind4"))}
 out = {"label": label, "budget": BUDGET, "only": ONLY, "variant": {k: os.environ.get(k) for k in
                                                                    ("LLM_VERIFY_CANDIDATES", "LLM_VERIFY_PURPOSE")}}
 sent = 0
