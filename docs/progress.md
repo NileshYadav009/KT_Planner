@@ -1907,3 +1907,34 @@ Results:
   model download step (a file it needs was not copied in). Fixed, but not
   tested: building the image needs Docker Desktop.
 - **Settings:** `PUNCTUATION_MODEL=0` turns it off.
+
+## Hardening, speed and the open accuracy items (audit §9abg, 26 Oct)
+
+- **Safer to run:** pasted transcripts are cleaned off the request path and
+  capped at 150,000 characters; every response carries browser security
+  headers; the API reference needs a sign-in; a browser session ends after
+  30 minutes without activity; expired KTs are deleted hourly, not only at
+  startup.
+- **Backups:** `scripts/backup.py` backs up the database and screenshots
+  while the app runs, checks a backup, restores one, and has a drill that
+  restores into a scratch folder and reads every KT back.
+- **Database changes** are numbered migrations (`migrations.py`), recorded
+  in the database.
+- **Data per customer:** vocabulary suggestions are kept per workspace and
+  deleted with it.
+- **Faster:** each sentence is embedded once and the entity model runs in
+  batches. A 487-word KT took 61 s instead of 86 s, a 1,367-word one 125 s
+  instead of 231 s, with the same document.
+- **Removed:** a second way of filling the web form (with a random fallback),
+  an unused template router, an unused page and code block.
+- **Accuracy:** two placement rules (change control, getting ready for a busy
+  event), numbered headings read aloud no longer printed as bullets, a
+  deployment chain shown one step per tool, the duplicate name list under
+  Architecture left out when the diagram is drawn, and two kinds of
+  contradiction flagged without an LLM. Dev 549 to 551 of 551; unseen KTs
+  unchanged at 466 of 501. Two other ideas were measured and dropped: they
+  lost facts.
+- **Found:** cleaning a long paste got slower with the square of its length
+  (now linear, same output), database connections were left open, a test
+  had failed since the page redesign, and in Docker approved vocabulary is not
+  kept on the data volume (open).

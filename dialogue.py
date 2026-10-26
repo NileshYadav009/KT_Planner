@@ -420,6 +420,32 @@ def is_greeting_only(text: str) -> bool:
     return bool(match) and not (text or "")[match.end():].strip()
 
 
+def is_heading_only(text: str) -> bool:
+    """A numbered heading read aloud: "Section two, architecture.", "Part
+    four: release process." It names the topic of what follows
+    (section_rules.segment_topics) and says nothing itself, yet it was
+    printed as a bullet of its section (X82). Only a numbered one: in speech
+    to text without punctuation a receiver's question reads like a heading
+    ("Costs?" as "costs."), and dropping those left two sections of a
+    question-and-answer KT reported Missing (dev d05, noisy copy). A phrase
+    with a verb, a figure or a name is a statement."""
+    from fact_units import _is_finite_verb, _tokens
+    from section_rules import _NUMBERED_HEADING_RE, _SPEAKER_PREFIX_RE, _segment_topic_of, heading_phrase
+
+    phrase = heading_phrase(text)
+    numbered = _NUMBERED_HEADING_RE.match(_SPEAKER_PREFIX_RE.sub("", text or "", count=1).strip())
+    if phrase is None or not numbered or re.search(r"\d", phrase):
+        return False
+    # A verb with something after it ("Terraform manages infrastructure"); a
+    # last word that could be one is the heading's noun ("known issues").
+    tokens = _tokens(phrase)
+    if any(_is_finite_verb(tokens, i) for i in range(1, len(tokens) - 1)):
+        return False
+    # A capital after the first word is a name, unless the word is itself a
+    # topic ("Backups and DR.").
+    return not any(w[:1].isupper() and not _segment_topic_of(w) for w in phrase.split()[1:])
+
+
 def is_handover_announcement(text: str) -> bool:
     """True when the sentence only announces what is being handed over (its
     name, which the document's title already gives) and states nothing else."""

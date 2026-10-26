@@ -131,16 +131,26 @@ def apply_marks(words: List[str], sentences: List[str], commas: bool = False) ->
     return " ".join(out)
 
 
+def _runs_needing_it(parts: List[str]) -> List[int]:
+    # Runs between sentence ends and line breaks, with what separates them:
+    # the cleaner runs again on its own output, where paragraphs are one line
+    # joined by full stops, and each of them is a run of its own.
+    return [i for i in range(0, len(parts), 2) if needs_punctuation(_LABEL_RE.sub("", parts[i].strip()))]
+
+
+def would_restore(text: str) -> bool:
+    """restore_punctuation would send part of `text` to the model. Checked
+    without loading it: the API leaves such a paste to a worker."""
+    return bool(text) and _enabled() and bool(_runs_needing_it(_RUN_SPLIT_RE.split(text)))
+
+
 def restore_punctuation(text: str) -> str:
     """`text` with punctuation for each paragraph that has none (see the
     module docstring); unchanged when none needs it or the model is off."""
     if not text or not _enabled():
         return text
-    # Runs between sentence ends and line breaks, with what separates them:
-    # the cleaner runs again on its own output, where paragraphs are one line
-    # joined by full stops, and each of them is a run of its own.
     parts = _RUN_SPLIT_RE.split(text)
-    todo = [i for i in range(0, len(parts), 2) if needs_punctuation(_LABEL_RE.sub("", parts[i].strip()))]
+    todo = _runs_needing_it(parts)
     if not todo:
         return text
     model = _load()

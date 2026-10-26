@@ -23,7 +23,7 @@ import ffmpeg
 import torch
 from faster_whisper import BatchedInferencePipeline, WhisperModel
 
-from ai import map_analysis_to_fields, polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
+from ai import polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript, close_segment_sentences
 from input_gate import assess_transcript, language_warning
@@ -140,6 +140,29 @@ def apply_retention() -> int:
     return len(removed)
 
 
+RETENTION_CHECK_SECONDS = 3600.0
+_retention_checked_at = 0.0
+_retention_lock = Lock()
+
+
+def apply_retention_when_due(now: Optional[float] = None) -> int:
+    """apply_retention at most once an hour per process, from the worker
+    heartbeat. It ran only when the API started, so a server that stayed up
+    never deleted an expired KT."""
+    global _retention_checked_at
+    import time
+
+    now = now or time.time()
+    with _retention_lock:
+        if now - _retention_checked_at < RETENTION_CHECK_SECONDS:
+            return 0
+        _retention_checked_at = now
+    removed = apply_retention()
+    if removed:
+        logger.info("Retention: deleted %d job(s) older than CONTINUUM_RETENTION_DAYS", removed)
+    return removed
+
+
 def load_models():
     """Load heavy models on startup so endpoints can use them."""
     global MODEL, MAPPER_PIPELINE
@@ -173,6 +196,21 @@ class DocumentAssemblyError(RuntimeError):
 class InputRejected(ValueError):
     """What was submitted cannot make a KT document (empty, no speech, not
     a KT). The job fails with this message; it is not a system error."""
+
+
+def clean_queued_paste(payload: dict) -> dict:
+    """A paste the API queued as it came (`"clean": true`), because its text
+    needs the punctuation model, which only workers load: cleaned and checked
+    here as the API checks any other paste. Other payloads are returned as
+    they are. Raises InputRejected with the input gate's reasons."""
+    if not payload.get("clean"):
+        return payload
+    cleaned = clean_transcript(payload.get("transcript") or "")
+    gate = assess_transcript(cleaned, source="paste")
+    if gate["verdict"] == "reject" and not payload.get("force"):
+        raise InputRejected(" ".join(gate["reasons"]))
+    return dict(payload, transcript=cleaned, clean=False,
+                warnings=gate["reasons"] if gate["verdict"] != "ok" else [])
 
 
 def _stage_failed(stage_errors: list, stage: str, exc: Exception, notice: Optional[str] = None,
@@ -763,7 +801,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         try:
             candidates = detect_vocabulary_candidates(transcript)
             if candidates:
-                record_candidates(candidates, job_id)
+                record_candidates(candidates, job_id, tenant_id)
         except Exception as exc:
             _stage_failed(stage_errors, "Vocabulary learning", exc, None)
 
@@ -781,15 +819,6 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
 
         JOB_QUEUE.set_progress(job_id, 85)
 
-        field_analysis = {
-            sec_id: {
-                "chunks": info.get("content", []),
-                "scores": [float(info.get("confidence", 0.0))] * len(info.get("content", []))
-            }
-            for sec_id, info in coverage.items()
-        }
-        mapped_fields = map_analysis_to_fields(field_analysis, SCHEMA)
-
         result = {
             "status": "completed",
             "transcript": transcript,
@@ -799,7 +828,6 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             "time_offset": time_offset,
             "coverage": coverage,
             "knowledge_object": knowledge_object,
-            "mapped_fields": mapped_fields,
             "missing_required": missing_required,
             "progress": progress,
             "screenshots": screenshots,

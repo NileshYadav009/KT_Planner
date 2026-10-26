@@ -35,6 +35,17 @@ def test_only_the_context_mapper_classifies():
     assert offenders == []
 
 
+def test_one_source_of_field_values():
+    # The web form once had its own field values (ai.map_analysis_to_fields:
+    # the nearest sentence by a second model, random vectors if that model
+    # failed to load). The page and the PDF both read populated_fields.
+    import ai
+    assert not hasattr(ai, "map_analysis_to_fields") and not hasattr(ai, "get_sentence_model")
+    with open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    assert "populated_fields" in page and "mapped_fields" not in page
+
+
 def test_the_project_root_holds_modules_not_scripts():
     loose = [f for f in os.listdir(ROOT) if f.endswith(".py") and f.startswith(("test_", "demo_"))]
     assert loose == []

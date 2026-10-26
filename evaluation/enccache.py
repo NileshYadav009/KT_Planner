@@ -145,6 +145,27 @@ def install(path):
             return res
 
         model.predict_entities = predict_entities
+
+        # The app predicts each KT's facts in batches (EntityExtractor.prefetch):
+        # kept per text, apart from the one-at-a-time results.
+        g_inference = model.inference
+
+        def inference(texts, labels, *pa, **pk):
+            items = [texts] if isinstance(texts, str) else list(texts)
+            extra = (json.dumps(list(labels)), json.dumps([str(x) for x in pa]),
+                     json.dumps(sorted((x, str(v)) for x, v in pk.items())))
+            keys = [_key("glb", *extra, t) for t in items]
+            found = _get_many(list(set(keys)))
+            todo = list(dict.fromkeys(items[i] for i, kk in enumerate(keys) if kk not in found))
+            STATS["hit"] += len(items) - len(todo)
+            STATS["miss"] += len(todo)
+            if todo:
+                new = {_key("glb", *extra, t): r for t, r in zip(todo, g_inference(todo, labels, *pa, **pk))}
+                _put_many(list(new.items()))
+                found.update(new)
+            return [found[kk] for kk in keys]
+
+        model.inference = inference
         model._memo_wrapped = True
 
     entity_extractor.EntityExtractor.__init__ = ee_init_memo

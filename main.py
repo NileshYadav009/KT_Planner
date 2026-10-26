@@ -3,11 +3,14 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+import re
 
 import logging
 logger = logging.getLogger(__name__)
 
 from api import router
+import browser_security
+import input_gate
 import media_guard
 import observability
 import pipeline
@@ -17,7 +20,8 @@ import worker
 observability.configure_logging()
 observability.init_error_tracking()
 
-app = FastAPI()
+# The API reference is served by api/routes.py, to signed-in users only.
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 # CORS configuration - restrict to allowed origins
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
@@ -25,7 +29,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in ALLOWED_ORIGINS],
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Continuum-CSRF", "Idempotency-Key"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Continuum-CSRF", "X-Continuum-Background",
+                   "Idempotency-Key"],
 )
 
 
@@ -48,18 +53,40 @@ async def request_id(request: Request, call_next):
     return response
 
 
+_PASTE_PATH_RE = re.compile(r"/kt-from-transcript|/kt/[^/]+/sessions")
+
+
 @app.middleware("http")
 async def refuse_oversized_uploads(request: Request, call_next):
     """Refuse an upload that declares a size over the limit before its body
     is read (media_guard.save_upload also stops one that does not declare
-    it). Set the same limit on the reverse proxy in production."""
-    if request.method == "POST" and request.url.path == "/upload":
+    it), and likewise a pasted transcript far over its limit (the route
+    counts its characters). Set the same limits on the reverse proxy in
+    production."""
+    if request.method == "POST":
         length = request.headers.get("content-length", "")
-        if length.isdigit() and int(length) > media_guard.max_upload_bytes() + 64 * 1024:   # + multipart overhead
+        length = int(length) if length.isdigit() else 0
+        if request.url.path == "/upload" and length > media_guard.max_upload_bytes() + 64 * 1024:   # + multipart overhead
             detail = (f"The file is larger than {media_guard.upload_limit_label()}. "
                       "Upload a shorter recording or the audio track only.")
             return JSONResponse({"detail": detail}, status_code=413)
+        # A character is at most 6 bytes of JSON ("é").
+        if _PASTE_PATH_RE.fullmatch(request.url.path) and length > input_gate.MAX_PASTE_CHARS * 6 + 64 * 1024:
+            detail = (f"The transcript is longer than the limit of {input_gate.MAX_PASTE_CHARS:,} characters. "
+                      "Split it into sessions and add them to the KT one by one.")
+            return JSONResponse({"detail": detail}, status_code=413)
     return await call_next(request)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Browser security headers on every response, including the refusals
+    above (added last, so it runs first; see browser_security.py)."""
+    response = await call_next(request)
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    for name, value in browser_security.headers_for(request.url.path, https).items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 # Serve the frontend static files

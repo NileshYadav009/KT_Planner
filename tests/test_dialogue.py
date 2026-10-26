@@ -298,3 +298,27 @@ def test_a_no_that_gives_the_right_value_is_a_correction_not_a_gap():
     assert is_gap_statement("Is there a DR plan? No.")
     assert is_gap_statement("Do we have a runbook? No, there isn't one.")
     assert is_gap_statement("Is it encrypted? No, not yet.")
+
+
+@pytest.mark.parametrize("said, heading", [
+    ("Section two, architecture.", True),
+    ("Part four: release process.", True),
+    ("Ines: Section three, ownership.", True),
+    ("Part six: known issues and fixes.", True),          # "issues" is the heading's noun
+    ("Section two, Terraform manages infrastructure.", False),
+    # Not numbered: in speech to text without punctuation a question reads
+    # the same ("Costs?" as "costs."), so these stay.
+    ("Known problems.", False),
+    ("costs.", False),
+    # Statements, not headings.
+    ("Section two, the API runs on EKS.", False),
+    ("Secrets in CyberArk.", False),
+    ("Terraform manages infrastructure.", False),
+])
+def test_a_heading_read_aloud_is_not_a_fact(said, heading):
+    """X82: "Section two, architecture." was printed as a bullet of
+    Architecture Knowledge. It still names the topic of what follows
+    (section_rules.topic_anchor)."""
+    from dialogue import is_heading_only
+
+    assert is_heading_only(said) is heading

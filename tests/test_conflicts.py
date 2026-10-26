@@ -164,7 +164,9 @@ def test_the_llm_conflict_check_lists_related_statements_and_keeps_only_valid_pa
 def test_a_conflict_the_llm_finds_is_shown_like_the_others():
     from knowledge.knowledge_builder import apply_conflicts, apply_llm_conflict_check, attach_conflict_warnings
 
-    a, b = "Developers own deployment approvals.", "Only the release manager can approve production deployments."
+    # A pair the rules cannot see (adversarial matrix D04; D02's is found
+    # without the LLM since §9abg).
+    a, b = "The service is public.", "Only private subnets are permitted to reach it."
     fine, never = "Deploying on Fridays is fine for us.", "Never deploy on Fridays, we had an outage."
     coverage = {"ownership_escalation": {"sentences": [{"text": a}]},
                 "deployment_and_rollback": {"sentences": [{"text": b}, {"text": fine}, {"text": never}]}}
@@ -286,3 +288,34 @@ def test_an_environment_after_the_count_or_an_outdated_count_is_not_a_conflict()
     assert find_value_conflicts([said, "Earlier, someone mentioned four production replicas, but that information "
                                        "is outdated."]) == []
     assert find_value_conflicts(["Production runs three replicas.", "Production runs five replicas."])
+
+
+def test_one_schedule_with_two_periods_is_flagged_without_an_llm():
+    """Adversarial matrix D03 (X8): "Backups run hourly." / "Our current
+    scheduled backup interval is every six hours." was flagged only by the
+    LLM check."""
+    from conflicts import find_value_conflicts
+
+    assert find_value_conflicts(["Backups run hourly.", "The ledger runs on Oracle on two servers.",
+                                 "Our current scheduled backup interval is every six hours."]) == [
+        ("Backups run hourly.", "Our current scheduled backup interval is every six hours.")]
+    for pair in (["Full backups run weekly.", "Log backups run every fifteen minutes."],      # two schedules
+                 ["We deploy to staging daily.", "Production deployments happen weekly."],
+                 ["Backups run hourly during business hours.", "Backups run every six hours."],
+                 ["Backups run nightly.", "Snapshots are taken every hour."],
+                 ["Backups run nightly.", "Sorry, backups run hourly."]):                     # a correction
+        assert find_value_conflicts(pair) == [], pair
+
+
+def test_who_may_do_a_thing_said_two_ways_is_flagged_without_an_llm():
+    """Adversarial matrix D02 (X8)."""
+    from conflicts import find_exclusive_conflicts
+
+    only = "Only the release manager can approve production deployments."
+    assert find_exclusive_conflicts(["Developers own deployment approvals.", only]) == [
+        ("Developers own deployment approvals.", only)]
+    for other in ("The release manager approves production deployments on Thursdays.",    # the same person
+                  "Developers cannot approve production deployments.",                   # agrees
+                  "Developers deploy to staging whenever they like.",                    # another action
+                  "Releases are built by GitLab CI and deployed to OpenShift."):
+        assert find_exclusive_conflicts([other, only]) == [], other

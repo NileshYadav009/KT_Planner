@@ -5,8 +5,10 @@ Extracts structured entities (tools, environments, owners, escalation levels, se
 from sentences to enrich classification with metadata.
 """
 
+from collections import OrderedDict
 from typing import Dict, List, Any, Optional
 import logging
+import threading
 
 try:
     from gliner import GLiNER
@@ -17,6 +19,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# Texts whose entities are kept (EntityExtractor.prefetch, _predict).
+MEMO_TEXTS = 5_000
 
 # Default entity types to extract
 DEFAULT_ENTITY_LABELS = [
@@ -51,6 +56,8 @@ class EntityExtractor:
         """
         self.model = None
         self.entity_labels = entity_labels or DEFAULT_ENTITY_LABELS
+        self._memo: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+        self._memo_lock = threading.Lock()
         self.use_gliner = use_gliner
         
         if not _GLINER_AVAILABLE or not use_gliner:
@@ -64,6 +71,42 @@ class EntityExtractor:
             logger.warning(f"Failed to load GLiNER model: {e}. Entity extraction will be disabled.")
             self.model = None
     
+    def prefetch(self, texts: List[str]) -> None:
+        """Predict the entities of every text not yet known, eight at a time:
+        GLiNER one fact at a time was about a third of a KT's time on a CPU,
+        and in batches it takes half as long, with the same entities (all 57
+        facts of three KTs, scores within 1e-5)."""
+        if not self.model:
+            return
+        with self._memo_lock:
+            todo = list(dict.fromkeys(t for t in texts if t and t.strip() and t not in self._memo))
+        if not todo:
+            return
+        try:
+            results = self.model.inference(todo, self.entity_labels, batch_size=8)
+        except Exception as e:
+            logger.debug(f"Batched entity extraction failed, texts left to one at a time: {e}")
+            return
+        self._remember(dict(zip(todo, results)))
+
+    def _predict(self, text: str) -> List[Dict[str, Any]]:
+        """GLiNER's entities for `text`, from what prefetch() or an earlier
+        call found where it can. Results are not changed by callers, so the
+        same list is returned."""
+        with self._memo_lock:
+            if text in self._memo:
+                self._memo.move_to_end(text)
+                return self._memo[text]
+        entities = self.model.predict_entities(text, self.entity_labels)
+        self._remember({text: entities})
+        return entities
+
+    def _remember(self, found: Dict[str, List[Dict[str, Any]]]) -> None:
+        with self._memo_lock:
+            self._memo.update(found)
+            while len(self._memo) > MEMO_TEXTS:
+                self._memo.popitem(last=False)
+
     def extract_entities(self, text: str) -> Dict[str, List[str]]:
         """
         Extract entities from text.
@@ -80,8 +123,7 @@ class EntityExtractor:
             return {}
         
         try:
-            # GLiNER expects a list of (text, labels) tuples
-            entities = self.model.predict_entities(text, self.entity_labels)
+            entities = self._predict(text)
             
             # Organize by entity type
             result: Dict[str, List[str]] = {}
@@ -116,7 +158,7 @@ class EntityExtractor:
             return {}
         
         try:
-            entities = self.model.predict_entities(text, self.entity_labels)
+            entities = self._predict(text)
             
             # Organize by entity type with confidence
             result: Dict[str, List[Dict[str, Any]]] = {}

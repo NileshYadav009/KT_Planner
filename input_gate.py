@@ -12,8 +12,14 @@ Verdicts:
            or misplaced (the warning reaches the PDF cover via run_kt_pipeline).
   ok     - nothing to report.
 """
+import os
 import re
 from typing import Dict, List, Optional
+
+# The longest paste accepted: about 25,000 words, more than two and a half
+# hours of speech. Cleaning it takes about 13 s on a laptop; the API refuses
+# a longer one (413) rather than hold a thread for minutes.
+MAX_PASTE_CHARS = int(os.getenv("CONTINUUM_MAX_TRANSCRIPT_CHARS", "150000"))
 
 MIN_WORDS = 30
 MIN_FACT_SENTENCES = 3

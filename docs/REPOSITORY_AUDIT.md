@@ -6694,6 +6694,111 @@ The gates all pass in both modes, every figure as before
 - The model is English only.
 - Memory use was not measured.
 
+### 9abg. Hardening, speed, and the open accuracy items (26 Oct)
+
+The user asked what could be picked up from the enterprise readiness
+checklist and the 16 Oct engineering audit, then chose all of it except CI on
+the working branch and rate limits. Each open item was first checked against
+the code as it stands; the 16 Oct audit's LLM timeout, polish polarity check,
+and gap-fill tests had been fixed since.
+
+**Found on the way.**
+
+- Pasted transcripts were cleaned inside the request handler, on the event
+  loop, with no size limit: every other request waited (78.6 s for a 300 KB
+  paste on 16 Oct). Since §9abf a paste with no punctuation could also load
+  the 210 MB punctuation model there, in the API process that is meant to
+  load no model.
+- Cleaning grew with the square of the text: each phrase correction
+  rewrote the whole text once per match. 150,000 characters took 30.6 s.
+- The job store and sign-in opened a SQLite connection per call and only
+  committed it in `with`; it stayed open until the garbage collector freed
+  it (a restore could not move the file on Windows).
+- `tests/test_auth.py` looked for "KT completeness", which the 26 Oct page
+  redesign (4fbf01b) removed; it had failed since.
+- Open: in the Docker image `glossary.json` (approved vocabulary) is written
+  to `/app`, not the data volume, so approvals are lost when the container is
+  recreated.
+
+**Hardening.**
+
+| Item | Change | Checked by |
+|---|---|---|
+| Paste route | Cleaned on a thread (`api/routes._paste_task`); refused over `CONTINUUM_MAX_TRANSCRIPT_CHARS` (150,000) by the route and, from its declared length, by `main.py` middleware; a paste that needs the punctuation model is queued as it came and cleaned and checked by the worker (`pipeline.clean_queued_paste`), which fails it with the gate's reasons as the API would. Phrase corrections stop re-running once a pass changes nothing: the same output on all 47 visible transcripts, 150,000 characters in 12.9 s instead of 30.6 s. | `tests/test_input_gate.py` (4 new) |
+| Browser security headers | `browser_security.py`: a Content-Security-Policy whose `script-src` names each inline script of the pages by its SHA-256 (no `unsafe-inline` for scripts), `frame-ancestors 'none'`, HSTS on HTTPS (`CONTINUUM_HSTS_SECONDS`), `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy: same-origin`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, on every response | `tests/test_browser_security.py` (hashes recomputed with Python's HTML parser) |
+| API reference | `/docs` and `/openapi.json` for signed-in users only; `CONTINUUM_API_DOCS=0` turns them and the app's link off; `/redoc` removed | same file |
+| Backups | `scripts/backup.py`: `backup` (SQLite online backup from a read-only connection, screenshots archived, manifest with SHA-256 and row counts, pruning), `verify`, `restore` (refuses to replace without `--force`, keeps what it replaces), `drill` (restore into a scratch folder and read every KT back). RPO and RTO in OPERATIONS.md. Connections now close at the end of their `with` block (`job_store.ClosingConnection`) | `tests/test_backup.py` (6) |
+| Retention | Also run hourly by each worker's heartbeat (`pipeline.apply_retention_when_due`) | `tests/test_data_handling.py` |
+| Idle sign-out | `CONTINUUM_SESSION_IDLE` (30 min): `sessions.last_seen_at`, written at most once a minute; the page marks what it asks for on its own (`X-Continuum-Background`, a request over a minute after the last click, key or scroll) and reports reading every 5 minutes at most | `tests/test_auth.py` (2 new) |
+| One field source | `ai.map_analysis_to_fields`, its MiniLM loader and random-vector fallback, and `mapped_fields` removed: nothing read them (the page fills its form from `populated_fields`) | `tests/test_legacy_removed.py` |
+| Vocabulary per workspace | `vocabulary_candidates` table (tenant, phrase) in the job database: backed up, deleted with the workspace (`auth.delete_tenant`), one writer at a time across processes; the old shared file is read once as candidates from before the split, and a phrase rejected there stays rejected for all; `scripts/review_vocabulary.py --workspace` | `tests/test_data_handling.py` (3) |
+| Offline tests | `tests/conftest.py` sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE` unless set | the runs below |
+| Dead code | `templates.py`, `renderers/blocks/code.py`, `static/review.html` removed; `docs/SYSTEM_FLOW.md` rewritten from the code (function names, no line numbers) | `tests/test_legacy_removed.py` |
+| Migrations | `migrations.py`: numbered, recorded in `schema_migrations`, applied once in order by the first process to take the write lock; the four ad-hoc changes are migrations 1-4 and the CREATE statements describe the current tables; `python migrations.py [--apply]`; an older release on a newer database logs an error | `tests/test_migrations.py` (6) |
+
+**Speed** (no LLM, laptop CPU, `scratchpad speed.py`, the same document
+before and after: identical digests of the sections, fields and coverage):
+
+| KT | Before | Each text embedded once (`embedding_memo.py`) | And GLiNER in batches (`EntityExtractor.prefetch`) |
+|---|---|---|---|
+| g10, 487 words | 85.5 s | 86.0 s | 60.6 s |
+| g01-g05 joined, 1,367 words | 231.4 s | 181.7 s | 124.9 s |
+
+The memo keeps vectors as float32 by text, as `evaluation/enccache.py` has
+always done for the accuracy runs. Field population had encoded a section's
+sentences again for every field. GLiNER ran once per fact (68 calls, 30-38 s
+on g10); in batches of eight it gave the same entities on all 57 facts of
+three KTs tried, scores within 7e-6, in half the time. `enccache.py` now keeps
+batched results per text too. Context windows are still encoded on their own
+(most of what is left): the learned section model was trained on them.
+
+**Accuracy items.** Each was measured on the six sets and the noisy copies;
+designs were chosen on visible KTs.
+
+| Item | Change | Result | Kept |
+|---|---|---|---|
+| X91 | Change control as the sentence's subject ("Changes to X require approval from Y") to Deployment; scaling up before a busy event starts to the calendar | dev d13 F37 and d14 F37 now correct. Anywhere in a sentence, the first rule took d13's flattened restrictions paragraph to Deployment (noisy copy, 2 facts): anchored to the start | Yes |
+| X82 | A numbered heading read aloud is left out after it names its topic (`dialogue.is_heading_only`) | Un-numbered headings were dropped too at first: in the noisy copy of d05 the receiver's questions ("Costs?") read as headings, and two sections were reported Missing. Numbered only | Yes |
+| X8 (no LLM) | One schedule with two periods (`_frequencies`); "only X can V" against another subject doing V (`find_exclusive_conflicts`) | Matrix D02, D03 flagged without an LLM; no flag on any matrix control | Yes |
+| X61 | A deployment step that is a chain of three or more statements shown one step each, word for word (the joining "and" kept) | Matrix E05; the scorer joins a section's text, so no quote moved | Yes |
+| X62 | The Architecture Knowledge name list left out when the diagram is drawn | No fact moved on any set | Yes |
+| X18 | A run of 20 or 25+ words with no punctuation cut where "and", "then", "so" or "but" opens a statement | Noisy copies 1054 to 1039 (20) or 1043 (25): many keyed quotes span "X and Y" | No |
+| L2 | Two onboarding commands cut when the second has its own span of time | Dev d03 F33 lost ("... during the morning rush" went to the calendar once alone); no coverage gained | No |
+
+**Results without an LLM.**
+
+| Set | §9abf | §9abg |
+|---|---|---|
+| Tuning | 534/534 | 534/534 |
+| Dev | 549/551 | 551/551 |
+| Holdouts | 88/95 | 88/95 |
+| Blind b01-b03 | 109/114 | 109/114 |
+| Blind b04-b07 | 118/132, 3 false Missing | 118/132, 3 false Missing |
+| Sealed b08-b11 (read once, at the end) | 151/160 | 151/160 |
+| Unseen total | 466/501 (93.0%) | 466/501 (93.0%) |
+| Noisy copies | 1057/1085, 1 false Missing | 1057/1085, 1 false Missing |
+| e2e, 6 KTs | 100% | 100% |
+| Matrix | 290/290 must, 45/50 should (83 cases) | 297/297 must, 51/54 should (87 cases) |
+
+The sealed set was read by a run made before one last change (a numbered
+heading whose last word could be a verb, "known issues", was kept); the other
+sets were run again on the final code. The release gates pass in both modes with every
+figure as before (`docs/QUALITY_GATES.md`); without an LLM two PDFs are shorter
+(Shopfront 11 to 10 pages, Streamline 10 to 8). The targeted test groups of every
+changed module pass.
+
+**Limits.**
+
+- Placement on unseen KTs did not move: the items picked up here were
+  either about meaning (conflicts), presentation (headings, steps, the name
+  list) or a handful of sentences.
+- The idle sign-out treats any request made within a minute of a click as
+  activity.
+- The backup script writes a folder; copying it off the host is the
+  operator's job (OPERATIONS.md).
+- Not measured: the API under load with the new thread pool, memory with the
+  embedding memo full (about 40 MB at 10,000 texts).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

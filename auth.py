@@ -60,7 +60,8 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
 
-from job_store import DEFAULT_DB_PATH
+import migrations
+from job_store import DEFAULT_DB_PATH, ClosingConnection
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     key_label    TEXT,
     role         TEXT NOT NULL,
     created_at   REAL NOT NULL,
-    expires_at   REAL NOT NULL
+    expires_at   REAL NOT NULL,
+    user_id      TEXT,
+    last_seen_at REAL
 );
 CREATE TABLE IF NOT EXISTS settings (
     name  TEXT PRIMARY KEY,
@@ -150,11 +153,6 @@ CREATE TABLE IF NOT EXISTS integrations (
     PRIMARY KEY (tenant_id, kind)
 );
 """
-
-# Columns added after the first release; older databases are upgraded in place.
-_MIGRATIONS = (
-    ("sessions", "user_id", "ALTER TABLE sessions ADD COLUMN user_id TEXT"),
-)
 
 _warned_disabled = False
 _lock = threading.Lock()
@@ -222,13 +220,10 @@ def _db_path() -> str:
 def _connect() -> sqlite3.Connection:
     path = _db_path()
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)
+    db = sqlite3.connect(path, timeout=30, factory=ClosingConnection)
     db.executescript(_SCHEMA)
     if path not in _migrated:
-        for table, column, sql in _MIGRATIONS:
-            if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
-                db.execute(sql)
-        db.commit()
+        migrations.migrate(path)       # an older database's tables brought up to date
         _migrated.add(path)
     return db
 
@@ -306,15 +301,18 @@ def set_llm_policy(tenant_id: str, policy: str) -> None:
 
 def delete_tenant(tenant_id: str) -> dict:
     """Remove a tenant and everything stored for it: jobs (transcripts,
-    documents), screenshots, cached LLM responses, API keys, people, sessions,
-    its SSO configuration and its Confluence and Jira connections."""
+    documents), screenshots, cached LLM responses, vocabulary candidates, API
+    keys, people, sessions, its SSO configuration and its Confluence and Jira
+    connections."""
     import pipeline
+    import vocabulary_learning
     from llm import cache
 
     job_ids = [j["job_id"] for j in pipeline.JOB_STORE.list(tenant_id, limit=1_000_000)]
     for job_id in job_ids:
         pipeline.delete_job_data(job_id)
     cached = cache.purge_tenant(tenant_id)
+    vocabulary_learning.delete_tenant_candidates(tenant_id)
     with _lock, _connect() as db:
         keys = db.execute("DELETE FROM api_keys WHERE tenant_id = ?", (tenant_id,)).rowcount
         people = db.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,)).rowcount
@@ -480,6 +478,13 @@ LOCAL_PRINCIPAL = Principal("local", "admin", "auth-disabled", user_id="local", 
 # an Authorization header, which is why the UI shell used to open for anyone).
 SESSION_COOKIE = "continuum_session"
 SESSION_TTL_SECONDS = int(os.getenv("CONTINUUM_SESSION_TTL", str(12 * 3600)))
+# A session also ends after this long with no activity (0: only the lifetime
+# above). A request counts as activity unless it carries BACKGROUND_HEADER,
+# which the page sets on what it asks for on its own (polling); the page also
+# reports reading and scrolling, which make no request.
+SESSION_IDLE_SECONDS = int(os.getenv("CONTINUUM_SESSION_IDLE", str(30 * 60)))
+BACKGROUND_HEADER = "x-continuum-background"
+_SEEN_EVERY_SECONDS = 60          # last_seen_at is written at most this often
 # Cookie-authenticated requests that change data must carry this header. A
 # cross-site form or image cannot add it, so the cookie alone is never enough
 # to make a change (CSRF).
@@ -492,25 +497,36 @@ def create_session(principal: Principal) -> str:
     now = time.time()
     with _lock, _connect() as db:
         db.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
-        db.execute("INSERT INTO sessions (session_hash, tenant_id, key_label, role, created_at, expires_at, user_id) "
-                   "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        db.execute("INSERT INTO sessions (session_hash, tenant_id, key_label, role, created_at, expires_at, user_id, "
+                   "last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                    (_hash(token), principal.tenant_id, principal.key_label, principal.role, now,
-                    now + SESSION_TTL_SECONDS, principal.user_id))
+                    now + SESSION_TTL_SECONDS, principal.user_id, now))
     return token
 
 
-def principal_for_session(token: Optional[str]) -> Optional[Principal]:
+def principal_for_session(token: Optional[str], active: bool = True) -> Optional[Principal]:
     """A session acts with the person's current role: a role change or a
-    disabled account takes effect on the next request, not at expiry."""
+    disabled account takes effect on the next request, not at expiry. A
+    session idle for SESSION_IDLE_SECONDS has ended; an `active` request
+    (not the page polling) keeps it going."""
     if not token:
         return None
+    now = time.time()
     with _connect() as db:
         row = db.execute(
-            "SELECT s.tenant_id, COALESCE(u.role, s.role), s.key_label, t.llm_policy, s.user_id, u.disabled "
+            "SELECT s.tenant_id, COALESCE(u.role, s.role), s.key_label, t.llm_policy, s.user_id, u.disabled, "
+            "COALESCE(s.last_seen_at, s.created_at) "
             "FROM sessions s JOIN tenants t USING (tenant_id) LEFT JOIN users u ON u.user_id = s.user_id "
-            "WHERE s.session_hash = ? AND s.expires_at > ?", (_hash(token), time.time())).fetchone()
+            "WHERE s.session_hash = ? AND s.expires_at > ?", (_hash(token), now)).fetchone()
     if not row or row[5]:
         return None
+    if SESSION_IDLE_SECONDS > 0 and now - row[6] > SESSION_IDLE_SECONDS:
+        with _lock, _connect() as db:
+            db.execute("DELETE FROM sessions WHERE session_hash = ?", (_hash(token),))
+        return None
+    if active and now - row[6] > _SEEN_EVERY_SECONDS:
+        with _lock, _connect() as db:
+            db.execute("UPDATE sessions SET last_seen_at = ? WHERE session_hash = ?", (now, _hash(token)))
     user_id = row[4]
     method = "sso" if user_id and user_id.startswith("u_") else "key"
     return Principal(row[0], _LEGACY_ROLES.get(row[1], row[1]), row[2] or "", row[3], user_id=user_id, method=method)
@@ -539,7 +555,12 @@ def optional_principal(request: Request) -> Optional[Principal]:
     key = _credentials(request)
     if key:
         return principal_for_key(key)
-    return principal_for_session(request.cookies.get(SESSION_COOKIE))
+    return principal_for_session(request.cookies.get(SESSION_COOKIE), _active(request))
+
+
+def _active(request: Request) -> bool:
+    """The person did something (not the page polling on its own)."""
+    return request.headers.get(BACKGROUND_HEADER) != "1"
 
 
 def require_principal(request: Request) -> Principal:
@@ -554,7 +575,7 @@ def require_principal(request: Request) -> Principal:
     if key:
         principal = principal_for_key(key)
     else:
-        principal = principal_for_session(request.cookies.get(SESSION_COOKIE))
+        principal = principal_for_session(request.cookies.get(SESSION_COOKIE), _active(request))
         if principal is not None and request.method not in _SAFE_METHODS and request.headers.get(CSRF_HEADER) != "1":
             raise HTTPException(status_code=403, detail="Missing CSRF header.")
     if principal is None:

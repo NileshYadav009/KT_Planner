@@ -477,3 +477,26 @@ def test_a_provider_limiting_us_is_a_failure_whatever_day_it_names():
 def test_where_credentials_live_and_what_data_never_reaches_are_security(said, section):
     rule = match_section_rules(said)
     assert rule and rule.section_id == section, (said, rule)
+
+
+@pytest.mark.parametrize("said, section", [
+    # Dev d13 and d14 (X91): one went to Ownership for the team it names, the
+    # other to Cost Optimization for its scaling.
+    ("Changes to the MQ bridge configuration require approval from the mainframe team.", "deployment_and_rollback"),
+    ("Any change to production requires a sign-off from the CAB.", "deployment_and_rollback"),
+    ("Scale the web dynos to twenty before the appeal starts.", "known_bad_days"),
+    ("Always pre-warm the cache ahead of the spring sale launch.", "known_bad_days"),
+])
+def test_change_control_and_getting_ready_for_a_busy_event(said, section):
+    rule = match_section_rules(said)
+    assert rule and rule.section_id == section, (said, rule)
+
+
+@pytest.mark.parametrize("said", [
+    "Changes to the on-call rota need approval from Maria.",       # who is on call, not change control
+    "If the queue backs up, scale the consumers.",                  # a fix
+    "We scale down before the night shift starts.",
+])
+def test_neither_rule_takes_what_is_not_theirs(said):
+    rule = match_section_rules(said)
+    assert rule is None or rule.section_id not in ("deployment_and_rollback", "known_bad_days"), (said, rule)

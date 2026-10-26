@@ -776,7 +776,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="8" x2="11" y2="15.5"/><line x1="16" y1="8" x2="13" y2="15.5"/></svg>
         Shared components
       </button>
-      <a class="side-link" href="/docs" target="_blank" rel="noopener">
+      <a class="side-link" id="apiDocsLink" href="/docs" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         API reference
       </a>
@@ -1129,6 +1129,16 @@ const THEME_ICONS = {
    API key. Requests that change data carry the CSRF header; a 401 means the
    session ended, so go back to the sign-in page. */
 try{ localStorage.removeItem('kt-api-key'); }catch(e){}
+/* Idle sign-out (auth.py, CONTINUUM_SESSION_IDLE): a request counts as
+   activity unless it is marked background. One made over a minute after the
+   person last clicked, typed or scrolled is the page polling on its own.
+   Reading and scrolling make no request, so they are reported every five
+   minutes at most. */
+let lastInteraction = Date.now(), lastReported = Date.now();
+['pointerdown', 'keydown', 'wheel', 'scroll', 'touchstart'].forEach(ev => window.addEventListener(ev, () => {
+  lastInteraction = Date.now();
+  if(lastInteraction - lastReported > 300000) fetch('/me').catch(() => {});
+}, {capture: true, passive: true}));
 const _nativeFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url;
@@ -1137,6 +1147,8 @@ window.fetch = async (input, init = {}) => {
   const method = String(init.method || 'GET').toUpperCase();
   const headers = new Headers(init.headers || {});
   if(!['GET','HEAD','OPTIONS'].includes(method)) headers.set('X-Continuum-CSRF', '1');
+  if(Date.now() - lastInteraction > 60000) headers.set('X-Continuum-Background', '1');
+  else lastReported = Date.now();
   const resp = await _nativeFetch(input, Object.assign({}, init, {headers, credentials: 'same-origin'}));
   if(resp.status === 401){ window.location.replace('/'); }
   return resp;
@@ -1173,6 +1185,7 @@ async function signOut(){
     const slot = document.getElementById('tbWorkspace');
     if(!slot) return;
     applyRolePermissions(me);
+    document.getElementById('apiDocsLink').hidden = me.api_docs === false;   // CONTINUUM_API_DOCS=0
     if(me.auth === 'disabled'){
       slot.innerHTML = '<span class="tb-badge" title="CONTINUUM_AUTH=disabled">Sign-in off (local)</span>';
     } else {

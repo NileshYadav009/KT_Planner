@@ -36,9 +36,10 @@ from devops_transcription import (
     replaces_value_before, resolve_correction_across, resolve_self_corrections, restates, withdrawn_values,
     withdraws_said_before,
 )
-from dialogue import (display_text, doubts_statement_before, is_document_instruction, merge_question_answers,
-                      speaker_labels)
+from dialogue import (display_text, doubts_statement_before, is_document_instruction, is_heading_only,
+                      merge_question_answers, speaker_labels)
 from grounding import states_withdrawn_value
+import embedding_memo
 from entity_extractor import EntityExtractor
 from fact_units import even_pieces, split_into_facts
 from section_rules import (
@@ -1173,13 +1174,11 @@ class ContextClassifier:
         self.llm_fallback_fn = llm_fallback_fn
 
     def _encode_texts(self, texts, normalize_embeddings: bool = True, convert_to_tensor: bool = True):
-        """Encode one or more texts with the classifier model."""
+        """Encode one or more texts with the classifier model, each text once
+        per process (embedding_memo.py; field population reuses them)."""
         try:
-            return self.model.encode(
-                texts,
-                convert_to_tensor=convert_to_tensor,
-                normalize_embeddings=normalize_embeddings
-            )
+            return embedding_memo.encode(self.model, texts, normalize_embeddings=normalize_embeddings,
+                                         convert_to_tensor=convert_to_tensor)
         except TypeError:
             # Fallback encoder may not support normalize_embeddings
             return self.model.encode(texts, convert_to_tensor=convert_to_tensor)
@@ -3006,6 +3005,8 @@ class ContextMappingPipeline:
         # Precompute embeddings for sentences to allow context-aware scoring
         texts = [s.text for s in sentences]
         embeddings = self.classifier._encode_texts(texts)
+        # GLiNER's entities for every fact, in batches (entity_extractor).
+        self.classifier.entity_extractor.prefetch(texts)
 
         # Precompute context embeddings: each fact with the spoken sentences
         # around it, two either side. Counted in sentences, not facts: cut
@@ -3173,6 +3174,11 @@ class ContextMappingPipeline:
         apply_rule_overrides(classified_sentences, self.classifier.section_metadata)
         logger.info("Stage 3.5: Applied section routing rules")
         restore_sections_emptied_by_topic(classified_sentences, unboosted_picks)
+
+        # A heading read aloud ("Section two, architecture.") has done its
+        # work: it named the topic of what follows (segment_topics). It is
+        # not a fact, and was printed as one (X82).
+        classified_sentences = [cs for cs in classified_sentences if not is_heading_only(cs.sentence.text)]
 
         # What the document shows: no speaker labels, and no question that its
         # answer makes redundant ("Nadia: How do I deploy? Owen: Merge to main

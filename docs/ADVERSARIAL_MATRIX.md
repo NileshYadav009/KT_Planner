@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base,a22base m9abf`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base,a22base,m9abf m9abg2`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `m9abf`.
+brackets). After: run `m9abg2`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
@@ -57,8 +57,8 @@ code before it (run s_base).
 | C02 | C uncertainty | A plan is not presented as current state | shows “planning to migrate to Kubernetes next quarter”; never shows alone “Kubernetes” (without “plan”) | 1/2 must (baseline) | 2/2 must | tests/test_knowledge_builders.py::test_a_technology_named_only_in_a_plan_or_a_guess_is_not_a_current_component |
 | C03 | C uncertainty | Hypothesis, then a confirmed and a rejected cause | shows “we confirmed the root cause was connection exhaustion”; never shows alone “disk was full” (without “suspected”) | 2/2 must (baseline) | 2/2 must | matrix only |
 | D01 | D contradiction | Same attribute, two values, no correction marker | shows “two availability zones”; shows “three availability zones”; flags “two availability zones / three availability zones” (should) | 2/2 must, 0/1 should (baseline) | 2/2 must, 1/1 should | tests/test_conflicts.py::test_two_counts_of_one_thing_are_paired_and_counts_of_different_things_are_not |
-| D02 | D contradiction | Who approves: general rule then a narrower one | shows one of “developers own deployment approvals / deployment approvals developers”; shows “only the release manager can approve production deployments”; flags “developers own deployment approvals / release manager can approve” (should) | 1/2 must, 0/1 should (baseline) | 2/2 must, 0/1 should | matrix only |
-| D03 | D contradiction | Backup interval: earlier value, later 'current' value | shows “every six hours”; flags “backups run hourly / every six hours” (should) | 1/1 must, 0/1 should (baseline) | 1/1 must, 0/1 should | matrix only |
+| D02 | D contradiction | Who approves: general rule then a narrower one | shows one of “developers own deployment approvals / deployment approvals developers”; shows “only the release manager can approve production deployments”; flags “developers own deployment approvals / release manager can approve” (should) | 1/2 must, 0/1 should (baseline) | 2/2 must, 1/1 should | matrix only |
+| D03 | D contradiction | Backup interval: earlier value, later 'current' value | shows “every six hours”; flags “backups run hourly / every six hours” (should) | 1/1 must, 0/1 should (baseline) | 1/1 must, 1/1 should | matrix only |
 | D04 | D contradiction | Public versus private access | shows “the service is public”; shows “only private subnets are permitted to reach it”; flags “the service is public / only private subnets” (should) | 2/2 must, 0/1 should (baseline) | 2/2 must, 0/1 should | matrix only |
 | E01 | E multi-fact | Five facts in one sentence | in “API traffic enters through CloudFront and the ALB” in architecture_reference, system_overview; shows “PostgreSQL stores orders”; in “PagerDuty alerts the on-call engineer” in monitoring_observability, ownership_escalation (should) | 2/2 must, 1/1 should (baseline) | 2/2 must, 1/1 should | matrix only |
 | E02 | E multi-fact | Monitoring and remediation in one sentence | shows “p99 latency goes above 800 ms”; shows “kubectl rollout restart”; in “Datadog alerts when p99 latency goes above 800 ms” in monitoring_observability, common_failures | 3/3 must (baseline) | 3/3 must | matrix only |
@@ -119,11 +119,13 @@ code before it (run s_base).
 | A22 | A correction / L long range | 'I said earlier X. That's wrong, it's Y now': a day, not a number, corrected much later | shows “Wednesdays”; never shows alone “Tuesdays” (without “Wednesdays”); in “Wednesdays” in deployment_and_rollback, known_bad_days (should) | 1/2 must, 1/1 should (a22base) | 2/2 must, 1/1 should | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
 | A23 | A correction | A day corrected in the next sentence with nothing else said: 'Sorry, Fridays.' | shows “Fridays”; never shows alone “Thursdays” (without “Fridays”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_day_of_the_week_is_corrected_like_a_number |
 | A24 | A correction / L long range | 'Earlier I said X; that's not right': the earlier claim restated, not named by topic | shows “it has five”; never shows alone “three nodes” (without “five”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
+| L04 | L noisy | A document read aloud: its numbered headings are not printed as facts | the job completes; shows “rerun it from the admin page”; never shows “^\W*section\s+\w+\W+(?:architecture|known issues|ownership)\W*$”; in “nightly import timing out” in common_failures (should) | not run () | 3/3 must, 1/1 should | tests/test_dialogue.py::test_a_heading_read_aloud_is_not_a_fact |
+| B11 | B ambiguity | A change-control rule that names the team who approves | shows “require approval from the network team”; in “require approval from the network team” in deployment_and_rollback, danger_zones (should) | not run () | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
+| B12 | B ambiguity | Scaling up ahead of a known busy event is calendar knowledge | shows “scale the web dynos to twenty”; in “scale the web dynos to twenty” in known_bad_days, common_failures (should) | not run () | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
+| E05 | E multi-fact | A deployment chain said in one sentence, one step per tool | shows “ArgoCD deploys them to EKS”; in order “GitHub Actions runs the tests / Amazon ECR stores the images / and ArgoCD deploys them to EKS”; in “Amazon ECR stores the images” in deployment_and_rollback (should) | not run () | 2/2 must, 1/1 should | tests/test_deployment_steps.py::test_a_chain_of_steps_in_one_sentence_is_one_step_each_word_for_word |
 
 ## Still failing after the fixes
 
-- **D02** (should) flagged “developers own deployment approvals / release manager can approve”: []
-- **D03** (should) flagged “backups run hourly / every six hours”: []
 - **D04** (should) flagged “the service is public / only private subnets”: []
 - **B09** (should) in_section “does the deployment from github”: ["system_overview"]
 - **T01** (should) absent_re “\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\?”: ["system_overview: How many labels a day? About twelve thousand a day."]

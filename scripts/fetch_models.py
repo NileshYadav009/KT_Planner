@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # repo id -> commit. Update deliberately, then re-run the golden suite.
 MODELS = {
     "BAAI/bge-large-en-v1.5": "d4aa6901d3a41ba39fb536a557fa166f842b0e09",          # section classifier
-    "sentence-transformers/all-MiniLM-L6-v2": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",  # chunking, field mapping
+    "sentence-transformers/all-MiniLM-L6-v2": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",  # field matching, if the classifier's model is missing
     "urchade/gliner_multi": "b5720abb5b8c575e626e54a7c1001761db8b08db",              # entity extraction
     "microsoft/mdeberta-v3-base": "a0484667b22365f84929a935b5e50a51f71f159d",         # GLiNER's tokenizer
     "Systran/faster-whisper-small": "536b0662742c02347bc0e980a01041f333bce120",       # transcription (CPU default)

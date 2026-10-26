@@ -133,20 +133,54 @@ def test_a_tenant_can_forbid_external_llm_calls(monkeypatch, mapper):
     pipeline.JOB_STORE.delete("data-nollm-0001")
 
 
-def test_vocabulary_file_holds_terms_only_and_survives_concurrent_writes(tmp_path):
-    from vocabulary_learning import record_candidates
+def test_vocabulary_candidates_hold_terms_only_and_survive_concurrent_writes():
+    from vocabulary_learning import load_candidates, record_candidates
 
-    path = str(tmp_path / "candidates.json")
     cands = [{"phrase": f"Term{i}", "signal": "near_miss", "example_sentence": f"Secret customer sentence {i}."}
              for i in range(20)]
-    threads = [threading.Thread(target=record_candidates, args=([c], f"job-{i}"), kwargs={"path": path})
+    threads = [threading.Thread(target=record_candidates, args=([c], f"job-{i}", "vocab-concurrent"))
                for i, c in enumerate(cands)]
     [t.start() for t in threads]
     [t.join() for t in threads]
-    data = json.load(open(path, encoding="utf-8"))
+    data = load_candidates("vocab-concurrent")
     assert len(data) == 20
     text = json.dumps(data)
     assert "Secret customer sentence" not in text and "job-" not in text
+
+
+def test_vocabulary_candidates_are_kept_per_workspace_and_deleted_with_it():
+    # They were one file for every customer, kept after a workspace was gone.
+    import auth
+    import vocabulary_learning as vl
+
+    acme, globex = auth.create_tenant("Vocab Acme"), auth.create_tenant("Vocab Globex")
+    vl.record_candidates([{"phrase": "Quokkaflow", "signal": "technical_pattern"}], "job-a", acme)
+    vl.record_candidates([{"phrase": "Quokkaflow", "signal": "technical_pattern"}], "job-a2", acme)
+    vl.record_candidates([{"phrase": "Zebrastack", "signal": "technical_pattern"}], "job-b", globex)
+    assert [(c["phrase"], c["occurrence_count"]) for c in vl.load_candidates(acme)] == [("Quokkaflow", 2)]
+    assert [c["phrase"] for c in vl.load_candidates(globex)] == ["Zebrastack"]
+    assert vl.reject_candidate("quokkaflow", acme)
+    vl.record_candidates([{"phrase": "Quokkaflow", "signal": "technical_pattern"}], "job-a3", acme)
+    assert vl.load_candidates(acme)[0]["status"] == "rejected"          # stays rejected there
+    auth.delete_tenant(acme)
+    assert vl.load_candidates(acme) == [] and vl.load_candidates(globex)
+
+
+def test_candidates_from_the_old_shared_file_are_kept(tmp_path, monkeypatch):
+    import vocabulary_learning as vl
+
+    legacy = tmp_path / "glossary_candidates.json"
+    legacy.write_text(json.dumps({
+        "noisetool": {"phrase": "NoiseTool", "signal": "technical_pattern", "status": "rejected", "occurrence_count": 3},
+        "pendingtool": {"phrase": "PendingTool", "signal": "technical_pattern", "status": "pending"}}))
+    monkeypatch.setenv("CONTINUUM_DB_PATH", str(tmp_path / "continuum.sqlite"))
+    monkeypatch.setattr(vl, "CANDIDATES_PATH", str(legacy))
+    assert {c["phrase"]: c["status"] for c in vl.load_candidates(vl.LEGACY_TENANT)} == {
+        "NoiseTool": "rejected", "PendingTool": "pending"}
+    vl.record_candidates([{"phrase": "NoiseTool", "signal": "technical_pattern"},
+                          {"phrase": "PendingTool", "signal": "technical_pattern"}], "job-1", "acme")
+    # Rejected before the split: rejected for every workspace.
+    assert [c["phrase"] for c in vl.load_candidates("acme")] == ["PendingTool"]
 
 
 def test_deleting_a_job_removes_its_record_and_screenshots(tmp_path, monkeypatch):
@@ -195,3 +229,25 @@ def test_retention_deletes_jobs_older_than_the_limit(monkeypatch):
     monkeypatch.setenv("CONTINUUM_RETENTION_DAYS", "30")
     assert pipeline.apply_retention() >= 1
     assert pipeline.JOB_STORE.get("data-old-0001") is None
+
+
+def test_retention_also_runs_while_the_server_stays_up(monkeypatch):
+    # It ran only when the API started; now each worker's heartbeat runs it
+    # once an hour.
+    import pipeline
+
+    def expire(job_id):
+        pipeline.JOB_QUEUE[job_id] = {"status": "completed"}
+        with sqlite3.connect(pipeline.JOB_STORE.path) as db:
+            db.execute("UPDATE jobs SET updated_at = ? WHERE job_id = ?", (time.time() - 40 * 86400, job_id))
+
+    monkeypatch.setenv("CONTINUUM_RETENTION_DAYS", "30")
+    monkeypatch.setattr(pipeline, "_retention_checked_at", 0.0)
+    now = time.time()
+    expire("data-old-0002")
+    assert pipeline.apply_retention_when_due(now) >= 1
+    expire("data-old-0003")
+    assert pipeline.apply_retention_when_due(now + 600) == 0           # not due yet
+    assert pipeline.JOB_STORE.get("data-old-0003") is not None
+    assert pipeline.apply_retention_when_due(now + 3601) >= 1
+    assert pipeline.JOB_STORE.get("data-old-0003") is None

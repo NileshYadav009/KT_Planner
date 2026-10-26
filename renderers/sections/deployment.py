@@ -40,8 +40,27 @@ def _steps(line: str) -> List[str]:
                       or restates(steps[-1], said_before_claim(sentence))):
             steps[-1] = f"{steps[-1]} {sentence}"
         else:
-            steps.append(sentence)
+            steps.extend(_chain_steps(sentence))
     return steps
+
+
+def _chain_steps(sentence: str) -> List[str]:
+    """A sentence that is a chain of three or more steps ("GitHub Actions
+    runs tests, Amazon ECR stores images, and ArgoCD deploys to EKS") as one
+    step each (X61), word for word: each joining word stays with the step it
+    opens ("and ArgoCD deploys to EKS."), so the steps together are the
+    sentence as said, in order."""
+    from fact_units import split_into_facts
+
+    spans = split_into_facts(sentence)
+    if len(spans) < 3:
+        return [sentence]
+    cuts = []
+    for (_, end), (start, _) in zip(spans, spans[1:]):
+        word = re.search(r"[A-Za-z]", sentence[end:start])
+        cuts.append(end + word.start() if word else start)
+    bounds = [0] + cuts + [len(sentence)]
+    return [sentence[a:b].strip() for a, b in zip(bounds, bounds[1:]) if sentence[a:b].strip()]
 
 
 def render(section: Dict[str, Any]) -> Dict[str, Any]:

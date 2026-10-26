@@ -140,7 +140,21 @@ leave-one-KT-out on those KTs; trained on the fact alone, without its
 context, it did worse than no model.
 
 A heading read aloud with a number ("Section eleven, costs.") names its
-topic like a plain one.
+topic like a plain one, and is then left out of the document
+(`dialogue.is_heading_only`, audit §9abg): it was printed as a bullet of its
+section. A heading without a number stays, because in speech to text without
+punctuation a receiver's question reads the same ("Costs?" as "costs."), and
+dropping those left two sections of a question-and-answer KT reported Missing.
+
+**Speed** (audit §9abg): each text is embedded once per process
+(`embedding_memo.py`, up to 10,000 texts, kept as float32 like the
+evaluation cache), so field population reuses the classifier's vectors
+instead of encoding a section's sentences again for every field. GLiNER runs
+on all of a KT's facts in batches of eight before scoring
+(`EntityExtractor.prefetch`; the same entities as one at a time on every one
+of 57 facts tried, scores within 1e-5). A 487-word KT went from 85 s to 61 s
+and a 1,367-word one from 231 s to 125 s on a laptop CPU, with the same
+document.
 
 **Topic segments** (`section_rules.segment_topics()`, audit §9aaj): every
 fact gets the topic the speaker last named, and that section gets

@@ -1,20 +1,6 @@
 import hashlib
 import json
 import re
-import numpy as np
-try:
-    from sentence_transformers import SentenceTransformer, util
-except Exception:
-    SentenceTransformer = None
-    class _Util:
-        @staticmethod
-        def cos_sim(a, b):
-            a = np.asarray(a)
-            b = np.asarray(b)
-            a_norm = a / (np.linalg.norm(a, axis=-1, keepdims=True) + 1e-9)
-            b_norm = b / (np.linalg.norm(b, axis=-1, keepdims=True) + 1e-9)
-            return np.dot(a_norm, b_norm.T)
-    util = _Util()
 
 from typing import Dict, List, Optional, Tuple
 import logging
@@ -293,19 +279,6 @@ def warmup_models():
 
 
 from kt_schema_loader import SCHEMA
-
-SENT_MODEL: Optional[SentenceTransformer] = None
-
-
-def get_sentence_model(model_name: str = "all-MiniLM-L6-v2") -> Optional[SentenceTransformer]:
-    global SENT_MODEL
-    if SENT_MODEL is None:
-        try:
-            SENT_MODEL = SentenceTransformer(model_name)
-        except Exception:
-            SENT_MODEL = None
-    return SENT_MODEL
-
 
 PRIORITY_COVERAGE_SECTION_IDS = [
     'system_overview',
@@ -629,70 +602,3 @@ def polish_coverage_text(
     }
     polished = polish_coverage_sections(batch, max_fragments_per_section=max_fragments_per_call)
     return polished.get(section_id, [])
-
-
-def map_analysis_to_fields(analysis: dict, schema: list, *, min_similarity: float = 0.25):
-    """Map analyzed chunks to concrete schema fields.
-
-    Returns a dict: { section_id: { field_id: {value, confidence, source_chunk_index} } }
-    """
-    model = get_sentence_model()
-    mappings = {}
-
-    # Precompute chunk texts per section
-    for sec in schema:
-        sid = sec['id']
-        sec_info = analysis.get(sid, {})
-        chunks = sec_info.get('chunks', [])
-        mappings[sid] = {}
-
-        if not chunks:
-            # nothing to map
-            continue
-
-        # encode all chunks for this section
-        if model is not None:
-            chunk_embs = model.encode(chunks, convert_to_tensor=True, normalize_embeddings=True)
-        else:
-            chunk_embs = np.random.rand(len(chunks), 384)
-
-        for field in sec.get('fields', []) or []:
-            fid = field.get('id')
-            if not fid:
-                continue
-            # build a representative text for the field: label + id + options + columns
-            parts = []
-            if field.get('label'):
-                parts.append(field['label'])
-            parts.append(field.get('id', ''))
-            if field.get('options'):
-                parts.extend([str(o) for o in field.get('options')])
-            if field.get('columns'):
-                parts.extend(field.get('columns'))
-            field_text = " ".join(parts)
-            if not field_text.strip():
-                continue
-            if model is not None:
-                field_emb = model.encode(field_text, convert_to_tensor=True, normalize_embeddings=True)
-            else:
-                field_emb = np.random.rand(384)
-
-            # compute similarities
-            if model is not None:
-                sims = util.cos_sim(field_emb, chunk_embs)[0]
-            else:
-                sims = np.dot(field_emb, chunk_embs.T)
-                sims = (sims - sims.min()) / (sims.max() - sims.min() + 1e-9)
-            best_idx = int(sims.argmax().item())
-            best_score = float(sims[best_idx].item())
-
-            if best_score >= min_similarity:
-                # pick the chunk as value (or refine for tables)
-                value = chunks[best_idx]
-                mappings[sid][fid] = {
-                    'value': value,
-                    'confidence': best_score,
-                    'source_chunk_index': best_idx
-                }
-
-    return mappings

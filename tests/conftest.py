@@ -18,6 +18,12 @@ os.environ.setdefault("CONTINUUM_COPYEDIT", "0")
 # The punctuation model (punctuation.py) is downloaded on first use; tests
 # give it a stand-in (tests/test_punctuation.py) and run without it.
 os.environ.setdefault("PUNCTUATION_MODEL", "0")
+# Models load from the local cache only, as in CI and the image: a model
+# load that reached huggingface.co made tests fail with the network, not
+# the code ("client has been closed"). Fetch them once with
+# scripts/fetch_models.py; HF_HUB_OFFLINE=0 lets a run download.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", os.environ["HF_HUB_OFFLINE"])
 # No live LLM in tests: llm_provider loads .env at import, and a key there
 # would send real (quota-spending) requests from an ordinary pytest run. An
 # empty value counts as set, so python-dotenv leaves it alone. Export a key

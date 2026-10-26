@@ -913,7 +913,8 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
       thing two counts, are stored on knowledge_object["_conflicts"] for the
       section and the coverage page to show.
     """
-    from conflicts import find_contradictions, find_superseded_tools, find_unconfirmed_changes, find_value_conflicts
+    from conflicts import (find_contradictions, find_exclusive_conflicts, find_superseded_tools,
+                           find_unconfirmed_changes, find_value_conflicts)
 
     sentence_section: Dict[str, str] = {}
     texts: List[str] = []
@@ -949,11 +950,13 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
             _walk(section.get("fields"))
         knowledge_object["_superseded_tools"] = list(superseded.values())
 
-    # Rules that permit and forbid the same thing, and two counts of one
-    # thing ("two availability zones" ... "three availability zones").
+    # Rules that permit and forbid the same thing, two counts of one thing
+    # ("two availability zones" ... "three availability zones") or two
+    # periods of one schedule, and who may do a thing said two ways ("Only
+    # the release manager can approve ..." / "Developers own ... approvals").
     knowledge_object["_conflicts"] = [
         {"section_id": sentence_section.get(a), "a": a, "b": b}
-        for a, b in find_contradictions(texts) + find_value_conflicts(texts)
+        for a, b in find_contradictions(texts) + find_value_conflicts(texts) + find_exclusive_conflicts(texts)
     ]
     # A change said with a hedge ("The backup retention is seven days. I
     # think we changed it to thirty days, but I'm not sure."): the mapper

@@ -21,6 +21,8 @@ from collections import OrderedDict
 from collections.abc import MutableMapping
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+import migrations
+
 DEFAULT_DB_PATH = os.getenv(
     "CONTINUUM_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "continuum.sqlite"))
 INTERRUPTED_MESSAGE = "The server restarted while this KT was being processed. Submit it again."
@@ -35,7 +37,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL,
     error       TEXT,
-    payload     BLOB
+    payload     BLOB,
+    created_by  TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_tenant_created ON jobs(tenant_id, created_at DESC);
 
@@ -150,28 +153,33 @@ def search_query(text: str) -> Optional[str]:
     return " ".join(f'"{w}"' for w in words[:-1]) + (" " if len(words) > 1 else "") + f'"{words[-1]}"*'
 
 
+class ClosingConnection(sqlite3.Connection):
+    """A connection that is also closed at the end of its with block. The
+    plain one only commits (or rolls back) there and stays open, holding its
+    database file, until the garbage collector frees it: a restore could not
+    move the file aside on Windows (scripts/backup.py), and every call left
+    one more open file behind until then."""
+
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
+
+
 class JobStore:
     def __init__(self, path: str = DEFAULT_DB_PATH):
         self.path = path
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self._lock = threading.Lock()
         with self._connect() as db:
-            # The stored PDFs were first keyed by render time (rendered_at),
-            # and CREATE TABLE IF NOT EXISTS never changes an existing table,
-            # so a database from then failed every download ("no such column:
-            # job_version"). The rows are only a cache of rendered PDFs: drop
-            # the old table and the next download renders again.
-            columns = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
-            if columns and "job_version" not in columns:
-                db.execute("DROP TABLE documents")
             db.executescript(_SCHEMA)
-            # Added with roles: who created the KT (an admin may delete any KT,
-            # anyone else only their own).
-            if "created_by" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
-                db.execute("ALTER TABLE jobs ADD COLUMN created_by TEXT")
+        # CREATE TABLE IF NOT EXISTS never changes a table that exists: an
+        # older database's tables are brought up to date by migrations.py.
+        migrations.migrate(path)
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path, timeout=30)
+        db = sqlite3.connect(self.path, timeout=30, factory=ClosingConnection)
         db.execute("PRAGMA journal_mode=WAL")
         return db
 

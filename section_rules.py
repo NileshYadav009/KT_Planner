@@ -247,6 +247,12 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bdeployments?\s+(?:are|is)\s+(?:also\s+)?frozen\b",
             r"\b(?:deploy(?:ment)?|change|code|release)\s+freezes?\b",
             RISING_LOAD_PERIOD,
+            # Getting ready for a known busy event: "Scale the web dynos to
+            # twenty before the appeal starts" went to Cost Optimization
+            # (dev d14, X91).
+            r"^\W*(?:(?:always|just|then|so|and|also)\s+)?(?:scale|pre-?scale|pre-?warm|warm\s+up)\b[^.;]{0,60}?"
+            r"\b(?:before|ahead\s+of)\s+(?:the|each|every|any|our)\s+(?:[\w'-]+\s+){0,3}?"
+            r"(?:starts?|begins?|kicks?\s+off|opens?|goes\s+live|launch(?:es)?)\b",
         ],
         0.96,
     ),
@@ -343,6 +349,15 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"(?:production|prod|staging|live)\b",
             r"\b(?:safety|change|cab|release|security|go[\s-]live)\s+(?:sign[\s-]?off|approval)\s+is\s+"
             r"(?:mandatory|required|needed)\b",
+            # Change control: "Changes to the MQ bridge configuration require
+            # approval from the mainframe team" went to Ownership for the
+            # team it names (dev d13, X91). Only as the sentence's subject:
+            # anywhere in a run with no punctuation, it took a restriction
+            # said before it to Deployment (d13's noisy copy).
+            r"^\W*(?:(?:and|so|also|then|but)\s+)?(?:any\s+)?changes?\s+to\s+(?:the\s+|our\s+|its\s+|a\s+|an\s+)?+"
+            r"(?!(?:on-?call|rota|roster|budget|spend|team|ownership)\b)[\w/.-]+(?:\s+[\w/.-]+){0,4}?\s+"
+            r"(?:require|requires|need|needs)\s+(?:an?\s+|prior\s+|written\s+|formal\s+|explicit\s+)?"
+            r"(?:approval|sign[\s-]?off)\b",
             # "we restore the previous image from its last savepoint" is a
             # rollback, not disaster recovery: what is restored is a build.
             r"\b(?:restore|reinstate)\s+the\s+(?:previous|last\s+(?:good|known[\s-]good|working))\s+(?:\w+\s+)?"
@@ -990,6 +1005,22 @@ def _segment_topic_of(phrase: str) -> Optional[str]:
     return min(hits)[1] if hits else None
 
 
+def _heading_body(text: str) -> str:
+    body = _SPEAKER_PREFIX_RE.sub("", text or "", count=1).strip()
+    # A document read aloud numbers its headings: "Section eleven, costs."
+    return _NUMBERED_HEADING_RE.sub("", body, count=1) or body
+
+
+def heading_phrase(text: str) -> Optional[str]:
+    """The phrase of a unit that is a heading naming a topic ("Backups and
+    DR.", "Section two, architecture." gives "architecture"), else None."""
+    match = _SEGMENT_HEADING_RE.match(_heading_body(text))
+    if match and len(match.group(1).split()) <= 4 and not _SEGMENT_NOT_HEADING_RE.search(match.group(1)) \
+            and _segment_topic_of(match.group(1)):
+        return match.group(1)
+    return None
+
+
 def topic_anchor(text: str) -> Optional[Tuple[str, Optional[str]]]:
     """(kind, section) when the unit names a topic: a short question, a
     heading or a fronted topic. A question naming nothing ("Anything else?")
@@ -1001,17 +1032,13 @@ def topic_anchor(text: str) -> Optional[Tuple[str, Optional[str]]]:
         topic = _segment_topic_of(label.group(0).strip().rstrip(":"))
         if topic:
             return ("fronted", topic)
-    body = _SPEAKER_PREFIX_RE.sub("", text or "", count=1).strip()
-    # A document read aloud numbers its headings: "Section eleven, costs."
-    body = _NUMBERED_HEADING_RE.sub("", body, count=1) or body
+    body = _heading_body(text)
     match = _SEGMENT_QUESTION_RE.match(body)
     if match and len(match.group(1).split()) <= 10:
         return ("question", _segment_topic_of(match.group(1)))
-    match = _SEGMENT_HEADING_RE.match(body)
-    if match and len(match.group(1).split()) <= 4 and not _SEGMENT_NOT_HEADING_RE.search(match.group(1)):
-        topic = _segment_topic_of(match.group(1))
-        if topic:
-            return ("heading", topic)
+    phrase = heading_phrase(text)
+    if phrase is not None:
+        return ("heading", _segment_topic_of(phrase))
     match = _SEGMENT_FRONTED_RE.match(body)
     if match and len(match.group(1).split()) <= 4:
         topic = _segment_topic_of(match.group(1))

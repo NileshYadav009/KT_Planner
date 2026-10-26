@@ -1258,6 +1258,68 @@
         {"check": "shows", "text": "it has five", "level": "must"},
         {"check": "never_alone", "text": "three nodes", "with": "five", "level": "must"}
       ]
+    },
+    {
+      "id": "L04", "category": "L noisy", "title": "A document read aloud: its numbered headings are not printed as facts",
+      "regression": "tests/test_dialogue.py::test_a_heading_read_aloud_is_not_a_fact",
+      "transcript": [
+        "Ines: This is the handover for the claims portal.",
+        "Section one, architecture.",
+        "The portal is a React app on Azure App Service with a PostgreSQL database.",
+        "Section two, known issues.",
+        "The most common problem is the nightly import timing out; rerun it from the admin page.",
+        "Section three, ownership.",
+        "The claims team owns the portal and escalations go to Priya Nair."
+      ],
+      "expect": [
+        {"check": "completes", "level": "must"},
+        {"check": "shows", "text": "rerun it from the admin page", "level": "must"},
+        {"check": "absent_re", "pattern": "^\\W*section\\s+\\w+\\W+(?:architecture|known issues|ownership)\\W*$", "level": "must"},
+        {"check": "in_section", "text": "nightly import timing out", "sections": ["common_failures"], "level": "should"}
+      ]
+    },
+    {
+      "id": "B11", "category": "B ambiguity", "title": "A change-control rule that names the team who approves",
+      "regression": "tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event",
+      "transcript": [
+        "Mara: This is the handover for the payments gateway.",
+        "The gateway runs on Kubernetes and talks to the bank over an IBM MQ bridge.",
+        "Changes to the firewall configuration require approval from the network team.",
+        "The payments team owns the gateway and the on-call rota."
+      ],
+      "expect": [
+        {"check": "shows", "text": "require approval from the network team", "level": "must"},
+        {"check": "in_section", "text": "require approval from the network team", "sections": ["deployment_and_rollback", "danger_zones"], "level": "should"}
+      ]
+    },
+    {
+      "id": "B12", "category": "B ambiguity", "title": "Scaling up ahead of a known busy event is calendar knowledge",
+      "regression": "tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event",
+      "transcript": [
+        "Theo: This is the handover for the donations site.",
+        "The site is a Rails app on Heroku with a Postgres database.",
+        "The spring appeal brings ten times the normal traffic.",
+        "Scale the web dynos to twenty before the appeal starts."
+      ],
+      "expect": [
+        {"check": "shows", "text": "scale the web dynos to twenty", "level": "must"},
+        {"check": "in_section", "text": "scale the web dynos to twenty", "sections": ["known_bad_days", "common_failures"], "level": "should"}
+      ]
+    },
+    {
+      "id": "E05", "category": "E multi-fact", "title": "A deployment chain said in one sentence, one step per tool",
+      "regression": "tests/test_deployment_steps.py::test_a_chain_of_steps_in_one_sentence_is_one_step_each_word_for_word",
+      "transcript": [
+        "Noor: This is the handover for the checkout service.",
+        "Checkout is a Node service on EKS with a Postgres database.",
+        "GitHub Actions runs the tests, Amazon ECR stores the images, and ArgoCD deploys them to EKS.",
+        "To roll back, revert the commit in the GitOps repository."
+      ],
+      "expect": [
+        {"check": "shows", "text": "ArgoCD deploys them to EKS", "level": "must"},
+        {"check": "order", "texts": ["GitHub Actions runs the tests", "Amazon ECR stores the images", "and ArgoCD deploys them to EKS"], "level": "must"},
+        {"check": "in_section", "text": "Amazon ECR stores the images", "sections": ["deployment_and_rollback"], "level": "should"}
+      ]
     }
   ]
 }

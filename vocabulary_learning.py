@@ -20,6 +20,7 @@ codebase's existing regex-based correction style (see devops_transcription.py):
 import json
 import logging
 import os
+import sqlite3
 import threading
 import re
 from datetime import datetime, timezone
@@ -153,95 +154,144 @@ def detect_vocabulary_candidates(transcript: str) -> List[Dict]:
     return list(candidates.values())
 
 
-def load_candidates(path: str = CANDIDATES_PATH) -> Dict:
-    if not os.path.exists(path):
-        return {}
+# Candidates are kept per workspace, in the job database (CONTINUUM_DB_PATH,
+# so backed up with it and deleted with the workspace). They were one JSON
+# file for every customer (CANDIDATES_PATH): one customer's terms sat beside
+# another's, stayed after a workspace was deleted, and two worker processes
+# writing at once could lose each other's updates (the lock held only within
+# a process). That file, if present, is read once into the database as
+# candidates from before the split (workspace LEGACY_TENANT): its pending
+# ones can still be reviewed, and a phrase rejected there stays rejected for
+# every workspace.
+LEGACY_TENANT = ""
+_SCHEMA = """CREATE TABLE IF NOT EXISTS vocabulary_candidates (
+    tenant_id  TEXT NOT NULL,
+    phrase_key TEXT NOT NULL,
+    record     TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, phrase_key)
+)"""
+_ready = set()
+_ready_lock = threading.Lock()
+
+
+def _db_path() -> str:
+    from job_store import DEFAULT_DB_PATH
+    return os.getenv("CONTINUUM_DB_PATH", DEFAULT_DB_PATH)
+
+
+def _connect() -> sqlite3.Connection:
+    from job_store import ClosingConnection
+
+    path = _db_path()
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    db = sqlite3.connect(path, timeout=30, factory=ClosingConnection)
+    with _ready_lock:
+        if path not in _ready:
+            db.execute(_SCHEMA)
+            _import_legacy_file(db)
+            db.commit()
+            _ready.add(path)
+    return db
+
+
+def _import_legacy_file(db: sqlite3.Connection) -> None:
+    if not os.path.exists(CANDIDATES_PATH):
+        return
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(CANDIDATES_PATH, "r", encoding="utf-8") as f:
+            legacy = json.load(f)
     except Exception as e:
-        logger.warning("Failed to load vocabulary candidates %s: %s", path, e)
-        return {}
+        logger.warning("Failed to read the old vocabulary candidates file %s: %s", CANDIDATES_PATH, e)
+        return
+    db.executemany("INSERT OR IGNORE INTO vocabulary_candidates (tenant_id, phrase_key, record) VALUES (?, ?, ?)",
+                   [(LEGACY_TENANT, key, json.dumps(entry, ensure_ascii=False))
+                    for key, entry in legacy.items() if isinstance(entry, dict)])
 
 
-def _save_candidates(data: Dict, path: str = CANDIDATES_PATH) -> None:
-    # Written to a temporary file and swapped in, so a crash or a concurrent
-    # job can never leave a truncated file behind.
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
+def load_candidates(tenant_id: Optional[str] = None) -> List[Dict]:
+    """Recorded candidates, each with its "tenant_id": one workspace's, or
+    every workspace's (the review script) when `tenant_id` is None."""
+    sql, args = "SELECT tenant_id, record FROM vocabulary_candidates", ()
+    if tenant_id is not None:
+        sql, args = sql + " WHERE tenant_id = ?", (tenant_id,)
+    with _connect() as db:
+        rows = db.execute(sql + " ORDER BY tenant_id, phrase_key", args).fetchall()
+    return [dict(json.loads(record), tenant_id=tenant) for tenant, record in rows]
 
 
-# Concurrent KT jobs record candidates at the same time; without this the
-# read-modify-write lost each other's updates.
-_CANDIDATES_LOCK = threading.Lock()
+def record_candidates(candidates: List[Dict], job_id: str, tenant_id: str = "local") -> None:
+    """Record detected candidates for the KT's workspace, merging with what
+    is already recorded there.
 
-
-def record_candidates(candidates: List[Dict], job_id: str, path: str = CANDIDATES_PATH) -> None:
-    """Persist detected candidates, merging with anything already recorded.
-
-    Never touches glossary.json — only approve_candidate() does that. A candidate
-    already marked "rejected" by a human is not re-added if seen again, so a
-    heuristic false-positive doesn't keep nagging the reviewer every run.
+    Never touches glossary.json — only approve_candidate() does that. A
+    candidate a human rejected (for this workspace, or before candidates
+    were kept per workspace) is not re-added if seen again, so a heuristic
+    false-positive doesn't keep nagging the reviewer every run. Terms and
+    counts only: no example sentences and no job ids (P0-9); a reviewer sees
+    a candidate's context in the KT it came from.
     """
     if not candidates:
         return
-
-    with _CANDIDATES_LOCK:
-        _record_candidates_locked(candidates, path)
-
-
-def _record_candidates_locked(candidates: List[Dict], path: str) -> None:
-    # This file is shared by every customer, so it holds terms and counts
-    # only: no example sentences and no job ids (P0-9). A reviewer sees a
-    # candidate's context in the KT it came from, not here.
-    store = load_candidates(path)
     now = _now_iso()
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")          # one writer at a time, across processes
+        for cand in candidates:
+            key = cand["phrase"].lower()
+            rows = dict(db.execute(
+                "SELECT tenant_id, record FROM vocabulary_candidates WHERE phrase_key = ? AND tenant_id IN (?, ?)",
+                (key, tenant_id, LEGACY_TENANT)).fetchall())
+            legacy = json.loads(rows.get(LEGACY_TENANT) or "{}")
+            existing = json.loads(rows[tenant_id]) if tenant_id in rows else None
+            if (existing or {}).get("status") == "rejected" or legacy.get("status") == "rejected":
+                continue
+            if existing:
+                existing["occurrence_count"] = existing.get("occurrence_count", 1) + 1
+                existing["last_seen"] = now
+            else:
+                existing = {
+                    "phrase": cand["phrase"],
+                    "signal": cand["signal"],
+                    "status": "pending",
+                    "occurrence_count": 1,
+                    "first_seen": now,
+                    "last_seen": now,
+                    "near_miss_of": cand.get("near_miss_of"),
+                    "score": cand.get("score"),
+                    "trigger": cand.get("trigger"),
+                }
+            db.execute("INSERT OR REPLACE INTO vocabulary_candidates (tenant_id, phrase_key, record) VALUES (?, ?, ?)",
+                       (tenant_id, key, json.dumps(existing, ensure_ascii=False)))
 
-    for cand in candidates:
-        key = cand["phrase"].lower()
-        existing = store.get(key)
-        if existing and existing.get("status") == "rejected":
-            continue
 
-        if existing:
-            existing["occurrence_count"] = existing.get("occurrence_count", 1) + 1
-            existing["last_seen"] = now
-            existing.pop("source_jobs", None)
-            existing.pop("example_contexts", None)
-        else:
-            store[key] = {
-                "phrase": cand["phrase"],
-                "signal": cand["signal"],
-                "status": "pending",
-                "occurrence_count": 1,
-                "first_seen": now,
-                "last_seen": now,
-                "near_miss_of": cand.get("near_miss_of"),
-                "score": cand.get("score"),
-                "trigger": cand.get("trigger"),
-            }
-
-    _save_candidates(store, path)
+def _set_status(phrase: str, tenant_id: str, **fields) -> bool:
+    key = phrase.lower()
+    with _connect() as db:
+        row = db.execute("SELECT record FROM vocabulary_candidates WHERE tenant_id = ? AND phrase_key = ?",
+                         (tenant_id, key)).fetchone()
+        if row is None:
+            logger.warning("No vocabulary candidate %r in workspace %r", phrase, tenant_id)
+            return False
+        entry = dict(json.loads(row[0]), **fields)
+        db.execute("UPDATE vocabulary_candidates SET record = ? WHERE tenant_id = ? AND phrase_key = ?",
+                   (json.dumps(entry, ensure_ascii=False), tenant_id, key))
+    return True
 
 
 def approve_candidate(
     phrase: str,
+    tenant_id: str,
     target: str = "terms",
     canonical: Optional[str] = None,
-    candidates_path: str = CANDIDATES_PATH,
     glossary_path: str = "glossary.json",
 ) -> bool:
-    """Promote a pending candidate into glossary.json — the live, human-approved
-    store that devops_transcription.py's correction pipeline reads on every call.
+    """Promote a workspace's candidate into glossary.json — the live,
+    human-approved store that devops_transcription.py's correction pipeline
+    reads on every call (for every workspace).
 
     target: "terms" (recognized vocabulary), "acronyms" (lowercase key -> canonical
     form), or "phrase_corrections" (mishearing -> corrected text; requires `canonical`).
     """
-    store = load_candidates(candidates_path)
-    key = phrase.lower()
-    entry = store.get(key)
+    entry = next((c for c in load_candidates(tenant_id) if c["phrase"].lower() == phrase.lower()), None)
     if entry is None:
         logger.warning("approve_candidate: no such pending candidate: %s", phrase)
         return False
@@ -253,7 +303,7 @@ def approve_candidate(
         if canonical_form not in data.setdefault("terms", []):
             data["terms"].append(canonical_form)
     elif target == "acronyms":
-        data.setdefault("acronyms", {})[key] = canonical_form
+        data.setdefault("acronyms", {})[phrase.lower()] = canonical_form
     elif target == "phrase_corrections":
         if not canonical:
             raise ValueError("approve_candidate: target='phrase_corrections' requires canonical=<corrected text>")
@@ -262,22 +312,16 @@ def approve_candidate(
         raise ValueError(f"approve_candidate: unknown target '{target}'")
 
     glossary.save_glossary(data, glossary_path)
-
-    entry["status"] = "approved"
-    entry["approved_as"] = target
-    entry["approved_canonical"] = canonical_form
-    _save_candidates(store, candidates_path)
-    return True
+    return _set_status(phrase, tenant_id, status="approved", approved_as=target, approved_canonical=canonical_form)
 
 
-def reject_candidate(phrase: str, candidates_path: str = CANDIDATES_PATH) -> bool:
-    """Mark a candidate rejected so it never resurfaces. Does not touch glossary.json."""
-    store = load_candidates(candidates_path)
-    key = phrase.lower()
-    entry = store.get(key)
-    if entry is None:
-        logger.warning("reject_candidate: no such pending candidate: %s", phrase)
-        return False
-    entry["status"] = "rejected"
-    _save_candidates(store, candidates_path)
-    return True
+def reject_candidate(phrase: str, tenant_id: str) -> bool:
+    """Mark a workspace's candidate rejected so it never resurfaces there.
+    Does not touch glossary.json."""
+    return _set_status(phrase, tenant_id, status="rejected")
+
+
+def delete_tenant_candidates(tenant_id: str) -> int:
+    """Every candidate recorded for a workspace (auth.delete_tenant)."""
+    with _connect() as db:
+        return db.execute("DELETE FROM vocabulary_candidates WHERE tenant_id = ?", (tenant_id,)).rowcount

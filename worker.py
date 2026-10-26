@@ -67,6 +67,7 @@ def _run(task: Dict[str, Any], worker_id: str) -> Optional[str]:
             input_path = payload["input_path"]
             pipeline.process_upload_task(job_id, input_path, f"{input_path}.mp3", media_format=payload.get("media_format"))
         elif kind == "transcript":
+            payload = pipeline.clean_queued_paste(payload)
             pipeline.run_kt_pipeline(job_id, payload["transcript"], warnings=payload.get("warnings") or [])
         elif kind == "session":
             sessions.add_session(job_id, payload)         # a follow-up session of a finished KT (P2-1)
@@ -76,6 +77,13 @@ def _run(task: Dict[str, Any], worker_id: str) -> Optional[str]:
             sessions.rename_speakers(job_id, payload)     # rebuilt with the speakers the user named
         else:
             raise ValueError(f"unknown task kind {kind!r}")
+    except pipeline.InputRejected as exc:
+        # A paste cleaned here (pipeline.clean_queued_paste) that cannot make
+        # a KT: the user is told why, as the API tells them for any other.
+        job = pipeline.JOB_QUEUE.get(job_id)
+        if job is not None:
+            job.update(status="failed", error=str(exc), failure=observability.FAILURE_INPUT)
+            pipeline.JOB_QUEUE[job_id] = job
     except Exception as exc:     # the pipeline records its own failures; this is anything else
         logger.exception("KT task %s failed", job_id)
         error = str(exc) or exc.__class__.__name__
@@ -179,6 +187,7 @@ class Worker:
                 pipeline.TASKS.heartbeat(self.worker_id, self.concurrency, len(running))
                 observability.check_queue_age(pipeline.TASKS.stats())
                 staleness.check_due_reviews()
+                pipeline.apply_retention_when_due()
             except Exception:
                 logger.warning("Worker heartbeat failed", exc_info=True)
 

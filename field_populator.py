@@ -9,6 +9,7 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+import embedding_memo
 from devops_transcription import apply_devops_corrections
 from llm.usage import record_skip as record_llm_skip
 from llm.usage import record_rejected as record_llm_rejected
@@ -1340,8 +1341,10 @@ def _extract_by_semantic_scored(
                 _SEMANTIC_TRACE(field, [], [], None)
             return None, None
 
-    field_emb = model.encode(field_text, convert_to_tensor=True, normalize_embeddings=True)
-    sent_embs = model.encode(sentences, convert_to_tensor=True, normalize_embeddings=True)
+    # The classifier has already encoded most of these sentences, with the
+    # same model: each text is encoded once (embedding_memo.py).
+    field_emb = embedding_memo.encode(model, field_text)
+    sent_embs = embedding_memo.encode(model, sentences)
     scores = st_util.cos_sim(field_emb, sent_embs)[0]
     best_idx = int(scores.argmax().item())
     best_score = float(scores[best_idx].item())

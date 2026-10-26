@@ -8,7 +8,6 @@ Continuum KT Planner is a Python-based knowledge transfer automation system. It 
 
 - `main.py` - primary application entry point and API server
 - `context_mapper.py` - sentence-level semantic classification pipeline
-- `templates.py` - schema and template manager for section definitions
 - `kt_schema_new.json` - active knowledge transfer schema
 - `requirements.txt` - Python dependency list
 - `static/` - simple UI and captured screenshot assets
@@ -43,7 +42,7 @@ The active pipeline is centered around `main.py` and `context_mapper.py`.
   6. Evidence extraction
   7. Structured knowledge assembly
 
-Additional helpers such as `templates.py`, `policy.py`, `runtime_policy.py`, and `glossary.py` support schema management, runtime configuration, and glossary-based text corrections.
+Additional helpers such as `policy.py`, `runtime_policy.py`, and `glossary.py` support runtime configuration and glossary-based text corrections.
 
 ## Folder structure
 
@@ -78,11 +77,9 @@ KT_Planner/
 │   └── upload_and_get_kt.py
 ├── static/                     # Web UI files and evidence screenshots
 │   ├── index.html
-│   ├── review.html
 │   └── screenshots/
-├── templates/                  # Stored template files (currently empty)
 ├── tests/                      # The pytest suite (pytest.ini limits collection to this folder)
-├── ai.py                       # LLM helpers: structured extraction, polish, field mapping
+├── ai.py                       # LLM helpers: structured extraction, polish
 ├── context_mapper.py           # Main semantic mapping pipeline
 ├── devops_transcription.py     # Transcription-specific helper script
 ├── glossary.json               # Glossary term definitions
@@ -92,7 +89,6 @@ KT_Planner/
 ├── kt_schema_new.json          # Active schema definition
 ├── policy.json                 # Runtime policy configuration
 ├── runtime_policy.py           # Policy loader and runtime behavior
-├── templates.py                # Template manager for schema versions
 └── main.py                     # FastAPI application entry point
 ```
 
@@ -104,9 +100,6 @@ The main application entry point. It handles HTTP API routes, file uploads, job 
 ### `context_mapper.py`
 The core processing engine. This file contains the sentence-level semantic mapper and the 7-stage pipeline for turning transcript text into structured KT output.
 
-### `templates.py`
-Manages schema templates, versioning, and audit logs. It stores template metadata and supports loading templates for different KT workflows.
-
 ### `kt_schema_new.json`
 The active knowledge transfer schema. It defines section IDs, labels, hints, and required status for the current KT model.
 
@@ -117,7 +110,7 @@ The active knowledge transfer schema. It defines section IDs, labels, hints, and
 Defines glossary terms and applies conservative corrections to transcription text to improve semantic quality.
 
 ### `ai.py`
-LLM helpers used by the pipeline: structured extraction per section, the coverage polish pass (with its lossless and grounding checks), and embedding-based field mapping. Sentence classification itself is done only by `context_mapper.py`; the second classifier (`enterprise_semantic_mapper.py`) and the `/semantic-placement` endpoint were removed.
+LLM helpers used by the pipeline: structured extraction per section, the coverage polish pass (with its lossless and grounding checks). Sentence classification itself is done only by `context_mapper.py`; the second classifier (`enterprise_semantic_mapper.py`) and the `/semantic-placement` endpoint were removed.
 
 ### `pii_anonymizer.py`
 Wraps PII detection and anonymization logic (based on Microsoft Presidio). It provides:
@@ -213,7 +206,7 @@ flowchart TD
   B --> C[clean_transcript() - normalization]
   C --> D[context_mapper.py - sentence segmentation & classification]
   D --> E[Evidence extraction & gap detection]
-  E --> F[Template population (`templates.py`) & assemble KT]
+  E --> F[Assemble KT (fixed 17-section schema)]
   F --> G[KT artifact storage & API response]
   subgraph optional
     C --> H[PII detection (`pii_anonymizer.py`) - detection only]

@@ -42,7 +42,11 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # "0 of 3 fields" as if nothing had been captured at all.
     components = section.get("_architecture_components") or []
     if components:
-        blocks.append(build_narrative_block("Architecture Knowledge", [", ".join(components)]))
+        # The bare names, only when there is no diagram: the diagram and the
+        # Technology summary already name every component (X62; dropping the
+        # list moved no fact on any accuracy set, audit §9abg).
+        if not section.get("_architecture_svg"):
+            blocks.append(build_narrative_block("Architecture Knowledge", [", ".join(components)]))
         # In-depth detail beyond the bare names above: the real transcript
         # sentences that named these components, which is usually where the
         # component's actual ROLE is stated ("Redis is used for caching and

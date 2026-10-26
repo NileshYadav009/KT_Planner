@@ -72,4 +72,6 @@ The adversarial probe covers:
 `enccache.py` memoises embedding, cross-encoder and entity-model outputs on
 disk (`evaluation/.cache/enc_cache.sqlite`). Runs are then minutes, not tens
 of minutes, on a slow machine. It is for experiments only, never the app. It
-stores pickles, so never use a cache file from anyone else.
+stores pickles, so never use a cache file from anyone else. The entity model
+is kept per text for both the one-at-a-time and the batched call (the app
+runs a KT's facts in batches since §9abg), under separate keys.

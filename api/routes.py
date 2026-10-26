@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, Form, Query, Request
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
@@ -35,8 +36,9 @@ import document_diff
 import document_model
 import signoff
 from devops_transcription import clean_transcript
-from input_gate import assess_transcript
+from input_gate import MAX_PASTE_CHARS, assess_transcript
 from job_queue import valid_idempotency_key
+from punctuation import would_restore
 from kt_schema_loader import SCHEMA
 import markdown_export
 import observability
@@ -391,6 +393,38 @@ async def upload(file: UploadFile, request: Request, participants: Optional[str]
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _paste_task(payload: dict) -> dict:
+    """The worker task for a pasted transcript, cleaned and checked. Runs on
+    a thread: cleaning a long paste takes seconds, and on the event loop it
+    held up every other request.
+
+    A transcript too long to clean in reasonable time is refused (413), and
+    one that cannot produce a KT document (too little operational content,
+    or no punctuation) with the gate's reasons (422); "force": true skips
+    that refusal for testing, and the reasons still reach the document as
+    warnings. A paste that needs the punctuation model is queued as it came
+    ("clean": true): only workers load the model, so a worker cleans and
+    checks it (pipeline.clean_queued_paste)."""
+    transcript = payload.get("transcript", "")
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
+    if len(transcript) > MAX_PASTE_CHARS:
+        raise HTTPException(status_code=413, detail=(
+            f"The transcript has {len(transcript):,} characters; the limit is {MAX_PASTE_CHARS:,} "
+            f"(about {MAX_PASTE_CHARS // 6:,} words). Split it into sessions and add them to the KT one by one."))
+    # A Teams or Zoom transcript file (WebVTT, SRT): its speaker turns.
+    transcript = captions.to_turns(transcript) or transcript
+    force = bool(payload.get("force"))
+    if would_restore(transcript):
+        return {"transcript": transcript, "clean": True, "force": force}
+    # Same normalization real audio gets.
+    cleaned = clean_transcript(transcript)
+    gate = assess_transcript(cleaned, source="paste")
+    if gate["verdict"] == "reject" and not force:
+        raise HTTPException(status_code=422, detail=" ".join(gate["reasons"]))
+    return {"transcript": cleaned, "warnings": gate["reasons"] if gate["verdict"] != "ok" else []}
+
+
 @router.post("/kt-from-transcript")
 async def kt_from_transcript(payload: dict, request: Request,
                              principal: Principal = Depends(require_permission("kt:create"))):
@@ -402,23 +436,8 @@ async def kt_from_transcript(payload: dict, request: Request,
     the existing GET /status/{job_id} and GET /export/pdf/{job_id} endpoints —
     same as a real upload.
     """
-    transcript = payload.get("transcript", "")
-    if not isinstance(transcript, str) or not transcript.strip():
-        raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
     key = _idempotency_key(request)
-    # A Teams or Zoom transcript file (WebVTT, SRT): its speaker turns.
-    transcript = captions.to_turns(transcript) or transcript
-
-    # Same normalization real audio gets, so this path actually exercises the
-    # vocabulary-correction pipeline being tested.
-    cleaned_transcript = clean_transcript(transcript)
-
-    # Refuse text that cannot produce a KT document (too little operational
-    # content, or caption-style text with no punctuation). "force": true skips
-    # the refusal for testing; the reasons still reach the document as warnings.
-    gate = assess_transcript(cleaned_transcript, source="paste")
-    if gate["verdict"] == "reject" and not payload.get("force"):
-        raise HTTPException(status_code=422, detail=" ".join(gate["reasons"]))
+    task = await run_in_threadpool(_paste_task, payload)
 
     job_id = str(uuid.uuid4())
     earlier = await _reserve(principal, key, job_id)
@@ -426,8 +445,7 @@ async def kt_from_transcript(payload: dict, request: Request,
         return _queued_response(earlier, "Already submitted. Poll /status/{job_id} for results.", duplicate=True)
     with pipeline.JOB_LOCK:
         pipeline.JOB_QUEUE[job_id] = _new_job(principal, payload.get("participants"))
-    pipeline.TASKS.enqueue(job_id, "transcript", {
-        "transcript": cleaned_transcript, "warnings": gate["reasons"] if gate["verdict"] != "ok" else []})
+    pipeline.TASKS.enqueue(job_id, "transcript", task)
     return _queued_response(job_id, "Transcript queued for processing. Poll /status/{job_id} for results.")
 
 
@@ -522,15 +540,7 @@ async def name_kt_speakers(job_id: str, payload: dict, principal: Principal = De
 @router.post("/kt/{job_id}/sessions")
 async def add_kt_session(job_id: str, payload: dict, principal: Principal = Depends(require_permission("kt:create"))):
     """Add a pasted follow-up session to a finished KT."""
-    transcript = payload.get("transcript", "")
-    if not isinstance(transcript, str) or not transcript.strip():
-        raise HTTPException(status_code=400, detail="transcript is required and must be non-empty.")
-    cleaned = clean_transcript(captions.to_turns(transcript) or transcript)
-    gate = assess_transcript(cleaned, source="paste")
-    if gate["verdict"] == "reject" and not payload.get("force"):
-        raise HTTPException(status_code=422, detail=" ".join(gate["reasons"]))
-    return _queue_session(job_id, principal, {
-        "transcript": cleaned, "warnings": gate["reasons"] if gate["verdict"] != "ok" else []})
+    return _queue_session(job_id, principal, await run_in_threadpool(_paste_task, payload))
 
 
 @router.post("/kt/{job_id}/sessions/upload")
@@ -879,7 +889,33 @@ async def me(principal: Principal = Depends(require_principal)):
             "key_label": principal.key_label, "user": principal.key_label, "method": principal.method,
             "role": principal.role, "role_label": ROLE_LABELS.get(principal.role, principal.role),
             "permissions": sorted(principal.permissions),
-            "auth": "disabled" if principal.method == "disabled" else "on"}
+            "auth": "disabled" if principal.method == "disabled" else "on", "api_docs": api_docs_enabled()}
+
+
+# --------------------------------------------------------------------------
+# API reference: signed-in users only (it was public). CONTINUUM_API_DOCS=0
+# turns it off, and the app's link to it with it.
+# --------------------------------------------------------------------------
+
+def api_docs_enabled() -> bool:
+    return os.getenv("CONTINUUM_API_DOCS", "on").strip().lower() not in ("0", "off", "false", "disabled")
+
+
+@router.get("/openapi.json", include_in_schema=False)
+async def openapi_schema(request: Request):
+    if not api_docs_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    require_principal(request)
+    return JSONResponse(request.app.openapi())
+
+
+@router.get("/docs", include_in_schema=False)
+async def api_reference(request: Request):
+    if not api_docs_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    if optional_principal(request) is None:
+        return RedirectResponse("/", status_code=302)       # the sign-in page
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="Continuum API reference")
 
 
 # --------------------------------------------------------------------------

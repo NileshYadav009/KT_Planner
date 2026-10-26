@@ -82,6 +82,86 @@ def test_paste_route_refuses_and_explains(monkeypatch):
     assert queued and queued[0]["warnings"]          # the reasons still reach the document
 
 
+class _FullStopEveryTwelveWords:
+    """A stand-in punctuation model (tests never download the real one)."""
+
+    def infer(self, texts, apply_sbd=True):
+        return [[" ".join(t.split()[i:i + 12]) + "." for i in range(0, len(t.split()), 12)] for t in texts]
+
+
+def _model_on(monkeypatch, model):
+    import punctuation
+
+    monkeypatch.setenv("PUNCTUATION_MODEL", "pcs_en")
+    monkeypatch.setattr(punctuation, "MIN_WORDS", 60)
+    loads = []
+    monkeypatch.setattr(punctuation, "_load", lambda: loads.append(1) or model)
+    return loads
+
+
+def test_an_unpunctuated_paste_is_punctuated_by_a_worker_not_the_api(monkeypatch):
+    # The API process loads no model; it queues the paste as it came, and the
+    # worker cleans it, the model giving it sentence ends, then checks it.
+    from fastapi.testclient import TestClient
+    import main
+    import pipeline
+    from worker import Worker
+
+    loads = _model_on(monkeypatch, _FullStopEveryTwelveWords())
+    queued = []
+    monkeypatch.setattr(pipeline, "run_kt_pipeline", lambda job_id, text, **k: queued.append(text))
+    resp = TestClient(main.app).post("/kt-from-transcript", json={"transcript": re.sub(r"[^\w\s]", "", KT).lower()})
+    assert resp.status_code == 200, resp.text
+    assert not loads
+    Worker(worker_id="test-punctuate").drain(resp.json()["job_id"])
+    assert loads and queued
+    assert queued[0].count(".") >= 8 and queued[0].startswith("This kt is for tripwise")   # words as said
+    pipeline.JOB_QUEUE.pop(resp.json()["job_id"], None)
+
+
+def test_a_paste_the_worker_cannot_punctuate_fails_with_the_reason(monkeypatch):
+    from fastapi.testclient import TestClient
+    import main
+    import pipeline
+    from worker import Worker
+
+    _model_on(monkeypatch, None)                       # the model is missing on the worker
+    monkeypatch.setattr(pipeline, "run_kt_pipeline", lambda *a, **k: pytest.fail("not a KT"))
+    resp = TestClient(main.app).post("/kt-from-transcript", json={"transcript": re.sub(r"[^\w\s]", "", KT).lower()})
+    assert resp.status_code == 200
+    Worker(worker_id="test-punctuate").drain(resp.json()["job_id"])
+    job = pipeline.JOB_QUEUE.pop(resp.json()["job_id"])
+    assert job["status"] == "failed" and job["failure"] == "input"
+    assert "punctuation" in job["error"]
+
+
+def test_a_queued_session_paste_is_cleaned_and_checked():
+    import pipeline
+
+    done = {"transcript": "Already cleaned.", "warnings": []}
+    assert pipeline.clean_queued_paste(done) is done
+    cleaned = pipeline.clean_queued_paste({"transcript": "Um, so, " + KT, "clean": True})
+    assert cleaned["transcript"].startswith("This KT is for TripWise") and not cleaned["clean"]
+    with pytest.raises(pipeline.InputRejected, match="needs at least"):
+        pipeline.clean_queued_paste({"transcript": "Hello everyone, thanks for joining.", "clean": True})
+    assert pipeline.clean_queued_paste({"transcript": "Hello everyone.", "clean": True, "force": True})["warnings"]
+
+
+def test_a_paste_over_the_limit_is_refused(monkeypatch):
+    from fastapi.testclient import TestClient
+    import main
+    from api import routes
+
+    client = TestClient(main.app)
+    monkeypatch.setattr(routes, "MAX_PASTE_CHARS", len(KT) - 1)
+    resp = client.post("/kt-from-transcript", json={"transcript": KT})
+    assert resp.status_code == 413 and "Split it into sessions" in resp.json()["detail"]
+    # Far over the limit, refused from its declared length before it is read.
+    monkeypatch.setattr(main.input_gate, "MAX_PASTE_CHARS", 10)
+    resp = client.post("/kt-from-transcript", json={"transcript": KT * 100})
+    assert resp.status_code == 413 and "longer than the limit" in resp.json()["detail"]
+
+
 def test_upload_of_a_non_kt_recording_fails_with_the_reason(tmp_path, monkeypatch):
     import pipeline
 

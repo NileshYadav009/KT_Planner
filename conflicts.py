@@ -215,26 +215,130 @@ def _measures_disagree(x, y) -> bool:
     return bool(x[2]) and x[2] == y[2] and x[1] == y[1] and x[0] != y[0] and not x[3] and not y[3]
 
 
+# How often a scheduled activity runs, said twice with two periods: "Backups
+# run hourly." ... "Our current scheduled backup interval is every six
+# hours." (adversarial matrix D03; only the LLM check saw it, X8). Hours per
+# run. Only activities a system has one schedule of, and only when the two
+# sentences name nothing else that could tell two schedules apart ("Full
+# backups run weekly" / "Log backups run every fifteen minutes"), with
+# nothing after the frequency ("hourly during business hours").
+_HOURS = {"minute": 1 / 60, "hour": 1, "day": 24, "night": 24, "morning": 24, "evening": 24, "week": 168,
+          "fortnight": 336, "month": 730, "quarter": 2190, "year": 8760}
+_ADVERB_HOURS = {"hourly": 1, "daily": 24, "nightly": 24, "weekly": 168, "fortnightly": 336, "monthly": 730,
+                 "quarterly": 2190, "yearly": 8760, "annually": 8760}
+_FREQUENCY_RE = re.compile(
+    r"\b(?:(?P<adverb>hourly|daily|nightly|weekly|fortnightly|monthly|quarterly|yearly|annually)"
+    r"|(?:every|each)\s+(?:(?P<n>\d+|other|two|three|four|five|six|seven|eight|ten|twelve|fifteen|twenty|thirty)\s+)?"
+    r"(?P<unit>minute|hour|day|night|morning|evening|week|fortnight|month|quarter|year)s?"
+    r"|(?P<times>once|twice|three\s+times)\s+(?:a|an|per|every)\s+(?P<per>hour|day|night|week|month|quarter|year))\b",
+    re.IGNORECASE)
+_ACTIVITIES = {"backup": "backup", "backups": "backup", "snapshot": "snapshot", "snapshots": "snapshot",
+               "deploy": "deploy", "deploys": "deploy", "deployment": "deploy", "deployments": "deploy",
+               "release": "release", "releases": "release", "patching": "patch", "patches": "patch",
+               "rotation": "rotation", "rotated": "rotation", "drill": "drill", "drills": "drill"}
+_FREQUENCY_LIGHT = _COUNT_LIGHT | {"current", "currently", "scheduled", "schedule", "interval", "frequency", "cadence",
+                                   "happen", "happens", "taken", "take", "takes", "done", "go", "goes", "out",
+                                   "automatically", "automated", "set", "every", "each", "once", "twice"}
+
+
+def _frequencies(text: str) -> List[Tuple[str, float, frozenset]]:
+    """(activity, hours between runs, the other words naming it) per clause
+    that states how often one scheduled activity runs."""
+    out = []
+    for clause in re.split(r"[.;!?,]|\b(?:and|but|while|whereas)\b", text or "", flags=re.IGNORECASE):
+        found = list(_FREQUENCY_RE.finditer(clause))
+        if len(found) != 1 or re.search(r"[a-z]", clause[found[0].end():], re.IGNORECASE):
+            continue
+        m = found[0]
+        if m.group("adverb"):
+            hours = _ADVERB_HOURS[m.group("adverb").lower()]
+        elif m.group("unit"):
+            n = (m.group("n") or "one").lower()
+            count = 2 if n == "other" else (int(n) if n.isdigit() else _WORD_NUMBERS.get(n, 1))
+            hours = count * _HOURS[m.group("unit").lower()]
+        else:
+            times = {"once": 1, "twice": 2, "three times": 3}[re.sub(r"\s+", " ", m.group("times").lower())]
+            hours = _HOURS[m.group("per").lower()] / times
+        words = re.findall(r"[a-z][\w+-]*", clause[:m.start()].lower())
+        activities = {_ACTIVITIES[w] for w in words if w in _ACTIVITIES}
+        if len(activities) != 1:
+            continue
+        named = frozenset(w for w in words if w not in _ACTIVITIES and w not in _FREQUENCY_LIGHT)
+        out.append((activities.pop(), hours, named))
+    return out
+
+
+_WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "ten": 10,
+                 "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30}
+
+
+def _frequencies_disagree(x, y) -> bool:
+    return x[0] == y[0] and x[2] == y[2] and abs(x[1] - y[1]) > 1e-9
+
+
 def find_value_conflicts(texts: Sequence[str]) -> List[Tuple[str, str]]:
-    """Pairs of sentences that give one thing two different counts, or one
-    setting two values, where neither corrects, updates or plans it and they
-    are not about different environments or different named parts of the
-    system."""
+    """Pairs of sentences that give one thing two different counts, one
+    setting two values or one schedule two periods, where neither corrects,
+    updates or plans it and they are not about different environments or
+    different named parts of the system."""
     try:
         from field_populator import _NOT_YET_RE
     except Exception:
         _NOT_YET_RE = None
-    stated = [(t, _counts(t), _measures(t)) for t in texts]
+    stated = [(t, _counts(t), _measures(t), _frequencies(t)) for t in texts]
     pairs: List[Tuple[str, str]] = []
-    for i, (a, counts_a, measures_a) in enumerate(stated):
-        if (not counts_a and not measures_a) or _PAST_RE.search(a) or (_NOT_YET_RE and _NOT_YET_RE.search(a)):
+    for i, (a, counts_a, measures_a, often_a) in enumerate(stated):
+        if (not counts_a and not measures_a and not often_a) or _PAST_RE.search(a) \
+                or (_NOT_YET_RE and _NOT_YET_RE.search(a)):
             continue
-        for b, counts_b, measures_b in stated[i + 1:]:
-            if ((not counts_b and not measures_b) or CORRECTION_RE.search(b) or _PAST_RE.search(b)
+        for b, counts_b, measures_b, often_b in stated[i + 1:]:
+            if ((not counts_b and not measures_b and not often_b) or CORRECTION_RE.search(b) or _PAST_RE.search(b)
                     or (_NOT_YET_RE and _NOT_YET_RE.search(b))):
                 continue
             if (any(_counts_disagree(x, y) for x in counts_a for y in counts_b)
-                    or any(_measures_disagree(x, y) for x in measures_a for y in measures_b)):
+                    or any(_measures_disagree(x, y) for x in measures_a for y in measures_b)
+                    or any(_frequencies_disagree(x, y) for x in often_a for y in often_b)):
+                pairs.append((a.strip(), b.strip()))
+    return pairs
+
+
+# Who may do a thing, said two ways: "Only the release manager can approve
+# production deployments." ... "Developers own deployment approvals."
+# (adversarial matrix D02; only the LLM check saw it, X8). The other
+# sentence must name the same action and something it acts on, with a
+# subject of its own that is neither the only one allowed nor the thing
+# acted on, and must not deny it ("Developers cannot approve ...").
+_ONLY_RE = re.compile(
+    r"\bonly\s+(?P<actor>(?:the\s+|our\s+)?[a-z][\w-]*(?:\s+[a-z][\w-]*){0,3}?)\s+"
+    r"(?:can|may|is\s+allowed\s+to|are\s+allowed\s+to|is\s+permitted\s+to|are\s+permitted\s+to)\s+"
+    r"(?P<action>[a-z]+)\b(?P<object>[^.;,]*)", re.IGNORECASE)
+_DENIES_RE = re.compile(r"\b(?:not|never|no|cannot|can'?t|won'?t|isn'?t|aren'?t|doesn'?t|don'?t)\b", re.IGNORECASE)
+_DOING_VERBS = {"own", "owns", "can", "may", "handle", "handles", "do", "does", "run", "runs", "manage", "manages",
+                "give", "gives", "grant", "grants", "sign", "signs", "are", "is", "approve", "approves", "make",
+                "makes", "perform", "performs", "decide", "decides"}
+
+
+def find_exclusive_conflicts(texts: Sequence[str]) -> List[Tuple[str, str]]:
+    pairs: List[Tuple[str, str]] = []
+    for b in texts:
+        m = _ONLY_RE.search(b or "")
+        if not m or CORRECTION_RE.search(b) or _PAST_RE.search(b):
+            continue
+        actor = _content_words(m.group("actor"))
+        action = m.group("action").lower().rstrip("s")[:5]
+        objects = _content_words(m.group("object"))
+        if not actor or not objects or len(action) < 4:
+            continue
+        for a in texts:
+            if a is b or _ONLY_RE.search(a) or _DENIES_RE.search(a) or CORRECTION_RE.search(a) or _PAST_RE.search(a):
+                continue
+            words = re.findall(r"[a-z][a-z']+", a.lower())
+            stems = [w.rstrip("s")[:5] for w in words]
+            if action not in stems or not objects & set(stems):
+                continue
+            verb_at = next((i for i, w in enumerate(words) if w in _DOING_VERBS or stems[i] == action), None)
+            subject = _content_words(" ".join(words[:verb_at])) if verb_at else set()
+            if subject and not subject & actor and not subject & objects:
                 pairs.append((a.strip(), b.strip()))
     return pairs
 

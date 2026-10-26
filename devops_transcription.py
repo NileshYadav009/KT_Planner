@@ -1212,19 +1212,30 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
     corrections_applied = []
     corrected = text
 
+    def _sub_per_match(pattern: str, replacement: str, source: str, times: int) -> str:
+        # re.sub once per match found, as it always was, but no more passes
+        # once one changes nothing: each pass rewrites the whole text, so a
+        # long paste's cleaning grew with the square of its length (30 s for
+        # 150,000 characters).
+        for _ in range(times):
+            updated = re.sub(pattern, replacement, source, flags=re.IGNORECASE)
+            if updated == source:
+                break
+            source = updated
+        return source
+
     def _apply_phrase_corrections(source: str) -> str:
         updated = source
         for pattern, replacement in PHRASE_CORRECTIONS.items():
             matches = list(re.finditer(pattern, updated, re.IGNORECASE))
             for match in matches:
-                original = match.group(0)
-                updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
                 corrections_applied.append({
                     "type": "phrase",
-                    "original": original,
+                    "original": match.group(0),
                     "corrected": replacement,
                     "pattern": pattern
                 })
+            updated = _sub_per_match(pattern, replacement, updated, len(matches))
 
         # Human-approved glossary phrases apply on every transcript, not just the
         # low-confidence repair path in context_mapper.py's ContextRepair. These are
@@ -1234,14 +1245,13 @@ def apply_devops_corrections(text: str) -> Tuple[str, List[Dict]]:
             pattern = re.escape(phrase)
             matches = list(re.finditer(pattern, updated, re.IGNORECASE))
             for match in matches:
-                original = match.group(0)
-                updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
                 corrections_applied.append({
                     "type": "glossary_phrase",
-                    "original": original,
+                    "original": match.group(0),
                     "corrected": replacement,
                     "pattern": phrase
                 })
+            updated = _sub_per_match(pattern, replacement, updated, len(matches))
         return updated
 
     # Step 1: Phrase corrections before fuzzy/word normalization

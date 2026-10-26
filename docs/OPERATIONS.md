@@ -130,8 +130,64 @@ local disk (not NFS).
 | `CONTINUUM_COPYEDIT_MODEL` | Qwen2.5-1.5B-Instruct, 4-bit | The local model: a path to a `.gguf` file, or `off`. The default (1.1 GB, Apache-2.0) is downloaded by `scripts/fetch_models.py`, never during a KT. It is loaded only for the copy edit, freed after it, and needs about 1.3 GB of RAM while it runs. |
 | `CONTINUUM_COPYEDIT_MAX_SECONDS` | `300` | Time limit for the local copy edit in one KT. Sentences after it stay as said. |
 | `CONTINUUM_COPYEDIT_THREADS` | half the CPU cores | CPU threads for the local model, so the machine stays usable while it runs. |
-| `PUNCTUATION_MODEL` | on | `0` turns off the punctuation model (`punctuation.py`). It runs only on a run of 120 words or more with fewer than one punctuation mark per 30 words (some speech-to-text exports; Whisper punctuates), and takes only the sentence ends from it: the words stay as said. A missing package or model leaves the text as it is. Loading takes about 10 s, once per worker; a 400-word run takes under a second. |
+| `PUNCTUATION_MODEL` | on | `0` turns off the punctuation model (`punctuation.py`). It runs only on a run of 120 words or more with fewer than one punctuation mark per 30 words (some speech-to-text exports; Whisper punctuates), and takes only the sentence ends from it: the words stay as said. A missing package or model leaves the text as it is. Loading takes about 10 s, once per worker; a 400-word run takes under a second. Only workers load it: the API queues such a paste as it came, and the worker cleans and checks it (a paste it cannot use fails with the reason, as the API would have refused it). |
 | `CONTINUUM_COPYEDIT_MIN_FREE_GB` | `1.5` | The local copy edit is skipped for a KT, which keeps its rules-only sentences, when less memory than this is free as it starts. |
+| `CONTINUUM_MAX_TRANSCRIPT_CHARS` | `150000` | The longest pasted transcript or session (about 25,000 words); a longer one is refused (413) and should be added as sessions. Cleaning runs off the request path, on a thread; 150,000 characters take about 13 s on a laptop. |
+| `CONTINUUM_SESSION_TTL` | `43200` (12 h) | A browser session's longest life. |
+| `CONTINUUM_SESSION_IDLE` | `1800` (30 min) | A session also ends after this long with no activity; `0` keeps only the lifetime. What the page asks for on its own (polling) does not count as activity; reading and scrolling do (the page reports them every 5 minutes at most). |
+| `CONTINUUM_API_DOCS` | on | The API reference (`/docs`, `/openapi.json`) is served to signed-in users only; `0` turns it off, and the app's link with it. |
+| `CONTINUUM_HSTS_SECONDS` | `31536000` | `Strict-Transport-Security` on HTTPS responses (directly, or behind a proxy that sends `X-Forwarded-Proto: https`); `0` leaves it out. The other browser security headers (a Content-Security-Policy naming the pages' inline scripts by hash, `X-Frame-Options`, `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`) are always sent (`browser_security.py`). |
+| `CONTINUUM_RETENTION_DAYS` | unset | Delete KTs unchanged for this many days, with their screenshots. Applied when the API starts and every hour by each worker. |
+
+## Backups and restore
+
+Everything a deployment knows is in the job database (`CONTINUUM_DB_PATH`:
+KTs, document versions, the queue, people, API keys, sessions, the audit log,
+vocabulary candidates) and the screenshots folder (`KT_ASSETS_DIR`).
+`scripts/backup.py` copies both while the app runs:
+
+```bash
+python scripts/backup.py backup --dest /backups --keep 14   # SQLite online backup + screenshots + manifest
+python scripts/backup.py verify /backups/continuum-<time>     # checksums and SQLite's integrity check
+python scripts/backup.py drill                              # back up, restore into a scratch folder, read every KT back
+```
+
+Run `backup` from cron or a scheduled job (in compose:
+`docker compose exec api python scripts/backup.py backup --dest /app/data/backups`)
+and copy each new folder off the host (an object store or another machine)
+in the same job: a backup on the same disk does not survive the disk. Run
+`drill` after changing the schedule and at least monthly; it fails when a
+KT cannot be read back.
+
+To restore, stop the API and the workers, then
+`python scripts/backup.py restore /backups/continuum-<time> --force`. It checks
+the backup first and keeps what it replaces beside it
+(`.before-restore-<time>`). With a nightly backup the most that can be lost is
+a day of KTs (RPO 24 hours; hourly backups make it an hour). A restore takes
+seconds for the database plus the models' load time when the app starts (2 to
+3 minutes on CPU), so the RTO is about 15 minutes including the copy back from
+off-host storage.
+
+## Database migrations
+
+Each module creates its tables as they are now. A change to an existing table
+is a numbered migration in `migrations.py`, applied once and in order when the
+app starts, and recorded in `schema_migrations`. `python migrations.py` lists
+what a database has and what is pending; `--apply` applies it without starting
+the app. Migrations go forward only: take a backup before upgrading, and roll
+back a release by restoring it. An older release started on a database a
+newer one migrated logs an error naming the migration it does not know.
+
+## Vocabulary candidates
+
+Terms the vocabulary learning spots in transcripts are kept per workspace in
+the job database, deleted with the workspace. `python scripts/review_vocabulary.py`
+lists them with their workspace; `--approve`/`--reject PHRASE` (with
+`--workspace TENANT_ID` when the phrase is pending in more than one) decides.
+An approved term goes into `glossary.json` and corrects every workspace's
+transcripts. A file from before (`CONTINUUM_VOCAB_CANDIDATES_PATH`) is read
+once into the database; a phrase rejected there stays rejected for every
+workspace.
 
 ## Submitting KTs
 

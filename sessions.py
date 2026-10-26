@@ -299,6 +299,7 @@ def add_session(job_id: str, payload: Dict[str, Any]) -> None:
             warnings += [f"Session {n}: {w}" for w in rec["warnings"]]
             notices += [f"Session {n}: {x}" for x in rec["notices"]]
         else:
+            payload = pipeline.clean_queued_paste(payload)
             session.update(kind="paste", transcript=str(payload.get("transcript") or ""), segments=None,
                            time_offset=0.0)
             warnings += [f"Session {n}: {w}" for w in payload.get("warnings") or []]

@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report g9abd g9abf`.
+then `python evaluation/quality_gates.py --report g9abf g9abg`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (g9abd) | After (g9abf) | |
+| Gate | Target | Before (g9abf) | After (g9abg) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -52,18 +52,18 @@ model was called for this page.
 
 | KT | Pages | Facts in PDF | Placement | Relations | Sources | Problems |
 |---|---|---|---|---|---|---|
-| e2e_a_aws_ecommerce | 11 | 15/15 | 100% | 6/6 | 37/37 | 0 |
-| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 39/39 | 0 |
-| e2e_c_gcp_data_platform | 10 | 12/12 | 100% | 3/3 | 33/33 | 0 |
-| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 23/23 | 0 |
-| e2e_e_quickbite_food_delivery | 12 | 32/32 | 100% | 7/7 | 56/56 | 0 |
-| e2e_f_online_learning | 11 | 20/20 | 100% | 5/5 | 42/42 | 0 |
+| e2e_a_aws_ecommerce | 10 | 15/15 | 100% | 6/6 | 36/36 | 0 |
+| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 38/38 | 0 |
+| e2e_c_gcp_data_platform | 8 | 12/12 | 100% | 3/3 | 32/32 | 0 |
+| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 22/22 | 0 |
+| e2e_e_quickbite_food_delivery | 12 | 32/32 | 100% | 7/7 | 55/55 | 0 |
+| e2e_f_online_learning | 11 | 20/20 | 100% | 5/5 | 41/41 | 0 |
 
 ## llm-replay
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (g9abd) | After (g9abf) | |
+| Gate | Target | Before (g9abf) | After (g9abg) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -83,11 +83,11 @@ model was called for this page.
 
 | KT | Pages | Facts in PDF | Placement | Relations | Sources | Problems |
 |---|---|---|---|---|---|---|
-| e2e_a_aws_ecommerce | 11 | 15/15 | 100% | 6/6 | 42/42 | 0 |
-| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 41/41 | 0 |
-| e2e_c_gcp_data_platform | 11 | 12/12 | 100% | 3/3 | 36/37 | 0 |
-| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 26/26 | 0 |
-| e2e_e_quickbite_food_delivery | 13 | 32/32 | 100% | 7/7 | 61/61 | 0 |
+| e2e_a_aws_ecommerce | 11 | 15/15 | 100% | 6/6 | 41/41 | 0 |
+| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 40/40 | 0 |
+| e2e_c_gcp_data_platform | 10 | 12/12 | 100% | 3/3 | 35/36 | 0 |
+| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 25/25 | 0 |
+| e2e_e_quickbite_food_delivery | 13 | 32/32 | 100% | 7/7 | 60/60 | 0 |
 
 A blocked KT has no answers in `tests/fixtures/e2e_kts_llm_recording.json`; recording them
 spends Groq quota and must be agreed first. One recorded from a user's own run can instead be
@@ -95,19 +95,19 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `final9abf`. Holdouts and blind KTs are unseen and are
+From `evaluation/accuracy.py` run `final9abg2`. Holdouts and blind KTs are unseen and are
 reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
 Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
 | Set | Correct | Facts | Placement | Lost | Unseen: 90% |
 |---|---|---|---|---|---|
 | tuning | 534 | 534 | 100.0% | 0 | tuned on |
-| dev | 549 | 551 | 99.6% | 0 | tuned on |
+| dev | 551 | 551 | 100.0% | 0 | tuned on |
 | holdout | 88 | 95 | 92.6% | 0 | pass |
 | blind2 | 109 | 114 | 95.6% | 0 | pass |
 | blind3 | 118 | 132 | 89.4% | 4 | FAIL |
 
 ## Adversarial matrix
 
-Run `m9abf`: 83 cases, must checks 290/290, should checks 45/50
+Run `m9abg2`: 87 cases, must checks 297/297, should checks 51/54
 (`docs/ADVERSARIAL_MATRIX.md`).

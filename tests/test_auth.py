@@ -182,8 +182,9 @@ def test_the_app_page_shows_sign_in_until_signed_in(client, tenants):
     assert "httponly" in cookie and "samesite=lax" in cookie
     app = client.get("/")
     assert 'id="themeToggle"' in app.text                      # the real app, now
-    # P2-5: what the KT covered, not a letter grade of the customer's KT.
-    assert "KT completeness" in app.text and "q.grade" not in app.text
+    # P2-5: what the KT covered, not a letter grade of the customer's KT
+    # (since the 26 Oct redesign, readiness from the coverage matrix).
+    assert "Handover readiness" in app.text and "q.grade" not in app.text
     assert client.get("/me").json()["workspace"] == "Acme"
     assert client.get("/jobs").status_code == 200
 
@@ -203,3 +204,39 @@ def test_sign_out_ends_the_session(client, tenants):
     client.post("/logout")
     assert client.get("/jobs").status_code == 401
     assert "Sign in" in client.get("/").text
+
+
+def _last_seen(client, seconds_ago=None):
+    """The session's last activity, after setting it `seconds_ago` if given."""
+    import time
+
+    session = auth._hash(client.cookies.get(auth.SESSION_COOKIE))
+    with auth._connect() as db:
+        if seconds_ago is not None:
+            db.execute("UPDATE sessions SET last_seen_at = ? WHERE session_hash = ?", (time.time() - seconds_ago, session))
+        row = db.execute("SELECT last_seen_at FROM sessions WHERE session_hash = ?", (session,)).fetchone()
+    return row[0] if row else None
+
+
+def test_an_idle_session_ends(client, tenants, monkeypatch):
+    # It lasted 12 hours whatever the activity (enterprise checklist P1).
+    monkeypatch.setattr(auth, "SESSION_IDLE_SECONDS", 1800)
+    client.post("/login", json={"api_key": tenants["a"][1]})
+    _last_seen(client, seconds_ago=1700)
+    assert client.get("/jobs").status_code == 200                   # still within it, and now active again
+    _last_seen(client, seconds_ago=1801)
+    assert client.get("/jobs").status_code == 401
+    assert _last_seen(client) is None                                # the session is gone
+
+
+def test_the_page_polling_on_its_own_does_not_keep_a_session_going(client, tenants, monkeypatch):
+    monkeypatch.setattr(auth, "SESSION_IDLE_SECONDS", 1800)
+    client.post("/login", json={"api_key": tenants["a"][1]})
+    seen = _last_seen(client, seconds_ago=600)
+    assert client.get("/jobs", headers={"X-Continuum-Background": "1"}).status_code == 200
+    assert _last_seen(client) == seen
+    assert client.get("/jobs").status_code == 200
+    assert _last_seen(client) > seen
+    monkeypatch.setattr(auth, "SESSION_IDLE_SECONDS", 0)            # 0: only the 12-hour lifetime
+    _last_seen(client, seconds_ago=6 * 3600)
+    assert client.get("/jobs").status_code == 200
