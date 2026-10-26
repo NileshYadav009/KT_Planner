@@ -600,11 +600,12 @@ def _with_their_corrections(sentences: List[str]) -> List[str]:
     it again: "We use PostgreSQL 14. Actually, ... production is now on
     PostgreSQL 16." was quoted as "We use PostgreSQL 14." for a connection
     (context_mapper.segment_sentences keeps the two as one unit)."""
-    from devops_transcription import points_back_to, replaces_value_before
+    from devops_transcription import points_back_to, replaces_value_before, restates, said_before_claim
 
     out: List[str] = []
     for sentence in sentences:
-        if out and (replaces_value_before(out[-1], sentence) or points_back_to(out[-1], sentence)):
+        if out and (replaces_value_before(out[-1], sentence) or points_back_to(out[-1], sentence)
+                    or restates(out[-1], said_before_claim(sentence))):
             out[-1] = f"{out[-1]} {sentence}"
         else:
             out.append(sentence)

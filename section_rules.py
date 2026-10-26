@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from fact_units import ONBOARDING_VERBS
+
 
 @dataclass
 class SectionRuleMatch:
@@ -83,8 +85,10 @@ _ONBOARDING_FIRST = r"(?:(?:on|in|for|during|within|over|by\s+the\s+end\s+of)\s+
 _NOT_ONBOARDING_TAIL = r"(?!\s+(?:of|after|back)\b)"
 ONBOARDING_MONTH_RX = (
     _ONBOARDING_LEAD + r"(?:" + _ONBOARDING_FIRST + r"(?:month|(?:four|few|couple\s+of)\s+weeks|(?:30|thirty)\s+days)\b"
-    + _NOT_ONBOARDING_TAIL + r"|(?:after|within)\s+(?:a|one)\s+month\b[\s,]+(?:i'?d\s+like\s+you|you|the\s+new\s+"
-    r"(?:owner|engineer|lead))\b)")
+    + _NOT_ONBOARDING_TAIL + r"|(?:(?:after|within)\s+(?:a|one)\s+month|within\s+(?:30|thirty)\s+days"
+    r"|by\s+the\s+end\s+of\s+(?:the|your)\s+month"
+    r"|by\s+week\s+(?:three|four|five|3|4|5))\b[\s,:]+(?:i'?d\s+like\s+you|you|the\s+new\s+(?:owner|engineer|lead)|"
+    + ONBOARDING_VERBS + r")\b)")
 ONBOARDING_DAY_RX = (
     _ONBOARDING_LEAD + r"(?:" + _ONBOARDING_FIRST + r"(?:day|week|couple\s+of\s+days)\b|(?:on\s+)?day\s+(?:one|1)\b)"
     + _NOT_ONBOARDING_TAIL)
@@ -130,7 +134,18 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # "Do not assume a healthy health check means the path is healthy"
             # is a trap warning of the same kind.
             r"\bdo\s+not\s+assume\b",
+            # Not data that never reaches a system ("Card details never touch
+            # our servers"): that is a control (security_controls).
+            r"(?<!\bdetails\s)(?<!\bdata\s)(?<!\bnumbers\s)(?<!\binformation\s)"
             r"\bnever\s+(?:manually\s+)?(?:change|edit|delete|touch|alter|run)\b",
+            # "The thing you really must not do is run the claim job twice"
+            # (dev d14) matched nothing and went to Open Responsibilities.
+            r"\b(?:(?:must|should)\s+(?:not|never)|mustn'?t|shouldn'?t)\s+(?:ever\s+)?(?:do|run(?!\s+into)|change|edit"
+            r"|delete|touch|alter|modify|drop|purge|disable|truncate|restart)\b",
+            # An action that cannot be taken back: "It advances every student
+            # a year, and undoing it means a database restore."
+            r"\b(?:undoing|reversing|reverting)\s+(?:it|that|this)\s+(?:means|requires|needs|takes)\b",
+            r"\bcan(?:'t|not)\s+be\s+(?:undone|reversed)\b",
             # Spoken warnings: "One warning: the last database migration might
             # be hard to reverse, so be careful with it." went to Disaster
             # Recovery, and Danger Zones reported the topic not discussed.
@@ -404,6 +419,13 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bdata\s+(?:never\s+leaves|must\s+(?:stay|remain)\s+in|stays\s+in|resides\s+in|is\s+kept\s+in)\s+"
             r"(?:the\s+)?(?:\w+\s+){0,2}(?:regions?|country|countries|eu|uk|us|data\s+centres?|data\s+centers?)\b",
             r"\bdata\s+residency\b",
+            # Sensitive data kept out of a system, or handled as personal
+            # data: "Card details never touch our servers", "Phone numbers are
+            # personal data so we delete message logs after ninety days".
+            r"\b(?:card|cardholder|payment|credit\s+card|customer|personal|patient)\s+(?:data|details|numbers|information)"
+            r"\s+(?:never|does\s+not|doesn'?t|do\s+not|don'?t)\s+(?:touch(?:es)?|reach(?:es)?|hits?|leaves?"
+            r"|pass(?:es)?\s+through|go(?:es)?\s+through)\b",
+            r"\b(?:is|are|counts?\s+as)\s+(?:personal|sensitive|personally\s+identifiable)\s+(?:data|information)\b",
         ],
         0.95,
     ),
@@ -805,6 +827,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bleast\s+privilege\b",
             r"\bservice\s+controls\b",
             r"\bsecrets?\s+(?:live|lives|are\s+kept|are\s+stored)\s+in\b",
+            # Where credentials are kept: "The Stripe and Postmark keys are in
+            # Heroku config vars" went to Environments.
+            r"\b(?:api\s+)?(?:keys|credentials|passwords|tokens|connection\s+strings)\s+(?:live|are(?:\s+(?:kept|stored|held))?)\s+in\b",
+            r"\b(?:api\s+key|credential|password|token|connection\s+string)\s+(?:lives|is\s+(?:kept|stored|held))\s+in\b",
             r"\b(?:production\s+|console\s+)?access\s+(?:goes|is)\s+(?:through|via)\b",
             r"\bhardware\s+(?:security\s+)?keys?\b",
         ],

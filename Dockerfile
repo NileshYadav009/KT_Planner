@@ -47,7 +47,9 @@ RUN useradd --create-home --uid 10001 continuum
 # Plain HTTPS downloads: the Xet client stalled at ~40 KB/s inside a Docker
 # Desktop build on 13 Oct while HTTPS from the same host ran at ~4.6 MB/s.
 COPY scripts/fetch_models.py scripts/fetch_models.py
-COPY diarization.py diarization.py
+# The modules fetch_models.py imports for their pinned files (standard
+# library only at import time).
+COPY diarization.py copyedit.py punctuation.py ./
 RUN HF_HUB_DISABLE_XET=1 python scripts/fetch_models.py --half && python scripts/fetch_models.py --verify \
  && chown -R continuum:continuum /opt/models
 

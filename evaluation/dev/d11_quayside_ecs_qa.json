@@ -1,0 +1,351 @@
+{
+ "id": "d11_quayside_ecs_qa",
+ "title": "Quayside: AWS ECS container bookings, labelled questions and answers",
+ "proves": "The receiver asks, guesses and confirms; the giver answers, sometimes with a short yes or no.",
+ "transcript": "Ellen: Thanks for doing this. Can we start with what Quayside actually does?\nMarcus: Sure. Quayside is the booking system hauliers use to reserve a slot to drop off or collect a container at the port. It takes around nine thousand bookings a day, and the gate staff check every truck against it.\nEllen: And if it's down?\nMarcus: Then trucks queue at the gate and the port loses money by the hour, so it's treated as critical.\nEllen: What's it built on?\nMarcus: It's a set of containers on AWS ECS with Fargate. There's a booking API in Node.js, a slot allocation worker in Python, and a React front end served from CloudFront. Bookings live in Aurora PostgreSQL. The worker picks jobs off an SQS queue.\nEllen: Is there a cache?\nMarcus: Yes, ElastiCache Redis holds the slot availability so the front end doesn't hammer the database.\nEllen: How do releases work?\nMarcus: Everything is in Bitbucket. A merge to main runs the Bitbucket pipeline, which builds the images, pushes them to ECR and updates the ECS services. Production needs a manual approval step in the pipeline. To roll back, you redeploy the previous task definition revision.\nEllen: So staging gets every merge automatically?\nMarcus: Right, staging gets every merge, production only after the approval.\nEllen: How many environments are there?\nMarcus: Three: dev, staging and production, each in its own AWS account.\nEllen: And monitoring?\nMarcus: CloudWatch dashboards for the services, and Datadog APM on the booking API. The main alert is booking latency over two seconds for five minutes, which pages the on-call through Opsgenie.\nEllen: What breaks most often?\nMarcus: The slot worker falls behind when a ship arrives late and thousands of bookings get moved at once. The queue backs up and hauliers see stale slots. You scale the worker service to ten tasks and it catches up in about twenty minutes.\nEllen: Anything else?\nMarcus: The customs feed. It sometimes sends duplicate release messages, and a container shows as released twice. You clear the duplicate in the admin screen; it's harmless otherwise.\nEllen: Backups are nightly, I assume?\nMarcus: No, Aurora takes continuous backups with point-in-time restore for fourteen days. We also snapshot the cluster before every release. Our recovery time objective is two hours.\nEllen: Has anyone tested a restore?\nMarcus: Not this year. That's something you should schedule.\nEllen: Security?\nMarcus: Hauliers log in through Cognito with multi-factor authentication. The database is only reachable from the private subnets, and the secrets are in AWS Secrets Manager.\nEllen: Is there anything I must never do?\nMarcus: Never purge the SQS queue to fix a backlog. Those are real bookings, and they're gone for good.\nEllen: When are the bad days?\nMarcus: Monday mornings, because everything that arrived over the weekend is collected then. And the weeks before Chinese New Year, when volumes double.\nEllen: What does it cost?\nMarcus: About eleven thousand dollars a month. Aurora is the biggest part. We moved the dev account to Aurora Serverless and saved roughly two thousand a month.\nEllen: Who owns it?\nMarcus: The terminal systems team owns Quayside. If something's on fire and I'm not around, call Grace Okafor, the head of terminal systems.\nEllen: What's unfinished?\nMarcus: The upgrade from Node 16 to Node 20 is half done; the API still runs on 16.\nEllen: What should I do first?\nMarcus: On day one, get added to the Opsgenie rota and get read access to the production account. In your first month, I'd like you to do a production release on your own.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Quayside is the booking system hauliers use to reserve a slot to drop off or collect a container at the port",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "It takes around nine thousand bookings a day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "the gate staff check every truck against it",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "trucks queue at the gate and the port loses money by the hour",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "It's a set of containers on AWS ECS with Fargate",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "a booking API in Node.js",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "a slot allocation worker in Python",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "a React front end served from CloudFront",
+   "alt": [
+    "a React frontend served from CloudFront"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Bookings live in Aurora PostgreSQL",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "The worker picks jobs off an SQS queue",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "ElastiCache Redis holds the slot availability",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "A merge to main runs the Bitbucket pipeline, which builds the images, pushes them to ECR and updates the ECS services",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "Production needs a manual approval step in the pipeline",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "you redeploy the previous task definition revision",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "staging gets every merge, production only after the approval",
+   "in": [
+    "deployment_and_rollback",
+    "environments"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "dev, staging and production, each in its own AWS account",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "CloudWatch dashboards for the services",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "Datadog APM on the booking API",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "The main alert is booking latency over two seconds for five minutes, which pages the on-call through Opsgenie",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "The slot worker falls behind when a ship arrives late",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "hauliers see stale slots",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "You scale the worker service to ten tasks",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "It sometimes sends duplicate release messages",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "You clear the duplicate in the admin screen",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "Aurora takes continuous backups with point-in-time restore for fourteen days",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "We also snapshot the cluster before every release",
+   "in": [
+    "disaster_recovery",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "Our recovery time objective is two hours",
+   "alt": [
+    "two hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "Hauliers log in through Cognito with multi-factor authentication",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "The database is only reachable from the private subnets",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "the secrets are in AWS Secrets Manager",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Never purge the SQS queue to fix a backlog",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "Those are real bookings, and they're gone for good",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "Monday mornings, because everything that arrived over the weekend is collected then",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "the weeks before Chinese New Year, when volumes double",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "About eleven thousand dollars a month",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "Aurora is the biggest part",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "We moved the dev account to Aurora Serverless and saved roughly two thousand a month",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "The terminal systems team owns Quayside",
+   "terms": [
+    "Quayside",
+    "terminal systems team"
+   ],
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "call Grace Okafor, the head of terminal systems",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "The upgrade from Node 16 to Node 20 is half done",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F41",
+   "quote": "the API still runs on 16",
+   "in": [
+    "open_responsibilities",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F42",
+   "quote": "get added to the Opsgenie rota and get read access to the production account",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F43",
+   "quote": "do a production release on your own",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

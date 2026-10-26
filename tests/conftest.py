@@ -15,6 +15,9 @@ os.environ.setdefault("CONTINUUM_AUTH", "disabled")
 # (copyedit.py): tests score the pipeline's own output, so it is off except
 # in tests/test_copyedit.py.
 os.environ.setdefault("CONTINUUM_COPYEDIT", "0")
+# The punctuation model (punctuation.py) is downloaded on first use; tests
+# give it a stand-in (tests/test_punctuation.py) and run without it.
+os.environ.setdefault("PUNCTUATION_MODEL", "0")
 # No live LLM in tests: llm_provider loads .env at import, and a key there
 # would send real (quota-spending) requests from an ordinary pytest run. An
 # empty value counts as set, so python-dotenv leaves it alone. Export a key

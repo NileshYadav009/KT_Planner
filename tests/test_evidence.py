@@ -37,6 +37,20 @@ def test_a_pasted_transcript_has_sources_without_times():
     assert format_time(None) == ""
 
 
+def test_a_long_run_with_no_full_stops_is_quoted_in_pieces():
+    """Speech to text without punctuation (dev d12): the source was the run cut
+    to its first 280 characters, so a fact from its end cited a quote that did
+    not hold it ("there's a nightly indexer job that pulls the catalogue")."""
+    run = ("How it's built it runs on Azure Kubernetes Service AKS we have three node pools and the search itself is "
+           "elasticsearch running as a statefulset with five nodes the api in front of it is a java spring boot app "
+           "and there's a nightly indexer job that pulls the catalogue from the product database which is sql server "
+           "and pushes it into elastic.")
+    quotes = [s["quote"] for s in transcript_sentences(run)]
+    assert len(quotes) == 2 and quotes[0].endswith("…") and quotes[1].startswith("…")
+    assert "nightly indexer job that pulls the catalogue from the product database" in quotes[1]
+    assert all(len(q) <= 280 for q in quotes)
+
+
 def test_each_fact_points_to_the_sentence_that_states_it():
     ko = _ko(
         {"type": "NarrativeBlock", "title": "S", "paragraphs": [

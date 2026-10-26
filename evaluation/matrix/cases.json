@@ -1211,6 +1211,53 @@
         {"check": "shows", "text": "weekends and dinner hours", "level": "must"},
         {"check": "shows", "text": "more on bank holidays", "level": "must"}
       ]
+    },
+    {
+      "id": "A22", "category": "A correction / L long range", "title": "'I said earlier X. That's wrong, it's Y now': a day, not a number, corrected much later",
+      "regression": "tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along",
+      "transcript": [
+        "Dana: This is the handover for the invoicing service.",
+        "We deploy the invoicing service on Tuesdays.",
+        "Builds run in Jenkins and the artefacts go to Nexus.",
+        "Invoices are stored in PostgreSQL on RDS.",
+        "If an invoice run fails, rerun it from the admin page.",
+        "The billing team owns the service.",
+        "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Wednesdays", "level": "must"},
+        {"check": "never_alone", "text": "Tuesdays", "with": "Wednesdays", "level": "must"},
+        {"check": "in_section", "text": "Wednesdays", "sections": ["deployment_and_rollback", "known_bad_days"], "level": "should"}
+      ]
+    },
+    {
+      "id": "A23", "category": "A correction", "title": "A day corrected in the next sentence with nothing else said: 'Sorry, Fridays.'",
+      "regression": "tests/test_devops_transcription.py::test_a_day_of_the_week_is_corrected_like_a_number",
+      "transcript": [
+        "Omar: This is the handover for the reporting API.",
+        "Releases go out on Thursdays. Sorry, Fridays.",
+        "The API runs on Cloud Run and reads from BigQuery."
+      ],
+      "expect": [
+        {"check": "shows", "text": "Fridays", "level": "must"},
+        {"check": "never_alone", "text": "Thursdays", "with": "Fridays", "level": "must"}
+      ]
+    },
+    {
+      "id": "A24", "category": "A correction / L long range", "title": "'Earlier I said X; that's not right': the earlier claim restated, not named by topic",
+      "regression": "tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along",
+      "transcript": [
+        "Lena: This is the handover for the search cluster.",
+        "The cluster has three nodes.",
+        "Queries come from the shop front end through an internal load balancer.",
+        "Index builds run every night from the product database.",
+        "If a node runs out of disk, add a node and rebalance the shards.",
+        "Earlier I said the cluster has three nodes; that's not right, it has five."
+      ],
+      "expect": [
+        {"check": "shows", "text": "it has five", "level": "must"},
+        {"check": "never_alone", "text": "three nodes", "with": "five", "level": "must"}
+      ]
     }
   ]
 }

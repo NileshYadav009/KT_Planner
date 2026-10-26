@@ -70,6 +70,30 @@ def test_a_statement_before_a_hedged_change_is_not_a_stated_gap():
         assert not states_something(gap), gap
 
 
+def test_a_statement_before_a_gap_with_no_contrast_word_still_states_something():
+    """Speech to text with no full stops (the noisy copies of the visible
+    KTs): "firestore has a daily export ... bigquery keeps seven days of time
+    travel honestly we haven't tested restoring" made Disaster Recovery
+    Missing, "stated as not in place". So did a plain "and"."""
+    from dialogue import states_something
+
+    for said in ["Backups firestore has a daily export to Cloud Storage and BigQuery keeps seven days of time travel "
+                 "honestly we haven't tested restoring the templates.",
+                 "We take nightly backups to S3 and we have never tested a restore.",
+                 "sql server full backup every night and log backups every fifteen minutes copied to azure blob storage "
+                 "the plan is to rebuild the servers from the vm templates and that's never been tested.",
+                 "what about backups aurora has automated backups with point in time recovery for thirty five days and "
+                 "we take a snapshot before every schema migration we have never done a cross-region restore though."]:
+        assert states_something(said), said
+    for gap in ["So for the disaster recovery part I have to say we haven't tested anything.",
+                "Honestly the whole recovery thing is something we have never documented.",
+                "There is no DR plan and we have never tested a restore.",
+                "Our recovery point objective is four hours, or at least that is what the previous document says.",
+                "That is all we had time for today we will cover deployment and the rest next week.",
+                "Do we have a disaster recovery plan no honestly there is no dr plan and nobody has tested restores."]:
+        assert not states_something(gap), gap
+
+
 def test_questions_are_merged_with_their_answers():
     texts = ["Is there a staging environment?", "Not really, we test in production.",
              "Who owns billing?", "What about alerts?", "Datadog pages us."]

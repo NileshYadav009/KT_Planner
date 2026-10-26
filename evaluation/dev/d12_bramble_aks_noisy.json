@@ -1,0 +1,312 @@
+{
+ "id": "d12_bramble_aks_noisy",
+ "title": "Bramble: AKS book search, noisy speech-to-text",
+ "proves": "No punctuation inside paragraphs, fillers, misheard tool names; cost and busy days never discussed.",
+ "transcript": "right so uh hi everyone this is the handover for bramble um bramble is basically the search service for the online bookshop so when a customer types in the search box that request goes to bramble and we get you know around fifty searches a second at peak\n\nso how it's built it runs on azure kubernetes service aks we have three node pools and the search itself is elasticsearch running as a stateful set with five nodes uh the api in front of it is a java spring boot app and there's a nightly indexer job that pulls the catalogue from the product database which is sequel server and pushes it into elastic\n\ndeploys uh so we use azure devops pipelines and helm charts the pipeline builds the image runs the tests and then does a helm upgrade into the cluster um if the release is bad you do a helm rollback to the previous revision and that takes a couple of minutes\n\nenvironments there's dev and prod and dev has a tiny elastic with only ten percent of the catalogue\n\nmonitoring we've got prometheus and graph ana in the cluster there's a dashboard for search latency and the indexer and the alert that matters is when the indexer hasn't finished by six am it posts in the teams channel and pages whoever is on call\n\nokay problems so the big one is elastic running out of heap when someone sends a crazy query with like a wildcard at the front uh the nodes go into garbage collection and search gets really slow what you do is find the query in the slow log and block that pattern in the api config then restart the node that's stuck\n\nthe other thing is the indexer timing out when the product database is being backed up at the same time you just rerun the indexer after the backup finishes\n\nbackups um we take an elastic snapshot to blob storage every night and we keep fourteen of them but honestly the index can just be rebuilt from sequel server in about three hours so that's really the recovery plan\n\nsecurity the api only accepts traffic from the front door and the elastic cluster isn't exposed outside the cluster at all the connection strings are in key vault\n\none thing never ever delete the alias called books live because the website reads from that alias and search goes down straight away\n\nit's owned by the discovery team i'm the tech lead for now and if you need to escalate go to Sam Whitfield he's the head of engineering\n\nopen stuff we started upgrading elastic from seven to eight and it's done in dev but not in prod yet\n\num for your first week get cube control access to the prod cluster and read the runbook in the wiki and by the end of the first month you should do the elastic upgrade in prod with me watching",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "the search service for the online bookshop",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "when a customer types in the search box that request goes to bramble",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "around fifty searches a second at peak",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "it runs on azure kubernetes service aks",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "we have three node pools",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "the search itself is elasticsearch running as a stateful set with five nodes",
+   "alt": [
+    "the search itself is elasticsearch running as a statefulset with five nodes"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "the api in front of it is a java spring boot app",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "there's a nightly indexer job that pulls the catalogue from the product database",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "the product database which is sequel server",
+   "alt": [
+    "the product database which is SQL Server"
+   ],
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "we use azure devops pipelines and helm charts",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "the pipeline builds the image runs the tests and then does a helm upgrade into the cluster",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "you do a helm rollback to the previous revision",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "there's dev and prod",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "dev has a tiny elastic with only ten percent of the catalogue",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "we've got prometheus and graph ana in the cluster",
+   "alt": [
+    "we've got prometheus and grafana in the cluster"
+   ],
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "there's a dashboard for search latency and the indexer",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "the alert that matters is when the indexer hasn't finished by six am",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "it posts in the teams channel and pages whoever is on call",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "elastic running out of heap when someone sends a crazy query",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "the nodes go into garbage collection and search gets really slow",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "find the query in the slow log and block that pattern in the api config",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "restart the node that's stuck",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "the indexer timing out when the product database is being backed up at the same time",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "you just rerun the indexer after the backup finishes",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "we take an elastic snapshot to blob storage every night and we keep fourteen of them",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "the index can just be rebuilt from sequel server in about three hours",
+   "alt": [
+    "the index can just be rebuilt from SQL Server in about three hours"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "the api only accepts traffic from the front door",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "the elastic cluster isn't exposed outside the cluster at all",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "the connection strings are in key vault",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "never ever delete the alias called books live",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "the website reads from that alias and search goes down straight away",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "it's owned by the discovery team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "go to Sam Whitfield he's the head of engineering",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "we started upgrading elastic from seven to eight",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "it's done in dev but not in prod yet",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "get cube control access to the prod cluster and read the runbook in the wiki",
+   "alt": [
+    "get kubectl access to the prod cluster and read the runbook in the wiki"
+   ],
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "you should do the elastic upgrade in prod with me watching",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [
+  "cost_optimization",
+  "known_bad_days"
+ ],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

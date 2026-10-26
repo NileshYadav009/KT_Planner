@@ -309,12 +309,70 @@ def _absolute_phrase_start(text: str) -> int:
     return match.start(1)
 
 
+# A later time frame for the new owner opens a fact of its own: "For your
+# first week get kubectl access ... and by the end of the first month you
+# should do the elastic upgrade" (dev d12). Uncut, the month's task went to
+# the first day's checklist with the rest. Speech to text without full stops
+# runs the two sentences of an onboarding plan together ("... read-only access
+# to the database by the end of the month run a thursday deployment
+# yourself"): there, with no comma or "and", the frame must be followed by
+# words to the new owner.
+# What a new owner is told to do in a time frame ("first month attend two
+# change boards", "in the first month take over ...").
+ONBOARDING_VERBS = (r"attend|shadow|join|get|ask|request|obtain|learn|read|meet|pair|own|do|take|lead|run|handle"
+                    r"|complete|review|sit|spend|start|try|become|be|watch|go|set\s+up|walk|make|schedule|plan|deploy")
+_TIME_FRAME = (
+    r"(?:(?:by|in|within|after|over|during|for)\s+(?:the\s+end\s+of\s+)?(?:the|your)\s+(?:very\s+)?"
+    r"(?:first|second|third|next)\s+(?:few\s+|couple\s+of\s+)?(?:\w+\s+)?(?:day|days|week|weeks|month|months|fortnight)"
+    r"|by\s+the\s+end\s+of\s+(?:the|your)\s+(?:week|month|fortnight)"
+    r"|by\s+week\s+(?:one|two|three|four|five|six|\d)"
+    r"|(?:within|after|in)\s+(?:a|one|two|three|four|six|thirty|sixty|ninety|\d+)\s+(?:days|weeks?|months?)"
+    r"|(?:on\s+)?day\s+(?:one|1)|first\s+(?:day|week|month))\b")
+_NEXT_TIME_FRAME_RE = re.compile(
+    # Not a frame inside a frame ("by the end of the | first month").
+    r"(?<!\bthe)(?<!\byour)(?<!\bof)(?<!\bvery)"
+    r"(?P<sep>[,;:]\s*(?:and\s+)?|\s+and\s+|\s+)(?:then\s+)?(?P<frame>" + _TIME_FRAME + r"[,:]?\s*)", re.IGNORECASE)
+_TO_THE_NEW_OWNER_RE = re.compile(
+    r"^(?:you|you'll|you'd|i'?d\s+like\s+you|i\s+want\s+you|the\s+new\s+(?:owner|engineer|lead)"
+    r"|(?:" + ONBOARDING_VERBS + r"))\b", re.IGNORECASE)
+# Words after a frame that make it part of the clause before ("in the first
+# month after launch", "the first week of January").
+_NOT_A_NEW_CLAUSE = {"and", "or", "but", "if", "when", "so", "because", "unless", "then", "while", "until", "once",
+                     "as", "that", "which", "of", "after", "back", "before"}
+
+
+def _time_frame_pieces(text: str) -> List[Tuple[int, int]]:
+    """`text` cut before each later time frame that opens a clause, or []."""
+    starts, ends = [0], []
+    for m in _NEXT_TIME_FRAME_RE.finditer(text):
+        rest = text[m.end():]
+        tokens = _tokens(rest)
+        if not tokens or tokens[0].lower() in _NOT_A_NEW_CLAUSE:
+            continue
+        to_owner = _is_imperative(rest) or bool(_TO_THE_NEW_OWNER_RE.match(rest))
+        if not (to_owner or (m.group("sep").strip() and _has_finite_verb(rest))):
+            continue
+        # A cut that leaves too little before it ("um first day get ...") is
+        # not a cut.
+        if len(_words(text[starts[-1]:m.start()])) < _MIN_WORDS:
+            continue
+        ends.append(m.start())
+        starts.append(m.start("frame"))
+    if not ends:
+        return []
+    # Each piece without the joining words between it and the next.
+    return list(zip(starts, ends + [len(text)]))
+
+
 def split_into_facts(text: str) -> List[Tuple[int, int]]:
     """The facts `text` states, as (start, end) character spans of `text`.
     One span covering the sentence when it states one fact or its clauses
     lean on each other."""
     stripped = text.rstrip()
     whole = [(0, len(stripped))]
+    frames = _time_frame_pieces(stripped)
+    if frames:
+        return [(a + x, a + y) for a, b in frames for x, y in split_into_facts(stripped[a:b])]
     if _SUBORDINATE_OPENER_RE.match(stripped):
         return whole
     boundaries = list(_BOUNDARY_RE.finditer(stripped))
@@ -368,3 +426,51 @@ def fact_texts(text: str) -> List[str]:
     return [text[a:b] for a, b in split_into_facts(text)]
 
 
+# A joining word before a subject opens a clause inside an unpunctuated run.
+_CLAUSE_START_RE = re.compile(
+    r"\s+(?=(?:and|but|so|then|because|while|where)\s+(?:there'?s|there\s+(?:is|are)|it'?s|it|we(?:'ve|'re|'ll)?"
+    r"|you|they|i|this|that'?s|the)\s)", re.IGNORECASE)
+
+
+_OPENS_A_CLAUSE = frozenset("you we they i it it's there there's if when so then our this that's once".split())
+_LEADS_ON = frozenset("""the a an of to in on for with from by and or is are was were be its their our your this that
+which who at as into than""".split())
+
+
+def even_pieces(text: str, limit: int) -> List[str]:
+    """`text`, a run with no punctuation over `limit` characters, as verbatim
+    pieces of about even length, each cut at a word boundary near its share:
+    before a joining word that opens a clause when one is close ("... a java
+    spring boot app | and there's a nightly indexer job ...", dev d12). Filled
+    up to the limit, the last piece of a run was a stub ("task definition
+    revision.", too short to keep) and a cut fell anywhere ("nightly indexer |
+    job that pulls the catalogue")."""
+    count = -(-len(text) // limit)
+    spans = [(m.start(), m.group(0).lower()) for m in re.finditer(r"\S+", text)]
+    if count <= 1 or len(spans) < 2:
+        return [text]
+    clauses = {m.end() for m in _CLAUSE_START_RE.finditer(text)}
+
+    def cost(i: int, target: float) -> float:
+        # Near its share; better before a clause or a word that opens one,
+        # worse after a word that leads into the next ("updates the | ecs").
+        start, word = spans[i]
+        score = abs(start - target)
+        if start in clauses:
+            score -= limit / 4
+        elif word in _OPENS_A_CLAUSE:
+            score -= limit / 8
+        if spans[i - 1][1] in _LEADS_ON:
+            score += limit / 4
+        return score
+
+    cuts: List[int] = []
+    for k in range(1, count):
+        target = len(text) * k / count
+        later = [i for i in range(1, len(spans)) if not cuts or spans[i][0] > cuts[-1]]
+        if not later:
+            break
+        near = [i for i in later if abs(spans[i][0] - target) <= limit / 4] or later
+        cuts.append(spans[min(near, key=lambda i: cost(i, target))][0])
+    bounds = [0] + cuts + [len(text)]
+    return [text[a:b].strip() for a, b in zip(bounds, bounds[1:]) if text[a:b].strip()]

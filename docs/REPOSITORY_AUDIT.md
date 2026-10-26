@@ -6527,6 +6527,173 @@ real recordings with corrected transcripts are measured.
 - The self-hosted LLM item is deferred.
 - Three discussed sections of b04-b07 are still reported Missing (X67).
 
+### 9abe. Accuracy: what was left (26 Oct)
+
+The user asked what was left for accuracy, then said to go ahead with the
+first item: X67, discussed sections reported Missing on blind set b04-b07.
+No Groq quota was spent and no package was installed.
+
+**Four more dev KTs in b04-b07's styles.** `evaluation/dev` d11-d14 (176
+facts; `dev_kts.py`), written before anything ran on them, with new systems
+and phrasing: labelled questions and answers in which the receiver guesses
+wrong, unpunctuated speech to text with misheard tool names and two sections
+never discussed, a formal document read aloud with part headings and
+label-and-value lines, and a rambling KT with a next-sentence correction and
+one much later. First read: 167/176 (94.9%), no false Missing. Four facts
+were "lost": the cleaner respelled them ("front end" to "frontend",
+"stateful set" to "statefulset", "actually" dropped as a filler) or the
+ownership table showed "X owns Y" as a row. Those four keys gained an alt or
+terms afterwards, as d09 F05 and b09 F04 had: 171/176 on the previous
+commit with the corrected keys. They are not in the learned model's
+training data (`section_model.npz` was not rebuilt).
+
+| ID | What (dev d07-d14) | Fix |
+|---|---|---|
+| X85 | "We deploy on Tuesdays." ... "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now." left "We deploy on Tuesdays." alone in Deployment; the restatement went to Disaster Recovery and the correction to the calendar. A day corrected in the next sentence ("Thursdays. Sorry, Fridays.") showed both | A correction that says again what it withdraws (`withdraws_said_before`: "I said earlier ...", "Earlier I said ...", then "that's wrong", "that's not right" or a marker, in the same sentence or the next) takes the sentence it restates along (`restates`: two thirds of the restated words, at least two), when that states nothing else and is at most 20 sentences back. Days of the week are values like numbers (`_WEEKDAY`). Matrix A22-A24, written first: 3/6 must before, 6/6 after |
+| X86 | "The Stripe and Postmark keys are in Heroku config vars" (Environments); "Card details never touch our servers" (Danger Zones, by the "never touch" rule); "Phone numbers are personal data so we delete message logs after ninety days" and "undoing it means a database restore" (Disaster Recovery); "The thing you really must not do is run the Gift Aid claim job twice" (matched no rule; it had been right only because it followed the card-details sentence) | Security: where keys, credentials, passwords, tokens or connection strings are kept; sensitive data that never reaches a system; "is personal data". Danger: "undoing it means", "can't be undone", "must not do", "shouldn't ever restart"; the "never touch" rule skips a data subject |
+| X91 | "Changes to the MQ bridge configuration require approval from the mainframe team" (Ownership, by the named team); "Scale the web dynos to twenty before the appeal starts" (Cost) | Not fixed: one sentence each, each could belong to two sections |
+
+**Noisy copies of the visible KTs.** The new KTs reproduced no false
+Missing, so the method was widened: every visible tuning and dev KT (36
+KTs, 1,085 facts) run as speech to text without punctuation (lower case, no
+punctuation inside a paragraph, speaker labels dropped), scored on its own
+key. The scorer ignores case and punctuation, so the keys apply unchanged.
+`evaluation/noisy_copies.py` does this; it never reads a holdout or blind KT.
+
+| Noisy copies | Placed | Wrong | Lost | False Missing | False covered |
+|---|---|---|---|---|---|
+| Previous commit (4c89899) | 1024/1085 (94.4%) | 46 | 15 | 13 | 1 |
+| After | 1048/1085 (96.6%) | 28 | 9 | 1 | 1 |
+
+The same KTs with punctuation: dev 549/551, tuning 534/534.
+
+| ID | What (noisy copies) | Fix |
+|---|---|---|
+| X87 | First 30-Day Ownership reported Missing on 9 KTs. "in the first week get an account on the weblogic console and read-only access to the database by the end of the month run a thursday deployment yourself": the two sentences of an onboarding plan, run together, were one fact, and the month's task went to the Day-1 checklist. Also "... and by the end of the first month you should do the elastic upgrade" (dev d12, punctuated) | `fact_units._time_frame_pieces`: a later time frame for the new owner ("by the end of the month", "by week three", "within thirty days", "first month", "day one", "in your first month") opens a fact of its own. After a comma or "and", when a clause follows it; with neither, only when the words after it are addressed to the new owner (an instruction verb, "you", "I'd like you", "the new owner"). Not "the first week of January", "the first month after launch" or "within thirty days if they leak". `ONBOARDING_MONTH_RX` reads "by the end of the month", "by week three" and "within thirty days" followed by such words |
+| X88 | Disaster Recovery reported Missing, "stated as not in place", on 3 KTs: "firestore has a daily export to cloud storage and bigquery keeps seven days of time travel honestly we haven't tested restoring the templates". The statement before a gap counted only after "but" or "though"; so "We take nightly backups to S3 and we have never tested a restore" (punctuated) was a gap too. A sentence-final "though" was read as a contrast inside the sentence | `dialogue.states_something_before_gap`: with no contrast word, the words before an absence ("never tested", "no runbook") state something when they are six words or more with a finite verb, not a gap and not hedged. Not after a doubt ("RPO four hours, or at least that is what the previous document says"), before a topic put off ("That is all we had time for today we will cover deployment ... next week"), when the gap is a relative clause ("something we have never documented") or after a short question that lost its mark ("do we have a disaster recovery plan no honestly there is no dr plan"). A contrast word at the end of a sentence is not one |
+| X89 | A run over 240 characters with no punctuation was filled up to the limit: cut mid-phrase ("nightly indexer \| job that pulls the catalogue"), its last piece a stub dropped as under four words ("task definition revision.", "lost"). Its source quote was the run cut to 280 characters, so a fact from its end cited a quote that did not hold it (dev "unsourced" 5 to 2) | `fact_units.even_pieces`: pieces of about even length, cut near each share, before a joining word that opens a clause when one is close, not right after "the", "of" or "and". The Sources list quotes such a run in pieces the same way, each marked "…" where it goes on |
+| X90 | The noisy copy of g11 (one 2,700-character paragraph, no line breaks) places 46% of its facts | Open. Cut points inside an unpunctuated run are guesses; a punctuation-restoration model (a package and a model download) would be the fix. Whisper punctuates, so this matters for other engines' output |
+
+**Results without an LLM.**
+
+| Set | Before (§9abd) | After |
+|---|---|---|
+| Holdouts (h12-h14) | 88/95 | 88/95 |
+| Blind b01-b03 | 109/114 | 109/114 |
+| Blind b04-b07 | 118/132, 3 false Missing, 4 lost | 118/132, 3 false Missing, 4 lost |
+| Sealed b08-b11 | 151/160, 1 false covered, 1 unsourced | 151/160, 1 false covered, 1 unsourced |
+| All unseen | 466/501 (93.0%) | 466/501 (93.0%) |
+| Dev (14 KTs) | 544/551 on the previous commit | 549/551 |
+| Tuning, e2e | 534/534, 6 KTs 100% | unchanged |
+| Matrix | 80 cases, 284/284 must, 44/49 should | 83 cases, 290/290 must, 45/50 should |
+
+The unseen sets did not move: the defects fixed here are not the ones
+left in b04-b07, and X67 stays open with 3 false Missing. Blind sets were
+read in aggregate only. The sealed set was read twice in this batch, both
+after every design choice (once before the X89 source fix, once after); no
+number changed and nothing was chosen by its result.
+
+**Checks.**
+
+- **Tests:** the rule, topic, coverage, fact, transcription, copy edit,
+  polish, grounding, conflicts, evidence, knowledge, dialogue, diarisation,
+  field, LLM-control, model and examples files pass, with new tests for
+  each fix. End to end with recorded Groq answers: 67 passed, 1
+  skipped (as before).
+- **Gates:** all pass in both modes, every figure as in §9abd
+  (`docs/QUALITY_GATES.md`).
+- **Replay coverage:** unchanged and still low (§9abd): e2e_f has no
+  recorded answers, and QuickBite uses 5 with 14 missing. Not re-recorded.
+
+**Limits.**
+
+- d11-d14 and the noisy copies were written or made by the same author as
+  the fixes. The noisy copies are synthetic: real speech-to-text output
+  has its own errors as well as missing punctuation.
+- X67 (3 false Missing on b04-b07), X90 and X91 are open.
+
+### 9abf. A punctuation model for speech to text without punctuation (26 Oct)
+
+The user asked whether a punctuation model would help and how big it is,
+then chose the small English one, measured first.
+
+**Choice.** Two candidates:
+
+- `punct_cap_seg_en` (`punctuators` package): punctuation, capitals and
+  sentence boundaries, one 210 MB ONNX file and a 0.6 MB tokenizer;
+- `fullstop-punctuation-multilang-large`: punctuation only, 2.24 GB.
+
+Only `punctuators` 0.0.7 was installed; its dependencies (onnxruntime,
+sentencepiece, omegaconf, huggingface-hub, torch) were already there, and
+nothing was upgraded. The model is pinned (commit b26fd1c4, unchanged since
+March 2023).
+
+**What it does well and badly.** On a 450-word flattened KT it took 0.7 s
+(about 10 s to load). Its words are not usable as they come: it spells
+hyphens and slashes "<unk>" ("two<unk>node", "Pub<Unk>sub") and guesses
+capitals for tool names ("Rollback Playbook"). In halting speech it ends
+sentences mid-phrase ("... we get you know around. | Fifty searches a
+second at peak"; "... before it goes. | Live.").
+
+**How it is used** (`punctuation.py`, called first in
+`devops_transcription.clean_transcript`):
+
+- Only the marks are taken: each word stays as said, and gets the model's
+  sentence end or question mark, with a capital at a sentence start. Commas
+  are off by default (`PUNCTUATION_COMMAS=1`; no better in the measurement
+  below).
+- A break that would leave a sentence of one or two words is not made.
+- A stray "." the model writes as a word of its own is dropped; when the
+  words still do not line up (5 of 173 runs), the run is left as said.
+- Only a run of 120 words or more, between sentence ends or line breaks,
+  with fewer than one punctuation mark per 30 words. The cleaner runs again
+  on its own output, one line with its paragraphs joined by full stops: a
+  first gate per line sent dev d12 there whole, and it lost 4 facts. Runs are
+  now judged between sentence ends (a test checks this).
+- `PUNCTUATION_MODEL=0` turns it off; a missing package, model or network
+  leaves the text as it is. Tests run without it (`tests/conftest.py`) and
+  with a stand-in model (`tests/test_punctuation.py`).
+- `scripts/fetch_models.py` fetches it into the image and `--verify` loads
+  it offline; `requirements.txt` and the lock name the package.
+
+**The threshold was chosen on the visible KTs** (`evaluation/noisy_copies.py`):
+
+| | No model | Model on runs of 30+ words | Model on runs of 120+ words (chosen) |
+|---|---|---|---|
+| Noisy copies (36 KTs, 1,085 facts) | 1048 (96.6%) | 1048 (96.6%), 25 lost | 1057 (97.4%), 9 lost |
+| The g11 copy (one paragraph, 391 words) | 46% | 88% | 83% |
+| Dev (normal text) | 549/551 | 545/551 | 549/551 |
+
+On paragraph-length runs the model was no better than `fact_units`'
+cutting (9 KTs better, 9 worse, before the gate fix; the same total after
+it). Paragraphs of the normal visible and e2e KTs never reach it at 120
+words.
+
+**Found on the way: the image would not build.** `scripts/fetch_models.py`
+has imported `copyedit` since 15 Oct (bd82842), but the Dockerfile copied
+only `diarization.py` before running it, so the build would stop there. It
+now copies `copyedit.py` and `punctuation.py` too (both import only the
+standard library at load time). No image was built to check this: Docker
+Desktop is not started without the user's word.
+
+**Results without an LLM.** The normal sets did not change (no visible or
+e2e KT has such a run; the blind sets are read in aggregate only): holdouts 88/95, blind b01-b03 109/114, b04-b07
+118/132 (3 false Missing), sealed b08-b11 151/160 (read once in this batch,
+at its end); dev 549/551, tuning 534/534, e2e 6 KTs 100%. Matrix 290/290
+must, 45/50 should. Noisy copies 1048 to 1057 of 1085 (97.4%), 9 lost, 1
+false Missing, 1 false covered.
+
+**Checks.** `tests/test_punctuation.py` (8) and the cleaner tests pass.
+The gates all pass in both modes, every figure as before
+(`docs/QUALITY_GATES.md`). The pinned model loads with `HF_HUB_OFFLINE=1`.
+
+**Limits.**
+
+- One visible KT has a whole transcript without line breaks; the
+  threshold rests on it and on the paragraph-length comparison.
+- The model is English only.
+- Memory use was not measured.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

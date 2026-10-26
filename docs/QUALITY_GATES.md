@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report acc g9abd`.
+then `python evaluation/quality_gates.py --report g9abd g9abf`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (acc) | After (g9abd) | |
+| Gate | Target | Before (g9abd) | After (g9abf) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -63,7 +63,7 @@ model was called for this page.
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (acc) | After (g9abd) | |
+| Gate | Target | Before (g9abd) | After (g9abf) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -95,19 +95,19 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `final9abd2`. Holdouts and blind KTs are unseen and are
+From `evaluation/accuracy.py` run `final9abf`. Holdouts and blind KTs are unseen and are
 reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
 Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
 | Set | Correct | Facts | Placement | Lost | Unseen: 90% |
 |---|---|---|---|---|---|
 | tuning | 534 | 534 | 100.0% | 0 | tuned on |
-| dev | 373 | 375 | 99.5% | 0 | tuned on |
+| dev | 549 | 551 | 99.6% | 0 | tuned on |
 | holdout | 88 | 95 | 92.6% | 0 | pass |
 | blind2 | 109 | 114 | 95.6% | 0 | pass |
 | blind3 | 118 | 132 | 89.4% | 4 | FAIL |
 
 ## Adversarial matrix
 
-Run `m9abd2`: 80 cases, must checks 284/284, should checks 44/49
+Run `m9abf`: 83 cases, must checks 290/290, should checks 45/50
 (`docs/ADVERSARIAL_MATRIX.md`).

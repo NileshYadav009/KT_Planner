@@ -9,7 +9,11 @@ follows the tuning goldens' conventions (components: architecture_reference
 or system_overview; build and release steps: deployment_and_rollback; ...).
 
 Round 8 (26 Oct, audit §9abd) adds d07-d10 in the four styles of the blind
-set b04-b07 (from evaluation/README.md, not from that set).
+set b04-b07 (from evaluation/README.md, not from that set). Round 9 (§9abe)
+adds d11-d14 in the same four styles with new systems and phrasing. Four of
+their keys gained an alt or terms after the first read, each a respelling
+the cleaner makes or an ownership row ("front end" -> "frontend",
+"stateful set" -> "statefulset", "actually" dropped, "X owns Y" as a row).
 """
 import json
 import os
@@ -794,6 +798,343 @@ First week, get SageMaker and Snowflake access and sit with revenue management f
         {"id": "F37", "quote": "an ask to support the two new hotels opening in spring", "in": ["open_responsibilities"]},
         {"id": "F38", "quote": "get SageMaker and Snowflake access and sit with revenue management for a morning", "in": DAY1},
         {"id": "F39", "quote": "run the Sunday training on your own and check the promotion decision", "in": MONTH1},
+    ],
+    "covered": ALL15,
+    "missing": [],
+})
+
+KTS.append({
+    "id": "d11_quayside_ecs_qa",
+    "title": "Quayside: AWS ECS container bookings, labelled questions and answers",
+    "proves": "The receiver asks, guesses and confirms; the giver answers, sometimes with a short yes or no.",
+    "transcript": """Ellen: Thanks for doing this. Can we start with what Quayside actually does?
+Marcus: Sure. Quayside is the booking system hauliers use to reserve a slot to drop off or collect a container at the port. It takes around nine thousand bookings a day, and the gate staff check every truck against it.
+Ellen: And if it's down?
+Marcus: Then trucks queue at the gate and the port loses money by the hour, so it's treated as critical.
+Ellen: What's it built on?
+Marcus: It's a set of containers on AWS ECS with Fargate. There's a booking API in Node.js, a slot allocation worker in Python, and a React front end served from CloudFront. Bookings live in Aurora PostgreSQL. The worker picks jobs off an SQS queue.
+Ellen: Is there a cache?
+Marcus: Yes, ElastiCache Redis holds the slot availability so the front end doesn't hammer the database.
+Ellen: How do releases work?
+Marcus: Everything is in Bitbucket. A merge to main runs the Bitbucket pipeline, which builds the images, pushes them to ECR and updates the ECS services. Production needs a manual approval step in the pipeline. To roll back, you redeploy the previous task definition revision.
+Ellen: So staging gets every merge automatically?
+Marcus: Right, staging gets every merge, production only after the approval.
+Ellen: How many environments are there?
+Marcus: Three: dev, staging and production, each in its own AWS account.
+Ellen: And monitoring?
+Marcus: CloudWatch dashboards for the services, and Datadog APM on the booking API. The main alert is booking latency over two seconds for five minutes, which pages the on-call through Opsgenie.
+Ellen: What breaks most often?
+Marcus: The slot worker falls behind when a ship arrives late and thousands of bookings get moved at once. The queue backs up and hauliers see stale slots. You scale the worker service to ten tasks and it catches up in about twenty minutes.
+Ellen: Anything else?
+Marcus: The customs feed. It sometimes sends duplicate release messages, and a container shows as released twice. You clear the duplicate in the admin screen; it's harmless otherwise.
+Ellen: Backups are nightly, I assume?
+Marcus: No, Aurora takes continuous backups with point-in-time restore for fourteen days. We also snapshot the cluster before every release. Our recovery time objective is two hours.
+Ellen: Has anyone tested a restore?
+Marcus: Not this year. That's something you should schedule.
+Ellen: Security?
+Marcus: Hauliers log in through Cognito with multi-factor authentication. The database is only reachable from the private subnets, and the secrets are in AWS Secrets Manager.
+Ellen: Is there anything I must never do?
+Marcus: Never purge the SQS queue to fix a backlog. Those are real bookings, and they're gone for good.
+Ellen: When are the bad days?
+Marcus: Monday mornings, because everything that arrived over the weekend is collected then. And the weeks before Chinese New Year, when volumes double.
+Ellen: What does it cost?
+Marcus: About eleven thousand dollars a month. Aurora is the biggest part. We moved the dev account to Aurora Serverless and saved roughly two thousand a month.
+Ellen: Who owns it?
+Marcus: The terminal systems team owns Quayside. If something's on fire and I'm not around, call Grace Okafor, the head of terminal systems.
+Ellen: What's unfinished?
+Marcus: The upgrade from Node 16 to Node 20 is half done; the API still runs on 16.
+Ellen: What should I do first?
+Marcus: On day one, get added to the Opsgenie rota and get read access to the production account. In your first month, I'd like you to do a production release on your own.""",
+    "facts": [
+        {"id": "F01", "quote": "Quayside is the booking system hauliers use to reserve a slot to drop off or collect a container at the port", "in": ["system_overview"]},
+        {"id": "F02", "quote": "It takes around nine thousand bookings a day", "in": ["system_overview"]},
+        {"id": "F03", "quote": "the gate staff check every truck against it", "in": ["system_overview"]},
+        {"id": "F04", "quote": "trucks queue at the gate and the port loses money by the hour", "in": ["system_overview"]},
+        {"id": "F05", "quote": "It's a set of containers on AWS ECS with Fargate", "in": AR},
+        {"id": "F06", "quote": "a booking API in Node.js", "in": AR},
+        {"id": "F07", "quote": "a slot allocation worker in Python", "in": AR},
+        {"id": "F08", "quote": "a React front end served from CloudFront", "alt": ["a React frontend served from CloudFront"], "in": AR},
+        {"id": "F09", "quote": "Bookings live in Aurora PostgreSQL", "in": AR},
+        {"id": "F10", "quote": "The worker picks jobs off an SQS queue", "in": AR},
+        {"id": "F11", "quote": "ElastiCache Redis holds the slot availability", "in": AR},
+        {"id": "F12", "quote": "A merge to main runs the Bitbucket pipeline, which builds the images, pushes them to ECR and updates the ECS services", "in": ["deployment_and_rollback"]},
+        {"id": "F13", "quote": "Production needs a manual approval step in the pipeline", "in": ["deployment_and_rollback"]},
+        {"id": "F14", "quote": "you redeploy the previous task definition revision", "in": ["deployment_and_rollback"]},
+        {"id": "F15", "quote": "staging gets every merge, production only after the approval", "in": ["deployment_and_rollback", "environments"]},
+        {"id": "F16", "quote": "dev, staging and production, each in its own AWS account", "in": ["environments"]},
+        {"id": "F17", "quote": "CloudWatch dashboards for the services", "in": ["monitoring_observability"]},
+        {"id": "F18", "quote": "Datadog APM on the booking API", "in": ["monitoring_observability"]},
+        {"id": "F19", "quote": "The main alert is booking latency over two seconds for five minutes, which pages the on-call through Opsgenie", "in": ["monitoring_observability"]},
+        {"id": "F20", "quote": "The slot worker falls behind when a ship arrives late", "in": ["common_failures"]},
+        {"id": "F21", "quote": "hauliers see stale slots", "in": ["common_failures"]},
+        {"id": "F22", "quote": "You scale the worker service to ten tasks", "in": ["common_failures"]},
+        {"id": "F23", "quote": "It sometimes sends duplicate release messages", "in": ["common_failures"]},
+        {"id": "F24", "quote": "You clear the duplicate in the admin screen", "in": ["common_failures"]},
+        {"id": "F25", "quote": "Aurora takes continuous backups with point-in-time restore for fourteen days", "in": ["disaster_recovery"]},
+        {"id": "F26", "quote": "We also snapshot the cluster before every release", "in": ["disaster_recovery", "deployment_and_rollback"]},
+        {"id": "F27", "quote": "Our recovery time objective is two hours", "alt": ["two hours"], "in": ["disaster_recovery"]},
+        {"id": "F28", "quote": "Hauliers log in through Cognito with multi-factor authentication", "in": ["security_controls"]},
+        {"id": "F29", "quote": "The database is only reachable from the private subnets", "in": ["security_controls"]},
+        {"id": "F30", "quote": "the secrets are in AWS Secrets Manager", "in": ["security_controls"]},
+        {"id": "F31", "quote": "Never purge the SQS queue to fix a backlog", "in": ["danger_zones"]},
+        {"id": "F32", "quote": "Those are real bookings, and they're gone for good", "in": ["danger_zones"]},
+        {"id": "F33", "quote": "Monday mornings, because everything that arrived over the weekend is collected then", "in": ["known_bad_days"]},
+        {"id": "F34", "quote": "the weeks before Chinese New Year, when volumes double", "in": ["known_bad_days"]},
+        {"id": "F35", "quote": "About eleven thousand dollars a month", "in": ["cost_optimization"]},
+        {"id": "F36", "quote": "Aurora is the biggest part", "in": ["cost_optimization"]},
+        {"id": "F37", "quote": "We moved the dev account to Aurora Serverless and saved roughly two thousand a month", "in": ["cost_optimization"]},
+        {"id": "F38", "quote": "The terminal systems team owns Quayside", "terms": ["Quayside", "terminal systems team"], "in": ["ownership_escalation"]},
+        {"id": "F39", "quote": "call Grace Okafor, the head of terminal systems", "in": ["ownership_escalation"]},
+        {"id": "F40", "quote": "The upgrade from Node 16 to Node 20 is half done", "in": ["open_responsibilities"]},
+        {"id": "F41", "quote": "the API still runs on 16", "in": ["open_responsibilities", "architecture_reference"]},
+        {"id": "F42", "quote": "get added to the Opsgenie rota and get read access to the production account", "in": DAY1},
+        {"id": "F43", "quote": "do a production release on your own", "in": MONTH1},
+    ],
+    "covered": ALL15,
+    "missing": [],
+})
+
+KTS.append({
+    "id": "d12_bramble_aks_noisy",
+    "title": "Bramble: AKS book search, noisy speech-to-text",
+    "proves": "No punctuation inside paragraphs, fillers, misheard tool names; cost and busy days never discussed.",
+    "transcript": """right so uh hi everyone this is the handover for bramble um bramble is basically the search service for the online bookshop so when a customer types in the search box that request goes to bramble and we get you know around fifty searches a second at peak
+
+so how it's built it runs on azure kubernetes service aks we have three node pools and the search itself is elasticsearch running as a stateful set with five nodes uh the api in front of it is a java spring boot app and there's a nightly indexer job that pulls the catalogue from the product database which is sequel server and pushes it into elastic
+
+deploys uh so we use azure devops pipelines and helm charts the pipeline builds the image runs the tests and then does a helm upgrade into the cluster um if the release is bad you do a helm rollback to the previous revision and that takes a couple of minutes
+
+environments there's dev and prod and dev has a tiny elastic with only ten percent of the catalogue
+
+monitoring we've got prometheus and graph ana in the cluster there's a dashboard for search latency and the indexer and the alert that matters is when the indexer hasn't finished by six am it posts in the teams channel and pages whoever is on call
+
+okay problems so the big one is elastic running out of heap when someone sends a crazy query with like a wildcard at the front uh the nodes go into garbage collection and search gets really slow what you do is find the query in the slow log and block that pattern in the api config then restart the node that's stuck
+
+the other thing is the indexer timing out when the product database is being backed up at the same time you just rerun the indexer after the backup finishes
+
+backups um we take an elastic snapshot to blob storage every night and we keep fourteen of them but honestly the index can just be rebuilt from sequel server in about three hours so that's really the recovery plan
+
+security the api only accepts traffic from the front door and the elastic cluster isn't exposed outside the cluster at all the connection strings are in key vault
+
+one thing never ever delete the alias called books live because the website reads from that alias and search goes down straight away
+
+it's owned by the discovery team i'm the tech lead for now and if you need to escalate go to Sam Whitfield he's the head of engineering
+
+open stuff we started upgrading elastic from seven to eight and it's done in dev but not in prod yet
+
+um for your first week get cube control access to the prod cluster and read the runbook in the wiki and by the end of the first month you should do the elastic upgrade in prod with me watching""",
+    "facts": [
+        {"id": "F01", "quote": "the search service for the online bookshop", "in": ["system_overview"]},
+        {"id": "F02", "quote": "when a customer types in the search box that request goes to bramble", "in": ["system_overview", "architecture_reference"]},
+        {"id": "F03", "quote": "around fifty searches a second at peak", "in": ["system_overview"]},
+        {"id": "F04", "quote": "it runs on azure kubernetes service aks", "in": AR},
+        {"id": "F05", "quote": "we have three node pools", "in": AR},
+        {"id": "F06", "quote": "the search itself is elasticsearch running as a stateful set with five nodes", "alt": ["the search itself is elasticsearch running as a statefulset with five nodes"], "in": AR},
+        {"id": "F07", "quote": "the api in front of it is a java spring boot app", "in": AR},
+        {"id": "F08", "quote": "there's a nightly indexer job that pulls the catalogue from the product database", "in": AR},
+        {"id": "F09", "quote": "the product database which is sequel server", "alt": ["the product database which is SQL Server"], "in": AR},
+        {"id": "F10", "quote": "we use azure devops pipelines and helm charts", "in": ["deployment_and_rollback"]},
+        {"id": "F11", "quote": "the pipeline builds the image runs the tests and then does a helm upgrade into the cluster", "in": ["deployment_and_rollback"]},
+        {"id": "F12", "quote": "you do a helm rollback to the previous revision", "in": ["deployment_and_rollback"]},
+        {"id": "F13", "quote": "there's dev and prod", "in": ["environments"]},
+        {"id": "F14", "quote": "dev has a tiny elastic with only ten percent of the catalogue", "in": ["environments"]},
+        {"id": "F15", "quote": "we've got prometheus and graph ana in the cluster", "alt": ["we've got prometheus and grafana in the cluster"], "in": ["monitoring_observability"]},
+        {"id": "F16", "quote": "there's a dashboard for search latency and the indexer", "in": ["monitoring_observability"]},
+        {"id": "F17", "quote": "the alert that matters is when the indexer hasn't finished by six am", "in": ["monitoring_observability"]},
+        {"id": "F18", "quote": "it posts in the teams channel and pages whoever is on call", "in": ["monitoring_observability"]},
+        {"id": "F19", "quote": "elastic running out of heap when someone sends a crazy query", "in": ["common_failures"]},
+        {"id": "F20", "quote": "the nodes go into garbage collection and search gets really slow", "in": ["common_failures"]},
+        {"id": "F21", "quote": "find the query in the slow log and block that pattern in the api config", "in": ["common_failures"]},
+        {"id": "F22", "quote": "restart the node that's stuck", "in": ["common_failures"]},
+        {"id": "F23", "quote": "the indexer timing out when the product database is being backed up at the same time", "in": ["common_failures"]},
+        {"id": "F24", "quote": "you just rerun the indexer after the backup finishes", "in": ["common_failures"]},
+        {"id": "F25", "quote": "we take an elastic snapshot to blob storage every night and we keep fourteen of them", "in": ["disaster_recovery"]},
+        {"id": "F26", "quote": "the index can just be rebuilt from sequel server in about three hours", "alt": ["the index can just be rebuilt from SQL Server in about three hours"], "in": ["disaster_recovery"]},
+        {"id": "F27", "quote": "the api only accepts traffic from the front door", "in": ["security_controls"]},
+        {"id": "F28", "quote": "the elastic cluster isn't exposed outside the cluster at all", "in": ["security_controls"]},
+        {"id": "F29", "quote": "the connection strings are in key vault", "in": ["security_controls"]},
+        {"id": "F30", "quote": "never ever delete the alias called books live", "in": ["danger_zones"]},
+        {"id": "F31", "quote": "the website reads from that alias and search goes down straight away", "in": ["danger_zones"]},
+        {"id": "F32", "quote": "it's owned by the discovery team", "in": ["ownership_escalation"]},
+        {"id": "F33", "quote": "go to Sam Whitfield he's the head of engineering", "in": ["ownership_escalation"]},
+        {"id": "F34", "quote": "we started upgrading elastic from seven to eight", "in": ["open_responsibilities"]},
+        {"id": "F35", "quote": "it's done in dev but not in prod yet", "in": ["open_responsibilities"]},
+        {"id": "F36", "quote": "get cube control access to the prod cluster and read the runbook in the wiki", "alt": ["get kubectl access to the prod cluster and read the runbook in the wiki"], "in": DAY1},
+        {"id": "F37", "quote": "you should do the elastic upgrade in prod with me watching", "in": MONTH1},
+    ],
+    "covered": [s for s in ALL15 if s not in ("cost_optimization", "known_bad_days")],
+    "missing": ["cost_optimization", "known_bad_days"],
+})
+
+KTS.append({
+    "id": "d13_heron_lambda_formal",
+    "title": "Heron: AWS serverless claims intake, formal document read aloud",
+    "proves": "Part headings said aloud, label-and-value lines (\"Recovery time objective: one hour.\"), issue lists.",
+    "transcript": """Heron operational handover. Prepared by the claims platform team. Part one: overview. Heron is the claims intake service for the motor insurance division. It receives first notification of loss reports from the customer app, the broker portal and the call centre, and creates a claim in the core claims system. Volume is approximately four thousand claims per day, rising sharply after severe weather.
+
+Part two: technical architecture. Heron is serverless and runs entirely on AWS. Incoming reports are accepted by Amazon API Gateway and validated by a Lambda function. An AWS Step Functions workflow then enriches each report with policy data and creates the claim. Report documents and photographs are stored in Amazon S3. Claim state is held in a DynamoDB table. The core claims system is a mainframe application, reached through an IBM MQ bridge.
+
+Part three: environments. Development, system test and production, each in a separate AWS account. System test is connected to the mainframe test region.
+
+Part four: release process. Infrastructure and code are defined in AWS CDK and stored in GitHub. A pull request triggers GitHub Actions, which runs unit tests and a CDK diff. Merging to main deploys to system test automatically. Production deployment is a manual workflow run, approved by a claims platform lead. Rollback: re-run the production workflow for the previous release tag.
+
+Part five: monitoring. Metrics and logs are in CloudWatch; traces are in AWS X-Ray. Alarms: Step Functions failures above one percent of executions, and the MQ bridge queue depth above five hundred. Both alarms page the on-call engineer through PagerDuty.
+
+Part six: known issues and fixes. Issue one: the mainframe is unavailable during its Sunday maintenance window, so claims queue in the MQ bridge. No action is needed; the queue drains when the mainframe returns. Issue two: duplicate claims when the customer app retries a submission. Resolution: run the deduplication script from the operations repository, then notify the claims handlers.
+
+Part seven: backup and recovery. DynamoDB point-in-time recovery is enabled with thirty-five days of retention. S3 versioning is enabled on the documents bucket, which is replicated to a second region. Recovery point objective: fifteen minutes. Recovery time objective: one hour.
+
+Part eight: security. All data is encrypted with customer-managed KMS keys. The API requires a signed token from the company identity provider. Claim photographs may contain personal data and are deleted after seven years.
+
+Part nine: restrictions. Do not disable the API Gateway throttling settings; they protect the mainframe from overload. Changes to the MQ bridge configuration require approval from the mainframe team.
+
+Part ten: critical dates. The weeks after a named storm are the busiest, followed by the first working day of January. No production releases are made during a declared weather event.
+
+Part eleven: cost. Monthly spend is about three thousand five hundred dollars. Step Functions state transitions are the largest item. Moving the enrichment steps to Express workflows is expected to halve that cost.
+
+Part twelve: ownership. Owner: the claims platform team. Escalation: Priya Raman, claims platform manager, then the head of claims technology.
+
+Part thirteen: open items. The broker portal integration is moving from SOAP to REST; this is scheduled for next quarter and not yet started.
+
+Part fourteen: onboarding. Day one: request access to the production AWS account and the PagerDuty schedule. Within thirty days: lead one production release and one deduplication run.""",
+    "facts": [
+        {"id": "F01", "quote": "Heron is the claims intake service for the motor insurance division", "in": ["system_overview"]},
+        {"id": "F02", "quote": "It receives first notification of loss reports from the customer app, the broker portal and the call centre", "in": ["system_overview", "architecture_reference"]},
+        {"id": "F03", "quote": "creates a claim in the core claims system", "in": ["system_overview", "architecture_reference"]},
+        {"id": "F04", "quote": "Volume is approximately four thousand claims per day", "in": ["system_overview"]},
+        {"id": "F05", "quote": "rising sharply after severe weather", "in": ["system_overview", "known_bad_days"]},
+        {"id": "F06", "quote": "Heron is serverless and runs entirely on AWS", "in": AR},
+        {"id": "F07", "quote": "Incoming reports are accepted by Amazon API Gateway and validated by a Lambda function", "in": AR},
+        {"id": "F08", "quote": "An AWS Step Functions workflow then enriches each report with policy data and creates the claim", "in": AR},
+        {"id": "F09", "quote": "Report documents and photographs are stored in Amazon S3", "in": AR},
+        {"id": "F10", "quote": "Claim state is held in a DynamoDB table", "in": AR},
+        {"id": "F11", "quote": "The core claims system is a mainframe application, reached through an IBM MQ bridge", "in": AR},
+        {"id": "F12", "quote": "Development, system test and production, each in a separate AWS account", "in": ["environments"]},
+        {"id": "F13", "quote": "System test is connected to the mainframe test region", "in": ["environments"]},
+        {"id": "F14", "quote": "Infrastructure and code are defined in AWS CDK and stored in GitHub", "in": ["deployment_and_rollback", "architecture_reference"]},
+        {"id": "F15", "quote": "A pull request triggers GitHub Actions, which runs unit tests and a CDK diff", "in": ["deployment_and_rollback"]},
+        {"id": "F16", "quote": "Merging to main deploys to system test automatically", "in": ["deployment_and_rollback"]},
+        {"id": "F17", "quote": "Production deployment is a manual workflow run, approved by a claims platform lead", "in": ["deployment_and_rollback"]},
+        {"id": "F18", "quote": "re-run the production workflow for the previous release tag", "in": ["deployment_and_rollback"]},
+        {"id": "F19", "quote": "Metrics and logs are in CloudWatch", "in": ["monitoring_observability"]},
+        {"id": "F20", "quote": "traces are in AWS X-Ray", "in": ["monitoring_observability"]},
+        {"id": "F21", "quote": "Step Functions failures above one percent of executions", "in": ["monitoring_observability"]},
+        {"id": "F22", "quote": "the MQ bridge queue depth above five hundred", "in": ["monitoring_observability"]},
+        {"id": "F23", "quote": "Both alarms page the on-call engineer through PagerDuty", "in": ["monitoring_observability"]},
+        {"id": "F24", "quote": "the mainframe is unavailable during its Sunday maintenance window, so claims queue in the MQ bridge", "in": ["common_failures", "known_bad_days"]},
+        {"id": "F25", "quote": "the queue drains when the mainframe returns", "in": ["common_failures"]},
+        {"id": "F26", "quote": "duplicate claims when the customer app retries a submission", "in": ["common_failures"]},
+        {"id": "F27", "quote": "run the deduplication script from the operations repository, then notify the claims handlers", "in": ["common_failures"]},
+        {"id": "F28", "quote": "DynamoDB point-in-time recovery is enabled with thirty-five days of retention", "in": ["disaster_recovery"]},
+        {"id": "F29", "quote": "S3 versioning is enabled on the documents bucket, which is replicated to a second region", "in": ["disaster_recovery"]},
+        {"id": "F30", "quote": "Recovery point objective: fifteen minutes", "alt": ["fifteen minutes"], "in": ["disaster_recovery"]},
+        {"id": "F31", "quote": "Recovery time objective: one hour", "alt": ["one hour"], "in": ["disaster_recovery"]},
+        {"id": "F32", "quote": "All data is encrypted with customer-managed KMS keys", "in": ["security_controls"]},
+        {"id": "F33", "quote": "The API requires a signed token from the company identity provider", "in": ["security_controls"]},
+        {"id": "F34", "quote": "Claim photographs may contain personal data and are deleted after seven years", "in": ["security_controls"]},
+        {"id": "F35", "quote": "Do not disable the API Gateway throttling settings", "in": ["danger_zones"]},
+        {"id": "F36", "quote": "they protect the mainframe from overload", "in": ["danger_zones"]},
+        {"id": "F37", "quote": "Changes to the MQ bridge configuration require approval from the mainframe team", "in": ["danger_zones", "deployment_and_rollback"]},
+        {"id": "F38", "quote": "The weeks after a named storm are the busiest, followed by the first working day of January", "in": ["known_bad_days"]},
+        {"id": "F39", "quote": "No production releases are made during a declared weather event", "in": ["known_bad_days", "deployment_and_rollback"]},
+        {"id": "F40", "quote": "Monthly spend is about three thousand five hundred dollars", "in": ["cost_optimization"]},
+        {"id": "F41", "quote": "Step Functions state transitions are the largest item", "in": ["cost_optimization"]},
+        {"id": "F42", "quote": "Moving the enrichment steps to Express workflows is expected to halve that cost", "in": ["cost_optimization"]},
+        {"id": "F43", "quote": "Owner: the claims platform team", "in": ["ownership_escalation"]},
+        {"id": "F44", "quote": "Escalation: Priya Raman, claims platform manager, then the head of claims technology", "in": ["ownership_escalation"]},
+        {"id": "F45", "quote": "The broker portal integration is moving from SOAP to REST", "in": ["open_responsibilities"]},
+        {"id": "F46", "quote": "this is scheduled for next quarter and not yet started", "in": ["open_responsibilities"]},
+        {"id": "F47", "quote": "request access to the production AWS account and the PagerDuty schedule", "in": DAY1},
+        {"id": "F48", "quote": "lead one production release and one deduplication run", "in": MONTH1},
+    ],
+    "covered": ALL15,
+    "missing": [],
+})
+
+KTS.append({
+    "id": "d14_goodwell_heroku_ramble",
+    "title": "Goodwell: Heroku charity donations, rambling with corrections",
+    "proves": "Returns to topics, a number corrected in the next sentence, a correction pointing far back.",
+    "transcript": """Okay, so, Goodwell. Where do I start. Goodwell is the donations platform for the charity, it takes one-off and monthly donations on the website, and it claims Gift Aid back from the tax office. On a normal day it's maybe two thousand donations, but it goes crazy during the TV appeal.
+
+So it's a Rails app on Heroku. We've got the web dynos, and Sidekiq workers that do the background stuff like sending receipts and building the Gift Aid claims. The database is Heroku Postgres on the standard plan, and Redis is there for Sidekiq. Payments go through Stripe, and the receipts go out through Postmark.
+
+Deploys, right. We deploy from GitHub; when you merge to main, CircleCI runs the test suite and then pushes to Heroku. We deploy on Tuesdays. If a deploy goes wrong you use heroku releases rollback, which takes you back to the previous release in seconds. Oh, and migrations: always run them in a separate step before the code goes out, because a migration that locks the donations table stops people giving.
+
+We have a staging app on Heroku that mirrors production, and a review app is created for every pull request.
+
+Going back to the architecture for a second, there's also a small Python service on AWS Lambda that sends the Gift Aid file to the tax office every Friday. It's the only thing not on Heroku.
+
+Monitoring is Sentry for errors and Heroku metrics for the dynos, and we've got a Papertrail alert if the Sidekiq queue goes above a thousand jobs. That alert goes to the on-call Slack channel and to my phone.
+
+What breaks. The main thing is Stripe webhooks timing out when we get a spike, so donations show as pending. The fix is to replay the failed webhooks from the Stripe dashboard. And the Gift Aid submission sometimes gets rejected because a donor's postcode is invalid; you correct the postcode in the admin and resubmit the file.
+
+Backups. Heroku Postgres takes daily backups and keeps them for seven days. No wait, sorry, it's thirty days, we upgraded the plan last year. We've never actually done a full restore though, which worries me a bit.
+
+Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now, we moved it after the Tuesday appeal clashes.
+
+Security: the admin is behind Google sign-in, only for charity staff. Card details never touch our servers, Stripe handles all of that. The Stripe and Postmark keys are in Heroku config vars.
+
+The thing you really must not do is run the Gift Aid claim job twice for the same month, the tax office treats it as a duplicate claim and that's a compliance problem.
+
+Busy times are the TV appeal night in March, when we get a month of donations in four hours, and December. Scale the web dynos to twenty before the appeal starts.
+
+Cost-wise we spend about eight hundred pounds a month on Heroku, the database is half of that. We looked at moving to AWS to save money but decided it wasn't worth it.
+
+It's owned by the digital team at the charity, and I'm the only developer, which is the problem really. For escalation, go to Fiona Grant, the head of digital, and for payments issues, Stripe support.
+
+Unfinished things: we were moving the receipts from Postmark to the charity's Salesforce, that's stalled. And the Ruby upgrade to 3.3 hasn't been started.
+
+For your first day, get added to the Heroku team and the Stripe account. Over the first month, run the Friday Gift Aid submission yourself and do one deploy.""",
+    "facts": [
+        {"id": "F01", "quote": "Goodwell is the donations platform for the charity", "in": ["system_overview"]},
+        {"id": "F02", "quote": "it takes one-off and monthly donations on the website", "in": ["system_overview"]},
+        {"id": "F03", "quote": "it claims Gift Aid back from the tax office", "in": ["system_overview"]},
+        {"id": "F04", "quote": "On a normal day it's maybe two thousand donations", "in": ["system_overview"]},
+        {"id": "F05", "quote": "it goes crazy during the TV appeal", "in": ["system_overview", "known_bad_days"]},
+        {"id": "F06", "quote": "it's a Rails app on Heroku", "in": AR},
+        {"id": "F07", "quote": "Sidekiq workers that do the background stuff like sending receipts and building the Gift Aid claims", "in": AR},
+        {"id": "F08", "quote": "The database is Heroku Postgres on the standard plan", "in": AR},
+        {"id": "F09", "quote": "Redis is there for Sidekiq", "in": AR},
+        {"id": "F10", "quote": "Payments go through Stripe", "in": AR},
+        {"id": "F11", "quote": "the receipts go out through Postmark", "in": AR},
+        {"id": "F12", "quote": "when you merge to main, CircleCI runs the test suite and then pushes to Heroku", "in": ["deployment_and_rollback"]},
+        {"id": "F13", "quote": "it's Wednesdays now, we moved it after the Tuesday appeal clashes", "in": ["deployment_and_rollback", "known_bad_days"]},
+        {"id": "F14", "quote": "you use heroku releases rollback, which takes you back to the previous release in seconds", "in": ["deployment_and_rollback"]},
+        {"id": "F15", "quote": "always run them in a separate step before the code goes out", "in": ["deployment_and_rollback", "danger_zones"]},
+        {"id": "F16", "quote": "a migration that locks the donations table stops people giving", "in": ["deployment_and_rollback", "danger_zones"]},
+        {"id": "F17", "quote": "We have a staging app on Heroku that mirrors production", "in": ["environments"]},
+        {"id": "F18", "quote": "a review app is created for every pull request", "in": ["environments", "deployment_and_rollback"]},
+        {"id": "F19", "quote": "a small Python service on AWS Lambda that sends the Gift Aid file to the tax office every Friday", "in": AR},
+        {"id": "F20", "quote": "It's the only thing not on Heroku", "in": AR},
+        {"id": "F21", "quote": "Monitoring is Sentry for errors and Heroku metrics for the dynos", "in": ["monitoring_observability"]},
+        {"id": "F22", "quote": "a Papertrail alert if the Sidekiq queue goes above a thousand jobs", "in": ["monitoring_observability"]},
+        {"id": "F23", "quote": "That alert goes to the on-call Slack channel and to my phone", "in": ["monitoring_observability"]},
+        {"id": "F24", "quote": "Stripe webhooks timing out when we get a spike, so donations show as pending", "in": ["common_failures"]},
+        {"id": "F25", "quote": "replay the failed webhooks from the Stripe dashboard", "in": ["common_failures"]},
+        {"id": "F26", "quote": "the Gift Aid submission sometimes gets rejected because a donor's postcode is invalid", "in": ["common_failures"]},
+        {"id": "F27", "quote": "you correct the postcode in the admin and resubmit the file", "in": ["common_failures"]},
+        {"id": "F28", "quote": "Heroku Postgres takes daily backups", "in": ["disaster_recovery"]},
+        {"id": "F29", "quote": "it's thirty days, we upgraded the plan last year", "in": ["disaster_recovery"]},
+        {"id": "F30", "quote": "We've never actually done a full restore", "alt": ["We've never done a full restore"], "in": ["disaster_recovery"]},
+        {"id": "F31", "quote": "the admin is behind Google sign-in, only for charity staff", "in": ["security_controls"]},
+        {"id": "F32", "quote": "Card details never touch our servers", "in": ["security_controls"]},
+        {"id": "F33", "quote": "The Stripe and Postmark keys are in Heroku config vars", "in": ["security_controls"]},
+        {"id": "F34", "quote": "run the Gift Aid claim job twice for the same month", "in": ["danger_zones"]},
+        {"id": "F35", "quote": "the tax office treats it as a duplicate claim and that's a compliance problem", "in": ["danger_zones"]},
+        {"id": "F36", "quote": "the TV appeal night in March, when we get a month of donations in four hours, and December", "in": ["known_bad_days"]},
+        {"id": "F37", "quote": "Scale the web dynos to twenty before the appeal starts", "in": ["known_bad_days", "common_failures"]},
+        {"id": "F38", "quote": "we spend about eight hundred pounds a month on Heroku", "in": ["cost_optimization"]},
+        {"id": "F39", "quote": "the database is half of that", "in": ["cost_optimization"]},
+        {"id": "F40", "quote": "We looked at moving to AWS to save money but decided it wasn't worth it", "in": ["cost_optimization"]},
+        {"id": "F41", "quote": "It's owned by the digital team at the charity", "in": ["ownership_escalation"]},
+        {"id": "F42", "quote": "I'm the only developer", "in": ["ownership_escalation"]},
+        {"id": "F43", "quote": "go to Fiona Grant, the head of digital", "in": ["ownership_escalation"]},
+        {"id": "F44", "quote": "for payments issues, Stripe support", "in": ["ownership_escalation"]},
+        {"id": "F45", "quote": "we were moving the receipts from Postmark to the charity's Salesforce, that's stalled", "in": ["open_responsibilities"]},
+        {"id": "F46", "quote": "the Ruby upgrade to 3.3 hasn't been started", "in": ["open_responsibilities"]},
+        {"id": "F47", "quote": "get added to the Heroku team and the Stripe account", "in": DAY1},
+        {"id": "F48", "quote": "run the Friday Gift Aid submission yourself and do one deploy", "in": MONTH1},
     ],
     "covered": ALL15,
     "missing": [],

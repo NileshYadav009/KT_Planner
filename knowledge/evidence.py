@@ -18,6 +18,7 @@ cells are not facts and get no sources.
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from fact_units import even_pieces
 from renderers.blocks.common import NOT_COVERED_MESSAGE, SECTION_STATUS_MESSAGES
 
 INFERRED_TEXT = "(inferred"
@@ -235,17 +236,27 @@ def transcript_sentences(transcript: str, segments: Optional[Sequence[Dict[str, 
 
     sentences, pos = [], 0
     for part in _SENTENCE_SPLIT.split(text):
-        begin = text.find(part, pos)
-        pos = begin + len(part)
-        quote = part.strip()
-        if len(_content_keys(quote)) < 1:
-            continue
-        sentence = {"quote": quote, "start": time_at(begin, 0), "end": time_at(pos, 1) if spans else None}
-        for key, index in (("speaker", 4), ("session", 5)):
-            value = most_of(begin, pos, index)
-            if value:
-                sentence[key] = value
-        sentences.append(sentence)
+        start = text.find(part, pos)
+        pos = start + len(part)
+        # A long run with no full stops (speech to text) is quoted in pieces,
+        # each marked where it goes on: cut to its first 280 characters, a
+        # fact from its end cited a quote that did not hold it.
+        pieces = even_pieces(part, int(_QUOTE_CHARS * 0.8)) if len(part) > _QUOTE_CHARS else [part]
+        at = start
+        for n, piece in enumerate(pieces):
+            begin = text.find(piece, at)
+            end = at = begin + len(piece)
+            quote = piece.strip()
+            if len(_content_keys(quote)) < 1:
+                continue
+            if len(pieces) > 1:
+                quote = ("…" if n else "") + quote + ("…" if n < len(pieces) - 1 else "")
+            sentence = {"quote": quote, "start": time_at(begin, 0), "end": time_at(end, 1) if spans else None}
+            for key, index in (("speaker", 4), ("session", 5)):
+                value = most_of(begin, end, index)
+                if value:
+                    sentence[key] = value
+            sentences.append(sentence)
     return sentences
 
 

@@ -16,7 +16,16 @@ low-confidence sentences (`ContextRepair`, Stage 4).
 
 Raw segments are joined and split into sentences, keeping each sentence's
 time from the Whisper segments it came from. A run-on (speech with no full
-stops) is cut at its sentence openers.
+stops) is cut at its sentence openers. A run of more than 240 characters
+with no punctuation at all is cut into pieces of about even length, at a
+word boundary near each share, preferring a joining word that opens a
+clause ("... a java spring boot app | and there's a nightly indexer job
+...") and never right after "the", "of" or "and" when another cut is close
+(`fact_units.even_pieces`). Filled up to the limit instead, a run ended in a
+stub too short to keep. These cuts are guesses; a run of 120 words or more
+with almost no punctuation (a whole transcript without line breaks) is
+therefore given sentence ends by a small model in the cleaner first
+(`punctuation.restore_punctuation`, ledger X90).
 
 **Each sentence is then cut into the facts it states**
 (`fact_units.split_into_facts`, via `context_mapper.split_facts`). The unit
@@ -34,7 +43,12 @@ them to ECR"), an explanation ("..., and the fix is to..."), the result of
 the step before ("..., and the results land in BigQuery"), a rule and its
 reason ("Never deploy on Fridays, we had an outage"), a sentence that opens
 with a condition, and lists of nouns. The rules are grammatical; no section,
-tool or transcript is named in them.
+tool or transcript is named in them. A later time frame for the new owner
+opens a fact of its own ("For your first week get kubectl access ... and by
+the end of the first month you should do the upgrade"), with or without a
+comma or "and"; with neither (speech to text that ran an onboarding plan's
+two sentences together), only when the words after it are addressed to the
+new owner ("run ...", "you should ...") (`fact_units._time_frame_pieces`).
 
 Every fact keeps its source: `Sentence.source_id` (the spoken sentence's
 position), `source_text` (the sentence verbatim) and `source_span` (the
@@ -245,4 +259,8 @@ Produces the final `KTResult` (`kt.coverage`, `kt.section_content`,
    separate: per section, which of its expected topics the session covered
    (`coverage_topics.py`). Each gap the speaker stated ("the failover
    runbook is still missing") is listed, quoted, under the Knowledge Gaps
-   checklist.
+   checklist. A section whose only statements are gaps is Missing, "stated
+   as not in place"; a unit that states a control before its gap ("We take
+   nightly backups to S3 and we have never tested a restore", with or
+   without "but") states something, and the section is at least Partial
+   (`dialogue.states_something_before_gap`).

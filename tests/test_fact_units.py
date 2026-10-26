@@ -362,3 +362,48 @@ def test_a_condition_opened_mid_sentence_stays_with_what_it_leads_to():
     two = "The API runs on EKS, and the database is PostgreSQL on RDS."
     assert len(split_into_facts(two)) == 2
 
+
+
+def test_a_second_time_frame_for_the_new_owner_starts_a_fact_of_its_own():
+    """Dev d12: "For your first week get kubectl access ... and by the end of
+    the first month you should do the elastic upgrade ..." was one fact, and
+    the month's task went to the Day-1 checklist."""
+    said = ("For your first week get kubectl access to the prod cluster and read the runbook in the wiki and by "
+            "the end of the first month you should do the elastic upgrade in prod with me watching.")
+    assert fact_texts(said) == ["For your first week get kubectl access to the prod cluster and read the runbook in the wiki",
+                                "by the end of the first month you should do the elastic upgrade in prod with me watching."]
+    assert fact_texts("In your first week, get access to the cluster, and by the end of the first month, run a "
+                      "release yourself.")[1] == "by the end of the first month, run a release yourself."
+    # Speech to text without full stops runs an onboarding plan's two
+    # sentences together; the second frame is followed by words to the new
+    # owner.
+    flat = ("in the first week get an account on the weblogic console and read-only access to the database by the "
+            "end of the month run a thursday deployment yourself.")
+    assert fact_texts(flat)[1] == "by the end of the month run a thursday deployment yourself."
+    assert len(fact_texts("day one request openshift and splunk access first month attend two change boards.")) == 2
+    # A time frame that opens no clause of its own is not cut.
+    for one in ["Backups are retained for the first 30 days and then moved to Glacier.",
+                "Traffic doubles in the first week of January and in the first month after launch.",
+                "We rotate the keys within thirty days if they leak.",
+                "By the end of the month, finance closes the books."]:
+        assert fact_texts(one) == [one.rstrip()], one
+
+
+def test_a_long_run_with_no_punctuation_is_cut_into_even_verbatim_pieces():
+    """Speech to text without punctuation (dev d12, the noisy copies of the
+    visible KTs): filled up to 240 characters, a run ended in a stub ("task
+    definition revision.", too short to keep) and was cut anywhere ("nightly
+    indexer | job that pulls the catalogue")."""
+    from fact_units import even_pieces
+
+    said = ("How it's built it runs on Azure Kubernetes Service AKS we have three node pools and the search itself is "
+            "elasticsearch running as a statefulset with five nodes the api in front of it is a java spring boot app "
+            "and there's a nightly indexer job that pulls the catalogue from the product database which is sql server "
+            "and pushes it into elastic.")
+    pieces = even_pieces(said, 240)
+    assert pieces[1].startswith("and there's a nightly indexer job")
+    assert all(p in said for p in pieces) and " ".join(pieces) == said
+    run = ("Everything is in bitbucket a merge to main runs the bitbucket pipeline which builds the images pushes them "
+           "to ecr and updates the ecs services production needs a manual approval step in the pipeline to roll back "
+           "you redeploy the previous task definition revision.")
+    assert min(len(p.split()) for p in even_pieces(run, 240)) > 10

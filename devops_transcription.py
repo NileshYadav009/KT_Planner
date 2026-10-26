@@ -44,6 +44,7 @@ except ImportError:
 
 import glossary
 from devops_vocabulary import DEVOPS_VOCABULARY, KEEP_AS_SAID
+from punctuation import restore_punctuation
 
 # ============================================================================
 # DevOps Terminology Corrections Dictionary
@@ -595,8 +596,11 @@ _ANYWHERE_FILLER_RE = re.compile(
 _SPELLED_NUMBER_WORD = (r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen"
                         r"|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy"
                         r"|eighty|ninety|hundred|thousand|million|billion)")
+# A day of the week is corrected like a number: "Releases go out on
+# Thursdays. Sorry, Fridays." (adversarial matrix A23).
+_WEEKDAY = r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?"
 _MID_SENTENCE_ACTUALLY_RE = re.compile(
-    r"(?<=[\w,;]\s)actually" + _NOT_JOINED + r"(?!,?\s*(?:\d|" + _SPELLED_NUMBER_WORD + r"\b)),?\s*",
+    r"(?<=[\w,;]\s)actually" + _NOT_JOINED + r"(?!,?\s*(?:\d|" + _SPELLED_NUMBER_WORD + r"\b|" + _WEEKDAY + r"\b)),?\s*",
     re.IGNORECASE)
 
 # A speaker correcting a number mid-sentence: "the order limit is 4000 or
@@ -608,8 +612,8 @@ _MID_SENTENCE_ACTUALLY_RE = re.compile(
 # and "actually" or a bare "no" are not reliably corrections ("5 minutes,
 # actually 10 on a bad day", "9 to 5, no 24/7 support").
 _SPELLED_NUMBER = _SPELLED_NUMBER_WORD + r"(?:(?:\s+|-)(?:and\s+)?" + _SPELLED_NUMBER_WORD + r")*"
-_CORRECTED_VALUE = (r"(?<![\w.,-])(?:\d(?:[\d,.]*\d)?(?:%|(?:k|K|M|GB|MB|TB|ms)\b)?|" + _SPELLED_NUMBER + r")"
-                    + _NOT_JOINED)
+_CORRECTED_VALUE = (r"(?<![\w.,-])(?:\d(?:[\d,.]*\d)?(?:%|(?:k|K|M|GB|MB|TB|ms)\b)?|" + _SPELLED_NUMBER
+                    + r"|" + _WEEKDAY + r")" + _NOT_JOINED)
 _CORRECTION_MARKER = (r"(?:sorry|i\s+mean|i\s+meant|no\s+wait|wait\s+no|no\s+sorry|rather|correction"
                       r"|scratch\s+that|my\s+bad|my\s+mistake|oops|let\s+me\s+correct\s+(?:that|myself))" + _NOT_JOINED)
 # Words that end the unit after the withdrawn number ("four hours I mean").
@@ -688,7 +692,8 @@ in on at by per with not but so then i mean we our you your they them be been ha
 
 
 def _number_key(value: str) -> str:
-    return re.sub(r"[,\s-]+", "", value.lower())
+    # "Tuesdays" and "Tuesday" are one value.
+    return re.sub(r"(?<=day)s$", "", re.sub(r"[,\s-]+", "", value.lower()))
 
 
 def _restatement_words(text: str) -> set:
@@ -762,6 +767,8 @@ def _value_kinds(text: str) -> List[Tuple[str, set]]:
         suffix = re.search(r"(?<=\d)(%|[A-Za-z]+)$", value)
         if suffix:
             kinds.add("unit:" + suffix.group(1).lower())
+        if re.fullmatch(_WEEKDAY, value, re.IGNORECASE):
+            kinds.add("unit:weekday")
         after = re.match(r"\s+([A-Za-z]+)", text[m.end():])
         if after and after.group(1).lower() not in _VALUE_LIGHT:
             word = after.group(1).lower()
@@ -911,6 +918,47 @@ def points_back_to(earlier: str, sentence: str) -> bool:
     stems = {w[:5] for w in re.findall(r"[a-z][a-z'-]+", m.group("topic").lower())
              if len(w) > 2 and w not in _VALUE_LIGHT and w not in ("earlier", "before")}
     return bool(stems & {w[:5] for w in re.findall(r"[a-z][a-z'-]+", earlier.lower())})
+
+
+# A correction that says again what it withdraws instead of naming its
+# topic: "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's
+# Wednesdays now", "Earlier I said the cluster has three nodes; that's not
+# right, it has five" (adversarial matrix A22, A24). The claim ends at the
+# first stop or a ", but".
+_SAID_BEFORE_RE = re.compile(
+    r"\b(?:(?:earlier|before)\s*,?\s+i\s+(?:said|mentioned|told\s+you)"
+    r"|i\s+(?:said|mentioned|told\s+you)\s+(?:earlier|before|at\s+the\s+start))\s*,?\s+(?:that\s+)?"
+    r"(?P<claim>[^.;!?—–]+?)(?=\s*(?:[.;!?—–]|,\s*(?:but|and|which|though)\b|$))", re.IGNORECASE)
+
+
+def said_before_claim(text: str) -> Optional[str]:
+    """What `text` says the speaker said earlier ("I said earlier we deploy
+    on Tuesdays" -> "we deploy on Tuesdays"), or None."""
+    m = _SAID_BEFORE_RE.search(text or "")
+    return m.group("claim") if m else None
+
+
+def withdraws_said_before(text: str) -> Optional[str]:
+    """The claim `text` says again and then withdraws, in its own words or
+    in a sentence after it ("That's wrong, ...", "Sorry, ..."), or None."""
+    m = _SAID_BEFORE_RE.search(text or "")
+    if not m:
+        return None
+    after = text[m.end():]
+    if _REPLACES_ANYWHERE_RE.search(after) or any(
+            _REPLACES_LEADING_RE.match(part) for part in re.split(r"[.;!?]\s*", after) if part.strip()):
+        return m.group("claim")
+    return None
+
+
+def restates(earlier: str, claim: Optional[str]) -> bool:
+    """`claim` says `earlier` again: at least two of its content words, and
+    two thirds of them, are in `earlier`."""
+    if not claim or not earlier:
+        return False
+    said = _rough_stems(claim)
+    shared = said & _rough_stems(earlier)
+    return len(said) >= 2 and len(shared) >= max(2, -(-2 * len(said) // 3))
 # Spoken agreement carries no content anywhere, commas or not ("reached
 # 15,000 right so yep so we have"), with a "so" that follows it.
 _AGREEMENT_FILLER_RE = re.compile(
@@ -1056,6 +1104,10 @@ def clean_transcript(text: str, keep_tag_questions: Optional[bool] = None) -> st
     # characters every rule expects: with "I’m handing over" the session
     # intro stayed in the document, and "don’t touch ..." was no prohibition.
     text = text.translate(_TYPOGRAPHIC_QUOTES)
+
+    # Speech to text with no punctuation gets its sentence ends back first
+    # (punctuation.py; only a paragraph that has almost none).
+    text = restore_punctuation(text)
 
     # A paragraph break ends a sentence even when nothing else does. Pasted
     # notes often leave a line without a full stop; joining it to the next

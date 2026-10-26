@@ -80,6 +80,11 @@ def is_document_instruction(text: str) -> bool:
 # "We never deploy on Fridays" (real operational rules) do not match, and
 # "has no owner yet" (an open responsibility, captured as such) does not
 # either.
+# A topic put off to a later session is not covered: "We will cover
+# deployment and the rest next week."
+_PUT_OFF_RE = re.compile(r"\b(?:we(?:'ll|\s+will)|let'?s|i(?:'ll|\s+will))\s+(?:cover|go\s+(?:over|through)|discuss|"
+                         r"talk\s+about|walk\s+through|do)\b[^.]*\b(?:next\s+(?:week|time|session|call)|later|"
+                         r"another\s+(?:session|time|call)|tomorrow|separately)\b", re.IGNORECASE)
 _GAP_RES = [
     re.compile(r"\bthere(?:\s+is|\s+are|'s)\s+(?:no|not\s+(?:a|an|any))\s+(?:[a-z]+\s+){0,2}?"
                r"(?:plan|process|runbook|documentation|docs?|backups?|monitoring|alert(?:ing|s)?|tests?|testing|"
@@ -130,11 +135,7 @@ _GAP_RES = [
     re.compile(r"\b(?:we|i|they|the\s+team)\s+(?:do\s+not|don'?t|does\s+not|doesn'?t)\s+(?:yet\s+|currently\s+)?have\s+"
                r"(?:a|an|any)\s+(?:confirmed|documented|agreed|defined|tested|written|current|up-to-date|verified)\b",
                re.IGNORECASE),
-    # A topic put off to a later session is not covered: "We will cover
-    # deployment and the rest next week."
-    re.compile(r"\b(?:we(?:'ll|\s+will)|let'?s|i(?:'ll|\s+will))\s+(?:cover|go\s+(?:over|through)|discuss|"
-               r"talk\s+about|walk\s+through|do)\b[^.]*\b(?:next\s+(?:week|time|session|call)|later|"
-               r"another\s+(?:session|time|call)|tomorrow|separately)\b", re.IGNORECASE),
+    _PUT_OFF_RE,
 ]
 # An answer that opens with a plain "no" to the question before it.
 # "Is there a DR plan? No." is a gap. "So it stores invoices in MySQL? No,
@@ -206,7 +207,9 @@ def doubts_statement_before(previous: str, sentence: str) -> bool:
 # "Cosmos has continuous backup turned on, but we have never tried a restore"
 # states a control that is in place, then a gap in it. Read as a gap alone,
 # Disaster Recovery was reported Missing although the backup was stated.
-_CONTRAST_RE = re.compile(r"(?:[,;]\s*|\s+)(?:but|however|though|although)\b", re.IGNORECASE)
+# Not one that ends the sentence ("we have never done a cross-region restore
+# though."): the clause it closes is the contrast.
+_CONTRAST_RE = re.compile(r"(?:[,;]\s*|\s+)(?:but|however|though|although)\b(?!\W*$)", re.IGNORECASE)
 # "Is it backed up? I think so, but I have never checked" states nothing.
 _HEDGE_RE = re.compile(r"\b(?:i\s+think|i\s+believe|i\s+guess|probably|maybe|perhaps|supposedly|should\s+be)\b",
                        re.IGNORECASE)
@@ -226,16 +229,52 @@ def states_something(text: str) -> bool:
     return states_something_before_gap(text)
 
 
+# What a speaker says before admitting a gap, not a statement of its own:
+# "..., and honestly we | haven't tested restoring", "I have to say we | ...",
+# "... and that's | never been tested".
+_GAP_LEAD_IN_RE = re.compile(
+    r"(?:\b(?:and|so)\s+)?(?:\b(?:honestly|frankly|to\s+be\s+honest|i\s+(?:have\s+to|must)\s+(?:say|admit)|i\s+mean)\s*,?\s*)?"
+    r"(?:\b(?:we|i|they|nobody|no\s*one|the\s+team|that'?s|that\s+(?:is|has)|it'?s|it\s+(?:is|has)|this\s+is"
+    r"|which\s+(?:is|has))\s*)?$", re.IGNORECASE)
+_RELATIVE_ANTECEDENT_RE = re.compile(
+    r"\b(?:something|anything|nothing|everything|thing|things|one|part|area|bit|what|which|that|where)\s*$", re.IGNORECASE)
+
+
 def states_something_before_gap(text: str) -> bool:
     """True when the gap is only in a contrasting clause ("..., but we have
     never tested it") and the clause before it states something on its own:
-    for a question and its answer, the answer's own words, unhedged."""
+    for a question and its answer, the answer's own words, unhedged. With no
+    contrast word ("We take nightly backups to S3 and we have never tested a
+    restore", or speech to text that ran the two sentences together), the
+    words before the gap must be a statement, of six words or more."""
     text = text or ""
     match = _CONTRAST_RE.search(text)
-    if not match:
+    if match:
+        head = text[:match.start()].split("?")[-1]
+        return len(head.split()) >= 4 and not is_gap_statement(head) and not _HEDGE_RE.search(head)
+    # Only after an absence ("never tested"): a doubt is about the words
+    # before it ("RPO four hours, or at least that is what the previous
+    # document says"), which then state nothing settled; before a topic put
+    # off, they close the session ("That is all we had time for today").
+    if _PUT_OFF_RE.search(text) or any(rx.search(text) for rx in _UNCONFIRMED_RES):
         return False
-    head = text[:match.start()].split("?")[-1]
-    return len(head.split()) >= 4 and not is_gap_statement(head) and not _HEDGE_RE.search(head)
+    starts = [m.start() for m in (rx.search(text) for rx in _GAP_RES) if m]
+    if not starts:
+        return False
+    head = _GAP_LEAD_IN_RE.sub("", text[:min(starts)].split("?")[-1]).strip()
+    # The gap is a relative clause of the head: "the whole recovery thing is
+    # something | we have never documented". Or the head is a short question
+    # that lost its mark ("do we have a disaster recovery plan no honestly |
+    # there is no dr plan"); a long one holds its answer ("what about backups
+    # aurora has automated backups with point in time recovery ...").
+    if _RELATIVE_ANTECEDENT_RE.search(head) or (_QUESTION_START_RE.match(head) and len(head.split()) <= 12):
+        return False
+    # A verb anywhere: a run of speech to text puts it far from the start
+    # ("sql server full backup every night and log backups every fifteen
+    # minutes copied to azure blob storage ...").
+    from fact_units import _has_finite_verb
+    return (len(head.split()) >= 6 and not is_gap_statement(head) and not _HEDGE_RE.search(head)
+            and _has_finite_verb(head))
 
 
 # Session framing, not knowledge: a greeting in front of a sentence, and a

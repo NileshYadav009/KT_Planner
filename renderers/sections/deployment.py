@@ -28,14 +28,16 @@ def _steps(line: str) -> List[str]:
     I said earlier about the freeze, it starts at 4 pm on Fridays." is kept
     whole by the mapper, and cut into two steps the withdrawn 6 pm stood
     alone (adversarial matrix A10)."""
-    from devops_transcription import corrects_statement_before, points_back_to, replaces_value_before
+    from devops_transcription import (corrects_statement_before, points_back_to, replaces_value_before, restates,
+                                      said_before_claim)
 
     steps: List[str] = []
     for sentence in (s.strip() for s in _STEP_SPLIT_RE.split(line)):
         if not sentence:
             continue
         if steps and (replaces_value_before(steps[-1], sentence) or points_back_to(steps[-1], sentence)
-                      or corrects_statement_before(steps[-1], sentence)):
+                      or corrects_statement_before(steps[-1], sentence)
+                      or restates(steps[-1], said_before_claim(sentence))):
             steps[-1] = f"{steps[-1]} {sentence}"
         else:
             steps.append(sentence)

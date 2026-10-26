@@ -429,6 +429,10 @@ def test_the_kts_opening_definition_of_the_system_is_its_overview():
     ("In your first month, run the Sunday training on your own.", "first_30_day_ownership"),
     ("After a month I'd like you to be the first responder on your own.", "first_30_day_ownership"),
     ("For your first week, get Vault access and get added to the PagerDuty schedule.", "day1_survival_checklist"),
+    # Cut out of a run of speech to text (fact_units._time_frame_pieces).
+    ("by the end of the month run a thursday deployment yourself.", "first_30_day_ownership"),
+    ("by week three you should own releases.", "first_30_day_ownership"),
+    ("Within thirty days: lead one production release and one deduplication run.", "first_30_day_ownership"),
 ])
 def test_the_new_owners_time_frame_opening_a_sentence_is_the_onboarding_plan(said, section):
     rule = match_section_rules(said)
@@ -454,3 +458,22 @@ def test_a_provider_limiting_us_is_a_failure_whatever_day_it_names():
     assert rule and rule.section_id == "common_failures"
     rule = match_section_rules("Black Friday is our busiest day.")
     assert rule and rule.section_id == "known_bad_days"
+
+
+@pytest.mark.parametrize("said, section", [
+    # Dev d14, d08 and d07.
+    ("The Stripe and Postmark keys are in Heroku config vars.", "security_controls"),
+    ("The database password is stored in Parameter Store.", "security_controls"),
+    ("Card details never touch our servers, Stripe handles all of that.", "security_controls"),
+    ("Phone numbers are personal data so we delete message logs after ninety days.", "security_controls"),
+    ("It advances every student a year, and undoing it means a database restore.", "danger_zones"),
+    # Still prohibitions.
+    ("Never touch the production database by hand.", "danger_zones"),
+    ("We never edit the Terraform state, it breaks every plan.", "danger_zones"),
+    ("A sent payout can't be undone, so check the batch twice.", "danger_zones"),
+    ("The thing you really must not do is run the Gift Aid claim job twice for the same month.", "danger_zones"),
+    ("You shouldn't ever restart the primary during business hours.", "danger_zones"),
+])
+def test_where_credentials_live_and_what_data_never_reaches_are_security(said, section):
+    rule = match_section_rules(said)
+    assert rule and rule.section_id == section, (said, rule)

@@ -40,6 +40,8 @@ back), `tests/test_conflicts.py` (conflicts), `tests/test_knowledge_builders.py`
 | A value withdrawn in the same sentence that says more than the new value: "The database backups are retained for seven days—actually, the new retention policy is 30 days."; "PostgreSQL 14—sorry, we upgraded it last week, so it's PostgreSQL 16 now." | The sentence whole, as said: never cut at the marker into two facts. An LLM answer that shows the old value without the new one is refused (an extracted value or line is dropped; a polish or copy edit falls back to the sentence as said). | `devops_transcription.withdrawn_values`, `context_mapper.split_facts`, `grounding.ground_structured`, `ai._polish_one`, `copyedit.problems` |
 | One value compared across environments in one sentence: "Staging uses 2000K, while production uses 3000K." | One statement, not cut into two facts; no conflict. | `compares_one_value` in `context_mapper.split_facts` |
 | A later sentence points back: "I was wrong about the backups earlier, they are kept for 35 days now." | The earlier sentence is moved next to the correction and shown with it. Only when the earlier sentence states nothing else, is about the named topic, and is at most 20 sentences back. | `points_back_to`, `segment_sentences` |
+| A later correction says again what it withdraws, in one sentence or two: "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now."; "Earlier I said the cluster has three nodes; that's not right, it has five." | The earlier sentence is moved next to the correction and shown with it, under the same conditions: it states nothing else, it is at most 20 sentences back, and at least two of the restated words (two thirds of them) are its own. The restatement and its withdrawal stay together either way. | `withdraws_said_before`, `restates`, `segment_sentences` |
+| A day of the week corrected: "Releases go out on Thursdays. Sorry, Fridays."; "every Sunday, sorry, every Saturday" | As a number: the corrected day only, or both together when the correction says more. | `_CORRECTED_VALUE` (`_WEEKDAY`) |
 | A tool replaced: "we moved off PagerDuty to Opsgenie" | Tool fields and the Technology summary name the new tool | `conflicts.find_superseded_tools`, `knowledge_builder.apply_conflicts` |
 | A single-valued field stated twice (RTO, RPO, an owner) | The corrected value, with what it replaces; with no correction marker, "Conflicting values stated" to confirm | `conflicts.resolve_single_value`, `field_populator.extract_rto_rpo` |
 | Two counts of one thing, with no correction: "two availability zones" ... "three availability zones"; or one setting with two values: "The upload size limit is 2000K." ... "The upload size limit is 3000K." | Both statements, and a "Possible conflict" warning in the section and the knowledge gaps. Not for different environments ("Staging runs 2 replicas", "Production runs 6"), different named parts ("the orders API timeout", "the payments API timeout"), a value with a condition ("800 ms during peak"), a volume ("500 orders a minute"), a past value or a plan. | `conflicts.find_value_conflicts` |
@@ -81,10 +83,14 @@ the KT page. A receiver is a speaker whose sentences are mostly questions.
   "upgraded", "moved", "changed"): "Actually, the rollback takes 10
   minutes" adds a fact.
 - **Further back:** "I was wrong about X", "forget what I said about X",
-  "what I said about X". X must name the earlier sentence's topic.
+  "what I said about X". X must name the earlier sentence's topic. Or the
+  earlier statement said again ("I said earlier ...", "Earlier I said ...")
+  and then withdrawn ("that's wrong", "that's not right", or a next sentence
+  opening with a marker).
 - **The values must be of one kind:** the same unit after the number ("7
   days" / "30 days", "2000K" / "3000K") or the same word naming it ("port
-  8080" / "port is 8443", "PostgreSQL 14" / "PostgreSQL 16").
+  8080" / "port is 8443", "PostgreSQL 14" / "PostgreSQL 16"). Two days of
+  the week are of one kind.
 
 ## Not handled yet
 

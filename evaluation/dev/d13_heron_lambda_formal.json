@@ -1,0 +1,385 @@
+{
+ "id": "d13_heron_lambda_formal",
+ "title": "Heron: AWS serverless claims intake, formal document read aloud",
+ "proves": "Part headings said aloud, label-and-value lines (\"Recovery time objective: one hour.\"), issue lists.",
+ "transcript": "Heron operational handover. Prepared by the claims platform team. Part one: overview. Heron is the claims intake service for the motor insurance division. It receives first notification of loss reports from the customer app, the broker portal and the call centre, and creates a claim in the core claims system. Volume is approximately four thousand claims per day, rising sharply after severe weather.\n\nPart two: technical architecture. Heron is serverless and runs entirely on AWS. Incoming reports are accepted by Amazon API Gateway and validated by a Lambda function. An AWS Step Functions workflow then enriches each report with policy data and creates the claim. Report documents and photographs are stored in Amazon S3. Claim state is held in a DynamoDB table. The core claims system is a mainframe application, reached through an IBM MQ bridge.\n\nPart three: environments. Development, system test and production, each in a separate AWS account. System test is connected to the mainframe test region.\n\nPart four: release process. Infrastructure and code are defined in AWS CDK and stored in GitHub. A pull request triggers GitHub Actions, which runs unit tests and a CDK diff. Merging to main deploys to system test automatically. Production deployment is a manual workflow run, approved by a claims platform lead. Rollback: re-run the production workflow for the previous release tag.\n\nPart five: monitoring. Metrics and logs are in CloudWatch; traces are in AWS X-Ray. Alarms: Step Functions failures above one percent of executions, and the MQ bridge queue depth above five hundred. Both alarms page the on-call engineer through PagerDuty.\n\nPart six: known issues and fixes. Issue one: the mainframe is unavailable during its Sunday maintenance window, so claims queue in the MQ bridge. No action is needed; the queue drains when the mainframe returns. Issue two: duplicate claims when the customer app retries a submission. Resolution: run the deduplication script from the operations repository, then notify the claims handlers.\n\nPart seven: backup and recovery. DynamoDB point-in-time recovery is enabled with thirty-five days of retention. S3 versioning is enabled on the documents bucket, which is replicated to a second region. Recovery point objective: fifteen minutes. Recovery time objective: one hour.\n\nPart eight: security. All data is encrypted with customer-managed KMS keys. The API requires a signed token from the company identity provider. Claim photographs may contain personal data and are deleted after seven years.\n\nPart nine: restrictions. Do not disable the API Gateway throttling settings; they protect the mainframe from overload. Changes to the MQ bridge configuration require approval from the mainframe team.\n\nPart ten: critical dates. The weeks after a named storm are the busiest, followed by the first working day of January. No production releases are made during a declared weather event.\n\nPart eleven: cost. Monthly spend is about three thousand five hundred dollars. Step Functions state transitions are the largest item. Moving the enrichment steps to Express workflows is expected to halve that cost.\n\nPart twelve: ownership. Owner: the claims platform team. Escalation: Priya Raman, claims platform manager, then the head of claims technology.\n\nPart thirteen: open items. The broker portal integration is moving from SOAP to REST; this is scheduled for next quarter and not yet started.\n\nPart fourteen: onboarding. Day one: request access to the production AWS account and the PagerDuty schedule. Within thirty days: lead one production release and one deduplication run.",
+ "facts": [
+  {
+   "id": "F01",
+   "quote": "Heron is the claims intake service for the motor insurance division",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F02",
+   "quote": "It receives first notification of loss reports from the customer app, the broker portal and the call centre",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F03",
+   "quote": "creates a claim in the core claims system",
+   "in": [
+    "system_overview",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F04",
+   "quote": "Volume is approximately four thousand claims per day",
+   "in": [
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F05",
+   "quote": "rising sharply after severe weather",
+   "in": [
+    "system_overview",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F06",
+   "quote": "Heron is serverless and runs entirely on AWS",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F07",
+   "quote": "Incoming reports are accepted by Amazon API Gateway and validated by a Lambda function",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F08",
+   "quote": "An AWS Step Functions workflow then enriches each report with policy data and creates the claim",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F09",
+   "quote": "Report documents and photographs are stored in Amazon S3",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F10",
+   "quote": "Claim state is held in a DynamoDB table",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F11",
+   "quote": "The core claims system is a mainframe application, reached through an IBM MQ bridge",
+   "in": [
+    "architecture_reference",
+    "system_overview"
+   ]
+  },
+  {
+   "id": "F12",
+   "quote": "Development, system test and production, each in a separate AWS account",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F13",
+   "quote": "System test is connected to the mainframe test region",
+   "in": [
+    "environments"
+   ]
+  },
+  {
+   "id": "F14",
+   "quote": "Infrastructure and code are defined in AWS CDK and stored in GitHub",
+   "in": [
+    "deployment_and_rollback",
+    "architecture_reference"
+   ]
+  },
+  {
+   "id": "F15",
+   "quote": "A pull request triggers GitHub Actions, which runs unit tests and a CDK diff",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F16",
+   "quote": "Merging to main deploys to system test automatically",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F17",
+   "quote": "Production deployment is a manual workflow run, approved by a claims platform lead",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F18",
+   "quote": "re-run the production workflow for the previous release tag",
+   "in": [
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F19",
+   "quote": "Metrics and logs are in CloudWatch",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F20",
+   "quote": "traces are in AWS X-Ray",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F21",
+   "quote": "Step Functions failures above one percent of executions",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F22",
+   "quote": "the MQ bridge queue depth above five hundred",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F23",
+   "quote": "Both alarms page the on-call engineer through PagerDuty",
+   "in": [
+    "monitoring_observability"
+   ]
+  },
+  {
+   "id": "F24",
+   "quote": "the mainframe is unavailable during its Sunday maintenance window, so claims queue in the MQ bridge",
+   "in": [
+    "common_failures",
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F25",
+   "quote": "the queue drains when the mainframe returns",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F26",
+   "quote": "duplicate claims when the customer app retries a submission",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F27",
+   "quote": "run the deduplication script from the operations repository, then notify the claims handlers",
+   "in": [
+    "common_failures"
+   ]
+  },
+  {
+   "id": "F28",
+   "quote": "DynamoDB point-in-time recovery is enabled with thirty-five days of retention",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F29",
+   "quote": "S3 versioning is enabled on the documents bucket, which is replicated to a second region",
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F30",
+   "quote": "Recovery point objective: fifteen minutes",
+   "alt": [
+    "fifteen minutes"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F31",
+   "quote": "Recovery time objective: one hour",
+   "alt": [
+    "one hour"
+   ],
+   "in": [
+    "disaster_recovery"
+   ]
+  },
+  {
+   "id": "F32",
+   "quote": "All data is encrypted with customer-managed KMS keys",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F33",
+   "quote": "The API requires a signed token from the company identity provider",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F34",
+   "quote": "Claim photographs may contain personal data and are deleted after seven years",
+   "in": [
+    "security_controls"
+   ]
+  },
+  {
+   "id": "F35",
+   "quote": "Do not disable the API Gateway throttling settings",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F36",
+   "quote": "they protect the mainframe from overload",
+   "in": [
+    "danger_zones"
+   ]
+  },
+  {
+   "id": "F37",
+   "quote": "Changes to the MQ bridge configuration require approval from the mainframe team",
+   "in": [
+    "danger_zones",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F38",
+   "quote": "The weeks after a named storm are the busiest, followed by the first working day of January",
+   "in": [
+    "known_bad_days"
+   ]
+  },
+  {
+   "id": "F39",
+   "quote": "No production releases are made during a declared weather event",
+   "in": [
+    "known_bad_days",
+    "deployment_and_rollback"
+   ]
+  },
+  {
+   "id": "F40",
+   "quote": "Monthly spend is about three thousand five hundred dollars",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F41",
+   "quote": "Step Functions state transitions are the largest item",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F42",
+   "quote": "Moving the enrichment steps to Express workflows is expected to halve that cost",
+   "in": [
+    "cost_optimization"
+   ]
+  },
+  {
+   "id": "F43",
+   "quote": "Owner: the claims platform team",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F44",
+   "quote": "Escalation: Priya Raman, claims platform manager, then the head of claims technology",
+   "in": [
+    "ownership_escalation"
+   ]
+  },
+  {
+   "id": "F45",
+   "quote": "The broker portal integration is moving from SOAP to REST",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F46",
+   "quote": "this is scheduled for next quarter and not yet started",
+   "in": [
+    "open_responsibilities"
+   ]
+  },
+  {
+   "id": "F47",
+   "quote": "request access to the production AWS account and the PagerDuty schedule",
+   "in": [
+    "day1_survival_checklist",
+    "first_30_day_ownership"
+   ]
+  },
+  {
+   "id": "F48",
+   "quote": "lead one production release and one deduplication run",
+   "in": [
+    "first_30_day_ownership",
+    "handover_completion"
+   ]
+  }
+ ],
+ "covered": [
+  "system_overview",
+  "architecture_reference",
+  "environments",
+  "deployment_and_rollback",
+  "monitoring_observability",
+  "common_failures",
+  "disaster_recovery",
+  "security_controls",
+  "danger_zones",
+  "known_bad_days",
+  "cost_optimization",
+  "ownership_escalation",
+  "open_responsibilities",
+  "day1_survival_checklist",
+  "first_30_day_ownership"
+ ],
+ "missing": [],
+ "source": "written for round 6 (synthetic)",
+ "holdout": false
+}

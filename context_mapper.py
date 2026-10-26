@@ -33,13 +33,14 @@ from policy import (
 from runtime_policy import load_policy
 from devops_transcription import (
     capitalise_sentence_start, clean_transcript, compares_one_value, corrects_statement_before, points_back_to,
-    replaces_value_before, resolve_correction_across, resolve_self_corrections, withdrawn_values,
+    replaces_value_before, resolve_correction_across, resolve_self_corrections, restates, withdrawn_values,
+    withdraws_said_before,
 )
 from dialogue import (display_text, doubts_statement_before, is_document_instruction, merge_question_answers,
                       speaker_labels)
 from grounding import states_withdrawn_value
 from entity_extractor import EntityExtractor
-from fact_units import split_into_facts
+from fact_units import even_pieces, split_into_facts
 from section_rules import (
     match_section_rules, find_overview_reassignment, apply_rule_overrides, entity_affinity_boost,
     RULE_OVERRIDE_CONFIDENCE, _GREETING_ONLY_RE, segment_topics, RECOVERY_EVIDENCE_RE,
@@ -429,9 +430,10 @@ def segment_sentences(
             # business criticality) before classification ever saw them.
             parts = [p for p in re.split(r"(?<=,)\s+", st) if p.strip()]
             if len(parts) <= 1:
-                # No commas at all: break on whitespace near the limit
-                # rather than mid-word.
-                parts = re.split(r"\s+", st)
+                # No commas at all: pieces of even length, never mid-word.
+                refined_sentences.extend((t, False, cut and i == 0)
+                                         for i, t in enumerate(even_pieces(st, MAX_SENT_LEN)))
+                continue
             temp = []
             cur = ''
             for p in parts:
@@ -459,6 +461,22 @@ def segment_sentences(
     # when that sentence states nothing else.
     joined_sentences = []   # [text, run_on, cut, kept whole]
     for st, run_on, cut in refined_sentences:
+        # One that says again what it withdraws ("Actually, I said earlier we
+        # deploy on Tuesdays. That's wrong, it's Wednesdays now.", in one
+        # sentence or two) takes the sentence it restates along, when that
+        # states nothing else; the two of it stay together either way.
+        claim, said = withdraws_said_before(st), st
+        if claim is None and joined_sentences and not joined_sentences[-1][3]:
+            claim = withdraws_said_before(f"{joined_sentences[-1][0]} {st}")
+            if claim is not None:
+                said = f"{joined_sentences.pop()[0]} {st}"
+        if claim is not None:
+            earlier = next((j for j in range(len(joined_sentences) - 1, max(-1, len(joined_sentences) - 21), -1)
+                            if restates(joined_sentences[j][0], claim)), None)
+            if earlier is not None and len(split_facts(joined_sentences[earlier][0])) == 1:
+                said = f"{joined_sentences.pop(earlier)[0]} {said}"
+            joined_sentences.append([said, run_on, cut, True])
+            continue
         # A sentence that only doubts the one before it ("That value needs
         # confirmation ...") is kept with it the same way.
         if joined_sentences and (replaces_value_before(joined_sentences[-1][0], st)

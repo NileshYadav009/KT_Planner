@@ -26,7 +26,9 @@ To move a model to a new revision, change its commit in
 The script downloads only the files the app loads: 3.2 GB of the 11 GB
 the six repos hold. It skips the TensorFlow, Flax, Rust and ONNX copies and
 the PyTorch `.bin` where safetensors exist. For `mdeberta-v3-base` it takes
-only the tokenizer, because GLiNER loads its own weights.
+only the tokenizer, because GLiNER loads its own weights. It also fetches the
+punctuation model (`punctuation.py`, 210 MB ONNX, §9abf), used only for a
+long run of transcript text with almost no punctuation.
 
 In the image (`--half`), bge-large and GLiNER are stored in fp16. That takes
 the models from 3.2 GB to 2.0 GB, and they still run in fp32. On 13 Oct the
@@ -128,6 +130,7 @@ local disk (not NFS).
 | `CONTINUUM_COPYEDIT_MODEL` | Qwen2.5-1.5B-Instruct, 4-bit | The local model: a path to a `.gguf` file, or `off`. The default (1.1 GB, Apache-2.0) is downloaded by `scripts/fetch_models.py`, never during a KT. It is loaded only for the copy edit, freed after it, and needs about 1.3 GB of RAM while it runs. |
 | `CONTINUUM_COPYEDIT_MAX_SECONDS` | `300` | Time limit for the local copy edit in one KT. Sentences after it stay as said. |
 | `CONTINUUM_COPYEDIT_THREADS` | half the CPU cores | CPU threads for the local model, so the machine stays usable while it runs. |
+| `PUNCTUATION_MODEL` | on | `0` turns off the punctuation model (`punctuation.py`). It runs only on a run of 120 words or more with fewer than one punctuation mark per 30 words (some speech-to-text exports; Whisper punctuates), and takes only the sentence ends from it: the words stay as said. A missing package or model leaves the text as it is. Loading takes about 10 s, once per worker; a 400-word run takes under a second. |
 | `CONTINUUM_COPYEDIT_MIN_FREE_GB` | `1.5` | The local copy edit is skipped for a KT, which keeps its rules-only sentences, when less memory than this is free as it starts. |
 
 ## Submitting KTs

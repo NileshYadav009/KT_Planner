@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9abd is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abf is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -28,18 +28,21 @@ table. `docs/progress.md` is the plain-language log.
 Placement accuracy is a quality target, not an invariant: 90% or better on
 unseen KTs. Without an LLM it is 88/95 on the holdouts, 109/114 on the blind
 set, 118/132 on the second blind set (b04-b07) and 151/160 on the sealed
-third (b08-b11): 466/501, 93.0% (§9abd; 441/501 before). With Groq's section
-check, 93/95, 110/114, 125/132 and 154/160: 482/501, 96.2% (§9abd; 321/341 on
-the first three before).
+third (b08-b11): 466/501, 93.0% (§9abd; 441/501 before; unchanged by §9abe).
+With Groq's section check, 93/95, 110/114, 125/132 and 154/160: 482/501, 96.2%
+(§9abd; 321/341 on the first three before). On the 36 visible KTs as speech to
+text without punctuation (`evaluation/noisy_copies.py`), 1057/1085 (97.4%), with
+1 discussed section reported Missing (§9abf; 1024/1085 and 13 before §9abe,
+1048/1085 before the punctuation model).
 
 ## Pipeline map (a pasted transcript; a recording first goes through `pipeline.transcribe_recording`)
 
 | Stage | Code |
 |---|---|
 | Upload, queue | `api/routes.py`, `job_queue.py`, `worker.py` |
-| Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` |
+| Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` (a run of 120+ words with almost no punctuation first gets sentence ends from a small model: `punctuation.restore_punctuation`, `PUNCTUATION_MODEL=0` turns it off) |
 | Speakers and roles (a conversation) | `captions.to_turns` (a Teams or Zoom WebVTT/SRT file as "Name:" turns), `speaker_roles.turn_segments` (pasted "Name:" turns), `detect_roles`, `apply_roles` (in `segment_sentences`): facts from the giver; the receiver's words only where the giver confirmed them. Speakers are named afterwards with `POST /kt/{id}/speakers` (`sessions.rename_speakers`) |
-| Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`), `fact_units.split_into_facts` |
+| Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`, `withdraws_said_before`; a long unpunctuated run cut by `fact_units.even_pieces`), `fact_units.split_into_facts` (a later onboarding time frame opens a fact: `_time_frame_pieces`) |
 | Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `merge_spoken_corrections`, `copyedit.copyedit_sentences` |
 | Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments, and the learned section model `section_model.npz`: `SECTION_MODEL_WEIGHT` x its probability; rebuilt by `scripts/build_section_model.py`) |
 | Close calls to the LLM | `ContextClassifier.verify_in_batches` |
@@ -80,7 +83,7 @@ overnight and only when asked. Use targeted runs, from the repo root with
 | Area | Command (`python -m pytest -q -p no:cacheprovider ...`) | Time |
 |---|---|---|
 | Routing rules, topics, coverage topics | `tests/test_section_rules.py tests/test_topic_segments.py tests/test_coverage_topics.py` | seconds |
-| Cleaner, copy edit, polish guards | `tests/test_devops_transcription.py tests/test_copyedit.py tests/test_polish_integrity.py` | about 30 s |
+| Cleaner, punctuation, copy edit, polish guards | `tests/test_devops_transcription.py tests/test_punctuation.py tests/test_copyedit.py tests/test_polish_integrity.py` | about 30 s |
 | LLM controls, no network | `tests/test_llm_cost_controls.py tests/test_llm_provider.py tests/test_llm_batching.py` | about 25 s |
 | Fields | `tests/test_field_populator.py` | about 15 s |
 | Knowledge and coverage | `tests/test_knowledge_builders.py tests/test_fact_units.py tests/test_dialogue.py` | about 3 min |
@@ -95,7 +98,9 @@ is measured on all six sets; holdout, blind2 and blind3 are read in
 aggregate only. `blind4` (b08-b11) is sealed: read once, at the end of a
 batch of changes, never while choosing between designs. A choice between
 designs (a weight, a threshold, a learned model) is made leave-one-KT-out
-on the visible tuning and dev KTs.
+on the visible tuning and dev KTs. `python evaluation/noisy_copies.py LABEL`
+(about 2 min) runs the same visible KTs as speech to text without
+punctuation, on their own keys.
 
 Quality gates: `python evaluation/quality_gates.py LABEL --replay --accuracy ACC
 --matrix M` (about 25 min): the release thresholds counted on the PDFs of the
@@ -161,7 +166,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X15 | High | KT taker: speaker labels and questions were printed as facts ("Nadia: How do I deploy?" was a deployment step; Tribal Knowledge listed "Nadia: What should I..." as safety-critical with no source); "Can I run through my questions?" / "Sure, go ahead." sat in System Overview | Fixed, §9aas (`dialogue.display_text` after classification; talk requests and their acknowledgement excluded; deployment steps keep a question with its answer). Matrix T01, T02. |
 | X16 | Med | KT taker: discussed topics reported "not discussed": rollback said as "swap back", "About twelve thousand a day", "goes offline", fixes said as "clear", "reset", "spread", users said as patients or clinics. The accuracy harness never measured topic-level gaps | Fixed, §9aas (`coverage_topics.py`); the matrix now checks topic gaps (T01) |
 | X17 | Med | A fix right after its failure ("Reset the tunnel ...; if it doesn't come back, call the network team") went to Ownership for its "call ... team", and Common Failures said "Fixes: not covered" | Fixed, §9aas (fix-after-failure continuation rule). Dev d05 F19 now correct. |
-| X18 | Low | A pronoun-only sentence after an answer ("Only six clinics have it.") is placed on its own; an unpunctuated speech-to-text run-on ("the app is on eks and the db is rds ... argo cd does the deployment") is one fact | Open: matrix B09 (should). Needs answer-turn grouping and punctuation restoration. |
+| X18 | Low | A pronoun-only sentence after an answer ("Only six clinics have it.") is placed on its own; an unpunctuated speech-to-text run-on ("the app is on eks and the db is rds ... argo cd does the deployment") is one fact | Open: matrix B09 (should). Needs answer-turn grouping and punctuation restoration. Parts done in §9abe: a later onboarding time frame is cut out (X87), a long run is cut evenly (X89); see X90. |
 | X19 | Med | With Groq, the section polish wrote filler for template labels nothing filled ("**Window:** N/A", "**Rollback trigger:** Not specified"; 18 of 133 cached answers) and reworded what was said, so 15 of 81 facts on two dev KTs no longer read as said | Fixed, §9aat: shared polish system prompt (keep the speaker's wording, omit unfilled labels, fragments are data) and deterministic removal of placeholder lines. Strict 65 to 69 of 81, lenient unchanged at 78; output tokens per polish call down about 14% |
 | X20 | Med | PDF: the cover said nothing about the handover; coverage status was plain text; sections of short facts were walls of paragraphs | Fixed, §9aat: "At a glance" tiles on the cover (covered well, partly, not covered, to confirm, with page links), coloured status badges, short facts as a list, tighter spacing (the user's KT 15 to 14 pages) |
 | X21 | Med | PDF: the Quick Reference (the incident page) sat after the coverage report, on page 9 to 11; its rows quoted up to 120 words of speech; each empty table cell said "Not covered during KT" | Fixed, §9aau: the card is section 01 (`knowledge_builder.lead_with_quick_reference`); a row over 45 words keeps its first whole sentences (never a safety, conflict or no-fix row); an empty cell is a dash, with one note under the table |
@@ -212,7 +217,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X64 | Med | A sentence about one environment ("staging uses recorded gantry traffic from last year") went to Deployment | Fixed, §9aba (environment-subject rule, 0.945, below recovery, monitoring and security rules; it does not move the topic) |
 | X65 | Low | The fix after a failure said without a failure word ("... grows and slows logins. Run the purge job, it is safe in business hours.") went to the calendar | Fixed, §9aba (`_FAILURE_RE`: slows, throttled, stalls, saturated, runs out of, stale, degraded) |
 | X66 | Med | The KT's opening definition ("Brightline is our data pipeline that loads ... into Snowflake") and who builds on it ("... teams build all their reports on top of it") went to Architecture | Fixed, §9aba (only before any topic is named, so a component defined later stays Architecture) |
-| X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Partly fixed, §9abd: four dev KTs in its styles (d07-d10) showed one cause (X77, fixed); b04-b07 now report 3 (with the learned model; 4 with the rule fixes alone). The rest is open: aggregate only, never inspected |
+| X67 | Med | A fresh blind set (b04-b07, 132 facts) reports 4 discussed sections as Missing without an LLM | Partly fixed, §9abd: four dev KTs in its styles (d07-d10) showed one cause (X77, fixed); b04-b07 now report 3 (with the learned model; 4 with the rule fixes alone). §9abe: four more dev KTs in its styles (d11-d14) reproduced no false Missing; noisy copies of the visible KTs showed two causes (X87, X88, fixed: 13 to 1 there), but b04-b07 still report 3. The rest is open: aggregate only, never inspected |
 | X68 | High | A conversation's receiver was a source like the giver: "So it stores invoices in MySQL, right?" printed as "It stores invoices in MySQL." after "No, it's PostgreSQL"; the receiver's corrected "30 days" stayed; the giver's "three nodes" stayed after he agreed it was five; an unanswered "Isn't it PagerDuty now?" made PagerDuty the alerting tool | Fixed, §9abb (`speaker_roles.py`: roles, then what counts; matrix S01) |
 | X69 | High | Pasted "Name:" labels were stripped for display but never recorded: no speaker in Sources, so nothing could tell giver from receiver | Fixed, §9abb (`turn_segments`, also on a session rebuild) |
 | X70 | High | The cleaner turned a tag question into a statement ("..., right?" to "."), so a receiver's wrong guess read as a fact | Fixed, §9abb: in a conversation the question keeps its mark (`remove_fillers(keep_tag_questions)`) |
@@ -232,3 +237,10 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X83 | High | Without an LLM, placement on unseen KTs was 86.8% (296/341), under the 90% target; the classifier's own first choice made most of the errors (L3) | Fixed, §9abd: a learned section model (`section_model.npz`: logistic regression over the fact's and its context's embeddings, trained on the synthetic tuning and dev KTs; `SECTION_MODEL_WEIGHT` 0.1), chosen leave-one-KT-out on visible KTs. Unseen 441 to 466 of 501 (93.0%) with X76-X79; the sealed set b08-b11 145 to 151 of 160 |
 | X84 | Med | Deployment steps cut a corrected unit into one step per sentence, so "The deploy freeze starts at 6 pm on Fridays." stood alone before its correction (matrix A10, once the learned model filed the pair under Deployment); "deploy freeze" was not a calendar freeze | Fixed, §9abd (`renderers/sections/deployment._steps` keeps a correcting sentence with its step; the freeze rule reads "deploy freeze") |
 | T4 | Product | A recording's speakers showed as "Speaker 1, 2"; a Teams or Zoom transcript file was pasted with its timings and tags and nobody named | Done, §9abd, the user's decision: name speakers on the KT page (`POST /kt/{job_id}/speakers`, a new version), WebVTT and SRT files read as speaker turns (`captions.py`), people listed on upload offered as names. Fetching them through the Teams or Zoom API is not done (needs an app registration) |
+| X85 | High | A correction that says again what it withdraws ("Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now"; "Earlier I said the cluster has three nodes; that's not right, it has five") left the old statement alone in Deployment, its two halves in two other sections (dev d14); a day corrected ("Releases go out on Thursdays. Sorry, Fridays.") showed both days | Fixed, §9abe (`withdraws_said_before`, `restates`; days of the week are values: `_WEEKDAY` in `_CORRECTED_VALUE`). Matrix A22-A24 |
+| X86 | Med | Where credentials are kept ("The Stripe and Postmark keys are in Heroku config vars") went to Environments; "Card details never touch our servers" to Danger Zones (the "never touch" rule); "Phone numbers are personal data so we delete message logs after ninety days" and "undoing it means a database restore" to Disaster Recovery; "The thing you really must not do is run ..." matched no rule (dev d07, d08, d14) | Fixed, §9abe (`section_rules`) |
+| X87 | High | Speech to text without full stops ran an onboarding plan's two sentences together ("in the first week get an account ... by the end of the month run a thursday deployment yourself"); the month's task went to the Day-1 checklist and First 30-Day Ownership was reported Missing on 9 of 36 noisy copies of the visible KTs | Fixed, §9abe (`fact_units._time_frame_pieces`; `ONBOARDING_MONTH_RX` reads "by the end of the month", "by week three", "within thirty days" followed by words to the new owner) |
+| X88 | Med | A control stated before a gap with no contrast word ("We take nightly backups to S3 and we have never tested a restore"; a noisy run) was read as a gap alone, and Disaster Recovery reported Missing, "stated as not in place" (3 noisy copies); a sentence-final "though" was read as a contrast mid-sentence | Fixed, §9abe (`dialogue.states_something_before_gap`: not after a doubt, a topic put off, a relative clause or a short question that lost its mark) |
+| X89 | Low | A run of more than 240 characters with no punctuation was filled up to the limit: cut mid-phrase ("nightly indexer \| job that pulls ..."), its last piece a stub dropped as under four words ("task definition revision."); its source quote was the run cut to 280 characters, so a fact from its end cited a quote that did not hold it | Fixed, §9abe (`fact_units.even_pieces` for the units and for the Sources list, each piece marked "…") |
+| X90 | Med | A whole KT with no punctuation and no paragraph breaks (the noisy copy of g11) places 46% of its facts; cut points inside an unpunctuated run are guesses | Partly fixed, §9abf, the user's decision (install, 210 MB): a run of 120+ words with almost no punctuation gets its sentence ends from a small English model (`punctuation.py`, `punctuators` "pcs_en", pinned); g11 46% to 83%. Paragraph-length runs are left to `fact_units` (the model was no better there) |
+| X91 | Low | "Changes to the MQ bridge configuration require approval from the mainframe team" went to Ownership (the named team); "Scale the web dynos to twenty before the appeal starts" to Cost Optimization (dev d13, d14) | Open: one sentence each, and each could belong to two sections |

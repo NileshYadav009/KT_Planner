@@ -638,6 +638,51 @@ def test_a_value_corrected_much_later_is_shown_with_its_correction():
         assert units[0] == "Backups are kept for 14 days.", later
 
 
+def test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along():
+    """Adversarial matrix A22, A24 and dev d14: "Actually, I said earlier we
+    deploy on Tuesdays. That's wrong, it's Wednesdays now." left "We deploy on
+    Tuesdays." alone in Deployment, and its two halves went to two other
+    sections."""
+    from context_mapper import AudioSegment, segment_sentences
+
+    def units(said):
+        return [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+
+    got = units("We deploy the invoicing service on Tuesdays. Builds run in Jenkins. The billing team owns it. "
+                "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now. "
+                "Invoices are stored in PostgreSQL.")
+    assert ("We deploy the invoicing service on Tuesdays. Actually, I said earlier we deploy on Tuesdays. "
+            "That's wrong, it's Wednesdays now.") in got
+    assert got[0] == "Builds run in Jenkins." and got[-1] == "Invoices are stored in PostgreSQL."
+    # In one sentence, with a number.
+    got = units("The cluster has three nodes. Queries come through a load balancer. "
+                "Earlier I said the cluster has three nodes; that's not right, it has five.")
+    assert got[-1] == "The cluster has three nodes. Earlier I said the cluster has three nodes; that's not right, it has five."
+    # Said again but not withdrawn, or not what was said: nothing moves.
+    for later in ["I said earlier we deploy on Tuesdays, and that still holds.",
+                  "I said earlier the dashboards refresh hourly; that's wrong, they refresh daily."]:
+        got = units(f"We deploy on Tuesdays. Builds run in Jenkins. {later}")
+        assert got[0] == "We deploy on Tuesdays.", later
+
+
+def test_a_day_of_the_week_is_corrected_like_a_number():
+    """Adversarial matrix A23: "Releases go out on Thursdays. Sorry,
+    Fridays." showed both days."""
+    from devops_transcription import (resolve_correction_across, resolve_self_corrections, restates,
+                                      withdrawn_values, withdraws_said_before)
+
+    assert resolve_correction_across("Releases go out on Thursdays.", "Sorry, Fridays.") == "Releases go out on Fridays."
+    assert resolve_self_corrections("Releases go out on Thursdays, sorry, Fridays.") == "Releases go out on Fridays."
+    assert withdrawn_values("Backups run on Sundays—actually, the new schedule is Saturdays.")[0]["new"] == "saturday"
+    # Two days said, nothing withdrawn.
+    assert resolve_self_corrections("We deploy on Tuesday rather than Monday.") == "We deploy on Tuesday rather than Monday."
+    assert withdrawn_values("Staging deploys on Mondays and production on Thursdays.") == []
+    claim = withdraws_said_before("Actually, I said earlier we deploy on Tuesdays. That's wrong, it's Wednesdays now.")
+    assert claim == "we deploy on Tuesdays" and restates("We deploy the API on Tuesdays.", claim)
+    assert not restates("Backups run on Tuesdays.", claim)
+    assert withdraws_said_before("I said earlier we deploy on Tuesdays, and that still holds.") is None
+
+
 def test_the_corrected_sentence_is_merged_and_the_correction_is_recorded():
     from context_mapper import Sentence, merge_spoken_corrections
 

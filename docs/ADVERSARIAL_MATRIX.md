@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base spk`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base,a22base m9abf`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `spk`.
+brackets). After: run `m9abf`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
@@ -116,6 +116,9 @@ code before it (run s_base).
 | S01 | S conversation | Three people: small talk, the receiver's guess and claim the giver corrects, the giver's value the receiver corrects and he agrees to, a challenge nobody answers, a repeat request (a three-person test, 25 Oct) | never shows “offsite|food was great|too much coffee|morning both|let.s begin”; never shows “stores invoices in mysql\.”; never shows “database[^.]*mysql”; never shows “heard backups are kept for 30 days”; shows “backups are kept for 14 days”; never shows “runs three nodes”; shows “five nodes”; never shows “alerting pagerduty”; flags “Alerts go to Slack / PagerDuty”; never shows “repeat that|short on time”; exactly “Never run the reconciliation job twice in one day”; never shows “who to page or escalate to.*on-call rotation” | 3/12 must (s_base) | 12/12 must | tests/test_speaker_roles.py; tests/test_dialogue.py::test_a_no_that_gives_the_right_value_is_a_correction_not_a_gap; tests/test_field_populator.py::test_a_tool_turned_down_or_said_to_be_the_old_one_is_not_current |
 | S02 | S conversation | A receiver's statement the giver never answers is listed to confirm, not shown as a fact | never shows “^(?!said by).*also exports a report to bigquery”; shows “Said by Meera, not confirmed by Arjun”; shows “finance ops queue” | 1/3 must (s_base) | 3/3 must | tests/test_speaker_roles.py::test_what_the_receiver_says_alone_is_listed_to_confirm_not_shown |
 | S03 | S conversation | One person talking about a food-delivery business: its domain words are not small talk | shows “food delivery platform”; shows “weekends and dinner hours”; shows “more on bank holidays” | 3/3 must (s_base) | 3/3 must | tests/test_speaker_roles.py::test_small_talk_and_asking_to_repeat_are_left_out_but_business_words_are_not |
+| A22 | A correction / L long range | 'I said earlier X. That's wrong, it's Y now': a day, not a number, corrected much later | shows “Wednesdays”; never shows alone “Tuesdays” (without “Wednesdays”); in “Wednesdays” in deployment_and_rollback, known_bad_days (should) | 1/2 must, 1/1 should (a22base) | 2/2 must, 1/1 should | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
+| A23 | A correction | A day corrected in the next sentence with nothing else said: 'Sorry, Fridays.' | shows “Fridays”; never shows alone “Thursdays” (without “Fridays”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_day_of_the_week_is_corrected_like_a_number |
+| A24 | A correction / L long range | 'Earlier I said X; that's not right': the earlier claim restated, not named by topic | shows “it has five”; never shows alone “three nodes” (without “five”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
 
 ## Still failing after the fixes
 

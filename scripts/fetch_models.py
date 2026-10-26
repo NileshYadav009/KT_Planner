@@ -101,6 +101,11 @@ def fetch(half: bool = False) -> None:
 
     path = hf_hub_download(copyedit.LOCAL_REPO, copyedit.LOCAL_FILE, revision=copyedit.LOCAL_REVISION)
     print(f"copy edit -> {path}")
+    # Sentence ends for speech to text with no punctuation (punctuation.py):
+    # one ONNX file, 210 MB.
+    import punctuation
+
+    print(f"punctuation -> {punctuation.fetch()}")
     try:
         from rapidocr import RapidOCR
 
@@ -144,6 +149,11 @@ def verify() -> int:
 
     if copyedit.ENABLED and copyedit.local_model_path() is None and copyedit.LOCAL_MODEL.lower() != "off":
         print("copy-edit model missing: run scripts/fetch_models.py")
+        return 1
+    import punctuation
+
+    if not punctuation.available():
+        print("punctuation model missing: run scripts/fetch_models.py")
         return 1
     print("all models load offline")
     return 0

@@ -1851,3 +1851,59 @@ Results:
   - a self-hosted LLM (deferred);
   - real customer KTs for an independent test;
   - real meeting recordings.
+
+## Accuracy: what was left (audit §9abe, 26 Oct)
+
+- **A correction bug, fixed.** "We deploy on Tuesdays." and, much later,
+  "Actually, I said earlier we deploy on Tuesdays. That's wrong, it's
+  Wednesdays now." The document showed "We deploy on Tuesdays." on its own.
+  Now the old sentence is shown with its correction. A day corrected in the
+  next sentence ("Releases go out on Thursdays. Sorry, Fridays.") is
+  handled like a corrected number.
+- **Speech to text without punctuation.** A new check runs all 36 practice
+  KTs with their punctuation removed, as some transcription tools return
+  them. Before: 94.4% of facts in the right section and 13 discussed
+  sections wrongly reported Missing. Now: 96.6% and 1. Two causes, fixed:
+  - the new owner's first week and first month said in one run, so the
+    month's tasks landed in the Day-1 checklist;
+  - "we take nightly backups ... and we have never tested a restore" read
+    as if there were no backups.
+- **Smaller fixes:**
+  - where credentials are kept is filed under Security;
+  - "card details never touch our servers" is a security control, not a
+    "never do this" rule;
+  - "undoing it means a database restore" and "the thing you must not do"
+    are Danger Zones;
+  - long unpunctuated stretches are cut evenly, and their sources quoted
+    in full.
+- **On the unseen test KTs nothing changed:** 93.0% without an LLM (466 of
+  501). The three sections still wrongly reported Missing on the second
+  blind set have other causes, which only more practice KTs or real ones
+  can show.
+- **Still open:**
+  - those three sections (X67);
+  - a whole transcript with no punctuation or line breaks at all, which
+    needs a punctuation model (your decision: a package and a download);
+  - two sentences filed in a plausible but different section.
+
+## A punctuation model (audit §9abf, 26 Oct)
+
+- **What:** a small English model (210 MB) that puts full stops back into
+  transcript text that has none. It runs only on a long stretch of 120
+  words or more with almost no punctuation, such as a whole transcript
+  pasted without line breaks. Whisper recordings and normal text never
+  reach it.
+- **Result:** on the 36 practice KTs with their punctuation removed, 97.4%
+  of facts land in the right section (96.6% before). A transcript with no
+  line breaks at all went from 46% to 83%. Nothing changed on the normal
+  test KTs.
+- **Kept narrow on purpose:** on paragraph-sized stretches the model made
+  mistakes in halting speech ("... we get you know around. Fifty searches
+  a second ...") and did no better than the existing rules, so it is not
+  used there.
+- **Words stay as said:** only the sentence ends are taken from the model,
+  because it garbles hyphens and slashes and guesses capitals.
+- **Found on the way:** the Docker image build would have failed at the
+  model download step (a file it needs was not copied in). Fixed, but not
+  tested: building the image needs Docker Desktop.
+- **Settings:** `PUNCTUATION_MODEL=0` turns it off.
