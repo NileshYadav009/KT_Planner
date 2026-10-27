@@ -349,6 +349,13 @@ PHRASE_CORRECTIONS = {
     r"\bpavement\s+(?=(?:orchestration|gateway|provider|processing|integration|service)s?\b)": "payment ",
     r"\bdiplomats\b(?=\s+(?:must|should|need\s+to|have\s+to|are\s+to)\s+(?:not\s+)?be\s+(?:avoided|frozen|paused|"
     r"blocked|stopped|planned|approved|scheduled))": "deployments",
+    # Whisper on public SRE recordings (27 Oct): "the engineer and call",
+    # "app decks", "aptX" (Apdex, the latency score), "get lab.com",
+    # "gatelab.com".
+    r"\b(engineers?)\s+and\s+call\b(?!\s+(?:center|centre|logs?|records?))": r"\1 on call",
+    r"\b(?:app\s*decks?|appdex|apdec|app\s+dex)\b": "Apdex",
+    r"\baptx\b(?=[^.;]{0,60}\b(?:scores?|thresholds?|ratios?|sli|slo|alerts?)\b)": "Apdex",
+    r"\b(?:get|gate)\s*lab\.com\b": "GitLab.com",
     # Single-token typo, not a generic fuzzy-similarity match (that class
     # of correction was deliberately reverted earlier — see
     # apply_fuzzy_term_corrections' MIN_FUZZY_PHRASE_WORDS — after it
@@ -1019,16 +1026,76 @@ _SEGMENT_OPENER_RE = re.compile(
     r"^(?:We|They|You|This|These|There|Our|Now|Then|Here|Suppose|Whatever|Once|If|When|Next|Also|Finally)\s")
 
 
-def close_segment_sentences(texts: List[str]) -> List[str]:
+# Words that are never a name, so a capital on them at the start of a piece
+# is only the cleaner's sentence case.
+_FUNCTION_WORD_RE = re.compile(
+    r"^(\W*)(our|this|that|these|those|the|a|an|and|or|but|so|which|where|what|when|who|whose|how|why|we|you|"
+    r"they|it|its|is|are|was|were|be|to|of|in|on|for|with|as|at|by|from|if|then|there|here|my|your|their|his|"
+    r"her|not|no|might|may|can|could|would|should|will|have|has|had|do|does|did|just|also|even|because|than|"
+    r"into|about|all|any|some|each|every|now|next|once|whatever|suppose|finally)\b", re.IGNORECASE)
+
+
+# A piece that ends on one of these has not finished its sentence.
+_UNFINISHED_END_RE = re.compile(
+    r"\b(?:that|and|or|but|to|the|a|an|of|with|for|in|on|at|by|from|is|are|was|were|be|our|your|their|my|its|"
+    r"as|than|if|so|which|who|where|when|because|not|into|about|this|these|those|we|you|they)\W*$", re.IGNORECASE)
+# A spoken opener that starts a new sentence even when Whisper writes it in
+# lower case: "... or faster" | "then we have the request throughput".
+_SPOKEN_OPENER_RE = re.compile(r"^\W*(?:then|so(?!\s+that\b)|yeah|yep|now|next|okay|ok|alright|finally)\b",
+                               re.IGNORECASE)
+
+
+def close_segment_sentences(texts: List[str], continues: Optional[List[bool]] = None,
+                            whisper_texts: Optional[List[str]] = None) -> List[str]:
     """End a transcribed piece with a full stop when the next piece opens a
-    new sentence and this one has no ending of its own."""
+    new sentence and this one has no ending of its own.
+
+    `continues[i]` says Whisper began piece i in lower case. Cleaning each
+    piece on its own gave it a capital, which read as a new sentence, so
+    public SRE recordings were cut mid-sentence ("... and increase. Our
+    signal to noise ratio ...", "... confident that. This is ...") into
+    fragments that were filed as facts. Such a piece carries on the sentence
+    before (and the capital on a function word is taken back) unless it
+    opens with a spoken opener after a piece that could end there: on the
+    user's console recording Whisper also wrote "then we have the request
+    throughput" in lower case after "... or faster"."""
     out = list(texts)
     for i in range(len(out) - 1):
         cur, nxt = (out[i] or "").rstrip(), (out[i + 1] or "").lstrip()
+        if continues is not None and continues[i + 1] and cur and cur[-1] not in ".!?":
+            said = (whisper_texts[i + 1] if whisper_texts else nxt) or ""
+            if (len(cur.split()) >= 3 and not _UNFINISHED_END_RE.search(cur)
+                    and _SPOKEN_OPENER_RE.match(said) and cur[-1] not in ",;:"):
+                out[i] = cur + "."
+                continue
+            out[i + 1] = _FUNCTION_WORD_RE.sub(lambda m: m.group(1) + m.group(2).lower(), out[i + 1], count=1)
+            out[i + 1] = _whisper_case_restored(out[i + 1], said)
+            continue
         if (cur and nxt and cur[-1] not in ".!?,;:" and len(cur.split()) >= 3
                 and _SEGMENT_OPENER_RE.match(nxt)):
             out[i] = cur + "."
     return out
+
+
+def _whisper_case_restored(cleaned: str, said: str) -> str:
+    """The first word as Whisper wrote it, when the cleaner only capitalised
+    it ("we've" | "changed the Apdex" became "... we've Changed the Apdex")
+    and it is not a known product name ("Kubernetes" keeps its capital)."""
+    first = re.match(r"(\W*)([A-Za-z][\w'-]*)", cleaned or "")
+    whisper_first = re.match(r"\W*([A-Za-z][\w'-]*)", said or "")
+    if not first or not whisper_first:
+        return cleaned
+    word, as_said = first.group(2), whisper_first.group(1)
+    if (as_said.islower() and word == as_said[:1].upper() + as_said[1:]
+            and as_said not in get_known_terms()[1]):
+        return first.group(1) + as_said + cleaned[first.end():]
+    return cleaned
+
+
+def continues_sentence(whisper_text: str) -> bool:
+    """Whisper began this piece in lower case: it carries on the sentence before."""
+    first = re.search(r"[A-Za-z]", whisper_text or "")
+    return bool(first) and first.group(0).islower()
 
 
 def remove_repeated_words(text: str) -> str:

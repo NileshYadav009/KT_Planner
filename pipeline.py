@@ -25,7 +25,7 @@ from faster_whisper import BatchedInferencePipeline, WhisperModel
 
 from ai import polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
-from devops_transcription import clean_transcript, close_segment_sentences
+from devops_transcription import clean_transcript, close_segment_sentences, continues_sentence
 from input_gate import assess_transcript, language_warning
 from dialogue import is_field_candidate
 from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
@@ -1072,7 +1072,9 @@ def transcribe_recording(job_id: str, input_path: str, media_format: Optional[st
             "no_speech_prob": getattr(s, "no_speech_prob", None)
         })
 
-    for seg, text in zip(cleaned_segments, close_segment_sentences([s["text"] for s in cleaned_segments])):
+    continues = [continues_sentence(s.text) for s in segments]
+    for seg, text in zip(cleaned_segments, close_segment_sentences([s["text"] for s in cleaned_segments], continues,
+                                                                  [s.text for s in segments])):
         seg["text"] = text
     raw_parts = [s["text"] for s in cleaned_segments]
     raw_text = " ".join(raw_parts).strip()

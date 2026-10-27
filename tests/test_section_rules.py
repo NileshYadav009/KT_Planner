@@ -500,3 +500,23 @@ def test_change_control_and_getting_ready_for_a_busy_event(said, section):
 def test_neither_rule_takes_what_is_not_theirs(said):
     rule = match_section_rules(said)
     assert rule is None or rule.section_id not in ("deployment_and_rollback", "known_bad_days"), (said, rule)
+
+
+@pytest.mark.parametrize("said, aside", [
+    # A presenter's aside on a recorded screen share (public SRE recordings,
+    # 27 Oct: printed under Danger Zones and System Overview).
+    ("I will stop sharing.", True),
+    ("And that is all I have.", True),
+    ("And I'll use this as an example.", True),
+    ("Let's go take a look at,", True),
+    ("Can you see my screen?", True),
+    # Something named or stated after it: a fact.
+    ("Let's take a look at the metrics catalog.", False),
+    ("Let me show you how the rollback works.", False),
+    ("I will stop the deployment first.", False),
+    ("That is all the configuration we need.", False),
+])
+def test_a_presenter_aside_is_not_a_fact(said, aside):
+    from section_rules import _GREETING_ONLY_RE
+
+    assert bool(_GREETING_ONLY_RE.match(said)) is aside

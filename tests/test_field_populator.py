@@ -359,6 +359,27 @@ def test_llm_gap_fill_prompt_lists_already_captured_sibling_values():
     )
 
 
+def test_an_environment_row_needs_a_sentence_that_names_the_environment():
+    """A recorded SRE talk filled "Staging characteristics" with "Another
+    example here is selectors." and Environments was reported covered."""
+    field = {"id": "staging_notes", "label": "Staging characteristics", "type": "text"}
+    others = ["production", "non-production"]
+    for unrelated in ["Another example here is selectors.", "This doesn't have that example."]:
+        assert _extract_by_semantic(field, [unrelated], model=None, own_identity_word="staging",
+                                    other_identity_words=others) is None
+    # A name the coverage topic accepts for staging still qualifies.
+    assert _extract_by_semantic(field, ["Staging characteristics: UAT runs on a single node."], model=None,
+                                own_identity_word="staging", other_identity_words=others) is not None
+
+
+def test_a_severity_level_is_not_a_technology():
+    from field_populator import current_tool_mentions
+
+    assert current_tool_mentions("Here is a case where we added a severity S3 as a string.") == []
+    assert current_tool_mentions("The rules get updated from an S2 to an S3.") == []
+    assert current_tool_mentions("Backups go to S3 every night.") == ["S3"]
+
+
 def test_extract_by_semantic_identity_filter_picks_correct_sibling_by_first_mention():
     # Direct unit test of the disambiguation logic (no embedding model
     # needed — the identity filter runs before the model is even

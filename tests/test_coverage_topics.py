@@ -20,6 +20,16 @@ def test_a_word_in_passing_is_not_the_topic():
     assert _elsewhere("first_30_day_ownership", "The first week of January is busy.") == []
 
 
+def test_spending_time_or_saving_a_file_is_not_a_cost_lever():
+    # Recorded talks: Cost Optimization reported covered from these.
+    for said in ["We do not really have to spend that time trying to find the root cause.",
+                 "I save everything I need in the .env file.", "You can spot the issue in the logs."]:
+        assert _elsewhere("cost_optimization", said) == [], said
+    for said in ["We spend about 4,000 dollars a month on EKS.", "Use spot instances for the batch jobs.",
+                 "Scale down the dev cluster at night to save money."]:
+        assert _elsewhere("cost_optimization", said) == ["Cost levers"], said
+
+
 def test_a_deadline_at_the_end_of_the_month_is_not_a_month_end_window():
     # An onboarding milestone marked an undiscussed Operational Calendar as
     # Partial ("1 of 3 topics covered (1 under First 30-Day Ownership Plan)").

@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from dialogue import says_nothing_specific
 from fact_units import ONBOARDING_VERBS
 
 
@@ -1187,7 +1188,22 @@ _CLOSING_ONLY = (
     # Architecture as "Additional details".
     r"(?:(?:so|okay|ok|well|right|alright|um+|uh+|and)[\s,]+)*(?:i\s+(?:think|guess|believe)\s+)?"
     r"(?:that'?s|that\s+is)\s+(?:about\s+|pretty\s+much\s+|basically\s+)?(?:all|it|everything|most\s+of\s+it)"
-    r"(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|from\s+(?:me|my\s+side)))?(?:\s+today)?"
+    r"(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|from\s+(?:me|my\s+side)|(?:that\s+)?i\s+(?:have|had|"
+    r"(?:'ve|\s+have)\s+got)(?:\s+for\s+(?:you|today))?))?(?:\s+today)?"
+    # A presenter's aside on a recorded screen share, with nothing after it:
+    # "I will stop sharing.", "And I'll use this as an example.", "Let's go
+    # take a look." (public SRE recordings, 27 Oct: printed under Danger
+    # Zones and System Overview). "Let's take a look at the metrics
+    # catalog" names something and stays.
+    r"|(?:(?:so|okay|ok|well|right|alright|now|and|um+|uh+)[\s,]+)*"
+    r"(?:(?:i(?:'ll|\s+will|\s+am\s+going\s+to|'m\s+going\s+to|'m\s+gonna)|let\s+me|let'?s)\s+"
+    r"(?:go\s+(?:ahead\s+and\s+)?|just\s+)?"
+    r"(?:stop\s+(?:sharing|the\s+recording|recording)(?:\s+(?:my\s+|the\s+)?screen)?(?:\s+now)?"
+    r"|share\s+(?:my|the)\s+screen(?:\s+now)?"
+    r"|take\s+a\s+(?:quick\s+)?look(?:\s+at(?:\s+(?:it|this|that|them|these|those))?)?(?:\s+(?:here|there|now))?"
+    r"|show\s+you(?:\s+(?:this|that|it|here|now))?"
+    r"|use\s+(?:this|that|it)\s+as\s+(?:an\s+)?example))"
+    r"|(?:can|could)\s+(?:you|everyone|everybody)\s+(?:all\s+)?see\s+my\s+screen(?:\s+(?:now|okay))?"
     # "That concludes the GCP data platform." ends the session; it is not a
     # statement that the handover is complete (the LLM inferred "Complete"
     # from it). Only when what concludes is the session or the thing handed
@@ -1229,9 +1245,10 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
     opening = True
     for idx, cs in enumerate(classified_sentences):
         text = cs.sentence.text or ""
-        if _GREETING_ONLY_RE.match(text):
+        if _GREETING_ONLY_RE.match(text) or says_nothing_specific(text):
             # "Alright, welcome." carries no knowledge; similarity scoring
-            # still gave it a section, and Sign-off rendered it.
+            # still gave it a section, and Sign-off rendered it. Nor does a
+            # remark like "It does the job." (recorded talks, 27 Oct).
             cs.primary_classification = None
             cs.secondary_classifications = []
             cs.multi_section_assignments = []

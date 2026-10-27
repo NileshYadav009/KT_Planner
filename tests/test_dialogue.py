@@ -322,3 +322,27 @@ def test_a_heading_read_aloud_is_not_a_fact(said, heading):
     from dialogue import is_heading_only
 
     assert is_heading_only(said) is heading
+
+
+@pytest.mark.parametrize("said, remark", [
+    # Recorded talks (27 Oct): filed under System Overview, a 21-minute KT
+    # ran to 26 pages.
+    ("Thoughts from your side?", True),
+    ("It does the job.", True),
+    ("This tool is very.", True),
+    ("And for sure, we will do that.", True),
+    ("Yes.", True),
+    # Short facts in the answer keys stay: a figure, a known term, a place,
+    # a negation, a name, an instruction.
+    ("RTO is four hours.", False),
+    ("It's all on premises.", False),
+    ("We don't have that.", False),
+    ("Owen: Dev, staging and production.", False),
+    ("Terraform manages infrastructure.", False),
+    ("Swap back.", False),
+    ("Only six clinics have it.", False),
+])
+def test_a_remark_that_says_nothing_specific_is_not_a_fact(said, remark):
+    from dialogue import says_nothing_specific
+
+    assert says_nothing_specific(said) is remark

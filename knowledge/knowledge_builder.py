@@ -8,12 +8,12 @@ from .relationships import build_relationships
 from section_rules import is_tribal_knowledge, _GREETING_ONLY_RE
 from field_populator import (
     PATTERN_EXTRACTORS, SYSTEM_NAME_STOPWORDS, _CALENDAR_WORDS, _trim_name_capture, current_tool_mentions,
-    name_with_descriptor, smart_title,
+    is_plausible_name, name_with_descriptor, smart_title,
 )
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
 from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_question, is_unconfirmed,
-                      states_something,
+                      says_nothing_specific, states_something,
                       states_something_before_gap,
                       without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics
@@ -142,7 +142,7 @@ def _is_session_pleasantry(text: str) -> bool:
     # The classifier's own opener/closer test: "That concludes the GCP data
     # platform." was dropped from the sections, then put back under
     # Additional Notes by the completeness check.
-    if _GREETING_ONLY_RE.match(stripped):
+    if _GREETING_ONLY_RE.match(stripped) or says_nothing_specific(stripped):
         return True
     # "Hi everyone, today I will be handing over the AWS e-commerce platform."
     # names a technology, so the content test below kept it; it only says
@@ -243,15 +243,25 @@ def _repeated_proper_name(texts: List[str]) -> Optional[str]:
         word = m.group(1)
         low = word.lower()
         if (low in tool_words or low in labels or low in SYSTEM_NAME_STOPWORDS or low in _CALENDAR_WORDS
-                or low in _CLOUD_WORDS):
+                or low in _CLOUD_WORDS or not is_plausible_name(word)):
             continue
         if _PERSON_CUE_RE.search(text[max(0, m.start() - 20):m.start()]):
             contacted.add(word)
         counts[word] += 1
     for word, count in counts.most_common():
-        if count >= 2 and word not in contacted:
+        if count >= 2 and word not in contacted and _NAMING_CUE_RE.search(text.replace(word, "\0")):
             return word
     return None
+
+
+# The system is asked about or described by its name ("questions about
+# Fernhill", "What is Fernhill exactly?", "owns Fernhill"); a word that is
+# only repeated is not (a recorded talk was titled "Slack", from "ping them
+# through Slack" said twice). \0 stands for the candidate.
+_NAMING_CUE_RE = re.compile(
+    r"\b(?:about|own|owns|owned|maintain|maintains|support|supports|handing\s+over|hand\s+over|called|named|"
+    r"is|for)\s+\0|\0\s+(?:exactly|is\s+(?:a|an|the|our)\b|does|handles|processes|platform|system|service|"
+    r"application|app)\b", re.IGNORECASE)
 
 
 def _infer_system_name(
@@ -272,6 +282,28 @@ def _infer_system_name(
         if stripped and stripped.lower() not in SYSTEM_NAME_STOPWORDS:
             return smart_title(stripped, " ".join(texts))
     return name
+
+
+def _given_as_a_name(capture: str, before: str) -> bool:
+    """The words before "platform", "system", ... are the speaker's name for
+    their system: said as ours ("our online grocery platform") or holding a
+    name the speaker capitalised ("the CorePay platform", "GCP data
+    platform"). On recorded talks that never named their system, "the title
+    of the service" and "like fully managed service" became the KT's title."""
+    words = capture.split()
+    if re.search(r"\bour\s*$", before, re.IGNORECASE) or any(w.lower() == "our" for w in words):
+        return True
+    # Defined or handed over in its own sentence: "It's the old claims
+    # system", "I'm handing over the payments platform".
+    sentence_so_far = re.split(r"[.!?]\s+", before)[-1] + " " + capture
+    if re.search(r"^\W*(?:it'?s|it\s+is|this\s+is|that'?s|that\s+is)\s+(?:the|a|an|our)\b", capture.strip(),
+                 re.IGNORECASE) or re.search(
+            r"\b(?:handing\s+over|hand\s+over|taking\s+over|responsible\s+for|(?:we|i)\s+(?:own|run|maintain|support|"
+            r"built|build)|(?:kt|handover|session)\s+(?:is\s+)?(?:for|about|on))\b", sentence_so_far, re.IGNORECASE):
+        return True
+    at_sentence_start = not before.strip() or before.rstrip()[-1:] in ".!?"
+    return any(w[:1].isupper() for w in words[1:]) or bool(words and words[0][:1].isupper() and not at_sentence_start) \
+        or any(re.fullmatch(r"[A-Z0-9]{2,}", w) for w in words)
 
 
 def _infer_system_name_from_overview(
@@ -310,7 +342,8 @@ def _infer_system_name_from_overview(
         re.IGNORECASE,
     ):
         name = _trim_name_capture(match.group(1).strip())
-        if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+        if name and name.lower() not in SYSTEM_NAME_STOPWORDS and is_plausible_name(name) \
+                and _given_as_a_name(match.group(1), combined[:match.start(1)]):
             if said is not None:
                 said.append(match.group(1).strip())
             return smart_title(name_with_descriptor(name, match.group(2)), combined)
@@ -1974,7 +2007,10 @@ _FREEZE_CUE_RE = re.compile(
     re.IGNORECASE)
 # A name after "call" or "ping" keeps its capital: with the pattern ignoring
 # case, "own the on-call rotation from next month" was carded as who to page.
-_ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!us\b)\w+|contact\s+\w+|reach out to|"
+# Someone paged: "page the on-call", not an alert that "will probably page on
+# that" (a recorded SRE talk's Quick Reference quoted it as who to page).
+_ESCALATION_CUE_RE = re.compile(r"\b(escalat\w*|page\s+(?!(?:us|on|in|for|if|when|that|this|it|out|through)\b)\w+|"
+                                r"contact\s+\w+|reach out to|"
                                 r"(?<![\w-])call\s+(?-i:[A-Z])\w+|ping\s+(?-i:[A-Z])\w+)", re.IGNORECASE)
 # "One recurring problem is X", "The most common production issue is X",
 # "Another issue is X, which …; fix …".
@@ -2551,7 +2587,8 @@ def verify_document_coverage(
                  # reader sees other words than the speaker's.
                  "reworded": _dedup_normalize(text) != _dedup_normalize(source)}
         if _is_session_pleasantry(text):
-            ledger.append(dict(entry, status="excluded", reason="greeting, closing or handover announcement"))
+            ledger.append(dict(entry, status="excluded", reason="a remark that says nothing specific"
+                               if says_nothing_specific(text) else "greeting, closing or handover announcement"))
             continue
         # A fact can be three words ("Terraform manages infrastructure."); a
         # short remark that names no tool or figure ("Okay, makes sense.") is

@@ -17,6 +17,7 @@ from llm.batching import llm_batch_calls_enabled
 from grounding import ungrounded, looks_malformed
 from dialogue import is_field_candidate
 from component_catalog import ToolMatcher
+from coverage_topics import field_topic_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +352,30 @@ _NAME_LEAD_CUT_RE = re.compile(
     r"through|about|name\s+is|named|called)\s+(?=\S)", re.IGNORECASE)
 
 
+# Words a system's name is never made of: a candidate holding one is a clause
+# cut out of speech. Recorded talks that never named their system were titled
+# "Because We Know That Sometimes Application", "Mock-Up of How We Try to
+# Organize Our Application", "Biggest Service" and "And" (27 Oct).
+_NOT_IN_A_NAME = frozenset(
+    "i we you they he she it me us them my our your their his her its this that these those because how what why "
+    "when where which who whom if so but or not no is are was were be been being am do does did have has had can "
+    "could will would should may might must know try tries trying think want need get got let sometimes always "
+    "never usually just also very really actually basically there here each every between like fully".split())
+_GENERIC_NAME_WORDS = frozenset(
+    "biggest big bigger main whole entire same other different new old current existing real actual first second "
+    "single simple typical normal unusual small large overall general specific particular certain nice good great "
+    "little own".split())
+
+
+def is_plausible_name(name: str) -> bool:
+    """A candidate that could be a system's name: no pronoun, verb or
+    connective, and more than generic adjectives."""
+    words = [w.lower().strip("'") for w in re.findall(r"[A-Za-z][\w'-]*", name or "")]
+    if not words or any(w in _NOT_IN_A_NAME for w in words):
+        return False
+    return not all(w in _GENERIC_NAME_WORDS or w in _NAME_JOINERS for w in words)
+
+
 def _trim_name_capture(name: str) -> str:
     words = _NAME_LEAD_CUT_RE.sub("", name.strip()).split()
     while words and words[0].lower() in _NAME_LEADING_FILLER_WORDS:
@@ -556,6 +581,13 @@ _WAS_OLD_RE = re.compile(r"^\s*(?:was|were)\s+(?:the\s+|our\s+)?(?:old|previous|
 # A question the next speaker answers "No": its guess is not the system.
 _ANSWERED_NO_RE = re.compile(r"^\s*(?:[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s*)?(?:no|nope|not\s+quite)\b",
                              re.IGNORECASE)
+# A severity or priority level, not a technology: "we added a severity S3",
+# "updated from an S2 to an S3" (a recorded SRE talk listed Storage: S3).
+_LEVEL_CODE_RE = re.compile(r"[SP]\d", re.IGNORECASE)
+_LEVEL_BEFORE_RE = re.compile(r"(?:\b(?:severity|sev|priority)\s+(?:of\s+|level\s+)?(?:an?\s+)?"
+                              r"|\b[SP]\d\s*(?:to|or|and|,|/)\s*(?:an?\s+)?)$", re.IGNORECASE)
+_LEVEL_AFTER_RE = re.compile(r"^\s*(?:(?:to|or|and|,|/)\s*(?:an?\s+)?[SP]\d\b|(?:severity|priority|incidents?)\b)",
+                             re.IGNORECASE)
 
 
 def current_tool_mentions(text: str) -> List[str]:
@@ -575,6 +607,9 @@ def current_tool_mentions(text: str) -> List[str]:
             continue
         asked = text.find("?", end)
         if asked != -1 and not re.search(r"[.!]", text[end:asked]) and _ANSWERED_NO_RE.match(text[asked + 1:]):
+            continue
+        if _LEVEL_CODE_RE.fullmatch(text[start:end]) and (
+                _LEVEL_BEFORE_RE.search(text[max(0, start - 40):start]) or _LEVEL_AFTER_RE.match(text[end:end + 30])):
             continue
         out.append(name)
     return out
@@ -990,16 +1025,20 @@ def _extract_by_pattern(
             # ("the service is down." must never match), but "named"/
             # "called" is specific enough to safely allow a bare
             # punctuation terminator when there's no trailing descriptor
-            # word ("The system is named Meridian.").
+            # word ("The system is named Meridian."). Only the system (or
+            # "it") being named: "the room is called the incident room" and
+            # "the tags, which is called classes" titled recorded talks
+            # "Incident Room" and "Classes".
             direct_match = re.search(
-                r"\b(?:is|was|are|were)\s+(?:named|called)\s+(?:(?:the|a|an)\s+)?"
+                r"\b(?:system|platform|application|app|service|project|product|it)(?:'s|\s+(?:is|was))\s+"
+                r"(?:also\s+)?(?:named|called)\s+(?:(?:the|a|an)\s+)?"
                 r"([A-Za-z0-9][A-Za-z0-9\s\-']{2,50}?)(?:\s+(platform|system|application|service)\b|[.,]|$)",
                 section_text,
                 re.IGNORECASE,
             )
         if direct_match:
             name = _trim_name_capture(direct_match.group(1).strip())
-            if name and name.lower() not in SYSTEM_NAME_STOPWORDS:
+            if name and name.lower() not in SYSTEM_NAME_STOPWORDS and is_plausible_name(name):
                 return smart_title(name_with_descriptor(name, direct_match.group(2)), section_text)
 
         # "This KT is for MedRelay, the lab results notification service" —
@@ -1222,6 +1261,16 @@ def _extract_by_semantic_scored(
 ):
     if exclude_line_keys:
         sentences = [s for s in sentences if _normalize_line(s) not in exclude_line_keys]
+
+    if own_identity_word:
+        # A per-entity field is filled only by a sentence that names its
+        # entity (or a name for it the coverage topic accepts: "pre-prod",
+        # "UAT" for staging). On recorded talks "Staging characteristics"
+        # was filled with "Another example here is selectors." and
+        # Environments reported covered when none was discussed.
+        names_own = field_topic_pattern(field.get("id", "")) or re.compile(
+            rf"(?<![\w-]){re.escape(own_identity_word)}(?![\w-])", re.IGNORECASE)
+        sentences = [s for s in sentences if names_own.search(s)]
 
     if _BEFORE_FIELD_RE.search(f"{field.get('id', '')} {field.get('label', '')}"):
         # What to do once something has failed is not what is checked before

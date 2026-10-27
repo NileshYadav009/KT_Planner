@@ -412,6 +412,54 @@ def without_session_framing(text: str) -> str:
     return " ".join(s for s in kept if not is_handover_announcement(s) and not is_greeting_only(s)).strip()
 
 
+# Words that carry no knowledge of their own: function words, filler verbs,
+# reactions and placeholders ("thing", "way", "point").
+_NOTHING_SPECIFIC_WORDS = frozenset("""
+a an the and or but so to of in on at by for with from as is are was were be been being am it its it's this that
+these those there here we you they i he she them us me my our your their his her him who what which when where why
+how if then than too very really just also even still already only quite pretty much many more most some any all
+each every no not yes yeah yep ok okay right well sure fine do does did done doing have has had having can could will
+would should may might must shall let let's get gets got getting go goes going went gone make makes made take takes
+took see sees saw seen look looks looked say says said tell told think thinks thought know knows knew want wants need
+needs like likes mean means guess hope feel feels come comes came put give gives gave try tries tried keep keeps kept
+show shows showed use uses used great good nice awesome cool useful easy simple interesting exciting annoying important
+happy glad fantastic perfect amazing excellent wonderful thing things stuff way ways kind sort bit lot lots part side
+point idea question questions thoughts sense one ones something anything everything nothing someone anyone everyone
+time times today now later again back first last next actually basically probably maybe definitely obviously i'm i've
+i'd you're we're we've they're that's there's here's don't doesn't didn't can't won't isn't aren't wasn't i'll we'll
+you'll it'll thank thanks exactly absolutely correct true cheers bye hello hi hmm uh um
+""".split())
+# Where a system runs is knowledge even in two words: "It's all on premises."
+_PLACE_WORDS = frozenset({"premises", "prem", "on-prem", "on-premises", "cloud", "region", "regions",
+                          "datacenter", "datacentre", "datacenters", "datacentres"})
+_LABEL_PREFIX_RE = re.compile(r"^[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s*")
+
+
+def says_nothing_specific(text: str) -> bool:
+    """A remark with at most one word of its own and no tool, figure, name or
+    known term: "Thoughts from your side?", "It does the job.", "This tool is
+    very.", "And for sure, we will do that." Recorded talks filed dozens of
+    these under System Overview (a 21-minute KT ran to 26 pages). Of the 1,180
+    facts in the visible answer keys, none is a sentence like this."""
+    from devops_transcription import get_known_terms
+
+    body = _LABEL_PREFIX_RE.sub("", (text or "").strip())
+    # A figure, or a negation: "We don't have that." states a gap.
+    if not body or re.search(r"\d|\b(?:no|not|never|none|nobody|nothing|nope)\b|n't\b", body, re.IGNORECASE):
+        return False
+    words = re.findall(r"[A-Za-z][\w'-]*", body)
+    if any(w[:1].isupper() and w != "I" for w in words[1:]):
+        return False
+    own = [w for w in (x.lower() for x in words) if w not in _NOTHING_SPECIFIC_WORDS and len(w) > 1]
+    if len(own) > 1:
+        return False
+    # A short instruction: "Swap back.", "Restart it."
+    if own and words[0].lower() == own[0] and len(words) <= 4:
+        return False
+    known = get_known_terms()[1]
+    return not any(w in known or w.rstrip("s") in known or w in _PLACE_WORDS for w in own)
+
+
 def is_greeting_only(text: str) -> bool:
     """A sentence that is only a greeting: "Hello everyone." The copy edit can
     split "Hi everyone, today I will be handing over X" in two, and the

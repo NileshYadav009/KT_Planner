@@ -211,7 +211,16 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          ("can_deploy", "understands_rollback", "knows_danger_zones", "escalation_clear", "architecture_verified"), None),
     ],
     "cost_optimization": [
-        ("Cost levers", ("levers",), r"\b(?:cost\w*|sav(?:e|ing)\w*|spend|budget|scale\w*\s+(?:down|to\s+zero)|spot|reserved)\b"),
+        # Spending, saving, spot and reserved count with money or capacity
+        # beside them: on recorded talks "we don't have to spend that time
+        # finding the root cause" made Cost Optimization covered, and "I save
+        # everything in the .env file" partly covered.
+        ("Cost levers", ("levers",),
+         r"\b(?:cost\w*|savings?|budget\w*"
+         r"|spend(?:s|ing)?\b(?!\s+(?:\w+\s+){0,3}?(?:time|effort|hours?|minutes?|days?|weeks?|cycles?)\b)"
+         r"|sav(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}?(?:money|costs?|dollars?|on\b|\$|\d)"
+         r"|scale\w*\s+(?:down|to\s+zero)|spot\s+(?:instances?|vms?|nodes?|capacity|pricing)"
+         r"|reserved\s+(?:instances?|capacity|nodes?|pricing))"),
     ],
 }
 
@@ -241,6 +250,15 @@ _ELSEWHERE_CONTEXT = {
     ("deployment_and_rollback", "Trigger and approvals"): _DEPLOY_CONTEXT,
     ("deployment_and_rollback", "Deployment window"): _DEPLOY_CONTEXT,
 }
+
+
+def field_topic_pattern(field_id: str) -> Optional["re.Pattern[str]"]:
+    """The evidence pattern of the topic `field_id` captures, if it has one."""
+    for topics in _COMPILED.values():
+        for _label, fields, rx in topics:
+            if field_id in fields:
+                return rx
+    return None
 
 
 def states_topic_elsewhere(section_id: str, label: str, rx: Optional["re.Pattern[str]"], text: str) -> bool:

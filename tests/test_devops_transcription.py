@@ -391,6 +391,48 @@ def test_a_transcribed_piece_is_closed_when_the_next_one_opens_a_sentence():
          "and we have", "The rollout history."]
 
 
+def test_a_piece_whisper_began_in_lower_case_carries_on_the_sentence():
+    """Public SRE recordings (27 Oct): Whisper began "our signal to noise
+    ratio" in lower case; cleaned on its own it read "Our ...", got a full
+    stop before it, and the sentence was cut into two fragments."""
+    from devops_transcription import close_segment_sentences, continues_sentence
+
+    whisper = ["tune these notifications to minimize that and increase", "our signal to noise ratio so that",
+               "we feel reliably confident that", "this is something to focus on.", "Then we move on"]
+    cleaned = ["Tune these notifications to minimize that and increase", "Our signal to noise ratio so that",
+               "We feel reliably confident that", "This is something to focus on.", "Then we move on"]
+    assert close_segment_sentences(cleaned, [continues_sentence(t) for t in whisper], whisper) == \
+        ["Tune these notifications to minimize that and increase", "our signal to noise ratio so that",
+         "we feel reliably confident that", "this is something to focus on.", "Then we move on"]
+    # A spoken opener after a piece that can end there opens a sentence even
+    # in lower case (the user's console recording); after "is" it cannot.
+    whisper = ["push out changes in a much better way or faster", "then we have the request throughput",
+               "so Arjun is", "there for this issue"]
+    cleaned = ["Push out changes in a much better way or faster", "Then we have the request throughput",
+               "So Arjun is", "There for this issue"]
+    assert close_segment_sentences(cleaned, [continues_sentence(t) for t in whisper], whisper) == \
+        ["Push out changes in a much better way or faster.", "Then we have the request throughput.",
+         "So Arjun is", "there for this issue"]
+    # A name keeps its capital; a piece Whisper capitalised still opens a sentence.
+    assert close_segment_sentences(["the cluster runs on", "Kubernetes in two regions"], [False, True]) == \
+        ["the cluster runs on", "Kubernetes in two regions"]
+    assert close_segment_sentences(["everything in dev is moved on to production", "Then we can see the health"],
+                                   [False, False]) == \
+        ["everything in dev is moved on to production.", "Then we can see the health"]
+
+
+def test_mishearings_heard_on_public_sre_recordings_are_fixed_in_context():
+    from devops_transcription import clean_transcript
+
+    assert clean_transcript("notifications for engineer and call for get lab.com") == \
+        "Notifications for engineer on-call for GitLab.com"
+    assert clean_transcript("a drop in app decks") == "A drop in Apdex"
+    assert clean_transcript("change the aptX or the error ratio") == "Change the Apdex or the error ratio"
+    # Look-alikes stay as said.
+    assert clean_transcript("paired with my aptX headphones") == "Paired with my aptX headphones"
+    assert clean_transcript("an engineer and call center agents") == "An engineer and call center agents"
+
+
 def test_correct_wording_is_left_as_said_and_mishearings_are_still_fixed():
     """The vocabulary listed real phrases as if they were mishearings, so
     "scale out the web tier" became "horizontal scaling the web tier", "The

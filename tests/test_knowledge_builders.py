@@ -360,6 +360,35 @@ def test_enrich_architecture_knowledge_pulls_components_from_any_section():
     }
 
 
+def test_a_talk_that_never_names_its_system_is_not_titled_with_a_phrase_from_it():
+    """Recorded talks (27 Oct) were titled "Because We Know That Sometimes
+    Application", "Biggest Service", "Incident Room", "Classes" and "And"."""
+    from knowledge.knowledge_builder import _infer_system_name
+
+    coverage = {"system_overview": {"content": [
+        "Because we know that sometimes application different requests take different time to perform.",
+        "Gitaly is probably the biggest service we run.",
+        "There is a permanent link to a Zoom room, and the room is called the incident room.",
+        "The second one is the tags, which is called classes.",
+        "And we tune it. And then we tune it again. Then we ping them through Slack and ping them through Slack."]}}
+    assert _infer_system_name(coverage) == "KT Document"
+    from field_populator import _extract_by_pattern
+
+    field = {"id": "system_name", "label": "System Name", "type": "text"}
+    for said in coverage["system_overview"]["content"]:
+        assert _extract_by_pattern(field, said) is None, said
+    # Still named when the speaker names it.
+    assert _extract_by_pattern(field, "The system is called Meridian.") == "Meridian"
+    assert _extract_by_pattern(field, "It's called Tern, the booking service.") == "Tern"
+
+
+def test_an_alert_that_pages_is_not_who_to_page():
+    from knowledge.knowledge_builder import _ESCALATION_CUE_RE
+
+    assert not _ESCALATION_CUE_RE.search("One of our SLO alerts will probably page on that.")
+    assert _ESCALATION_CUE_RE.search("A severity one or two will page the engineer on call.")
+
+
 def test_a_kt_is_named_after_its_system_not_a_pronoun_phrase():
     """KT-taker audit (dev d05, matrix T01): "What is Fernhill exactly? It's
     the appointment booking system ..." titled the document "It's the
