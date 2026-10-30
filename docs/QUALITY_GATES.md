@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report g9abf g9abg`.
+then `python evaluation/quality_gates.py --report g9abg grec4`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (g9abf) | After (g9abg) | |
+| Gate | Target | Before (g9abg) | After (grec4) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -63,7 +63,7 @@ model was called for this page.
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (g9abf) | After (g9abg) | |
+| Gate | Target | Before (g9abg) | After (grec4) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -95,7 +95,7 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `final9abg2`. Holdouts and blind KTs are unseen and are
+From `evaluation/accuracy.py` run `rec4`. Holdouts and blind KTs are unseen and are
 reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
 Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
@@ -109,5 +109,5 @@ Groq's section check, as the app runs, see the latest accuracy section of the au
 
 ## Adversarial matrix
 
-Run `m9abg2`: 87 cases, must checks 297/297, should checks 51/54
+Run `rec4`: 87 cases, must checks 297/297, should checks 51/54
 (`docs/ADVERSARIAL_MATRIX.md`).

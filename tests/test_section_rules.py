@@ -510,6 +510,7 @@ def test_neither_rule_takes_what_is_not_theirs(said):
     ("And I'll use this as an example.", True),
     ("Let's go take a look at,", True),
     ("Can you see my screen?", True),
+    ("All right, I'll just share my screen.", True),
     # Something named or stated after it: a fact.
     ("Let's take a look at the metrics catalog.", False),
     ("Let me show you how the rollback works.", False),
@@ -520,3 +521,12 @@ def test_a_presenter_aside_is_not_a_fact(said, aside):
     from section_rules import _GREETING_ONLY_RE
 
     assert bool(_GREETING_ONLY_RE.match(said)) is aside
+
+
+def test_a_labelled_aside_is_still_an_aside():
+    # Matrix L05: the transcript's first line, with its speaker label.
+    from dialogue import without_label
+    from section_rules import _GREETING_ONLY_RE
+
+    assert _GREETING_ONLY_RE.match(without_label("Dana: All right, I'll just share my screen."))
+    assert not _GREETING_ONLY_RE.match(without_label("Dana: The portal runs on Azure."))

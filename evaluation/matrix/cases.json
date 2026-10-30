@@ -1320,6 +1320,56 @@
         {"check": "order", "texts": ["GitHub Actions runs the tests", "Amazon ECR stores the images", "and ArgoCD deploys them to EKS"], "level": "must"},
         {"check": "in_section", "text": "Amazon ECR stores the images", "sections": ["deployment_and_rollback"], "level": "should"}
       ]
+    },
+    {
+      "id": "L05", "category": "L noisy", "title": "A recorded talk: presenter asides and empty remarks are not facts, and no fragment is the title",
+      "regression": "tests/test_dialogue.py::test_a_remark_that_says_nothing_specific_is_not_a_fact",
+      "transcript": [
+        "Dana: All right, I'll just share my screen.",
+        "Can you see my screen?",
+        "This is a demo of the alert tuning runbook for engineers on call.",
+        "Gitaly is probably the biggest service we run.",
+        "There is a permanent Zoom room, and the room is called the incident room.",
+        "Thoughts from your side?",
+        "It does the job.",
+        "Severity one or two alerts page the engineer on call through PagerDuty.",
+        "That's all I have, I will stop sharing."
+      ],
+      "expect": [
+        {"check": "completes", "level": "must"},
+        {"check": "system_name", "text": "KT Document", "level": "must"},
+        {"check": "absent", "text": "share my screen", "level": "must"},
+        {"check": "absent", "text": "thoughts from your side", "level": "must"},
+        {"check": "absent", "text": "it does the job", "level": "must"},
+        {"check": "absent", "text": "stop sharing", "level": "must"},
+        {"check": "shows", "text": "page the engineer on call", "level": "must"},
+        {"check": "in_section", "text": "page the engineer on call", "sections": ["monitoring_observability", "ownership_escalation"], "level": "should"}
+      ]
+    },
+    {
+      "id": "L06", "category": "L noisy", "title": "A recorded code walkthrough: everyday words do not cover sections nobody discussed",
+      "regression": "tests/test_coverage_topics.py::test_everyday_words_on_recorded_talks_do_not_cover_a_topic",
+      "transcript": [
+        "Sam: This is the walkthrough of our banking chatbot code.",
+        "The bot is a Python Flask app that answers questions about accounts.",
+        "In order to access this, I type the intent name in square brackets.",
+        "I don't want the stop words, so I remove them from the token list.",
+        "But this is for your own good.",
+        "Then I open the web page and try a question.",
+        "The dev team would involve the product manager for new intents.",
+        "This is what I'm saving in the training list."
+      ],
+      "expect": [
+        {"check": "completes", "level": "must"},
+        {"check": "coverage", "section": "danger_zones", "not": ["Strong"], "level": "must"},
+        {"check": "coverage", "section": "security_controls", "not": ["Strong"], "level": "must"},
+        {"check": "coverage", "section": "ownership_escalation", "not": ["Strong"], "level": "must"},
+        {"check": "coverage", "section": "cost_optimization", "not": ["Strong"], "level": "must"},
+        {"check": "coverage", "section": "security_controls", "is": ["Missing"], "level": "should"},
+        {"check": "coverage", "section": "ownership_escalation", "is": ["Missing"], "level": "should"},
+        {"check": "coverage", "section": "cost_optimization", "is": ["Missing", "Not discussed"], "level": "should"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
     }
   ]
 }

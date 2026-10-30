@@ -1938,3 +1938,76 @@ Results:
   (now linear, same output), database connections were left open, a test
   had failed since the page redesign, and in Docker approved vocabulary is not
   kept on the data volume (open).
+
+## Real recordings end to end (audit §9abh, 27-28 Oct)
+
+- **What:** six public meeting recordings (five GitLab meetings and talks,
+  one project code walkthrough) run through the app from the video file to
+  the PDF, without an LLM and with Groq. Two are kept back to check the
+  fixes. The answer keys were written from the captions before any output
+  was read.
+- **What we found:** every document was titled with a scrap of speech
+  ("And", "Classes"); speech cut at pauses became half-sentence facts; asides
+  ("I will stop sharing") and empty remarks were printed as facts; sections
+  nobody discussed showed as covered; Groq refused more calls than it
+  answered.
+- **Fixed:** sentences are rejoined across Whisper's pauses; asides and
+  remarks that say nothing specific are left out (and listed in the ledger
+  with why); a document is titled "KT Document" unless the system is
+  actually named; everyday words ("I don't want them", "your own good",
+  "the web page") no longer count as a discussed topic; Groq calls go one at
+  a time, paced to the account's per-minute limits, with no hidden retries.
+- **Result:** the practice and blind KTs are exactly as before. On the four
+  recordings, 39 of 60 key facts land in the right section (37 before), with
+  87 remarks left out instead of 38 and four fewer pages in all. No section
+  nobody discussed is shown as "covered well" any more (four were).
+- **Still open:** on real speech every sentence is filed under some
+  section, so a section nobody discussed can show one stray sentence and
+  read "partly covered". A threshold on the classifier's confidence was
+  measured and would have hidden real sections, so it was not made. A place
+  for content that fits no section (the fixed-plus-flexible idea) would
+  address it; that is a product decision.
+- **Nightly test:** Windows Task Scheduler runs one or two short recordings
+  through Groq at 4 am, using at most 120,000 of the 200,000 tokens Groq
+  allows a day, and writes a report with tokens, refusals and scores. The
+  first night: two recordings in 76 minutes, 88,511 tokens, 2 refusals
+  instead of 18 the night before, no failed call, 34 of 38 key facts in the
+  right section. It found one more thing: a sentence where the speaker said
+  "one or two" and the document "1 or 2" was marked "no source" (fixed).
+- **Two new adversarial cases** for recorded talks. They caught two more
+  slips, both fixed: an aside said after the speaker's name ("Dana: All
+  right, I'll just share my screen.") and two empty remarks kept together
+  ("Thoughts from your side? It does the job.").
+- **Found, not fixed:** the release check that replays recorded Groq answers
+  now covers only part of the Groq path, because the answers were recorded
+  before the October classifier change. Recording them again costs about
+  49,000 Groq tokens; that is your call.
+
+## DevOps recordings, and coverage by topic on recordings (audit §9abi, 29-30 Oct)
+
+- **What:** six more recordings, all DevOps (GitLab's delivery and
+  infrastructure teams: an auto-deploy tour, Deployer and Patcher training,
+  a Geo failover, restoring Gitaly servers from snapshots; two more held
+  back), after you pointed out that half the first set was not DevOps.
+- **Result:** without an LLM, 50 of 64 key facts in the right section on the
+  four, 26 of 35 on the two held back. All DevOps recordings together 73%,
+  the off-topic ones 72%: the drop from written KTs (93%) comes from speech,
+  not the subject. With Groq the two held back scored 27 of 35, with no
+  refusals.
+- **A section for what fits nowhere:** measured and not built. Nothing in
+  the classifier tells a stray sentence from a real fact on recordings, and
+  Groq's check never answered "none of these".
+- **Fixed:** on a recording, a section whose statements name none of its
+  topics is now "Not covered", with the statements still shown in it.
+  Sections shown as covered though nobody discussed them: 38 to 8 on the
+  twelve recordings; one discussed section on a held-back recording is now
+  reported not covered. Typed and pasted transcripts are unchanged: there
+  the rule reported 4 discussed sections not covered on the unseen practice
+  KTs, so it applies to recordings only (your choice).
+- **Also fixed:** 44 sections on the practice KTs listed discussed topics as
+  "not discussed" because of how they were said ("in your first month,
+  ...", "busy dates", "keeps the bill down", "owned by", "if you're stuck,
+  ask ..."). They now count.
+- **Nightly test:** it now runs its queue in order, one recording at a time,
+  and starts nothing after 08:30. On 29 Oct it had run the two held-back
+  recordings ahead of the queue.

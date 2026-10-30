@@ -6799,6 +6799,268 @@ changed module pass.
 - Not measured: the API under load with the new thread pool, memory with the
   embedding memo full (about 40 MB at 10,000 texts).
 
+### 9abh. Real recordings end to end (27-28 Oct)
+
+The user asked for real meeting recordings to be run end to end within
+Groq's free limits, recorded sessions included. Six public recordings: five
+GitLab meetings and talks (Zoom) and one project KT (a code walkthrough).
+Four are worked on; two (RpFl1n2sM00, uCU8jdYzpac) are held back and read in
+aggregate only. Each answer key was written from YouTube's captions (for
+RpFl1n2sM00, whose captions could not be fetched, from a larger Whisper
+model's transcript) before any output was read. The harness lives outside
+the repository, in `../online_kts`: `run_online.py` starts the API and a
+worker on a scratch database and uploads each recording; `score_online.py`
+scores with `tests/golden_eval.score`; `whisper_cache.py` records Whisper's
+segments once, so a rerun tests the pipeline after transcription;
+`nightly.py` runs the Groq test from Windows Task Scheduler.
+
+**Before (27 Oct).** Without an LLM, 37/60 key facts in an allowed section on
+the four, and 48/63 on the two held back (scored in aggregate once
+RpFl1n2sM00's key was written, 28 Oct). With Groq, on three of the four,
+39/49. Every recording was
+titled with a speech fragment ("And", "Classes", "Incident Room"), reported
+undiscussed sections as covered (20 on the four), and printed asides and
+remarks as facts (up to 27 pages for a 34-minute KT). Groq's console showed
+more 429 refusals than successes.
+
+**Found and fixed** (ledger X96-X105; X101, X103 and X106 stay open):
+
+| Item | Cause | Change | Checked by |
+|---|---|---|---|
+| X96 | `close_segment_sentences` read the capital the cleaner gives each Whisper piece as a new sentence, so speech cut at a pause became fragments ("... and increase. Our signal to noise ratio") | A piece Whisper began in lower case carries on its sentence (its capital taken back) unless a spoken opener follows a piece that can end there | `tests/test_devops_transcription.py`; the user's console recording keeps its sentence ends |
+| X97 | Per-environment fields filled with sentences naming no environment | Such a field needs a sentence its coverage topic accepts (`coverage_topics.field_topic_pattern`); since 28 Oct "Known differences" needs a named environment too | `tests/test_field_populator.py` |
+| X98 | Asides ("I will stop sharing.") and remarks that say nothing specific were facts | `_GREETING_ONLY_RE`; `dialogue.says_nothing_specific`, excluded with its reason in the ledger. One of 1,180 visible key facts matched before the place-word exception, none after | `tests/test_dialogue.py`, `tests/test_section_rules.py` |
+| X99 | Titles from fragments | `field_populator.is_plausible_name`; "is called X" only for the system or "it"; a repeated word only in a naming context, and (28 Oct) not when said more often in lower case ("Going", from "if your word is Going") | `tests/test_knowledge_builders.py` |
+| X100 | Cost covered from "spend that time", "saving" a file; "severity S3" as Amazon S3; "alerts will probably page on that" as who to page; three Whisper mishearings | Coverage wording, severity codes, escalation cue, gated corrections. On 28 Oct, also: "I don't want them" and "you don't need to" are not never-do rules, "your own good" is not ownership, "the web page" is not paging, "the dev team" is not an environment, "in order to access this" is not access control | `tests/test_coverage_topics.py` |
+| X102 | The OpenAI client retried each 429 twice unseen; four calls at once; nothing paced the account's 7,000 input and 1,000 output tokens a minute | `max_retries=0`; input and output windows learned from refusals or set (`LLM_INPUT_TOKENS_PER_MINUTE`, `LLM_OUTPUT_TOKENS_PER_MINUTE`, `LLM_RATE_HEADROOM`); a call asks for at most the output limit less the headroom | `tests/test_llm_provider.py` |
+| X104 | With Groq, "alerts with a severity of 1 or 2 page the engineer on-call" was printed "no source": every number a line shows must be in its source, and the speaker said "one or two" | A transcript sentence's numbers said in words also count as digits (`evidence._spoken_as_digits`), on the transcript's side only | `tests/test_evidence.py` |
+| X105 | Found by the new matrix case L05: "Thoughts from your side? It does the job." (a question kept with the sentence after it) was printed, and so was "Dana: All right, I'll just share my screen." (a label, and "all right") | A unit of several sentences says nothing specific when each sentence says nothing specific; the greeting and aside test reads the sentence without its speaker label (`dialogue.without_label`); "all right" leads an aside | `tests/test_dialogue.py`, `tests/test_section_rules.py`; matrix L05, L06 |
+
+**Measured and not kept.** On recordings, most undiscussed sections reported
+as covered hold only sentences the classifier filed there weakly ("I have a
+variable in which I have 15 zeros." under the calendar), so the section reads
+"N statement(s) captured, but not the expected topics" and counts as Partial.
+Reporting such a section as not covered when every sentence in it is a weak
+classifier pick was measured on the visible KTs first: discussed sections end
+up in that state with the same confidences (tuning h08 Cost Optimization
+0.27, dev d01 Danger Zones 0.22, d09 Handover Completion 0.25; noisy copies of
+d07 and d14, Operational Calendar 0.26 and 0.23) as the misfiled sentences on
+recordings (0.18 to 0.27). It would have reported discussed sections Missing.
+Not made. X101 (a personal anecdote printed in five sections) stays open for
+the same reason: nothing in the classifier separates it.
+
+**Results without an LLM.**
+
+| Set | §9abg | §9abh |
+|---|---|---|
+| Tuning | 534/534 | 534/534 |
+| Dev | 551/551 | 551/551 |
+| Holdouts | 88/95 | 88/95 |
+| Blind b01-b03 | 109/114 | 109/114 |
+| Blind b04-b07 | 118/132, 3 false Missing | 118/132, 3 false Missing |
+| Noisy copies | 1057/1085, 1 false Missing | 1057/1085, 1 false Missing |
+| e2e, 6 KTs | 100% | 100% |
+| Matrix | 297/297 must, 51/54 should (87 cases) | 310/310 must, 54/58 should (89 cases) |
+
+The sealed set was not read. The matrix gained L05 (asides, remarks and
+fragment titles on a recorded talk) and L06 (everyday words on a code
+walkthrough); L05 failed three musts until X105, and L06's open should is a
+stray sentence under Ownership (X103). The six accuracy sets, the noisy
+copies and the matrix were run again after X105: no figure moved. The
+release gates and the recordings were run before it (gates and the two held
+back after X104, the four before it).
+
+**The recorded Groq replay (X106, open).** The release gates' LLM mode
+answers from Groq responses recorded on 24 Oct (§9aax). Run KT by KT, 29
+requests on the five recorded e2e KTs are not in the recording (a section
+check on each, polish, extraction, field fill, the conflict check) and fall
+back to the rules, as designed; the §9abg commit, run the same way in a
+worktree, misses the same 29. So the misses predate this batch, most likely
+the learned section model (§9abd) changing what goes to each call, and the
+gates' LLM mode now checks only part of the LLM path. Recording again costs
+about 49,000 Groq tokens and needs the user's go-ahead. On the four recordings, before and after the
+27 Oct fixes (Whisper replayed, so only the pipeline differs):
+
+| | Before | 27 Oct fixes | And 28 Oct |
+|---|---|---|---|
+| Key facts in an allowed section | 37/60 | 39/60 | 39/60 |
+| Facts in the document | 651 | 592 | 592 |
+| Remarks and asides left out | 38 | 87 | 87 |
+| Pages | 89 | 84 | 85 |
+| Titles | four fragments | "KT Document" on three, "Going" on one | "KT Document" on all four |
+| Undiscussed sections reported covered | 20 | 20 | 18 |
+| ... of them "covered well" | 4 | 1 | 0 |
+
+The two held back, in aggregate, on the final code without an LLM: 48/63, as
+before; undiscussed sections reported covered 6, as before; 736 facts in
+their documents instead of 811. The 67-minute one ran 250 minutes because the
+laptop slept for 2 h 54 min in the middle (Windows event log); awake, about 76
+minutes, against 82. The harness now asks Windows to stay awake while it
+runs. The release gates pass in both modes with every figure as on 26 Oct
+(`docs/QUALITY_GATES.md`).
+
+**Groq.** The free plan for `qwen/qwen3.8-27b` (console, 28 Oct): 30
+requests and 7,000 input / 1,000 output tokens a minute, 1,000 requests and
+200,000 tokens a day; cached tokens do not count. A recording used about
+2,400 tokens per minute of speech (132k for three, 55 minutes), the section
+check 62% of the input. The nightly test spends at most 120,000 in a rolling
+24 hours, one call at a time, at 85% of the minute limits, and runs short
+recordings only. The first paced night (28 Oct, 04:00; with the 28 Oct
+wording, title and environment-field changes, before X104 and X105):
+
+| | 27 Oct, unpaced | 28 Oct, paced |
+|---|---|---|
+| 429 refusals the app saw | 18 (the console showed more refusals than successes) | 2, both on output tokens a minute, each answered on its retry; no call failed |
+| Alert tuning runbook (15 min) | 13/15, 28,376 tokens, 4 undiscussed sections covered | 13/15, 26,590 tokens, 3 (Deployment now Missing) |
+| Merge trains KT (24 min, held back) | 20/23 without an LLM | 21/23, 61,921 tokens, 3 undiscussed sections covered (aggregate) |
+| Wall time | | 76 min for both; it stopped before a third (88,511 used + about 56,000 would pass 120,000) |
+
+Two of the runbook's key facts were marked "no source". F04 was X104. F03
+is the scorer's: the polish wrote "metrics catalog readme" and its source,
+as Whisper heard it, says "read me"; the key was left as written.
+
+**Limits.**
+
+- Placement on real speech (65%) is far below written KTs (93%). Every
+  sentence is filed under some section, so an undiscussed section often
+  shows a stray sentence and reads Partial. Giving content that fits no fixed
+  section its own place (the fixed-plus-flexible sections the user raised on
+  27 Oct, set aside then) is the change that addresses it.
+- Six recordings, five from one company, one speaker style each.
+
+### 9abi. DevOps recordings, and coverage judged by topic on recordings (29-30 Oct)
+
+The user pointed out that three of the six recordings in §9abh were not
+DevOps or infrastructure KTs (a data app, a frontend feature, a chatbot),
+while the product is aimed at DevOps, SRE and cloud handovers. Six more
+public recordings of 25 minutes or less were added from GitLab's
+infrastructure and delivery teams: an auto-deploy tour with a release
+manager, Deployer and Patcher training, a Geo planned failover, and
+restoring a zone of Gitaly servers from disk snapshots are worked on; a
+Gitaly high-availability demo and a Registry migration to Kubernetes were
+drawn at random (seed 20261029) and held back, read in aggregate only. A
+recruiting interview found in the search was dropped as not a KT. Each key
+was written from the captions before any output was read, and every key now
+carries a domain (DevOps or off-topic), so scores are shown per domain.
+
+**Results on the §9abh code, without an LLM** (29 Oct, from a frozen copy of
+the code, run by Windows Task Scheduler):
+
+| Recordings | Key facts in an allowed section | Undiscussed sections shown covered |
+|---|---|---|
+| DevOps, four new | 50/64 (78%) | 9 |
+| DevOps, two new held back (aggregate) | 26/35 (74%) | 5 |
+| The four of §9abh | 38/60 | 18 |
+| The two of §9abh held back (aggregate) | 48/63 | 6 |
+
+The four of §9abh read 38/60 on the final code, not 39/60: X105 moved one of
+the chatbot's facts (a Google Colab sentence) from Architecture to System
+Overview. By domain, every DevOps recording together: 124/169 (73%); the
+off-topic ones: 38/53 (72%). The gap to written KTs (93%) comes from speech,
+not from the subject. No discussed section was reported Missing on any
+recording; the errors are facts in the wrong section and undiscussed
+sections shown as covered.
+
+With Groq the same night, the two new held-back recordings: 27/35 (26/35
+without), 3 undiscussed sections shown covered (5 without), 97,087 tokens,
+no 429 refusal. The nightly ran those two instead of the front of its queue:
+it ran recordings with no Whisper capture first, as a group, and the held-back
+ones are never captured. It now runs its queue in order, one recording at a
+time, each waiting for its share of the rolling 24-hour budget, and starts
+nothing after 08:30 (`../online_kts/tools/nightly.py`; checked with a
+simulated clock against the real ledger).
+
+**A place for what fits no section (the fixed-plus-flexible idea), measured
+and not built.** The classifier's signals were recorded for every placed
+sentence: on the recordings worked on, a sentence holding a key fact
+("real", 159) against one filed under a section the key says was not
+discussed ("stray", 53); and on the visible practice KTs, every key fact
+(890). Within recordings nothing separates the two: at the cut that loses 1%
+of real facts, the best signal (the classifier's combined score for its pick)
+catches 24% of the strays on DevOps recordings and 30% on the others. Against
+facts from written KTs the strays separate well (a cut at 0.630 catches 94%),
+but that cut would hide 70 of the 159 real facts on recordings: speech scores
+low throughout. Groq's section check, replayed from its recorded answers on
+the alert-tuning recording, answered "none of these" for 0 of the 7 strays it
+saw. A section built from confidence would hide real facts, so none was made.
+
+**Coverage by topic (X103, fixed on recordings; X107).** Of the 27
+undiscussed sections shown covered on the eight recordings worked on, 21
+were in one state: every statement filed there named none of the section's
+topics ("I have a variable in which I have 15 zeros." under the Operational
+Calendar), which read "N statement(s) captured, but not the expected topics"
+and counted as Partial. The user chose to judge such a section by its
+topics: not covered, its statements kept in the section. Measured first on
+the visible KTs, the rule would have been wrong: 44 discussed sections (20
+on the clean KTs, 24 on their noisy copies) were in the same state, because
+the topic patterns missed how they were said, and their rows listed
+discussed topics as "not discussed" (X107): "In your first month, do one
+production release with me watching", "Busy dates? The twenty-fifth of every
+month is payroll day", "... which keeps the bill down", "Under no
+circumstances should ...", "Owned by the data science team", "If you're
+stuck, Omar Haddad, ...", "The admin is behind Google sign-in", "The Stripe
+and Postmark keys are in Heroku config vars", "Snowflake time travel is set
+to thirty days". The patterns now read these (`coverage_topics.py`: the
+onboarding month as Week 4, busy times, bad days, highest volumes, nothing
+deployed, the bill, "we pay for", under no circumstances, owned by and
+business owners, being stuck, sign-in, keys in config, time travel and
+versioning). All 44 now match a topic; none of the recordings' stray
+sentences does.
+
+Then the rule (`coverage_topics.names_no_topic`, in
+`knowledge_builder.append_coverage_matrix_section`): a section whose
+statements name none of its topics is not covered, with "the N statement(s)
+filed here name none of its topics" and a line on the follow-up list.
+Architecture Reference (its components are judged from what was extracted)
+and sections with a topic judged only from fields are left out. Applied to
+every KT, it changed nothing on the visible KTs but reported 4 more discussed
+sections Missing on the unseen written KTs (holdouts 0 to 1, b01-b03 0 to 2,
+b04-b07 3 to 4; aggregate only), worded beyond the patterns. The user chose
+to apply it to recordings only: `pipeline.run_kt_pipeline` passes `spoken`
+when a segment is timed (Whisper's); a paste, a caption file and a pasted
+session are untimed. A pasted transcript of a real meeting is therefore
+judged as written.
+
+| | Before | After |
+|---|---|---|
+| Recordings worked on (8): undiscussed shown covered | 27 | 6 |
+| ... discussed shown Missing | 0 | 0 |
+| Recordings held back (4, aggregate): undiscussed shown covered | 11 | 2 |
+| ... discussed shown Missing | 0 | 1 |
+| Written sets, noisy copies, matrix | as §9abh | identical, check for check |
+
+The recordings' figures come from rebuilding each coverage report from its
+saved result (coverage, schema and knowledge object; the same rebuild with
+the §9abh code reproduces every saved report). A real run of the
+8-minute zone-restore recording through the pipeline (Whisper replayed, no
+LLM) confirms the flag: undiscussed sections shown covered 3 to 1, key facts
+unchanged at 8/11.
+
+**Results without an LLM.**
+
+| Set | §9abh | §9abi |
+|---|---|---|
+| Tuning | 534/534 | 534/534 |
+| Dev | 551/551 | 551/551 |
+| Holdouts | 88/95 | 88/95 |
+| Blind b01-b03 | 109/114 | 109/114 |
+| Blind b04-b07 | 118/132, 3 false Missing | 118/132, 3 false Missing |
+| Noisy copies | 1057/1085, 1 false Missing | 1057/1085, 1 false Missing |
+| e2e, 6 KTs | 100% | 100% |
+| Matrix | 310/310 must, 54/58 should | 310/310 must, 54/58 should |
+
+The release gates pass in both modes with every figure as in §9abh.
+The sealed set was not read.
+
+**Limits.**
+
+- Twelve recordings, eleven from one company. The DevOps ones are
+  internal team sessions, not handovers of one system, so several sections
+  (cost, the 30-day plan, sign-off) are rightly not discussed in most.
+- The remaining 8 undiscussed sections shown covered on recordings hold a
+  stray sentence that does name a topic word ("deploy", "production").
+- X101 (a personal anecdote printed in several sections) stays open.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

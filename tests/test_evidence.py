@@ -97,6 +97,21 @@ def test_a_number_the_session_never_said_is_not_sourced():
     assert ko["rendered_sections"][0]["blocks"][0]["sources"] == [[]]
 
 
+def test_a_number_said_in_words_sources_the_same_number_in_digits():
+    """A recorded talk (28 Oct): "anything that's a severity one or two will
+    page the engineer on call" did not source the polished "alerts with a
+    severity of 1 or 2 page the engineer on-call"."""
+    said = transcript_sentences("By default anything that's a severity one or two will page the engineer on call. "
+                                "We get about twelve thousand alerts a year.")
+    for written in ["By default, alerts with a severity of 1 or 2 page the engineer on-call.",
+                    "About 12000 alerts a year."]:
+        ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [written]})
+        assert attach_evidence(ko, said)["unsourced"] == 0, written
+    # Still not a number nobody said.
+    ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": ["Alerts with a severity of 3 page the engineer."]})
+    assert attach_evidence(ko, said)["unsourced"] == 1
+
+
 def test_inferred_values_and_status_lines_are_never_linked_as_stated():
     ko = _ko({"type": "NarrativeBlock", "title": "S", "paragraphs": [
         "The payments API runs on EKS" + INFERRED_MARKER, NOT_COVERED_MESSAGE, MENTIONED_ELSEWHERE_MESSAGE]})

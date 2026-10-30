@@ -136,6 +136,25 @@ _CHARS_PER_TOKEN = 3.5
 
 _RATE_LIMIT_MARKERS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "ratelimit", "quota")
 
+# Some tiers meter input and output tokens per minute apart. Groq's on_demand
+# tier for qwen/qwen3.8-27b, measured 27 Oct from its own 429 bodies: input
+# 7,000/minute (ITPM), output 1,000/minute (OTPM). Three recorded KTs sent up
+# to four calls at once and drew more 429s than successes (Groq console); 14
+# of the 18 the app saw were ITPM. Each limit is learned from the provider's
+# first refusal that names it, or set here (0 = learn); the throttle then
+# keeps each window under LLM_RATE_HEADROOM of it.
+LLM_INPUT_TOKENS_PER_MINUTE = int(os.getenv("LLM_INPUT_TOKENS_PER_MINUTE", "0") or 0)
+LLM_OUTPUT_TOKENS_PER_MINUTE = int(os.getenv("LLM_OUTPUT_TOKENS_PER_MINUTE", "0") or 0)
+LLM_RATE_HEADROOM = float(os.getenv("LLM_RATE_HEADROOM", "0.9") or 0.9)
+_MINUTE_LIMIT_RE = re.compile(r"\b(input|output)\s+tokens\s+per\s+minute\s*\([A-Z]+\):\s*limit\s+(\d+)", re.IGNORECASE)
+_learned_minute_limits: dict = {}
+# bucket -> deque[(monotonic_ts, tokens)] of input and of output tokens.
+_input_windows: dict = defaultdict(deque)
+_output_windows: dict = defaultdict(deque)
+# Output tokens a call is expected to produce before it has: the running
+# average of real completions (the provider's own count), 300 until known.
+_output_seen = {"calls": 0, "tokens": 0}
+
 _throttle_lock = threading.Lock()
 _call_timestamps: dict = defaultdict(deque)
 # bucket -> deque[(monotonic_ts, tokens_reserved)], the token half of the
@@ -250,10 +269,44 @@ def reconcile_token_usage(provider_label: str, estimated_tokens: int, actual_tok
         tq.append((now, shortfall))
 
 
-def _throttle(provider_label: str, estimated_tokens: int = 0) -> None:
+def _note_minute_limits(exc: BaseException) -> None:
+    """Keep the input/output tokens-per-minute limits a refusal names."""
+    for kind, limit in _MINUTE_LIMIT_RE.findall(str(exc)):
+        with _throttle_lock:
+            if _learned_minute_limits.get(kind.lower()) != int(limit):
+                _learned_minute_limits[kind.lower()] = int(limit)
+                LOGGER.info("Provider %s token limit learned from a refusal: %s tokens/minute", kind.lower(), limit)
+
+
+def _minute_budget(kind: str) -> int:
+    limit = (LLM_INPUT_TOKENS_PER_MINUTE if kind == "input" else LLM_OUTPUT_TOKENS_PER_MINUTE) \
+        or _learned_minute_limits.get(kind, 0)
+    return int(limit * LLM_RATE_HEADROOM) if limit else 0
+
+
+def _expected_output() -> int:
+    return _output_seen["tokens"] // _output_seen["calls"] if _output_seen["calls"] else 300
+
+
+def book_actual_tokens(provider_label: str, estimated_input: int, input_tokens, output_tokens) -> None:
+    """Correct the input window to what the call really took and book its
+    real output, so both windows hold the provider's own counts."""
+    bucket = _bucket_for(provider_label)
+    with _throttle_lock:
+        now = time.monotonic()
+        if input_tokens is not None and int(input_tokens) > estimated_input:
+            _input_windows[bucket].append((now, int(input_tokens) - estimated_input))
+        if output_tokens is not None:
+            _output_windows[bucket].append((now, int(output_tokens)))
+            _output_seen["calls"] += 1
+            _output_seen["tokens"] += int(output_tokens)
+
+
+def _throttle(provider_label: str, estimated_tokens: int = 0, estimated_input: int = 0) -> None:
     """Block until sending another request stays within BOTH
     LLM_MAX_CALLS_PER_MINUTE and this bucket's tokens/minute budget, over the
-    same sliding 60s window.
+    same sliding 60s window, and within the input and output tokens-per-minute
+    limits once they are known (see LLM_INPUT_TOKENS_PER_MINUTE).
 
     `estimated_tokens` of 0 skips the token check entirely, so callers that
     genuinely don't know a call's size behave exactly as before.
@@ -272,6 +325,16 @@ def _throttle(provider_label: str, estimated_tokens: int = 0) -> None:
             wait = 0.0
             if len(dq) >= LLM_MAX_CALLS_PER_MINUTE:
                 wait = 60 - (now - dq[0]) + 0.05
+            # Input and output per minute, apart. A window with nothing in it
+            # always lets a call through (one larger than the whole budget
+            # could otherwise never go).
+            for kind, window, need in (("input", _input_windows[bucket], estimated_input),
+                                       ("output", _output_windows[bucket], _expected_output())):
+                while window and now - window[0][0] >= 60:
+                    window.popleft()
+                budget = _minute_budget(kind)
+                if budget and need and window and sum(t for _, t in window) + need > budget:
+                    wait = max(wait, 60 - (now - window[0][0]) + 0.05)
 
             budget = _token_budget(bucket)
             if budget > 0 and estimated_tokens > 0 and tq:
@@ -287,6 +350,8 @@ def _throttle(provider_label: str, estimated_tokens: int = 0) -> None:
                 dq.append(now)
                 if estimated_tokens > 0:
                     tq.append((now, estimated_tokens))
+                if estimated_input > 0:
+                    _input_windows[bucket].append((now, estimated_input))
                 return
         time.sleep(wait)
 
@@ -335,8 +400,14 @@ def _note_output_limit(exc: BaseException) -> None:
 
 
 def _fit_output_budget(max_tokens: int) -> int:
-    limit = _learned_output_limit
-    return min(max_tokens, limit) if limit else max_tokens
+    """A call asks for at most the output limit (with the throttle's headroom
+    when the limit is set or named per minute), so no single request can be
+    refused for its size: Groq refuses a request whose expected output alone
+    exceeds the minute's output limit."""
+    limit = _learned_output_limit or LLM_OUTPUT_TOKENS_PER_MINUTE or _learned_minute_limits.get("output", 0)
+    if not limit:
+        return max_tokens
+    return min(max_tokens, max(64, int(limit * LLM_RATE_HEADROOM)))
 
 
 def _is_daily_quota_error(exc: Exception) -> bool:
@@ -417,7 +488,7 @@ def _kt_llm_seconds_left() -> Optional[float]:
         return None
 
 
-def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: int = 0):
+def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: int = 0, estimated_input: int = 0):
     """Call call_fn() (a zero-arg callable making the real API request),
     retrying on rate-limit errors with the provider's own suggested delay
     (falling back to capped exponential backoff), up to LLM_RETRY_MAX_ATTEMPTS
@@ -434,7 +505,7 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: 
     """
     last_exc = None
     for attempt in range(LLM_RETRY_MAX_ATTEMPTS + 1):
-        _throttle(provider_label, estimated_tokens)
+        _throttle(provider_label, estimated_tokens, estimated_input)
         try:
             return call_fn()
         except Exception as exc:
@@ -442,6 +513,7 @@ def _call_with_rate_limit_retry(call_fn, provider_label: str, estimated_tokens: 
             # even though this attempt failed, so the throttle stops
             # over-sending for the rest of the run.
             _note_token_limit(provider_label, getattr(getattr(exc, "response", None), "headers", None))
+            _note_minute_limits(exc)
             if not _is_rate_limit_error(exc) or attempt == LLM_RETRY_MAX_ATTEMPTS:
                 raise
             if _is_daily_quota_error(exc):
@@ -592,8 +664,13 @@ class GroqProvider(LLMProvider):
         self.client = None
         if OpenAI is not None and self.api_key:
             try:
+                # max_retries=0: the SDK retried each 429 twice on its own, out
+                # of sight of the throttle and the usage counters (the app saw
+                # 18 refusals on three KTs; Groq's console showed over a
+                # hundred). _call_with_rate_limit_retry waits the delay Groq
+                # asks for and counts every retry.
                 self.client = OpenAI(api_key=self.api_key, base_url=self.base_url,
-                                     timeout=LLM_REQUEST_TIMEOUT_SECONDS)
+                                     timeout=LLM_REQUEST_TIMEOUT_SECONDS, max_retries=0)
             except Exception as exc:
                 LOGGER.warning("Groq OpenAI client initialization failed: %s", exc)
                 self.client = None
@@ -650,7 +727,8 @@ class GroqProvider(LLMProvider):
             prompt,
             max_output_tokens=max_tokens,
         )
-        response = _call_with_rate_limit_retry(_do_call, "Groq", estimated)
+        estimated_input = estimate_tokens(completion_kwargs["messages"][0]["content"], prompt)
+        response = _call_with_rate_limit_retry(_do_call, "Groq", estimated, estimated_input)
 
         # Correct the throttle's window with what the call actually cost, so a
         # systematic under-estimate can't accumulate into a 429 storm. See
@@ -661,6 +739,7 @@ class GroqProvider(LLMProvider):
                 usage = response.get("usage") or {}
             read = (lambda k: usage.get(k)) if isinstance(usage, dict) else (lambda k: getattr(usage, k, None))
             _note_usage(read("prompt_tokens"), read("completion_tokens"))
+            book_actual_tokens("Groq", estimated_input, read("prompt_tokens"), read("completion_tokens"))
             actual = read("total_tokens")
             if actual:
                 reconcile_token_usage("Groq", estimated, int(actual))

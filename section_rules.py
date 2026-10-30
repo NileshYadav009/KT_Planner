@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from dialogue import says_nothing_specific
+from dialogue import says_nothing_specific, without_label
 from fact_units import ONBOARDING_VERBS
 
 
@@ -1186,7 +1186,7 @@ _GREETING_WORD = (
 _CLOSING_ONLY = (
     # "I think that's most of it." ended a short KT and was printed under
     # Architecture as "Additional details".
-    r"(?:(?:so|okay|ok|well|right|alright|um+|uh+|and)[\s,]+)*(?:i\s+(?:think|guess|believe)\s+)?"
+    r"(?:(?:so|okay|ok|well|right|alright|all\s+right|um+|uh+|and)[\s,]+)*(?:i\s+(?:think|guess|believe)\s+)?"
     r"(?:that'?s|that\s+is)\s+(?:about\s+|pretty\s+much\s+|basically\s+)?(?:all|it|everything|most\s+of\s+it)"
     r"(?:\s+(?:we\s+had\s+time\s+for|for\s+(?:today|now)|from\s+(?:me|my\s+side)|(?:that\s+)?i\s+(?:have|had|"
     r"(?:'ve|\s+have)\s+got)(?:\s+for\s+(?:you|today))?))?(?:\s+today)?"
@@ -1195,7 +1195,7 @@ _CLOSING_ONLY = (
     # take a look." (public SRE recordings, 27 Oct: printed under Danger
     # Zones and System Overview). "Let's take a look at the metrics
     # catalog" names something and stays.
-    r"|(?:(?:so|okay|ok|well|right|alright|now|and|um+|uh+)[\s,]+)*"
+    r"|(?:(?:so|okay|ok|well|right|alright|all\s+right|now|and|um+|uh+)[\s,]+)*"
     r"(?:(?:i(?:'ll|\s+will|\s+am\s+going\s+to|'m\s+going\s+to|'m\s+gonna)|let\s+me|let'?s)\s+"
     r"(?:go\s+(?:ahead\s+and\s+)?|just\s+)?"
     r"(?:stop\s+(?:sharing|the\s+recording|recording)(?:\s+(?:my\s+|the\s+)?screen)?(?:\s+now)?"
@@ -1245,7 +1245,7 @@ def apply_rule_overrides(classified_sentences, schema_metadata: Dict[str, Dict])
     opening = True
     for idx, cs in enumerate(classified_sentences):
         text = cs.sentence.text or ""
-        if _GREETING_ONLY_RE.match(text) or says_nothing_specific(text):
+        if _GREETING_ONLY_RE.match(without_label(text)) or says_nothing_specific(text):
             # "Alright, welcome." carries no knowledge; similarity scoring
             # still gave it a section, and Sign-off rendered it. Nor does a
             # remark like "It does the job." (recorded talks, 27 Oct).

@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from coverage_topics import assess_topics
+from coverage_topics import assess_topics, names_no_topic
 
 
 def _elsewhere(section_id, sentence):
@@ -146,3 +146,70 @@ def test_people_using_the_product_is_not_access_control():
     for said in ["Only admins can access the production bucket.", "Production access goes through Okta SSO.",
                  "The service account only has read access to BigQuery."]:
         assert rx.search(said), said
+    assert not rx.search("In order to access this, every time I will have to type in intents.")
+
+
+def test_everyday_words_on_recorded_talks_do_not_cover_a_topic():
+    # Recorded talks (28 Oct): each of these covered an undiscussed section.
+    assert _discussed("danger_zones", "I don't want them.") == set()
+    assert _elsewhere("danger_zones", "You don't need to page or create an incident for that.") == []
+    assert _elsewhere("danger_zones", "It uncovers a layer that support don't get to see.") == []
+    assert "Paging and alert routing" not in _elsewhere("monitoring_observability",
+                                                        "Go to the page, you have a full documentation.")
+    assert _elsewhere("ownership_escalation", "But this is for your own good.") == []
+    assert "Paging and alert routing" not in _elsewhere("monitoring_observability",
+                                                        "I want to try it from the web page and execute it.")
+    assert "Development / test" not in _elsewhere("environments", "The dev team would involve the communication manager.")
+    assert _elsewhere("cost_optimization", "In this list, this is what I'm saving.") == []
+    # Still the topic when it is one.
+    for rule in ["Don't restart the primary during business hours.", "Do not run the migration twice.",
+                 "Never delete the old model versions."]:
+        assert _discussed("danger_zones", rule) == {"Never-do rules"}, rule
+    assert "Owning teams" in _discussed("ownership_escalation", "The data team owns the pipeline.")
+    assert "Owning teams" in _discussed("ownership_escalation", "We own the ingestion jobs.")
+    assert "Paging and alert routing" in _discussed("monitoring_observability", "A page goes to the on-call.")
+    assert "Development / test" in _discussed("environments", "Dev uses Stripe's test mode.")
+    assert _discussed("cost_optimization", "The reserved instances gave us savings of 30 percent.") == {"Cost levers"}
+
+
+def test_topics_said_the_way_written_kts_say_them():
+    # The visible KTs (30 Oct): each of these sections was discussed, and its
+    # statements matched none of its topics.
+    cases = [
+        ("first_30_day_ownership", "In your first month, do one production release with me watching.", "Week 4"),
+        ("first_30_day_ownership", "Within thirty days: lead one production release and one deduplication run.", "Week 4"),
+        ("known_bad_days", "Busy dates? The twenty-fifth of every month is payroll day.", "High-traffic periods"),
+        ("known_bad_days", "Winter storms produce the highest repair volumes.", "High-traffic periods"),
+        ("known_bad_days", "And the weeks before Chinese New Year, when volumes double.", "High-traffic periods"),
+        ("known_bad_days", "Nothing gets deployed in the three days before it.", "Change freezes"),
+        ("known_bad_days", "Avoid any change in those weeks.", "Change freezes"),
+        ("cost_optimization", "Warehouses auto-suspend after sixty seconds idle, which keeps the bill down.", "Cost levers"),
+        ("cost_optimization", "Licences, we pay for VMware per socket, so we keep Quarry on the existing hosts.", "Cost levers"),
+        ("danger_zones", "Under no circumstances should the matching tolerance setting be changed.", "Never-do rules"),
+        ("disaster_recovery", "Snowflake time travel is set to thirty days on the reporting schema.", "Backups"),
+        ("ownership_escalation", "Owned by the data science team, and revenue management are the business owners.",
+         "Owning teams"),
+        ("ownership_escalation", "If you're stuck, Omar Haddad, he's the head of data science.", "Escalation path"),
+        ("security_controls", "The admin is behind Google sign-in, only for charity staff.", "Access control"),
+        ("security_controls", "The Stripe and Postmark keys are in Heroku config vars.", "Secrets management"),
+    ]
+    for section_id, said, topic in cases:
+        assert topic in _discussed(section_id, said), (section_id, said)
+    # Not the newcomer's month, a bill sent to a customer, or a key in a table.
+    assert _elsewhere("first_30_day_ownership", "The first month of the year is quiet.") == []
+    assert _elsewhere("cost_optimization", "Customers pay for orders with a card.") == []
+    assert "Secrets management" not in _elsewhere("security_controls", "The primary keys are in the orders table.")
+
+
+def test_sentences_filed_where_they_fit_least_name_no_topic():
+    # Recorded talks (X103): one such sentence made an undiscussed section Partial.
+    for section_id, said in [("known_bad_days", "I have a variable in which I have 15 zeros."),
+                             ("cost_optimization", "But for now, it's just a dummy value."),
+                             ("first_30_day_ownership", "This shouldn't take very long, so I'm going to apply it."),
+                             ("security_controls", "I have got inside documents.")]:
+        assert names_no_topic(section_id, [said]), said
+    assert not names_no_topic("known_bad_days", ["Busy times are the TV appeal night in March."])
+    # Architecture's components are judged from what was extracted, and the
+    # System Overview's technology from its fields: never stray there.
+    assert not names_no_topic("architecture_reference", ["I run the tokenizer on each document."])
+    assert not names_no_topic("system_overview", ["Hold on for a second."])

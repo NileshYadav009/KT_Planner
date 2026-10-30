@@ -116,6 +116,29 @@ def _numbers(text: str) -> set:
     return set(_NUMBER.findall(str(text or "")))
 
 
+_UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+                                     "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * i for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_SPOKEN_NUMBER = re.compile(r"\b(" + "|".join(_TENS) + r")(?:[\s-]+(" + "|".join(list(_UNITS)[1:10]) + r"))?\b"
+                            r"|\b(" + "|".join(_UNITS) + r")\b", re.IGNORECASE)
+_SCALE = re.compile(r"\b(\d+)\s+(hundred|thousand|million)\b", re.IGNORECASE)
+
+
+def _spoken_as_digits(text: str) -> str:
+    """Numbers said in words, written as digits: "a severity one or two"
+    states the document's "a severity of 1 or 2", which was printed "no
+    source" on a recorded talk (28 Oct). Read on the transcript's side only, so
+    a number the session never said still finds no source."""
+    def number(m: "re.Match[str]") -> str:
+        if m.group(1):
+            return str(_TENS[m.group(1).lower()] + (_UNITS[m.group(2).lower()] if m.group(2) else 0))
+        return str(_UNITS[m.group(3).lower()])
+
+    text = _SPOKEN_NUMBER.sub(number, str(text or ""))
+    scale = {"hundred": 100, "thousand": 1000, "million": 1000000}
+    return _SCALE.sub(lambda m: str(int(m.group(1)) * scale[m.group(2).lower()]), text)
+
+
 _ALIASES: Optional[Tuple[Dict[str, str], Any]] = None
 
 
@@ -326,8 +349,8 @@ class _Index:
     def __init__(self, sentences: List[Dict[str, Any]], labels: Sequence[str] = (), system_name: str = ""):
         self.sentences = sentences
         canonical = [_canonical(s["quote"]) for s in sentences]
-        self.keys = [set(_content_keys(c)) for c in canonical]
-        self.numbers = [_numbers(c) for c in canonical]
+        self.keys = [set(_content_keys(c)) | set(_content_keys(_spoken_as_digits(c))) for c in canonical]
+        self.numbers = [_numbers(c) | _numbers(_spoken_as_digits(c)) for c in canonical]
         self.flat = [f" {_flat(c)} " for c in canonical]
         # A greeting or a sentence that only announces the handover says
         # nothing about the system: "Hi team, today I'm handing over our online

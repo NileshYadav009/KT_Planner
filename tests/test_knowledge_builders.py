@@ -372,6 +372,12 @@ def test_a_talk_that_never_names_its_system_is_not_titled_with_a_phrase_from_it(
         "The second one is the tags, which is called classes.",
         "And we tune it. And then we tune it again. Then we ping them through Slack and ping them through Slack."]}}
     assert _infer_system_name(coverage) == "KT Document"
+    # An ordinary word capitalised mid-sentence by speech to text, twice, and
+    # once in a naming context ("is Going"), said in lower case elsewhere.
+    coverage = {"system_overview": {"content": [
+        "For example, if your word is Going, the lemmatizer searches for go.", "Next we will Going further.",
+        "We are going to train it. Then we are going to save it. I am going to load it."]}}
+    assert _infer_system_name(coverage) == "KT Document"
     from field_populator import _extract_by_pattern
 
     field = {"id": "system_name", "label": "System Name", "type": "text"}
@@ -416,6 +422,30 @@ def test_a_value_kept_with_its_hedged_correction_still_covers_its_topic():
     result = append_coverage_matrix_section(ko, {"disaster_recovery": _cov(unit)}, schema)
     row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
     assert row["Coverage"] != "Missing", row
+
+
+def test_on_a_recording_a_section_holding_only_statements_that_name_none_of_its_topics_is_not_covered():
+    """Recorded talks (X103): "I have a variable in which I have 15 zeros."
+    filed under the Operational Calendar made it Partial, "statement(s)
+    captured, but not the expected topics". The statement stays; the section
+    is not covered and is on the follow-up list. A statement that names a
+    topic still covers it, and a written transcript keeps the section
+    Partial (each statement there is said on purpose)."""
+    stray = "I have a variable in which I have 15 zeros."
+    for said, spoken, expected in ((stray, True, "Missing"), ("Busy times are the appeal night in March.", True, "Partial"),
+                                   (stray, False, "Partial")):
+        ko = {"sections": [{"id": "known_bad_days", "title": "Operational Calendar", "fields": {},
+                            "blocks": [{"type": "paragraph", "text": said}]}], "summary": {}}
+        schema = [{"id": "known_bad_days", "title": "Operational Calendar", "fields": []}]
+        result = append_coverage_matrix_section(ko, {"known_bad_days": _cov(said)}, schema, spoken=spoken)
+        matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+        row = matrix["_coverage_rows"][0]
+        assert row["Coverage"] == expected, row
+        if expected == "Missing":
+            assert "name none of its topics" in row["Assessment"], row
+            assert "Operational Calendar" in matrix["_knowledge_gaps"], matrix["_knowledge_gaps"]
+            calendar = next(s for s in result["sections"] if s["id"] == "known_bad_days")
+            assert calendar["blocks"][0]["text"] == stray
 
 
 def test_work_still_missing_is_the_content_of_open_responsibilities_not_a_gap_in_it():

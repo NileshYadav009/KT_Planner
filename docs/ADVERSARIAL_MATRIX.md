@@ -4,14 +4,14 @@ Short KTs built to break the pipeline, one failure each, run with no LLM
 through the real pipeline to the rendered document and, where marked, the
 PDF text. The transcripts and checks are in `evaluation/matrix/cases.json`.
 Run them with `python evaluation/matrix.py LABEL`, and regenerate this page
-with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base,a22base,m9abf m9abg2`.
+with `python evaluation/matrix_report.py baseline,fix1-6,b3base,b3fix2,c6base,u_base,olp1,r_base,r06_base,s_base,a22base,m9abf,m9abg2 rec6`.
 
 - **must**: a wrong document (a lost fact, a withdrawn value shown as
   current, a guess shown as fact, a changed number or name).
 - **should**: behaviour the product does not promise yet.
 
 Before: each case's first run, before any fix for it (run named in
-brackets). After: run `m9abg2`.
+brackets). After: run `rec6`.
 
 Some first-run failures were the harness's, not the product's, and were
 corrected: D02 expected a sentence the document shows as an ownership row
@@ -119,13 +119,16 @@ code before it (run s_base).
 | A22 | A correction / L long range | 'I said earlier X. That's wrong, it's Y now': a day, not a number, corrected much later | shows “Wednesdays”; never shows alone “Tuesdays” (without “Wednesdays”); in “Wednesdays” in deployment_and_rollback, known_bad_days (should) | 1/2 must, 1/1 should (a22base) | 2/2 must, 1/1 should | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
 | A23 | A correction | A day corrected in the next sentence with nothing else said: 'Sorry, Fridays.' | shows “Fridays”; never shows alone “Thursdays” (without “Fridays”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_day_of_the_week_is_corrected_like_a_number |
 | A24 | A correction / L long range | 'Earlier I said X; that's not right': the earlier claim restated, not named by topic | shows “it has five”; never shows alone “three nodes” (without “five”) | 1/2 must (a22base) | 2/2 must | tests/test_devops_transcription.py::test_a_correction_that_says_again_what_it_withdraws_takes_the_earlier_sentence_along |
-| L04 | L noisy | A document read aloud: its numbered headings are not printed as facts | the job completes; shows “rerun it from the admin page”; never shows “^\W*section\s+\w+\W+(?:architecture|known issues|ownership)\W*$”; in “nightly import timing out” in common_failures (should) | not run () | 3/3 must, 1/1 should | tests/test_dialogue.py::test_a_heading_read_aloud_is_not_a_fact |
-| B11 | B ambiguity | A change-control rule that names the team who approves | shows “require approval from the network team”; in “require approval from the network team” in deployment_and_rollback, danger_zones (should) | not run () | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
-| B12 | B ambiguity | Scaling up ahead of a known busy event is calendar knowledge | shows “scale the web dynos to twenty”; in “scale the web dynos to twenty” in known_bad_days, common_failures (should) | not run () | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
-| E05 | E multi-fact | A deployment chain said in one sentence, one step per tool | shows “ArgoCD deploys them to EKS”; in order “GitHub Actions runs the tests / Amazon ECR stores the images / and ArgoCD deploys them to EKS”; in “Amazon ECR stores the images” in deployment_and_rollback (should) | not run () | 2/2 must, 1/1 should | tests/test_deployment_steps.py::test_a_chain_of_steps_in_one_sentence_is_one_step_each_word_for_word |
+| L04 | L noisy | A document read aloud: its numbered headings are not printed as facts | the job completes; shows “rerun it from the admin page”; never shows “^\W*section\s+\w+\W+(?:architecture|known issues|ownership)\W*$”; in “nightly import timing out” in common_failures (should) | 3/3 must, 1/1 should (m9abg2) | 3/3 must, 1/1 should | tests/test_dialogue.py::test_a_heading_read_aloud_is_not_a_fact |
+| B11 | B ambiguity | A change-control rule that names the team who approves | shows “require approval from the network team”; in “require approval from the network team” in deployment_and_rollback, danger_zones (should) | 1/1 must, 1/1 should (m9abg2) | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
+| B12 | B ambiguity | Scaling up ahead of a known busy event is calendar knowledge | shows “scale the web dynos to twenty”; in “scale the web dynos to twenty” in known_bad_days, common_failures (should) | 1/1 must, 1/1 should (m9abg2) | 1/1 must, 1/1 should | tests/test_section_rules.py::test_change_control_and_getting_ready_for_a_busy_event |
+| E05 | E multi-fact | A deployment chain said in one sentence, one step per tool | shows “ArgoCD deploys them to EKS”; in order “GitHub Actions runs the tests / Amazon ECR stores the images / and ArgoCD deploys them to EKS”; in “Amazon ECR stores the images” in deployment_and_rollback (should) | 2/2 must, 1/1 should (m9abg2) | 2/2 must, 1/1 should | tests/test_deployment_steps.py::test_a_chain_of_steps_in_one_sentence_is_one_step_each_word_for_word |
+| L05 | L noisy | A recorded talk: presenter asides and empty remarks are not facts, and no fragment is the title | the job completes; title names “KT Document”; never shows “share my screen”; never shows “thoughts from your side”; never shows “it does the job”; never shows “stop sharing”; shows “page the engineer on call”; in “page the engineer on call” in monitoring_observability, ownership_escalation (should) | not run () | 7/7 must, 1/1 should | tests/test_dialogue.py::test_a_remark_that_says_nothing_specific_is_not_a_fact |
+| L06 | L noisy | A recorded code walkthrough: everyday words do not cover sections nobody discussed | the job completes; coverage of “danger_zones” is not Strong; coverage of “security_controls” is not Strong; coverage of “ownership_escalation” is not Strong; coverage of “cost_optimization” is not Strong; coverage of “security_controls” is Missing (should); coverage of “ownership_escalation” is Missing (should); coverage of “cost_optimization” is Missing/Not discussed (should); the Not Covered list matches the coverage matrix | not run () | 6/6 must, 2/3 should | tests/test_coverage_topics.py::test_everyday_words_on_recorded_talks_do_not_cover_a_topic |
 
 ## Still failing after the fixes
 
 - **D04** (should) flagged “the service is public / only private subnets”: []
 - **B09** (should) in_section “does the deployment from github”: ["system_overview"]
 - **T01** (should) absent_re “\b(how do i deploy it|what breaks most often|who owns it|how many labels a day)\?”: ["system_overview: How many labels a day? About twelve thousand a day."]
+- **L06** (should) coverage “ownership_escalation”: "Partial"

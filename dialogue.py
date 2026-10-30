@@ -435,6 +435,11 @@ _PLACE_WORDS = frozenset({"premises", "prem", "on-prem", "on-premises", "cloud",
 _LABEL_PREFIX_RE = re.compile(r"^[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s*")
 
 
+def without_label(text: str) -> str:
+    """The sentence without a leading speaker label ("Dana: All right, ...")."""
+    return _LABEL_PREFIX_RE.sub("", (text or "").strip())
+
+
 def says_nothing_specific(text: str) -> bool:
     """A remark with at most one word of its own and no tool, figure, name or
     known term: "Thoughts from your side?", "It does the job.", "This tool is
@@ -443,12 +448,26 @@ def says_nothing_specific(text: str) -> bool:
     facts in the visible answer keys, none is a sentence like this."""
     from devops_transcription import get_known_terms
 
-    body = _LABEL_PREFIX_RE.sub("", (text or "").strip())
+    body = without_label(text)
+    # A question kept with the sentence after it is judged sentence by
+    # sentence: "Thoughts from your side? It does the job." (matrix L05).
+    parts = [p for p in re.split(r"(?<=[.!?])\s+", body) if p.strip()]
+    if len(parts) > 1:
+        return all(says_nothing_specific(p) for p in parts)
     # A figure, or a negation: "We don't have that." states a gap.
     if not body or re.search(r"\d|\b(?:no|not|never|none|nobody|nothing|nope)\b|n't\b", body, re.IGNORECASE):
         return False
     words = re.findall(r"[A-Za-z][\w'-]*", body)
     if any(w[:1].isupper() and w != "I" for w in words[1:]):
+        return False
+    # A line that names a topic leads what follows: in a question-and-answer
+    # KT without punctuation "and my first week." and "who owns what." are the
+    # receiver's questions; dropped, First 30-Day Ownership was reported
+    # Missing (dev d05, noisy copy).
+    from section_rules import _segment_topic_of, topic_anchor
+
+    anchor = topic_anchor(body)
+    if (anchor and anchor[0] == "heading") or any(_segment_topic_of(w.lower()) for w in words):
         return False
     own = [w for w in (x.lower() for x in words) if w not in _NOTHING_SPECIFIC_WORDS and len(w) > 1]
     if len(own) > 1:

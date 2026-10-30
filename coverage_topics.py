@@ -14,7 +14,7 @@ with no pattern can only be satisfied by its fields.
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from section_rules import RISING_LOAD_PERIOD
+from section_rules import ONBOARDING_MONTH_RX, RISING_LOAD_PERIOD
 
 _I = re.IGNORECASE
 
@@ -50,7 +50,10 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
     "environments": [
         ("Production", ("production_notes",), r"\bprod(?:uction)?\b"),
         ("Staging / pre-production", ("staging_notes",), r"\b(?:staging|pre-?prod\w*|uat)\b"),
-        ("Development / test", ("non_production_notes",), r"\b(?:dev|development|test|qa|sandbox|non-?prod\w*)\b"),
+        # An environment, not the people: "the dev team would involve the
+        # communication manager" covered it on a recorded talk.
+        ("Development / test", ("non_production_notes",),
+         r"\b(?:dev(?!\s+teams?\b)|development(?!\s+teams?\b)|test|qa|sandbox|non-?prod\w*)\b"),
         # Two environments set against each other state a difference without
         # the word: "We have three replicas in staging, but production runs
         # five replicas" was followed by "not discussed: Differences between
@@ -66,13 +69,19 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:datadog|grafana|prometheus|cloudwatch|new\s+relic|splunk|azure\s+monitor|application\s+insights|"
          r"cloud\s+monitoring|dynatrace|kibana|opensearch|elk|monitoring\s+tool)\b"),
         ("Key alerts and dashboards", ("first_response_steps",), r"\b(?:alert\w*|dashboards?|thresholds?|slos?|slis?)\b"),
-        ("Paging and alert routing", ("alert_routing",), r"\b(?:pages?|paging|pagerduty|opsgenie|on-?call|notif\w*)\b"),
+        # A page sent, not a page read: "I want to try it from the web page",
+        # "Go to the page, you have a full documentation".
+        ("Paging and alert routing", ("alert_routing",),
+         r"\b(?:(?<!web\s)(?<!home\s)(?<!landing\s)(?<!login\s)(?<!wiki\s)(?<!status\s)(?<!settings\s)(?<!next\s)"
+         r"(?<!go\sto\sthe\s)(?<!on\sthe\s)(?<!open\sthe\s)pages?(?!\s+(?:of|number)\b)|paging|pagerduty|opsgenie|"
+         r"on-?call|notif\w*)\b"),
     ],
     "disaster_recovery": [
         ("RTO", ("rto_metric",), r"\brto\b|\brecovery\s+time\b"),
         ("RPO", ("rpo_metric",), r"\brpo\b|\brecovery\s+point\b"),
         ("Backups", ("rpo_steps",),
-         r"\bbackups?\b|\bback(?:ed|s)?\s+up\b|\bsnapshots?\b|\bpoint[\s-]in[\s-]time\b|\bretain\w*\b|\bretention\b"),
+         r"\bbackups?\b|\bback(?:ed|s)?\s+up\b|\bsnapshots?\b|\bpoint[\s-]in[\s-]time\b|\bretain\w*\b|\bretention\b"
+         r"|\btime\s+travel\b|\bversioning\b"),
         # A standby copy, not any replica: "production runs five replicas"
         # (pods) covered failover (a user's KT, 23 Oct).
         ("Failover / standby", ("rto_steps",),
@@ -91,14 +100,23 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:key\s+vault|vault|kms|secrets?\s+manager|secret\s+manager)\b"
          r"|\b(?:secrets?|credentials?|passwords?|api\s+keys?)\s+(?:are\s+|is\s+)?(?:all\s+)?(?:stored|kept|managed|"
          r"rotated|held|injected|loaded|pulled|read|fetched|live|lives|come|comes)\b"
-         r"|\b(?:stor\w*|keep\w*|manag\w*|rotat\w*)\s+(?:the\s+|all\s+|our\s+)?(?:secrets?|credentials?)\b"),
+         r"|\b(?:stor\w*|keep\w*|manag\w*|rotat\w*)\s+(?:the\s+|all\s+|our\s+)?(?:secrets?|credentials?)\b"
+         # "The Stripe and Postmark keys are in Heroku config vars."
+         r"|\b(?:keys|tokens|secrets?|credentials?|passwords?)\s+(?:are|is)\s+(?:all\s+)?(?:kept\s+|stored\s+)?in\s+"
+         r"(?:the\s+)?(?:[\w-]+\s+){0,2}(?:config\w*|settings|vars|variables|env\w*|parameter\s+store|ssm|vault)\b"),
         # Not people using the product: "Students access the React application
         # through CloudFront" made Security "came up in passing" (a user's KT,
         # 25 Oct). "Only admins can access the bucket" still counts.
         ("Access control", (),
+         # Nor reaching something to use it: "In order to access this, every
+         # time I type in intents" (a recorded code walkthrough).
          r"\b(?:(?<!users\s)(?<!students\s)(?<!customers\s)(?<!clients\s)(?<!patients\s)(?<!people\s)"
-         r"(?<!visitors\s)(?<!members\s)(?<!learners\s)(?<!shoppers\s)(?<!buyers\s)access|iam|rbac|"
-         r"least\s+privilege|permissions?|service\s+accounts?|workload\s+identity|sso)\b"),
+         r"(?<!visitors\s)(?<!members\s)(?<!learners\s)(?<!shoppers\s)(?<!buyers\s)(?<!order\sto\s)(?<!how\sto\s)"
+         r"access|iam|rbac|"
+         r"least\s+privilege|permissions?|service\s+accounts?|workload\s+identity|sso)\b"
+         # "The admin is behind Google sign-in, only for charity staff."
+         r"|\bbehind\s+(?:[\w-]+\s+){0,2}?(?:sign-?in|log-?in|sso|vpn|okta|auth\w*|identity-aware\s+proxy)\b"
+         r"|\b(?:google|microsoft|okta|github|azure\s+ad|entra)\s+(?:sign-?in|log-?in)\b"),
         ("Security scanning", ("security_scan_config",),
          r"\b(?:scan\w*|trivy|snyk|sonarqube|dependabot|checkov|vulnerab\w*)\b"),
     ],
@@ -149,7 +167,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:peak\s+(?:periods?|times?|seasons?|hours?|days?|weeks?|months?|traffic|load|usage)|"
          r"(?:is|are|was|were)\s+(?:the\s+|our\s+)?peak|the\s+peak\s+(?:is|was)|busiest|black\s+friday|(?:flash|summer|winter|holiday|seasonal|big)\s+sales?|"
          r"sales?\s+(?:events?|periods?|seasons?|days?|campaigns?)|holiday\w*|season\w*|"
-         r"(?:high|peak)\s+traffic|traffic\s+(?:peaks?|spikes?)|market\s+open|volatility)\b|" + RISING_LOAD_PERIOD),
+         r"(?:high|peak)\s+traffic|traffic\s+(?:peaks?|spikes?)|market\s+open|volatility|"
+         # "Busy dates? The twenty-fifth ...", "When are the bad days? Monday
+         # mornings ...", "Winter storms produce the highest repair volumes",
+         # "the weeks before Chinese New Year, when volumes double".
+         r"busy\s+(?:times?|dates?|days?|periods?|weeks?|months?|seasons?)|bad\s+days|"
+         r"(?:highest|biggest|heaviest|largest)\s+(?:[\w-]+\s+)?(?:volumes?|loads?|traffic)|"
+         r"volumes?\s+(?:doubles?|triples?|spikes?|jumps?)|doubles\s+the\s+(?:number|volume))\b|" + RISING_LOAD_PERIOD),
         # A window that recurs, not a deadline: "By the end of the month you
         # should be doing the releases" (an onboarding milestone) marked an
         # undiscussed calendar as covered under First 30 Days.
@@ -159,15 +183,24 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\bend\s+of\s+(?:the\s+|every\s+|each\s+)?month\b|\bdays\s+of\s+the\s+month\b"),
         # "Avoid production deployments during ...": a word may sit between.
         ("Change freezes", ("deployment_blackout_times",),
-         r"\b(?:avoid\s+(?:\w+\s+)?(?:deploying|deployments?|releasing|releases?|changes)|no\s+(?:changes|deploys?|deployments)|"
+         r"\b(?:avoid\s+(?:\w+\s+)?(?:deploying|deployments?|releasing|releases?|changes?)|no\s+(?:changes|deploys?|deployments)|"
+         r"nothing\s+(?:gets\s+|is\s+)?(?:deployed|released|changed)|"
          r"freeze|blackout|never\s+deploy|don't\s+deploy|do\s+not\s+deploy)\b"),
     ],
     "danger_zones": [
+        # A rule, not a want or a permission: on recorded talks "I don't want
+        # them" made Danger Zones covered well, and "You don't need to page
+        # or create an incident for that" mentioned it.
         ("Never-do rules", (),
-         r"\b(?:never|do\s+not|don't|must\s+not|avoid|danger\w*|careful|risky|do\s+not\s+touch|sensitive)\b"),
+         r"\b(?:never|(?<!\bi\s)(?:do\s+not|don't)(?!\s+(?:need|have|want|know|think|see|remember|mind|care|"
+         r"understand|like|expect|worry|believe|recall|really|actually|usually|necessarily|even|just|mean|get)\b)|"
+         r"must\s+not|avoid|danger\w*|careful|risky|do\s+not\s+touch|sensitive|under\s+no\s+circumstances)\b"),
     ],
     "ownership_escalation": [
-        ("Owning teams", ("application_ownership", "infrastructure_ownership"), r"\bowns?\b|\bresponsible\s+for\b"),
+        # Owning, not "for your own good" (a recorded talk).
+        ("Owning teams", ("application_ownership", "infrastructure_ownership"),
+         r"\bowns\b|(?<!\bmy\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bher\s)(?<!\bits\s)(?<!\bour\s)(?<!\btheir\s)\bown\b"
+         r"|\bresponsible\s+for\b|\bowned\s+by\b|\b(?:business|service|product|system|technical|application)\s+owners?\b"),
         # Said without the word too: "if they do not answer in fifteen
         # minutes, call Maria, the engineering manager" was reported as an
         # escalation path not discussed, below that very sentence.
@@ -177,7 +210,9 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"doesn'?t|don'?t|did\s+not|didn'?t|fails?\s+to|can'?t|cannot)|nobody|no\s+one|no-one)\s+"
          r"(?:answer|respond|reply|pick\s+up|acknowledge|ack)s?\b|"
          r"\b(?:call|contact|ring)(?!\s+cent(?:re|er)\b)\s+(?:the\s+)?(?:[\w'-]+,?\s+){0,4}?"
-         r"(?:manager|lead|head\s+of\s+[\w-]+|director|duty\s+manager)\b"),
+         r"(?:manager|lead|head\s+of\s+[\w-]+|director|duty\s+manager)\b|"
+         # "If you're stuck, Omar Haddad, he's the head of data science."
+         r"\bif\s+you(?:'re|\s+are|\s+get)\s+stuck\b"),
         ("On-call tool", ("oncall_tool",), r"\b(?:pagerduty|opsgenie|on-?call)\b"),
     ],
     "first_30_day_ownership": [
@@ -192,7 +227,10 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         # covered Week 4 (a user's KT, 23 Oct).
         ("Week 4", ("week4",),
          r"\b(?:fourth\s+week|(?:in|during|by)\s+(?:the\s+|your\s+)?last\s+week(?!\s+of\b)|week\s+(?:four|4)|"
-         r"end\s+of\s+the\s+(?:first\s+)?month|day\s+30)\b"),
+         r"end\s+of\s+the\s+(?:first\s+)?month|day\s+30)\b"
+         # The month's goal, said for the month as a whole: "In your first
+         # month, do one production release with me watching."
+         r"|" + ONBOARDING_MONTH_RX),
     ],
     "open_responsibilities": [
         ("Open work", ("open_tasks",),
@@ -214,13 +252,18 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         # Spending, saving, spot and reserved count with money or capacity
         # beside them: on recorded talks "we don't have to spend that time
         # finding the root cause" made Cost Optimization covered, and "I save
-        # everything in the .env file" partly covered.
+        # everything in the .env file" (and "this is what I'm saving") partly
+        # covered.
         ("Cost levers", ("levers",),
-         r"\b(?:cost\w*|savings?|budget\w*"
+         r"\b(?:cost\w*|savings\b|budget\w*"
          r"|spend(?:s|ing)?\b(?!\s+(?:\w+\s+){0,3}?(?:time|effort|hours?|minutes?|days?|weeks?|cycles?)\b)"
          r"|sav(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}?(?:money|costs?|dollars?|on\b|\$|\d)"
          r"|scale\w*\s+(?:down|to\s+zero)|spot\s+(?:instances?|vms?|nodes?|capacity|pricing)"
-         r"|reserved\s+(?:instances?|capacity|nodes?|pricing))"),
+         r"|reserved\s+(?:instances?|capacity|nodes?|pricing)"
+         # "... auto-suspend after sixty seconds idle, which keeps the bill
+         # down"; "Licences, we pay for VMware per socket, so ...".
+         r"|auto-?suspend\w*|(?:keeps?|kept|keeping|cuts?|cutting|reduc\w*|lower\w*)\s+(?:the\s+|our\s+)?bill\b"
+         r"|\bwe\s+pay\s+(?:for|per)\b)"),
     ],
 }
 
@@ -237,6 +280,24 @@ GAPS_ARE_CONTENT_SECTIONS = {"open_responsibilities": "Open work"}
 
 _COMPILED = {sid: [(label, fields, re.compile(rx, _I) if rx else None) for label, fields, rx in topics]
              for sid, topics in SECTION_TOPICS.items()}
+
+# Architecture Reference's main topic, its components and data flow, is
+# judged from the components found (knowledge_builder adds it), not from
+# words: its statements are its content though they name neither a link nor
+# a review date.
+_JUDGED_BY_STRUCTURE = {"architecture_reference"}
+
+
+def names_no_topic(section_id: str, texts: Sequence[str]) -> bool:
+    """`texts`, filed under this section, name none of its topics: what a
+    recording leaves where it fits least ("I have a variable in which I have
+    15 zeros." under the Operational Calendar), not the section discussed.
+    One such sentence made an undiscussed section Partial (X103). Only for
+    sections whose every topic has an evidence pattern."""
+    topics = _COMPILED.get(section_id)
+    if not topics or section_id in _JUDGED_BY_STRUCTURE or any(rx is None for _l, _f, rx in topics):
+        return False
+    return not any(rx.search(t) for _l, _f, rx in topics if rx for t in texts)
 
 # A topic stated under another section counts only when that sentence names
 # the topic's subject. Inside its own section the subject is understood ("Only

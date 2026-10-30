@@ -114,6 +114,54 @@ def _clear_throttle_state():
     lp._call_timestamps.clear()
     lp._token_timestamps.clear()
     lp._learned_token_limits.clear()
+    lp._input_windows.clear()
+    lp._output_windows.clear()
+    lp._learned_minute_limits.clear()
+    lp._output_seen.update(calls=0, tokens=0)
+
+
+def test_an_input_limit_named_in_a_refusal_paces_the_next_calls(monkeypatch):
+    """Groq's on_demand tier refused three recorded KTs on input tokens per
+    minute (27 Oct): the limit it names is kept and calls wait under it."""
+    monkeypatch.setattr(lp, "LLM_MAX_CALLS_PER_MINUTE", 100)
+    monkeypatch.setattr(lp, "LLM_INPUT_TOKENS_PER_MINUTE", 0)
+    _clear_throttle_state()
+    clock = _patched_clock(monkeypatch)
+    lp._note_minute_limits(Exception(
+        "Error code: 429 - Rate limit reached for model `qwen/qwen3.8-27b` on input tokens per minute "
+        "(ITPM): Limit 7000, Used 6990, Requested 253. Please try again in 2.08s."))
+
+    lp._throttle("Groq", estimated_input=2400)
+    lp._throttle("Groq", estimated_input=2400)
+    assert clock.sleeps == []          # 4,800 of 6,300 (90% of 7,000)
+    lp._throttle("Groq", estimated_input=2400)
+    assert len(clock.sleeps) == 1
+
+
+def test_real_output_counts_against_the_output_limit(monkeypatch):
+    monkeypatch.setattr(lp, "LLM_MAX_CALLS_PER_MINUTE", 100)
+    monkeypatch.setattr(lp, "LLM_OUTPUT_TOKENS_PER_MINUTE", 1000)
+    _clear_throttle_state()
+    clock = _patched_clock(monkeypatch)
+
+    lp._throttle("Groq", estimated_input=100)
+    lp.book_actual_tokens("Groq", 100, 100, 800)
+    # The next call is expected to write about as much: 800 + 800 > 900.
+    lp._throttle("Groq", estimated_input=100)
+    assert len(clock.sleeps) == 1
+    # A known output limit also caps what a call asks for, with the headroom.
+    assert lp._fit_output_budget(2048) == 900
+    assert lp._fit_output_budget(256) == 256
+
+
+def test_the_groq_client_does_not_retry_out_of_sight(monkeypatch):
+    """The OpenAI SDK retried each 429 twice by default, unseen by the throttle
+    and the counters (Groq's console showed many times the 429s the app logged)."""
+    monkeypatch.setattr(lp, "GROQ_API_KEY", "test-key-not-real")
+    provider = lp.GroqProvider()
+    if provider.client is None:
+        pytest.skip("OpenAI SDK not installed")
+    assert provider.client.max_retries == 0
 
 
 def test_token_throttle_is_inert_when_no_budget_is_known(monkeypatch):
@@ -471,7 +519,8 @@ def test_a_request_over_the_output_per_minute_limit_is_resent_within_it(monkeypa
     assert provider.generate("p", max_output_tokens=2048) == "ok"
     assert provider.generate("p", max_output_tokens=2048) == "ok"   # later calls ask within it at once
     assert provider.generate("p", max_output_tokens=20) == "ok"     # smaller asks are unchanged
-    assert asked == [2048, 1000, 1000, 20]
+    # Within the limit less the throttle's headroom (LLM_RATE_HEADROOM, 0.9).
+    assert asked == [2048, 900, 900, 20]
 
 
 class _FakeResponse:

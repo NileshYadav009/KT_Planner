@@ -1231,6 +1231,13 @@ _BEFORE_FIELD_RE = re.compile(r"(?:^|[\s_])(?:pre[-_\s]|before\b|prior\b)", re.I
 _AFTER_FAILURE_RE = re.compile(
     r"^\W*(?:(?:and|so|also|but)\s+)?(?:if|when|whenever|once|after)\b[^.;]*?\b(?:fail\w*|goes?\s+wrong|went\s+wrong|"
     r"break\w*|broke|crash\w*|errors?\s+out|is\s+down|goes?\s+down|misbehav\w*)\b", re.IGNORECASE)
+# A difference between environments names one: on recorded talks "It will
+# manifest in different ways." and "We do have some examples here where we've
+# changed the Apdex." were the Known differences, and Environments was covered.
+_NEEDS_AN_ENVIRONMENT = {"known_differences"}
+_ENVIRONMENT_NAMED_RE = re.compile(
+    r"\b(?:prod(?:uction)?|staging|dev(?:elopment)?|test|qa|uat|pre-?prod\w*|sandbox|non-?prod\w*|environments?)\b",
+    re.IGNORECASE)
 
 
 def _extract_by_semantic(
@@ -1271,6 +1278,8 @@ def _extract_by_semantic_scored(
         names_own = field_topic_pattern(field.get("id", "")) or re.compile(
             rf"(?<![\w-]){re.escape(own_identity_word)}(?![\w-])", re.IGNORECASE)
         sentences = [s for s in sentences if names_own.search(s)]
+    if field.get("id") in _NEEDS_AN_ENVIRONMENT:
+        sentences = [s for s in sentences if _ENVIRONMENT_NAMED_RE.search(s)]
 
     if _BEFORE_FIELD_RE.search(f"{field.get('id', '')} {field.get('label', '')}"):
         # What to do once something has failed is not what is checked before

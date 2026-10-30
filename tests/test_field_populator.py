@@ -370,6 +370,11 @@ def test_an_environment_row_needs_a_sentence_that_names_the_environment():
     # A name the coverage topic accepts for staging still qualifies.
     assert _extract_by_semantic(field, ["Staging characteristics: UAT runs on a single node."], model=None,
                                 own_identity_word="staging", other_identity_words=others) is not None
+    # And a difference between environments names one (recorded talks, 28 Oct).
+    field = {"id": "known_differences", "label": "Known differences / limitations", "type": "text"}
+    assert _extract_by_semantic(field, ["It will manifest in different ways."], model=None) is None
+    assert _extract_by_semantic(field, ["The known difference is that staging has smaller instances."],
+                                model=None) is not None
 
 
 def test_a_severity_level_is_not_a_technology():

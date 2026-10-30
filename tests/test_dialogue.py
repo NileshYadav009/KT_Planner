@@ -332,6 +332,9 @@ def test_a_heading_read_aloud_is_not_a_fact(said, heading):
     ("This tool is very.", True),
     ("And for sure, we will do that.", True),
     ("Yes.", True),
+    # A question kept with the sentence after it (matrix L05).
+    ("Thoughts from your side? It does the job.", True),
+    ("How many a day? About twelve thousand a day.", False),
     # Short facts in the answer keys stay: a figure, a known term, a place,
     # a negation, a name, an instruction.
     ("RTO is four hours.", False),

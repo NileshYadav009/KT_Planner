@@ -2,7 +2,7 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9abg is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abi is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -32,17 +32,26 @@ third (b08-b11): 466/501, 93.0% (§9abd; 441/501 before; unchanged by §9abe to 
 With Groq's section check, 93/95, 110/114, 125/132 and 154/160: 482/501, 96.2%
 (§9abd; 321/341 on the first three before). On the 36 visible KTs as speech to
 text without punctuation (`evaluation/noisy_copies.py`), 1057/1085 (97.4%), with
-1 discussed section reported Missing (§9abf, unchanged by §9abg; 1024/1085 and 13 before §9abe,
-1048/1085 before the punctuation model).
+1 discussed section reported Missing (§9abf, unchanged by §9abg and §9abh; 1024/1085 and 13 before §9abe,
+1048/1085 before the punctuation model). On real recordings (six public meetings, Whisper, keys from
+captions; harness in `../online_kts`, outside the repo) it is far lower: without an LLM 37/60 on the
+four worked on before §9abh, 39/60 after (undiscussed sections shown covered 20 to 18, "covered well" 4 to 0),
+and 48/63 on the two held back both times (aggregate);
+with Groq 39/49 on three before, and on the first paced
+night 34/38 on two (one held back), 2 refusals instead of 18 (§9abh). On six DevOps recordings added
+on 29 Oct (two held back), 50/64 and 26/35 without an LLM; every DevOps recording together 73%, the
+off-topic ones 72% (the four of §9abh read 38/60 after X105). Undiscussed sections shown covered on the
+twelve recordings: 38 to 8, once a recording's section whose statements name none of its topics is not
+covered (X103, recordings only; §9abi).
 
 ## Pipeline map (a pasted transcript; a recording first goes through `pipeline.transcribe_recording`)
 
 | Stage | Code |
 |---|---|
 | Upload, queue | `api/routes.py` (a paste is cleaned on a thread, `_paste_task`; one that needs the punctuation model is queued as it came and cleaned by the worker, `pipeline.clean_queued_paste`), `job_queue.py`, `worker.py` |
-| Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` (a run of 120+ words with almost no punctuation first gets sentence ends from a small model: `punctuation.restore_punctuation`, `PUNCTUATION_MODEL=0` turns it off) |
+| Clean (vocabulary, fillers) | `devops_transcription.clean_transcript` (a run of 120+ words with almost no punctuation first gets sentence ends from a small model: `punctuation.restore_punctuation`, `PUNCTUATION_MODEL=0` turns it off). A recording's Whisper pieces are cleaned one by one; a piece Whisper began in lower case carries on its sentence (`close_segment_sentences`) |
 | Speakers and roles (a conversation) | `captions.to_turns` (a Teams or Zoom WebVTT/SRT file as "Name:" turns), `speaker_roles.turn_segments` (pasted "Name:" turns), `detect_roles`, `apply_roles` (in `segment_sentences`): facts from the giver; the receiver's words only where the giver confirmed them. Speakers are named afterwards with `POST /kt/{id}/speakers` (`sessions.rename_speakers`) |
-| Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`, `withdraws_said_before`; a long unpunctuated run cut by `fact_units.even_pieces`), `fact_units.split_into_facts` (a later onboarding time frame opens a fact: `_time_frame_pieces`). A heading read aloud names the topic and is then dropped (`dialogue.is_heading_only`) |
+| Sentences, facts | `context_mapper.segment_sentences` (a correcting sentence kept whole with what it corrects: `replaces_value_before`, `points_back_to`, `withdraws_said_before`; a long unpunctuated run cut by `fact_units.even_pieces`), `fact_units.split_into_facts` (a later onboarding time frame opens a fact: `_time_frame_pieces`). A heading read aloud names the topic and is then dropped (`dialogue.is_heading_only`), and so are a presenter's asides and remarks that say nothing specific (`section_rules._GREETING_ONLY_RE`, `dialogue.says_nothing_specific`) |
 | Self-corrections, copy edit | `devops_transcription.resolve_self_corrections`, `merge_spoken_corrections`, `copyedit.copyedit_sentences` |
 | Classify | `context_mapper.ContextClassifier._score_sentence_candidates` (bge-large, examples, hints, GLiNER, topic segments, and the learned section model `section_model.npz`: `SECTION_MODEL_WEIGHT` x its probability; rebuilt by `scripts/build_section_model.py`). Each text is embedded once per process (`embedding_memo.py`, shared with field population) and GLiNER runs on a KT's facts in batches (`EntityExtractor.prefetch`) |
 | Close calls to the LLM | `ContextClassifier.verify_in_batches` |
@@ -110,7 +119,7 @@ six e2e KTs, with no LLM and from the recorded Groq answers. `--report BEFORE
 AFTER` rewrites `docs/QUALITY_GATES.md`. A failing gate is a defect, never a
 reason to loosen an answer key.
 
-Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (80 short KTs,
+Adversarial matrix: `python evaluation/matrix.py LABEL [IDS]` (89 short KTs,
 about 3 min). Each case targets one failure (corrections, hedges,
 contradictions, numbers, order, noise, PDF text) with exact checks on the
 rendered document. A new failure gets a case there first, then a unit test.
@@ -250,3 +259,15 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X93 | Low | Cleaning grew with the square of the text (each phrase correction rewrote the whole text once per match): 30.6 s for 150,000 characters | Fixed, §9abg: 12.9 s, the same output on every visible transcript |
 | X94 | Low | The job store and sign-in left each SQLite connection open until the garbage collector freed it | Fixed, §9abg (`job_store.ClosingConnection`) |
 | X95 | Med | In the Docker image the approved vocabulary (`glossary.json`) is written to `/app`, not the data volume: approvals are lost when the container is recreated, and backups do not hold them | Open |
+| X96 | High | Recorded speech (public GitLab Zoom meetings and a project KT, 27 Oct) was cut at pauses into fragments filed as facts ("... and increase. Our signal to noise ratio"): `close_segment_sentences` read the capital the cleaner gives each Whisper piece as a new sentence | Fixed, §9abh: a piece Whisper began in lower case carries on its sentence (its capital taken back) unless a spoken opener ("then", "so", "yeah") follows a piece that can end there; the user's console recording keeps its closes |
+| X97 | High | Every recording reported Environments "covered well": the per-environment fields were filled with sentences naming no environment ("Staging: Another example here is selectors.") | Fixed, §9abh: such a field needs a sentence naming its environment, as its coverage topic accepts it (`coverage_topics.field_topic_pattern`); "Known differences" needs a named environment ("It will manifest in different ways.") |
+| X98 | Med | Presenter asides ("I will stop sharing.", "That's all I have.") and content-free remarks ("Thoughts from your side?", "It does the job.") were facts; a 21-minute talk made 26 pages, System Overview a dumping ground | Fixed, §9abh: asides in `_GREETING_ONLY_RE`; `dialogue.says_nothing_specific` (at most one word of its own, no tool, figure, name, known term, negation, instruction or topic word), excluded with that reason in the ledger. One of 1,180 visible key facts matched before the place-word exception, none after |
+| X99 | High | All nine recording KTs were titled with speech fragments ("And", "Classes", "Biggest Service", "Because We Know That Sometimes Application"): none named its system | Fixed, §9abh: `field_populator.is_plausible_name`; "is called X" only for the system or "it"; a repeated word only in a naming context; the last-resort pattern only for a name given as ours, defined or capitalised; not a word said more often in lower case ("Going", from "if your word is Going"). Otherwise "KT Document" |
+| X100 | Med | On recordings: Cost Optimization covered from "spend that time" and "save a file"; "severity S3" listed as Storage S3; the Quick Reference's who-to-page quoted "alerts will probably page on that"; "engineer and call", "aptX"/"app decks" (Apdex), "get lab.com" | Fixed, §9abh (`coverage_topics`, `current_tool_mentions`, `_ESCALATION_CUE_RE`, gated corrections). Also: "I don't want them" / "you don't need to" (never-do rules), "your own good" (ownership), "the web page" (paging), "the dev team" (an environment), "in order to access this" (access control) |
+| X101 | Med | A speaker's personal anecdote (parenting) was printed in five sections | Open: neither classifier confidence nor vocabulary separates it from real facts without losing some (§9abh) |
+| X104 | Low | With Groq, "alerts with a severity of 1 or 2 page the engineer on-call" was "no source": the speaker said "one or two" | Fixed, §9abh (`evidence._spoken_as_digits`, transcript side only) |
+| X105 | Low | "Thoughts from your side? It does the job." (a question kept with the next sentence) and "Dana: All right, I'll just share my screen." were printed | Fixed, §9abh: judged sentence by sentence; the aside test reads past the speaker label (`dialogue.without_label`). Matrix L05 |
+| X106 | Med | The gates' recorded Groq replay misses 29 requests on the five recorded e2e KTs (the same on §9abg), so their LLM mode checks only part of the LLM path | Open: re-record (about 49k Groq tokens) needs the user's go-ahead |
+| X103 | Med | On recordings, undiscussed sections read Partial (18 on the four worked on): every sentence is filed somewhere, and one stray sentence ("I have a variable in which I have 15 zeros." under the calendar) gives a section "statement(s) captured, but not the expected topics" | Fixed on recordings, §9abi, the user's decision: on a KT transcribed from a recording (`spoken`, a timed segment), a section whose statements name none of its topics is not covered (`coverage_topics.names_no_topic`); 38 to 8 on twelve recordings, 1 discussed section Missing on those held back. Not on written transcripts (4 more false Missing on the unseen KTs). Not made: a confidence threshold (§9abh) or a section for what fits nowhere (no classifier signal separates the strays, Groq never answered NONE; §9abi) |
+| X102 | High | Groq's console showed more 429s than successes on three recorded KTs; the app logged 18: the OpenAI client retried each 429 twice unseen, four calls went out at once, and nothing paced the account's 7,000 input / 1,000 output tokens a minute | Fixed, §9abh: `max_retries=0`; input and output windows learned from refusals or set (`LLM_INPUT_TOKENS_PER_MINUTE`, `LLM_OUTPUT_TOKENS_PER_MINUTE`, `LLM_RATE_HEADROOM`); a call asks for at most the output limit less the headroom |
+| X107 | Med | 44 discussed sections on the visible KTs (20 clean, 24 noisy copies) matched none of their topics, so their rows said discussed topics were "not discussed" and put them on the follow-up list: "In your first month, do one production release", "Busy dates?", "keeps the bill down", "Under no circumstances", "Owned by", "If you're stuck, ...", "behind Google sign-in", "keys are in Heroku config vars", "time travel" | Fixed, §9abi (`coverage_topics.py`); none of the recordings' stray sentences matches. No figure moved on any set |

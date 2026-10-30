@@ -117,6 +117,9 @@ local disk (not NFS).
 | `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
 | `LLM_BATCH_CALLS` | `1` | Batches classification checks and field gap-fills (see Submitting KTs); `0` sends one call each. |
 | `LLM_MAX_CALLS_PER_KT` | `0` (no limit) | Live LLM requests one KT may send. Later requests are skipped (the KT keeps its rules-only results) and counted as skipped in the KT's LLM usage, so one long KT cannot empty a daily quota. Cache hits do not count. |
+| `LLM_INPUT_TOKENS_PER_MINUTE` | `0` (learn) | Input tokens a minute the provider allows. `0` learns it from the first refusal that names it (Groq's free plan for `qwen/qwen3.8-27b`: 7,000 on this account). |
+| `LLM_OUTPUT_TOKENS_PER_MINUTE` | `0` (learn) | Output tokens a minute (1,000 on this account). A call never asks for more than this less the headroom. |
+| `LLM_RATE_HEADROOM` | `0.9` | Share of each per-minute limit the throttle uses. The nightly recording test uses 0.85. |
 | `LLM_CACHE` | `readwrite` | `read`, `off`, or `replay`: answer only from stored responses and never send an unrecorded request (offline runs of recorded LLM output; `scripts/e2e_kts.py --llm replay`). |
 | `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to `CONTINUUM_REVIEW_WEBHOOK_URL`, naming the incoming owner. `0` turns it off. |
 | `WHISPER_MODEL` | `small` | The Whisper model. A GPU is used automatically when one is present; there `medium` or `large-v3` transcribes more accurately at a usable speed. On CPU, `medium` also needs `WHISPER_ALLOW_MEDIUM_CPU=1`. |
@@ -260,6 +263,19 @@ Groq accounts also cap output tokens per minute (1,000 on the account
 measured). A request asking for more is refused whatever is retried, so the
 provider keeps the limit Groq names in the refusal and asks within it from
 then on.
+
+Groq's free plan for `qwen/qwen3.8-27b` (console docs, 28 Oct): 30 requests and
+8,000 tokens a minute, 1,000 requests and 200,000 tokens a day. This account splits
+the minute into 7,000 input and 1,000 output tokens. The provider keeps both under
+the limit less `LLM_RATE_HEADROOM`, from the first refusal that names each or from
+`LLM_INPUT_TOKENS_PER_MINUTE` and `LLM_OUTPUT_TOKENS_PER_MINUTE`. The OpenAI client
+does not retry on its own (`max_retries=0`): it retried each 429 twice, unseen by the
+throttle and the usage counters, and on 27 Oct Groq's console showed more 429s than
+successes for three recorded KTs while the app logged 18. A recorded KT costs about
+1,900-2,800 tokens per minute of audio, so the free plan's daily tokens cover about
+70-100 minutes of recordings; a 67-minute KT alone uses most of a day and, paced, runs
+past `LLM_KT_DEADLINE_SECONDS`. `qwen/qwen3.8-27b` is a preview model, which Groq says
+may be discontinued at short notice.
 
 On 12 Oct the four end-to-end KTs (tests/e2e_kts) ran through the API on Groq
 `qwen/qwen3.8-27b` with `LLM_BATCH_CALLS=1`, `LLM_MAX_CALLS_PER_KT=40` and

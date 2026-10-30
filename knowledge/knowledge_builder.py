@@ -15,8 +15,8 @@ from component_catalog import display_name
 from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_question, is_unconfirmed,
                       says_nothing_specific, states_something,
                       states_something_before_gap,
-                      without_session_framing)
-from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics
+                      without_label, without_session_framing)
+from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics, names_no_topic
 from fact_units import fact_texts
 
 
@@ -142,7 +142,7 @@ def _is_session_pleasantry(text: str) -> bool:
     # The classifier's own opener/closer test: "That concludes the GCP data
     # platform." was dropped from the sections, then put back under
     # Additional Notes by the completeness check.
-    if _GREETING_ONLY_RE.match(stripped) or says_nothing_specific(stripped):
+    if _GREETING_ONLY_RE.match(without_label(stripped)) or says_nothing_specific(stripped):
         return True
     # "Hi everyone, today I will be handing over the AWS e-commerce platform."
     # names a technology, so the content test below kept it; it only says
@@ -249,6 +249,12 @@ def _repeated_proper_name(texts: List[str]) -> Optional[str]:
             contacted.add(word)
         counts[word] += 1
     for word, count in counts.most_common():
+        # A word said more often in lower case is an ordinary word speech to
+        # text capitalised mid-sentence: a code walkthrough was titled "Going"
+        # ("if your word is Going", "Next we will Going further"; "going" 16
+        # times). A system's own name keeps its capital.
+        if len(re.findall(rf"\b{re.escape(word.lower())}\b", text)) >= count:
+            continue
         if count >= 2 and word not in contacted and _NAMING_CUE_RE.search(text.replace(word, "\0")):
             return word
     return None
@@ -1590,6 +1596,7 @@ def append_coverage_matrix_section(
     coverage: Dict[str, Any],
     dynamic_schema: List[Dict[str, Any]],
     full_schema: Optional[List[Dict[str, Any]]] = None,
+    spoken: bool = False,
 ) -> Dict[str, Any]:
     """Reshape the pipeline's existing per-section coverage status/confidence
     (already computed before this runs — no new extraction) into a
@@ -1600,6 +1607,9 @@ def append_coverage_matrix_section(
     left out (nothing in the KT touched it) gets a row of its own, "Not
     discussed", in schema order, and a line on the follow-up list. It is not
     counted as a section not covered: it may not apply to this system.
+
+    `spoken`: the KT was transcribed from a recording. There a section whose
+    statements name none of its topics is not covered (X103).
     """
     rows: List[Dict[str, str]] = []
     row_ids: List[str] = []
@@ -1727,14 +1737,25 @@ def append_coverage_matrix_section(
             covered = [t for t in topic_states if t[1] != "missing"]
             elsewhere = [t for t in topic_states if t[1] == "elsewhere"]
             missing = [t[0] for t in topic_states if t[1] == "missing"]
-            if not covered and not (texts or sentence_count):
+            # On a recording (`spoken`), statements that name none of the
+            # section's topics were filed there for want of a better place,
+            # not said about it: one such sentence made undiscussed sections
+            # Partial (X103; 38 of them on twelve recorded talks, 8 after).
+            # The statements stay in the section; the section is not covered.
+            # Not on a written transcript, where each statement is said on
+            # purpose: there the same rule reported 4 more discussed sections
+            # Missing on the unseen KTs, worded beyond the topic patterns.
+            strays_only = spoken and not covered and bool(own_texts) and names_no_topic(section_id, texts)
+            if not covered and (not (texts or sentence_count) or strays_only):
                 bucket = "Missing"
-                assessment = "Not covered in the KT session."
+                assessment = (f"Not covered in the KT session; the {len(own_texts)} statement(s) filed here name "
+                              f"none of its topics." if strays_only else "Not covered in the KT session.")
                 gaps.append(title)
             else:
                 # A section with its own statements is at least Partial, even
-                # when none of its expected topics matched: Danger Zones that
-                # listed four danger zones was reported Missing.
+                # when none of its expected topics matched as a topic (a stated
+                # gap naming it, say): Danger Zones that listed four danger
+                # zones was reported Missing.
                 bucket = "Strong" if not missing else ("Partial" if covered or own_texts else "Missing")
                 # Topics met only in passing under other sections do not make a
                 # section covered well: Common Failures said "Not discussed as

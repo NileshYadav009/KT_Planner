@@ -84,6 +84,18 @@ WHISPER_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").strip().lower() not
 # per second of audio instead of 0.74, with 4.4% word errors instead of 6.3%.
 WHISPER_BATCHED = os.getenv("WHISPER_BATCHED", "1").strip().lower() not in ("0", "false", "no", "off")
 WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
+
+
+def whisper_hotwords() -> Optional[str]:
+    """The DevOps terms Whisper is told to expect (`devops_vocabulary.
+    WHISPER_HOTWORDS`), with a team's own from WHISPER_EXTRA_HOTWORDS;
+    WHISPER_HOTWORDS=0 turns them off."""
+    if os.getenv("WHISPER_HOTWORDS", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    from devops_vocabulary import WHISPER_HOTWORDS
+
+    extra = [t.strip() for t in os.getenv("WHISPER_EXTRA_HOTWORDS", "").split(",") if t.strip()]
+    return ", ".join(dict.fromkeys(extra + list(WHISPER_HOTWORDS))) or None
 _BATCHED_MODEL = None
 
 MODEL = None
@@ -278,6 +290,9 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     tenant_token = CURRENT_TENANT.set(tenant_id)
     policy_token = LLM_POLICY.set(llm_policy)
 
+    # A recording's Whisper segments are timed; a paste, a caption file or a
+    # pasted session is untimed (speaker_roles.turn_segments, sessions).
+    spoken = any(isinstance(seg, dict) and not seg.get("untimed") for seg in segments or [])
     # Credentials never go further than this line: not to the LLM, the
     # cache, the job store or the PDF.
     transcript, redacted = redact_secrets(transcript)
@@ -680,7 +695,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
 
         try:
             knowledge_object = append_coverage_matrix_section(knowledge_object, coverage, dynamic_schema,
-                                                              full_schema=SCHEMA)
+                                                              full_schema=SCHEMA, spoken=spoken)
         except Exception as exc:
             _stage_failed(stage_errors, "Coverage summary", exc, "The KT coverage summary could not be built.")
 
@@ -1050,6 +1065,9 @@ def transcribe_recording(job_id: str, input_path: str, media_format: Optional[st
         # 27% faster. Continuous speech transcribes identically.
         "vad_filter": WHISPER_VAD_FILTER,
     }
+    hotwords = whisper_hotwords()
+    if hotwords:
+        transcribe_kwargs["hotwords"] = hotwords
     checkpoint("Audio extraction")
     language_note = spoken_language_warning(audio_to_use)
     segments, info = _transcribe(audio_to_use, **transcribe_kwargs)
