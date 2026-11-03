@@ -87,15 +87,20 @@ WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
 
 
 def whisper_hotwords() -> Optional[str]:
-    """The DevOps terms Whisper is told to expect (`devops_vocabulary.
-    WHISPER_HOTWORDS`), with a team's own from WHISPER_EXTRA_HOTWORDS;
-    WHISPER_HOTWORDS=0 turns them off."""
-    if os.getenv("WHISPER_HOTWORDS", "1").strip().lower() in ("0", "false", "no", "off"):
-        return None
-    from devops_vocabulary import WHISPER_HOTWORDS
+    """The terms Whisper is told to expect: a team's own (WHISPER_EXTRA_HOTWORDS,
+    comma-separated), and with WHISPER_HOTWORDS=1 the built-in DevOps list
+    (`devops_vocabulary.WHISPER_HOTWORDS`). The list is off by default: on
+    recorded talks it put a few more key sentences in the transcript and spelled
+    the terms right, but the wording around them changed and 7 fewer of 98 key
+    facts on the recordings held back reached their section (74 to 67; +5 of
+    124 on those worked on). Whisper is deterministic, so that is the list's
+    doing, not chance (audit §9abi)."""
+    terms = [t.strip() for t in os.getenv("WHISPER_EXTRA_HOTWORDS", "").split(",") if t.strip()]
+    if os.getenv("WHISPER_HOTWORDS", "0").strip().lower() in ("1", "true", "yes", "on"):
+        from devops_vocabulary import WHISPER_HOTWORDS
 
-    extra = [t.strip() for t in os.getenv("WHISPER_EXTRA_HOTWORDS", "").split(",") if t.strip()]
-    return ", ".join(dict.fromkeys(extra + list(WHISPER_HOTWORDS))) or None
+        terms += list(WHISPER_HOTWORDS)
+    return ", ".join(dict.fromkeys(terms)) or None
 _BATCHED_MODEL = None
 
 MODEL = None

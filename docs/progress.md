@@ -2008,6 +2008,11 @@ Results:
   "not discussed" because of how they were said ("in your first month,
   ...", "busy dates", "keeps the bill down", "owned by", "if you're stuck,
   ask ..."). They now count.
+- **Whisper vocabulary:** tried, and off by default. Given 43 DevOps terms,
+  Whisper spelled them right ("Apdex", "RPO", "ChatOps") and heard a few more
+  key sentences, but on the recordings held back 7 fewer key facts reached
+  the right section, because the wording around them changed. A team can
+  still give Whisper its own terms (`WHISPER_EXTRA_HOTWORDS`).
 - **Nightly test:** it now runs its queue in order, one recording at a time,
   and starts nothing after 08:30. On 29 Oct it had run the two held-back
   recordings ahead of the queue.

@@ -696,12 +696,13 @@ KEEP_AS_SAID = frozenset({
 })
 
 
-# Terms Whisper is told to expect (faster-whisper's `hotwords`, put before
-# every 30-second chunk), spelled as written. Without them, on recorded talks,
-# the small model wrote "PO" for RPO and "BZ jobs" for busy jobs, and missed
-# Patroni and ChatOps (27-29 Oct). Generic tools and terms whose spelling
-# speech does not give, kept short: the prompt shares Whisper's 448-token
-# window with what it writes.
+# Terms Whisper can be told to expect (faster-whisper's `hotwords`, put
+# before every 30-second chunk), spelled as written; used with
+# WHISPER_HOTWORDS=1 (off by default: see pipeline.whisper_hotwords). Without
+# them, on recorded talks, the small model wrote "PO" for RPO and "BZ jobs"
+# for busy jobs, and missed Patroni and ChatOps (27-29 Oct). Generic tools and
+# terms whose spelling speech does not give, kept short: the prompt shares
+# Whisper's 448-token window with what it writes.
 WHISPER_HOTWORDS = (
     "Kubernetes", "kubectl", "Helm", "Terraform", "Argo CD", "CI/CD", "Prometheus", "Grafana", "Alertmanager",
     "PagerDuty", "Opsgenie", "Datadog", "Splunk", "Kibana", "Elasticsearch", "OpenTelemetry", "PostgreSQL",

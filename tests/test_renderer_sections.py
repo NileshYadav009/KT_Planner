@@ -441,7 +441,7 @@ def test_architecture_reference_renders_details_and_diagram_blocks_when_present(
     }
     result = render_architecture_reference(section)
     titles = [b["title"] for b in result["blocks"]]
-    assert "Architecture Knowledge" in titles
+    assert "Architecture Knowledge" not in titles            # the diagram names every component (X62)
     assert "Architecture Details" in titles
     assert "High-Level Architecture" in titles
     assert "Architecture Metadata" in titles

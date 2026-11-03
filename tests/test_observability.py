@@ -130,8 +130,10 @@ def test_metrics_are_served_only_to_the_metrics_token(env, monkeypatch):
 
 def test_the_ops_report_shows_stage_latency_and_failures(env, monkeypatch):
     _run_one(env, monkeypatch)
+    # One encoding on both ends, whatever the runner sets: the report prints "—".
     out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "ops_report.py")], capture_output=True,
-                         text=True, env=dict(os.environ, CONTINUUM_DB_PATH=env.JOB_STORE.path), timeout=120)
+                         encoding="utf-8", timeout=120,
+                         env=dict(os.environ, CONTINUUM_DB_PATH=env.JOB_STORE.path, PYTHONIOENCODING="utf-8"))
     assert out.returncode == 0, out.stderr
     assert "KTs: 1 — 1 completed" in out.stdout
     assert "Text polishing" in out.stdout and "Classification" in out.stdout

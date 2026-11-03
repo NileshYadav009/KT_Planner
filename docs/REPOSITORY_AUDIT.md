@@ -7036,6 +7036,27 @@ the §9abh code reproduces every saved report). A real run of the
 LLM) confirms the flag: undiscussed sections shown covered 3 to 1, key facts
 unchanged at 8/11.
 
+**Whisper vocabulary (30 Oct to 2 Nov; measured, off by default).** The app
+runs Whisper "small" with no vocabulary; on the recordings it wrote "PO" for
+RPO, "BZ jobs" for busy jobs and "app decks" for Apdex, and missed Patroni and
+ChatOps. faster-whisper takes `hotwords`, put before every 30-second chunk; a
+list of 43 generic DevOps terms (159 tokens, nothing GitLab-specific) was
+tried (`devops_vocabulary.WHISPER_HOTWORDS`, `pipeline.whisper_hotwords`). On
+the eight recordings worked on, key-fact quotes present in the raw transcript
+went from 106 to 111 of 124, and on the four held back from 91 to 92 of 98
+(aggregate); the terms were written as said (Apdex 0 to 7 times, RPO 0 to 2),
+and the list never appeared as words nobody said. End to end without an LLM,
+key facts in an allowed section went from 88 to 93 of 124 on those worked on
+and from 74 to 67 of 98 on those held back. Whisper is deterministic (two
+recordings captured again without the list came back word for word), so the
+drop is the list's: it changed the wording around key sentences, and the
+classifier placed them differently. Each setting also drops some real speech
+the other keeps (about 450 of 18,854 words each way, in runs of six words or
+more). The built-in list is off (`WHISPER_HOTWORDS=1` uses it); a team's own
+terms still go to Whisper (`WHISPER_EXTRA_HOTWORDS`). On speech, a change of
+wording moves key facts between sections by several in a hundred, more than
+twelve recordings can resolve.
+
 **Results without an LLM.**
 
 | Set | §9abh | §9abi |
@@ -7060,6 +7081,8 @@ The sealed set was not read.
 - The remaining 8 undiscussed sections shown covered on recordings hold a
   stray sentence that does name a topic word ("deploy", "production").
 - X101 (a personal anecdote printed in several sections) stays open.
+- Whisper's mishearings and dropped speech (X108) stay open; a larger model
+  is unmeasured.
 
 ## 9. Fix from this audit already worth doing next
 

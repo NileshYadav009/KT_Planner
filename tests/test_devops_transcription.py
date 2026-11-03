@@ -819,17 +819,21 @@ def test_a_tag_question_asks_in_a_conversation_and_is_a_statement_in_a_talk():
     assert "MySQL?" in cleaned and "right" not in cleaned
 
 
-def test_whisper_is_told_the_devops_terms_to_expect(monkeypatch):
+def test_whisper_is_told_a_teams_own_terms_and_the_devops_list_only_when_asked(monkeypatch):
     # Recorded talks (27-29 Oct): the small model wrote "PO" for RPO and "BZ
-    # jobs" for busy jobs. The list goes before every 30-second chunk and
-    # shares Whisper's 448-token window with what it writes, so it stays short.
+    # jobs" for busy jobs. The built-in list is off by default (it cost key
+    # facts on the recordings held back, audit §9abi). It goes before every
+    # 30-second chunk and shares Whisper's 448-token window with what it
+    # writes, so it stays short.
     import pipeline
     from devops_vocabulary import WHISPER_HOTWORDS
 
     assert len(", ".join(WHISPER_HOTWORDS)) <= 400
     monkeypatch.delenv("WHISPER_HOTWORDS", raising=False)
+    monkeypatch.delenv("WHISPER_EXTRA_HOTWORDS", raising=False)
+    assert pipeline.whisper_hotwords() is None
     monkeypatch.setenv("WHISPER_EXTRA_HOTWORDS", "Fernhill, Patroni")
+    assert pipeline.whisper_hotwords() == "Fernhill, Patroni"
+    monkeypatch.setenv("WHISPER_HOTWORDS", "1")
     words = pipeline.whisper_hotwords().split(", ")
     assert words[0] == "Fernhill" and words.count("Patroni") == 1 and "RPO" in words
-    monkeypatch.setenv("WHISPER_HOTWORDS", "0")
-    assert pipeline.whisper_hotwords() is None
