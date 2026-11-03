@@ -933,6 +933,50 @@
       "pdf": true
     },
     {
+      "id": "T04", "category": "T KT taker", "title": "A question-and-answer KT read by its receiver: yes/no answers, a corrected assumption, a refer-back action, failures said by what goes wrong",
+      "regression": "tests/test_dialogue.py::test_an_answer_after_yes_or_no_stands_without_its_question; tests/test_dialogue.py::test_a_corrected_assumption_is_not_a_stated_gap; tests/test_dialogue.py::test_an_action_on_the_sentence_before_stays_with_it; tests/test_incident_card.py::test_failures_said_by_what_goes_wrong_are_carded_with_their_fixes; tests/test_speaker_roles.py::test_a_receivers_thanks_is_not_listed_to_confirm",
+      "transcript": [
+        "Ana: Thanks for doing this.",
+        "Ana: Can we start with what Harbor actually does?",
+        "Ben: Sure.",
+        "Ben: Harbor is the invoicing service our wholesale customers use to download their monthly statements.",
+        "Ana: Is there a queue?",
+        "Ben: Yes, RabbitMQ holds the statement jobs until the renderer picks them up.",
+        "Ana: Exports run weekly, I assume?",
+        "Ben: No, the export job runs every night at two and writes the files to S3.",
+        "Ana: What breaks most often?",
+        "Ben: The renderer runs out of memory when a customer has more than ten thousand invoices.",
+        "Ben: Statements then stay stuck in the queue.",
+        "Ben: Restart the renderer with the large-memory profile and the queue drains in about ten minutes.",
+        "Ana: Anything else?",
+        "Ben: The tax feed.",
+        "Ben: It sometimes sends the same rate twice, and totals come out doubled.",
+        "Ben: Delete the duplicate rate in the admin screen and re-run the statement.",
+        "Ana: Has anyone tested a restore?",
+        "Ben: Not this year. That's something you should schedule.",
+        "Ana: Is there anything I must never do?",
+        "Ben: Never delete messages from the dead letter queue by hand.",
+        "Ana: Who owns it?",
+        "Ben: The billing platform team owns Harbor."
+      ],
+      "expect": [
+        {"check": "system_name", "text": "Harbor", "level": "must"},
+        {"check": "absent_re", "pattern": "can we start with", "level": "must"},
+        {"check": "absent_re", "pattern": "thanks for doing this", "level": "must"},
+        {"check": "absent_re", "pattern": "exports run weekly, i assume", "level": "must"},
+        {"check": "absent_re", "pattern": "is there a queue\\?", "level": "should"},
+        {"check": "shows", "text": "RabbitMQ holds the statement jobs", "level": "must"},
+        {"check": "absent_re", "pattern": "(?:stated gap|not in place)[^|]*export job", "level": "must"},
+        {"check": "shows", "text": "That's something you should schedule", "level": "must"},
+        {"check": "absent_re", "pattern": "^known failure", "level": "must"},
+        {"check": "shows", "text": "The renderer runs out of memory", "level": "must"},
+        {"check": "in_section", "text": "Delete the duplicate rate in the admin screen", "sections": ["common_failures"], "level": "must"},
+        {"check": "shows", "text": "The tax feed: it sometimes sends the same rate twice", "level": "should"},
+        {"check": "gaps_consistent", "level": "must"}
+      ],
+      "pdf": true
+    },
+    {
       "id": "U01", "category": "U user KT", "title": "The user's KT 1 (e-commerce platform): a corrected replica count, a corrected retention, a guess, a plan, stated unknowns",
       "regression": "tests/test_dialogue.py::test_more_ways_of_stating_an_unknown_or_a_doubt; tests/test_section_rules.py::test_a_stated_limit_is_architecture_and_a_document_caveat_is_no_danger_zone",
       "transcript": [

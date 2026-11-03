@@ -144,7 +144,28 @@ _GAP_RES = [
 _NEGATIVE_ANSWER_RE = re.compile(
     r"\?\s*(?:(?:no|nope)\b(?!,?\s+(?:it'?s|it\s+is|that'?s|that\s+is|they'?re|they\s+are|we\s+use|we'?re\s+(?:on|using)"
     r"|we\s+(?:moved|switched)|it\s+(?:runs|uses|lives|goes|was\s+moved)|it'?s\s+now|the\s+[\w-]+\s+(?:is|are|runs|uses))\b)"
-    r"|not\s+really\b|not\s+yet\b|none\b|nothing\b)", re.IGNORECASE)
+    r"|not\s+really\b|not\s+yet\b|none\b|nothing\b"
+    # "Has anyone tested a restore? Not this year." (dev d11)
+    r"|not\s+(?:this|last)\s+(?:year|quarter|month)\b|not\s+(?:for\s+)?(?:a\s+(?:long\s+)?while|ages|years|recently|lately)\b)",
+    re.IGNORECASE)
+# A question that asks whether something exists or was done: answered no, it
+# is a gap. A question that assumes a value ("Backups are nightly, I
+# assume?") answered "No, Aurora takes continuous backups ..." is corrected,
+# and the correction is the fact (dev d11 read "stated gap" for it).
+_EXISTENCE_QUESTION_RE = re.compile(
+    r"\b(?:is|are|was|were)\s+there\b|\b(?:do|does|did)\s+(?:we|you|they|it|i)\s+(?:have|keep|run|use|get)\b"
+    r"|\bhave\s+(?:we|you)\s+got\b|\b(?:has|have)\s+(?:anyone|anybody|someone|somebody|we|you|it)\s+(?:ever\s+)?"
+    r"(?:been\s+)?\w+ed\b|\bany\b", re.IGNORECASE)
+_NEGATION_RE = re.compile(r"\b(?:not|no|never|none|nothing|nobody|without)\b|n't\b|\bno\s*one\b", re.IGNORECASE)
+
+
+def _corrects_the_question(text: str) -> bool:
+    m = re.search(r"(?P<q>[^?.!]*)\?\s*(?:no|nope)\b[\s,;:.!-]*(?P<rest>[^?]*)$", (text or "").strip(), re.IGNORECASE)
+    if not m:
+        return False
+    rest = m.group("rest")
+    return (len(rest.split()) >= 4 and not _EXISTENCE_QUESTION_RE.search(m.group("q"))
+            and not _NEGATION_RE.search(rest))
 
 
 def is_question(text: str) -> bool:
@@ -164,7 +185,8 @@ def is_gap_statement(text: str) -> bool:
     """True when the sentence (or question + answer unit) says the thing is
     not in place, not decided or not known, which is a gap, not coverage."""
     text = text or ""
-    return bool(_NEGATIVE_ANSWER_RE.search(text) or any(rx.search(text) for rx in _GAP_RES))
+    negative = _NEGATIVE_ANSWER_RE.search(text) and not _corrects_the_question(text)
+    return bool(negative or any(rx.search(text) for rx in _GAP_RES))
 
 
 def is_unconfirmed(text: str) -> bool:
@@ -181,6 +203,22 @@ def is_unconfirmed(text: str) -> bool:
 
 # A back-reference in a sentence that only doubts what came before it.
 _REFERS_BACK_RE = re.compile(r"\b(?:this|that|these|those)\b|^\W*it\b", re.IGNORECASE)
+
+
+# "Not this year. That's something you should schedule." tells the new owner
+# what to do about the sentence before it. Alone it said nothing specific and
+# was left out, with the action (receiver's reading of dev d11, audit §9abj).
+_ACT_ON_BEFORE_RE = re.compile(
+    r"^\W*(?:(?:that|this|it)(?:'s|\s+is)\s+(?:something|one|a\s+(?:thing|job|task))\s+(?:you|we)\s+|(?:you|we)\s+)"
+    r"(?:should|need\s+to|must|have\s+to|ought\s+to|(?:will|'ll)\s+(?:want|need)\s+to)\s+(?:really\s+|definitely\s+)?"
+    r"[a-z]+\b[^.!?]*[.!]?\s*$", re.IGNORECASE)
+
+
+def asks_to_act_on_before(previous: str, sentence: str) -> bool:
+    """`sentence` asks the new owner to act on what `previous` said."""
+    body = without_label(sentence)
+    return bool(previous and _ACT_ON_BEFORE_RE.match(body) and _REFERS_BACK_RE.search(body)
+                and len(body.split()) <= 12 and not without_label(previous).endswith("?"))
 
 
 def doubts_statement_before(previous: str, sentence: str) -> bool:
@@ -595,7 +633,14 @@ _LEANS_ON_QUESTION_RE = re.compile(
 _QUESTION_LIGHT = frozenset("""what which who whom how where when why should would could can do does did is are was
 were am i we you my our your the a an to of for in on at with me us about anything else other more and so okay ok
 also any there have has had know will if something wrong exactly that this it be been tell me thing things happen
-happens happening break breaks most often usually typically normally""".split())
+happens happening break breaks most often usually typically normally must mustn't need needs ever really actually
+still left go goes going""".split())
+
+# "Is there a cache? Yes, ElastiCache Redis holds ...": a yes or no that a
+# whole statement follows. The statement says what the question asked
+# (receiver's reading of a Q&A KT, audit §9abj).
+_ANSWER_LEAD_RE = re.compile(r"^\W*(?:yes|yeah|yep|no|nope|correct|right|exactly|sure)\b[\s,;:.!-]+(?=\w)",
+                             re.IGNORECASE)
 
 
 # An answer that opens like a fragment needs its question: "Around eight
@@ -612,18 +657,37 @@ def _question_stems(text: str) -> set:
             if w not in _QUESTION_LIGHT and len(w) > 2}
 
 
+def _stands_alone(answer: str, opening_only: bool = False) -> bool:
+    # "IT" (the department) is not the pronoun. After a yes or no the answer
+    # names its own subject first, so only its opening can lean on the
+    # question ("Yes, there's one in staging"); "RabbitMQ holds the jobs until
+    # the renderer picks them up" refers to its own jobs.
+    text = re.sub(r"\bIT\b", "tech", answer)
+    leaning = _LEANS_ON_QUESTION_RE.search(" ".join(text.split()[:2]) if opening_only else text)
+    return len(answer.split()) >= 4 and not leaning and not _FRAGMENT_ANSWER_RE.match(answer)
+
+
 def without_redundant_question(text: str) -> str:
     """"How do I deploy? Merge to main and GitHub Actions deploys to a staging
-    slot." -> the answer alone, when it says everything the question asked."""
+    slot." -> the answer alone, when it says everything the question asked.
+    "Is there a cache? Yes, ElastiCache Redis holds the slot availability." ->
+    the statement after the yes, when it stands alone and is about what the
+    question asked (a word of the question within one of its words)."""
     m = re.match(r"^\s*(?P<q>[^?]*\?)\s+(?P<a>[^?]+)$", text or "")
     if not m:
         return text
     question, answer = m.group("q"), m.group("a").strip()
-    if len(answer.split()) < 4 or _LEANS_ON_QUESTION_RE.search(answer) or _FRAGMENT_ANSWER_RE.match(answer):
-        return text
-    if _question_stems(question) - _question_stems(answer):
-        return text
-    return answer
+    if _stands_alone(answer) and not (_question_stems(question) - _question_stems(answer)):
+        return answer
+    lead = _ANSWER_LEAD_RE.match(answer)
+    if lead:
+        rest = answer[lead.end():]
+        rest = rest[:1].upper() + rest[1:]
+        words = re.findall(r"[a-z][a-z'-]+", rest.lower())
+        stems = _question_stems(question)
+        if _stands_alone(rest, opening_only=True) and (not stems or any(s in w for s in stems for w in words)):
+            return rest
+    return text
 
 
 def display_text(text: str, labels) -> str:

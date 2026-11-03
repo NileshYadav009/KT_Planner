@@ -81,6 +81,24 @@ def test_the_backup_never_writes_to_the_live_database(data):
     assert os.path.getmtime(data["db"]) == before
 
 
+def test_the_approved_vocabulary_is_backed_up_and_restored(data, tmp_path):
+    """glossary.json lives beside the database (X95) and goes with it."""
+    vocabulary = os.path.join(os.path.dirname(data["db"]), "glossary.json")
+    with open(vocabulary, "w", encoding="utf-8") as fh:
+        json.dump({"terms": ["Patroni"], "acronyms": {}, "phrase_corrections": {"pat rony": "Patroni"}}, fh)
+    folder = backup.backup(data["dest"])
+    assert backup.verify(folder)["glossary"]["file"] == "glossary.json"
+
+    target = str(tmp_path / "elsewhere" / "glossary.json")
+    backup.restore(folder, str(tmp_path / "elsewhere" / "continuum.sqlite"), str(tmp_path / "elsewhere" / "a"),
+                   target_glossary=target)
+    assert json.load(open(target, encoding="utf-8"))["phrase_corrections"] == {"pat rony": "Patroni"}
+    with open(os.path.join(folder, "glossary.json"), "a", encoding="utf-8") as fh:
+        fh.write(" ")
+    with pytest.raises(SystemExit, match="checksum"):
+        backup.verify(folder)
+
+
 def test_the_restore_drill_reads_every_kt_back(data, capsys):
     assert backup.main(["drill"]) == 0
     out = capsys.readouterr().out

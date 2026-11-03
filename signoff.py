@@ -23,6 +23,8 @@ import hashlib
 import time
 from typing import Any, Dict, List, Optional
 
+import document_model
+
 ROLES = ("giver", "receiver", "approver")
 ROLE_LABELS = {"giver": "KT giver (outgoing owner)", "receiver": "KT receiver (incoming owner)",
                "approver": "Approver"}
@@ -122,7 +124,11 @@ def acknowledge(job: Dict[str, Any], role: str, version: int, actor: Dict[str, A
         raise SignoffError("Sign-off has not started" if current.get("status") == "draft" else "This KT is signed", 409)
     if role not in ROLES or (current["participants"].get(role) or {}).get("user_id") != actor.get("user_id"):
         raise SignoffError("Only the person named for this role can acknowledge it", 403)
-    if int(version) != int(current_version):
+    try:
+        version = document_model.version_number(version)
+    except ValueError:
+        raise SignoffError("version must be the number of the version you read", 400)
+    if version != int(current_version):
         raise SignoffError(f"Acknowledge the current version ({current_version}); the document changed", 409)
     still_open = open_gaps(job)
     if still_open:

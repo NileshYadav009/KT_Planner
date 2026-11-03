@@ -146,8 +146,10 @@ local disk (not NFS).
 
 Everything a deployment knows is in the job database (`CONTINUUM_DB_PATH`:
 KTs, document versions, the queue, people, API keys, sessions, the audit log,
-vocabulary candidates) and the screenshots folder (`KT_ASSETS_DIR`).
-`scripts/backup.py` copies both while the app runs:
+vocabulary candidates), the screenshots folder (`KT_ASSETS_DIR`) and the
+approved vocabulary (`glossary.json` beside the database, or
+`CONTINUUM_GLOSSARY_PATH`). `scripts/backup.py` copies all three while the app
+runs:
 
 ```bash
 python scripts/backup.py backup --dest /backups --keep 14   # SQLite online backup + screenshots + manifest
@@ -188,7 +190,11 @@ the job database, deleted with the workspace. `python scripts/review_vocabulary.
 lists them with their workspace; `--approve`/`--reject PHRASE` (with
 `--workspace TENANT_ID` when the phrase is pending in more than one) decides.
 An approved term goes into `glossary.json` and corrects every workspace's
-transcripts. A file from before (`CONTINUUM_VOCAB_CANDIDATES_PATH`) is read
+transcripts. The file sits beside the job database, so in Docker it is on the
+data volume (`CONTINUUM_GLOSSARY_PATH` puts it elsewhere); a `glossary.json`
+in the working directory, where it used to be written, is copied there once
+and left in place. Each save writes a new file and moves it into place, so a
+crash never leaves half a file. A file from before (`CONTINUUM_VOCAB_CANDIDATES_PATH`) is read
 once into the database; a phrase rejected there stays rejected for every
 workspace.
 

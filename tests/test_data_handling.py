@@ -183,6 +183,46 @@ def test_candidates_from_the_old_shared_file_are_kept(tmp_path, monkeypatch):
     assert [c["phrase"] for c in vl.load_candidates("acme")] == ["PendingTool"]
 
 
+def test_approved_vocabulary_is_kept_beside_the_database(tmp_path, monkeypatch):
+    """X95: glossary.json was written to the working directory (/app in the
+    Docker image, outside the data volume), so approvals were lost when the
+    container was recreated and no backup held them."""
+    import glossary
+    import vocabulary_learning as vl
+
+    monkeypatch.chdir(tmp_path)
+    data = tmp_path / "volume"
+    monkeypatch.setenv("CONTINUUM_DB_PATH", str(data / "continuum.sqlite"))
+    monkeypatch.delenv("CONTINUUM_GLOSSARY_PATH", raising=False)
+    assert glossary.default_path() == str(data / "glossary.json")
+
+    # A glossary at the old place is copied over once and stays where it was.
+    (tmp_path / "glossary.json").write_text(json.dumps({"terms": ["Patroni"]}), encoding="utf-8")
+    assert glossary.get_glossary()["terms"] == ["Patroni"]
+    assert json.loads((data / "glossary.json").read_text(encoding="utf-8")) == {"terms": ["Patroni"]}
+    assert (tmp_path / "glossary.json").exists()
+
+    vl.record_candidates([{"phrase": "PgBouncer", "signal": "technical_pattern"}], "job-1", "acme")
+    assert vl.approve_candidate("PgBouncer", "acme")
+    saved = json.loads((data / "glossary.json").read_text(encoding="utf-8"))
+    assert saved["terms"] == ["Patroni", "PgBouncer"]
+    assert sorted(os.listdir(data)) == ["continuum.sqlite", "glossary.json"]      # no half-written file left
+    assert "PgBouncer" in glossary.get_glossary()["terms"]
+
+    monkeypatch.setenv("CONTINUUM_GLOSSARY_PATH", str(tmp_path / "elsewhere.json"))
+    assert glossary.default_path() == str(tmp_path / "elsewhere.json")
+
+
+def test_a_failed_vocabulary_save_leaves_the_old_file_whole(tmp_path, monkeypatch):
+    import glossary
+
+    path = tmp_path / "glossary.json"
+    path.write_text(json.dumps({"terms": ["Kafka"]}), encoding="utf-8")
+    assert glossary.save_glossary({"terms": [object()]}, str(path)) is False   # not JSON: the dump fails
+    assert json.loads(path.read_text(encoding="utf-8")) == {"terms": ["Kafka"]}
+    assert os.listdir(tmp_path) == ["glossary.json"]
+
+
 def test_deleting_a_job_removes_its_record_and_screenshots(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     import main

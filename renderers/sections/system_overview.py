@@ -30,7 +30,7 @@ _TECH_CATEGORY_MAP = {
     "github actions": "GitOps / deployment", "helm": "GitOps / deployment",
     "vault": "Secrets", "consul": "Secrets",
     "trivy": "Security", "sonarqube": "Security", "veracode": "Security",
-    "amazon ecr": "Security", "s3": "Storage",
+    "s3": "Storage",
     "prometheus": "Observability", "grafana": "Observability", "cloudwatch": "Observability",
     "datadog": "Observability", "splunk": "Observability", "elk": "Observability",
     "elasticsearch": "Observability", "logstash": "Observability", "kibana": "Observability",

@@ -36,8 +36,8 @@ from devops_transcription import (
     replaces_value_before, resolve_correction_across, resolve_self_corrections, restates, withdrawn_values,
     withdraws_said_before,
 )
-from dialogue import (display_text, doubts_statement_before, is_document_instruction, is_heading_only,
-                      merge_question_answers, speaker_labels)
+from dialogue import (asks_to_act_on_before, display_text, doubts_statement_before, is_document_instruction,
+                      is_heading_only, merge_question_answers, speaker_labels)
 from grounding import states_withdrawn_value
 import embedding_memo
 from entity_extractor import EntityExtractor
@@ -232,7 +232,9 @@ _KT_META_COMMENTARY_PATTERNS = [
 _SPEAKER_LEAD_RE = re.compile(r"^[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s+")
 _TALK_REQUEST_RE = re.compile(
     r"^\W*(?:[\w']+\W+){0,6}?(?:can|could|may|shall)\s+(?:i|we|you)\s+(?:run\s+through|go\s+through"
-    r"|walk\s+(?:me|us)\s+through|take\s+(?:me|us)\s+through|ask(?:\s+(?:you|a\s+few|some))?)\b[^.!]*\?\s*$",
+    r"|walk\s+(?:me|us)\s+through|take\s+(?:me|us)\s+through|ask(?:\s+(?:you|a\s+few|some))?"
+    # "Can we start with what Quayside actually does?" (dev d11, d07's "Payslip")
+    r"|(?:start|begin)\s+with\s+(?:what|how|who|an?\s+(?:overview|quick)|the\s+(?:basics|big\s+picture)))\b[^.!]*\?\s*$",
     re.IGNORECASE)
 _ACKNOWLEDGEMENT_RE = re.compile(
     r"^\W*(?:sure|yes|yeah|yep|ok(?:ay)?|of\s+course|absolutely|no\s+problem|go\s+ahead|please\s+do|right|fine)"
@@ -482,7 +484,8 @@ def segment_sentences(
         # confirmation ...") is kept with it the same way.
         if joined_sentences and (replaces_value_before(joined_sentences[-1][0], st)
                                  or corrects_statement_before(joined_sentences[-1][0], st)
-                                 or doubts_statement_before(joined_sentences[-1][0], st)):
+                                 or doubts_statement_before(joined_sentences[-1][0], st)
+                                 or asks_to_act_on_before(joined_sentences[-1][0], st)):
             prev = joined_sentences[-1]
             joined_sentences[-1] = [f"{prev[0]} {st}", prev[1] or run_on, prev[2], True]
             continue

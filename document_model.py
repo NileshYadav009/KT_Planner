@@ -281,7 +281,11 @@ def save_edits(pipeline, job_id: str, edits: List[Dict[str, Any]], base_version:
         if signoff.is_locked(job):
             raise EditError("This KT is signed; signed versions cannot be changed", 409)
         version = current_version(job)
-        if int(base_version) != version:
+        try:
+            base_version = version_number(base_version)
+        except ValueError:
+            raise EditError("base_version must be the number of the version you edited", 400)
+        if base_version != version:
             raise EditError(f"The document changed since you opened it (now version {version}). "
                             "Reload it and make your edits again.", 409)
         ensure_first_version(pipeline, job_id, job)
@@ -314,6 +318,18 @@ def versions(pipeline, job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def version_snapshot(pipeline, job_id: str, job: Dict[str, Any], version: int) -> Optional[Dict[str, Any]]:
-    if version == current_version(job):
+    current = current_version(job)
+    if version == current:
         return snapshot(job.get("knowledge_object") or {})
+    # Only versions that can exist reach the database: a number past SQLite's
+    # integer range used to raise there (a 500).
+    if isinstance(version, bool) or not isinstance(version, int) or not 1 <= version < current:
+        return None
     return pipeline.JOB_STORE.version(job_id, version)
+
+
+def version_number(value: Any) -> int:
+    """A version number sent by a client (JSON number or digits), or ValueError."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)) or not str(value).strip().isdigit():
+        raise ValueError(value)
+    return int(value)

@@ -2,7 +2,9 @@
 
 This is the living record for anyone, person or agent, changing the KT pipeline.
 `docs/REPOSITORY_AUDIT.md` holds the evidence for each change, by section number
-(§9abi is the latest batch). `docs/KT_PIPELINE.md` describes each stage in
+(§9abj is the latest batch; the whole-application audit of 3 Nov is
+`CONTINUUM_COMPLETE_AUDIT_REPORT.md`, with `SECURITY_AUDIT.md`,
+`TEST_CASES.md`, `KT_RECEIVER_FEEDBACK.md` and `FEATURE_ROADMAP.md`). `docs/KT_PIPELINE.md` describes each stage in
 detail. `docs/CORRECTIONS.md` is the specification for corrections, changes
 and contradictions. `docs/ADVERSARIAL_MATRIX.md` is the adversarial case
 table. `docs/progress.md` is the plain-language log.
@@ -102,6 +104,19 @@ overnight and only when asked. Use targeted runs, from the repo root with
 | Learned section model, examples | `tests/test_section_model.py tests/test_section_examples.py` | about 20 s |
 | Speaker names, caption files, giver choice | `tests/test_speaker_names.py tests/test_giver_choice.py` | about 5 min |
 | End to end, with recorded Groq replay | `tests/test_e2e_kts.py` | about 13 min |
+
+Tools that are not app dependencies live in `.venv-tools` (git-ignored):
+Playwright with Chromium, ruff and pip-audit. The browser journey,
+`.venv-tools/Scripts/python evaluation/browser_journey.py LABEL [--llm-down]`
+(about 20 min), starts the app itself on scratch data with sign-in on and no
+LLM, and clicks through sign-in, an empty and a junk paste, a real KT, the
+document, gaps, Ask, an edit, a move, the PDF and exports, refresh and the back
+button, a server restart, a receiver's view, a paste over the limit, three KTs
+at once, phone width and sign-out; `--llm-down` gives it an LLM that refuses
+every connection. Lint: `.venv-tools/Scripts/ruff check . --select F,E9,B`
+(the default set is mostly style). Dependencies:
+`.venv-tools/Scripts/pip-audit --path .venv-1/Lib/site-packages` (sends the
+package list to the vulnerability database).
 
 Accuracy: `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,blind3,e2e`
 (about 5 min; see `evaluation/README.md`). Every placement or coverage change
@@ -258,7 +273,7 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X92 | Med | A pasted transcript was cleaned inside the request, on the event loop, with no size limit (every other request waited); since §9abf a paste with no punctuation could load the 210 MB punctuation model in the API process | Fixed, §9abg (`_paste_task` on a thread, `CONTINUUM_MAX_TRANSCRIPT_CHARS`, the worker cleans a paste that needs the model: `pipeline.clean_queued_paste`) |
 | X93 | Low | Cleaning grew with the square of the text (each phrase correction rewrote the whole text once per match): 30.6 s for 150,000 characters | Fixed, §9abg: 12.9 s, the same output on every visible transcript |
 | X94 | Low | The job store and sign-in left each SQLite connection open until the garbage collector freed it | Fixed, §9abg (`job_store.ClosingConnection`) |
-| X95 | Med | In the Docker image the approved vocabulary (`glossary.json`) is written to `/app`, not the data volume: approvals are lost when the container is recreated, and backups do not hold them | Open |
+| X95 | Med | In the Docker image the approved vocabulary (`glossary.json`) is written to `/app`, not the data volume: approvals are lost when the container is recreated, and backups do not hold them | Fixed, §9abj: beside the job database (`glossary.default_path`, `CONTINUUM_GLOSSARY_PATH`), the old file copied over once; saved through a temporary file; in backup, verify and restore |
 | X96 | High | Recorded speech (public GitLab Zoom meetings and a project KT, 27 Oct) was cut at pauses into fragments filed as facts ("... and increase. Our signal to noise ratio"): `close_segment_sentences` read the capital the cleaner gives each Whisper piece as a new sentence | Fixed, §9abh: a piece Whisper began in lower case carries on its sentence (its capital taken back) unless a spoken opener ("then", "so", "yeah") follows a piece that can end there; the user's console recording keeps its closes |
 | X97 | High | Every recording reported Environments "covered well": the per-environment fields were filled with sentences naming no environment ("Staging: Another example here is selectors.") | Fixed, §9abh: such a field needs a sentence naming its environment, as its coverage topic accepts it (`coverage_topics.field_topic_pattern`); "Known differences" needs a named environment ("It will manifest in different ways.") |
 | X98 | Med | Presenter asides ("I will stop sharing.", "That's all I have.") and content-free remarks ("Thoughts from your side?", "It does the job.") were facts; a 21-minute talk made 26 pages, System Overview a dumping ground | Fixed, §9abh: asides in `_GREETING_ONLY_RE`; `dialogue.says_nothing_specific` (at most one word of its own, no tool, figure, name, known term, negation, instruction or topic word), excluded with that reason in the ledger. One of 1,180 visible key facts matched before the place-word exception, none after |
@@ -272,3 +287,17 @@ Open items, most consequential first. Fixed items say where the evidence is.
 | X102 | High | Groq's console showed more 429s than successes on three recorded KTs; the app logged 18: the OpenAI client retried each 429 twice unseen, four calls went out at once, and nothing paced the account's 7,000 input / 1,000 output tokens a minute | Fixed, §9abh: `max_retries=0`; input and output windows learned from refusals or set (`LLM_INPUT_TOKENS_PER_MINUTE`, `LLM_OUTPUT_TOKENS_PER_MINUTE`, `LLM_RATE_HEADROOM`); a call asks for at most the output limit less the headroom |
 | X107 | Med | 44 discussed sections on the visible KTs (20 clean, 24 noisy copies) matched none of their topics, so their rows said discussed topics were "not discussed" and put them on the follow-up list: "In your first month, do one production release", "Busy dates?", "keeps the bill down", "Under no circumstances", "Owned by", "If you're stuck, ...", "behind Google sign-in", "keys are in Heroku config vars", "time travel" | Fixed, §9abi (`coverage_topics.py`); none of the recordings' stray sentences matches. No figure moved on any set |
 | X108 | Med | Whisper ("small", no vocabulary) mishears DevOps terms on recordings ("PO" for RPO, "BZ jobs" for busy jobs, "app decks" for Apdex; Patroni and ChatOps missed), and drops some real speech another setting keeps (about 450 of 18,854 words) | Open. Measured and kept off by default (§9abi): a 43-term list as Whisper `hotwords` (`WHISPER_HOTWORDS=1`) put more key sentences in the transcript (106 to 111 of 124; 91 to 92 of 98 held back) but 7 fewer of 98 held-back key facts reached their section (wording around them changed; Whisper is deterministic). A team's own terms still go to Whisper (`WHISPER_EXTRA_HOTWORDS`). A larger model is unmeasured |
+| X109 | High | `/feedback` (Move on the Transcript tab) moved another section's sentence: the page numbers sentences across the KT, the route counted within each section; the moved sentence stayed in its old list; an unknown sentence answered "feedback applied" | Fixed, §9abj: read as the page counts, its text sent and checked (409 when the page is stale), removed from its old section, 404 / 409 for an unknown sentence or an unfinished KT. Browser journey J09 |
+| X110 | Med | Nine server errors (500) on wrong-typed or out-of-range input: edits `base_version`, a version past SQLite's integer range (versions, diff, PDF), a non-text section id, sign-off acknowledge's version | Fixed, §9abj (`document_model.version_number`; a probe of every write route finds none) |
+| X111 | Med | Upload errors returned the exception text (server paths); no size limit on other request bodies (and none early on a session recording); Ask took a question of any length | Fixed, §9abj: logged, a plain message with the request id; 1 MB on other bodies; 500 characters |
+| X112 | High | pip-audit: 28 of 164 packages with advisories (249), several on the input path | Fixed for the input path, §9abj, the user's decision: starlette 1.10 / fastapi 0.162, python-multipart, pillow 13, weasyprint 70, urllib3, requests, cryptography and others (16 packages, 148 left: the model stack kept, tooling, test-only pypdf; `SECURITY_AUDIT.md`) |
+| X113 | High | WeasyPrint 70 removed `default_url_fetcher`; the safe fetcher imported it, so every font and embedded screenshot was refused | Fixed, §9abj (`pdf_rendering._document_fetcher`, a `URLFetcher` with the same allow-list) |
+| X114 | Med | A Q&A KT read by its receiver (dev d11): questions printed before yes/no answers that stand alone; "Can we start with what X does? Sure." printed; "Backups are nightly, I assume? No, Aurora takes ..." a stated gap; "Not this year" no gap and "tested a restore" not DR testing; "That's something you should schedule." dropped; failures said by what goes wrong carded as "Known failure" with the next failure inside it; a receiver's thanks listed to confirm | Fixed, §9abj (`dialogue`, `coverage_topics`, `speaker_roles`, `knowledge_builder._known_failures`; matrix T04). No accuracy figure moved on any set |
+| X115 | Low | A finished KT's `/status` and `/schema` (100-200 KB) were encoded by FastAPI's encoder after a deep copy, and sent uncompressed | Fixed, §9abj: `json.dumps` once (27.5 to 4.0 ms), gzip (170 to 27 KB) |
+| X116 | Low | Repeated dictionary keys (ruff F601): a test expectation dropped without notice (`test_ecommerce_kt`, "PagerDuty alert"), Amazon ECR labelled Security | Fixed, §9abj; the test passes with the full expectation |
+| X117 | Low | "Is there a queue? Yes, RabbitMQ holds the jobs ..." keeps its question: the answer never repeats the question's word, and relaxing that drops "runbook" from "Is there a runbook for that? Yes, Priya wrote it last year." | Open (matrix T04 should) |
+| X119 | Med | Web page: editing a table row (the incident card, technology, ownership, connections) opened its editor inside the first column, 177 px wide, one-line inputs cutting the text | Fixed, §9abj (found by the browser journey): a row of its own across the table, a text box per cell |
+| X120 | Low | The diagram draws 3 of Quayside's stated connections: "the worker picks jobs off an SQS queue" and "a React front end served from CloudFront" have no line | Open: more connection verbs need the relations gate (`wrong_relations` 0) re-measured |
+| X121 | Low | A language said after its workload ("a slot allocation worker in Python") was missing from the Technology summary | Fixed, §9abj (`PATTERN_EXTRACTORS["tools"]`; "experience in Java" still not a tool) |
+| X122 | Med | A receiver's first questions have no coverage topic: how to tell a release failed, which dashboard to open; Monitoring reads Strong without a dashboard named | Open: roadmap P2, to measure on all six sets |
+| X118 | Low | A coverage row can list a topic as "not discussed" and quote a stated gap about it ("DR testing" / "Has anyone tested a restore? Not this year.") | Open: by design a gap does not cover its topic; the wording could say "stated as not done" |

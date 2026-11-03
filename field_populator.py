@@ -534,7 +534,10 @@ PATTERN_EXTRACTORS = {
         # A language names the workload only when it is said to be one
         # ("a Go consumer service", "the Python workers"); "go" and "Java"
         # as ordinary words never match.
-        r"(?-i:Go|Python|Java)(?=\s+(?:\w+\s+)?(?:services?|consumers?|workers?|microservices?|API|backend|application|app)\b))\b",
+        r"(?-i:Go|Python|Java)(?=\s+(?:\w+\s+)?(?:services?|consumers?|workers?|microservices?|API|backend|application|app)\b)|"
+        # ... or said after it: "a slot allocation worker in Python" (dev d11).
+        r"(?:(?<=worker\sin\s)|(?<=workers\sin\s)|(?<=service\sin\s)|(?<=services\sin\s)|(?<=consumer\sin\s)"
+        r"|(?<=API\sin\s)|(?<=written\sin\s)|(?<=built\sin\s))(?-i:Go|Python|Java))\b",
         re.IGNORECASE,
     ),
     "duration": re.compile(r"\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|seconds?|secs?)\b", re.IGNORECASE),

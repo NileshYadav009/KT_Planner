@@ -30,7 +30,7 @@ reason (the facts ledger), and what needs confirming becomes a follow-up.
 import re
 from typing import Any, Dict, List, Optional
 
-from dialogue import speaker_labels
+from dialogue import says_nothing_specific, speaker_labels
 
 # A turn label at the start of a line or after a sentence: "Meera: ...".
 _TURN_RE = re.compile(r"(?:^|(?<=[.!?])\s+|\n\s*)([A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}):\s")
@@ -308,7 +308,10 @@ def apply_roles(units: List[Any], roles: Optional[Dict[str, Any]], merge, exclud
                 skip.add(reply_at)
             continue
         leave_out(unit, f"said by {unit.speaker}, not confirmed by {giver}")
-        findings.append({"kind": "unconfirmed", "text": body, "by": unit.speaker, "giver": giver})
+        # Thanks and small talk claim nothing to confirm: "Thanks for doing
+        # this." was on the follow-up list (dev d11, audit §9abj).
+        if not says_nothing_specific(body):
+            findings.append({"kind": "unconfirmed", "text": body, "by": unit.speaker, "giver": giver})
     return out
 
 

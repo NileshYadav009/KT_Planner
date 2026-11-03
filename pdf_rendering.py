@@ -199,21 +199,53 @@ def _is_bundled_font(url: str) -> bool:
     return path in {os.path.normcase(os.path.realpath(p)) for p in _font_paths()}
 
 
+def _allowed(url) -> bool:
+    return str(url).startswith("data:") or _is_bundled_font(url)
+
+
+def _weasyprint_fetcher():
+    """WeasyPrint's own fetcher: a URLFetcher since WeasyPrint 70, which
+    removed default_url_fetcher (the import failed inside the fetcher, so
+    every font and screenshot was refused and the PDF set in a system font)."""
+    try:
+        from weasyprint.urls import URLFetcher
+    except ImportError:
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher
+    return URLFetcher(allowed_protocols=("data", "file"))
+
+
 def safe_url_fetcher(url, *args, **kwargs):
     """WeasyPrint URL fetcher for KT documents: only inline data: URIs are
     loaded (the stylesheet is inline and screenshots are embedded as data
     URIs), and the bundled font files by their exact paths. Any other URL in
     the document, file:// or http(s)://, is refused, so no content can make
     the renderer read server files or call internal addresses."""
-    if str(url).startswith("data:") or _is_bundled_font(url):
-        from weasyprint import default_url_fetcher
-        return default_url_fetcher(url, *args, **kwargs)
+    if _allowed(url):
+        return _weasyprint_fetcher()(url, *args, **kwargs)
     raise ValueError(f"External resource blocked in KT document: {str(url)[:80]}")
+
+
+def _document_fetcher():
+    """safe_url_fetcher in the form this WeasyPrint takes: since 70 a
+    URLFetcher object (a refused fetch reads its _fail_on_errors)."""
+    try:
+        from weasyprint.urls import URLFetcher
+    except ImportError:
+        return safe_url_fetcher
+
+    class SafeFetcher(URLFetcher):
+        def fetch(self, url, headers=None):
+            if _allowed(url):
+                return super().fetch(url, headers)
+            raise ValueError(f"External resource blocked in KT document: {str(url)[:80]}")
+
+    return SafeFetcher(allowed_protocols=("data", "file"))
 
 
 def _layout(html_doc: str):
     from weasyprint import HTML
-    return HTML(string=html_doc, url_fetcher=safe_url_fetcher).render()
+    return HTML(string=html_doc, url_fetcher=_document_fetcher()).render()
 
 
 def layout_overflows(document) -> list:

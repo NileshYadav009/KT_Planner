@@ -282,9 +282,9 @@ def approve_candidate(
     tenant_id: str,
     target: str = "terms",
     canonical: Optional[str] = None,
-    glossary_path: str = "glossary.json",
+    glossary_path: Optional[str] = None,
 ) -> bool:
-    """Promote a workspace's candidate into glossary.json — the live,
+    """Promote a workspace's candidate into glossary.json (glossary.default_path()) — the live,
     human-approved store that devops_transcription.py's correction pipeline
     reads on every call (for every workspace).
 

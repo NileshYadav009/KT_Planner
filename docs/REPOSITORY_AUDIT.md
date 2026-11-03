@@ -7084,6 +7084,109 @@ The sealed set was not read.
 - Whisper's mishearings and dropped speech (X108) stay open; a larger model
   is unmeasured.
 
+### 9abj. Whole-application audit: defects, security, a receiver's reading (3 Nov)
+
+The user asked for a complete engineering, product, QA, receiver and
+application-security audit, with the improvements implemented. The reports
+are at the repository root: `CONTINUUM_COMPLETE_AUDIT_REPORT.md`,
+`SECURITY_AUDIT.md`, `TEST_CASES.md`, `KT_RECEIVER_FEEDBACK.md`,
+`FEATURE_ROADMAP.md`. This section is the evidence for the code changes.
+
+**First, the suite.** The first full run since §9abg (2 Nov, 3 h 38 min):
+1392 passed, 2 failed, 1 skipped. Both failures were tests behind deliberate
+changes: one expected the Architecture Knowledge list beside a diagram (X62
+removed it), one decoded the ops report's "—" in the console code page when
+the runner forced UTF-8 output. Both fixed.
+
+**Defects found by reading the code and probing it** (X109-X111). The
+Transcript tab numbers sentences across the KT and sends that number;
+`/feedback` matched it within each section, so a correction moved another
+section's sentence and saved it as a new document version (only sentence 0,
+the one test, agreed). A probe sending wrong-typed JSON to every write route
+of a finished KT found 21 server errors, 9 real (four causes) and 12 from its
+own data. Upload errors returned exception text; bodies other than uploads
+and pastes had no limit.
+
+**Dependencies** (X112, X113). pip-audit (tools environment): 28 of 164
+packages with 249 advisories. With the user's choice, the packages on the
+input path were upgraded (starlette 0.52 to 1.10 with fastapi 0.162,
+python-multipart, pillow 13, weasyprint 70, urllib3, requests, cryptography,
+idna, certifi, pyasn1, anyio, python-dotenv): 16 packages and 148 advisories
+remain, the model stack left alone. WeasyPrint 70 removed
+`default_url_fetcher`; the safe fetcher imported it inside the fetch, so every
+font and every embedded screenshot was refused. The bundled-font test caught
+it; the fetcher is now a `URLFetcher` subclass with the same allow-list.
+
+**A receiver's reading** (X114). A visible dev KT in question-and-answer
+form (d11, Quayside, AWS ECS) built without an LLM and read as the new
+owner, page by page. It answered most Day-1 questions, but: about a dozen
+answers carried the receiver's question; "Can we start with what Quayside
+actually does? Sure." was a fact; "Backups are nightly, I assume? No, Aurora
+takes continuous backups ..." was Disaster Recovery's stated gap while "Has
+anyone tested a restore? Not this year." read "DR testing: not discussed";
+"That's something you should schedule." was left out as saying nothing; the
+card carded the slot worker's fix as "Known failure" with the customs feed's
+symptom inside it; Tribal Knowledge showed "Is there anything I must…"; the
+follow-up list asked to confirm "Thanks for doing this." Each is fixed
+generically, with matrix case T04 (written for this, not from d11's words)
+and unit tests. Measured before keeping each:
+
+| Change | Visible units changed |
+|---|---|
+| A yes/no lead dropped when the statement after it stands alone and shares a word of the question; modal words light; "IT" not a pronoun | 5 of 118 question+answer units, each reads right alone |
+| A "no" to a question that assumed a value, followed by a statement with no negation, is a correction, not a gap | 1 unit (d11's) |
+| "Not this year" a negative answer; DR testing reads "tested a restore", "restores have never been tested" | |
+| A short sentence that refers back and tells the owner to act stays with the sentence before | 1 sentence (d11's) |
+| A failure said by what goes wrong ("falls behind", "runs out of", "sends duplicate") opens a card row; description before the fix is the situation; a bare noun phrase after a fixed failure opens the next | card only |
+| The same wording covers Common Failures' "Known failures" topic (a queue that backs up, not a job that backs up a database) | d11's row no longer reads "only in passing under System Overview" |
+| A language said after its workload ("a worker in Python") is a tool (X121) | Technology summary |
+
+Not kept: dropping wh-questions whose answers carry no pronoun. A third of
+them carry the qualifier ("Bad days to deploy?", "And my first week?").
+
+| Set (no LLM) | §9abi | §9abj |
+|---|---|---|
+| Tuning, dev | 1085/1085 | 1085/1085 |
+| Holdouts, blind b01-b03, b04-b07 | 88/95, 109/114, 118/132 | the same |
+| e2e, 6 KTs | 100%, no problems | the same |
+| Noisy copies | 1057/1085 | 1057/1085 |
+| Matrix | 89 cases, 310/310 must, 54/58 should | 90 cases, 324/324 must, 56/61 should |
+
+Measured twice, after the receiver fixes (j1) and after the last two (j2),
+with the same figures. The release gates pass in both modes on the final
+code, PDF layout included (WeasyPrint 70). The sealed set, read once at the
+end: 151/160, no discussed section shown Missing, as in §9abd.
+
+**Speed** (X115). A finished KT's `/status` is 100-200 KB of JSON. Encoding
+the largest local KT (a read-only copy) through a deep copy for signing and
+FastAPI's encoder took 27.5 ms; `json.dumps` once, signing only when a
+screenshot path is in it, takes 4.0 ms with identical JSON. GZip (level 5)
+sends 26.6 KB instead of 169.6 KB.
+
+**Other.** X95 fixed (vocabulary beside the database, atomic save, backed
+up). ruff's repeated-key check found a test expectation silently dropped
+(`test_ecommerce_kt`: "PagerDuty alert"; the test passes with it) and Amazon
+ECR labelled Security (X116). `on_event` moved to a lifespan handler. A
+browser journey in Playwright (`evaluation/browser_journey.py`, tools
+environment) found the table-row editor laid out in the first column, 177 px
+wide; it now has a row of its own with a text box per cell. Its final run:
+19 of 19 checks; with an LLM that refuses every connection, 6 of 6 (the KT
+completed with warnings, 18 calls failed and 2 were skipped, all falling
+back). Three of its earlier failures were the script's own (a table row's
+inputs taken for a textarea; a string wait the page's CSP rightly refused;
+the paste form not opened in the LLM-down run).
+
+**Full suite on the final code** (3-4 Nov, 1 h 35 min): 1416 passed, 0
+failed, 1 skipped (the e2e LLM replay of `e2e_f_online_learning`, which has
+no recorded answer for the current prompts, X106), 1 xpassed (the holdout
+target test, a non-strict xfail).
+
+**Limits.**
+
+- One receiver reading of one KT; the five fixes are generic and measured on
+  every visible KT, but other KT styles may show other problems.
+- X117 and X118 stay open; the model-stack advisories stay open by decision.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

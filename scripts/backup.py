@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Back up and restore Continuum's data: the job database and screenshots.
+"""Back up and restore Continuum's data: the job database, screenshots and approved vocabulary.
 
     python scripts/backup.py backup --dest /backups [--keep 14]
     python scripts/backup.py verify /backups/continuum-20261026T020000Z
@@ -9,7 +9,8 @@
 The database (CONTINUUM_DB_PATH: KTs, document versions, the queue, people,
 API keys, sessions, the audit log) is copied with SQLite's online backup, so
 the API and workers keep running while it is taken. The screenshots
-(KT_ASSETS_DIR) are archived beside it, and a manifest records each file's
+(KT_ASSETS_DIR) are archived beside it, with the approved vocabulary
+(glossary.json, glossary.default_path()), and a manifest records each file's
 SHA-256 and the row count of every table. The LLM response cache is not
 included: it refills itself. A backup is a folder; copy it off the host (an
 object store or another machine) as the next step of the same job.
@@ -39,6 +40,7 @@ sys.path.insert(0, ROOT)
 PREFIX = "continuum-"
 DB_FILE = "continuum.sqlite"
 ASSETS_FILE = "kt_assets.tar.gz"
+GLOSSARY_FILE = "glossary.json"
 MANIFEST = "manifest.json"
 
 
@@ -50,6 +52,11 @@ def db_path() -> str:
 def assets_dir() -> str:
     # pipeline.KT_ASSETS_DIR, without importing the pipeline and its models.
     return os.getenv("KT_ASSETS_DIR", os.path.join(ROOT, "data", "kt_assets"))
+
+
+def glossary_file() -> str:
+    from glossary import default_path
+    return default_path()
 
 
 def _sha256(path: str) -> str:
@@ -83,10 +90,12 @@ def _integrity(path: str) -> str:
         db.close()
 
 
-def backup(dest: str, keep: int = 14, source_db: Optional[str] = None, source_assets: Optional[str] = None) -> str:
+def backup(dest: str, keep: int = 14, source_db: Optional[str] = None, source_assets: Optional[str] = None,
+           source_glossary: Optional[str] = None) -> str:
     """A new backup folder in `dest`; the oldest beyond `keep` are removed."""
     source_db = source_db or db_path()
     source_assets = source_assets or assets_dir()
+    source_glossary = source_glossary or glossary_file()
     if not os.path.exists(source_db):
         raise SystemExit(f"No database at {source_db}")
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -122,6 +131,10 @@ def backup(dest: str, keep: int = 14, source_db: Optional[str] = None, source_as
                     tar.add(full, arcname=os.path.relpath(full, source_assets))
                     files += 1
         manifest["assets"] = {"file": ASSETS_FILE, "sha256": _sha256(archive), "files": files}
+    if os.path.isfile(source_glossary):
+        copy = os.path.join(partial, GLOSSARY_FILE)
+        shutil.copyfile(source_glossary, copy)
+        manifest["glossary"] = {"file": GLOSSARY_FILE, "sha256": _sha256(copy), "source": source_glossary}
     manifest["seconds"] = round(time.time() - started, 1)
     with open(os.path.join(partial, MANIFEST), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
@@ -141,7 +154,7 @@ def verify(folder: str) -> dict:
             manifest = json.load(fh)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"{folder} is not a complete backup: {exc}")
-    parts = [manifest["database"]] + ([manifest["assets"]] if manifest.get("assets") else [])
+    parts = [manifest["database"]] + [manifest[k] for k in ("assets", "glossary") if manifest.get(k)]
     for part in parts:
         path = os.path.join(folder, part["file"])
         if not os.path.exists(path) or _sha256(path) != part["sha256"]:
@@ -161,11 +174,12 @@ def _set_aside(path: str, stamp: str) -> Optional[str]:
 
 
 def restore(folder: str, target_db: Optional[str] = None, target_assets: Optional[str] = None,
-            force: bool = False) -> dict:
+            force: bool = False, target_glossary: Optional[str] = None) -> dict:
     """Put a verified backup in place; what it replaces is kept beside it."""
     manifest = verify(folder)
     target_db = target_db or db_path()
     target_assets = target_assets or assets_dir()
+    target_glossary = target_glossary or glossary_file()
     if os.path.exists(target_db) and not force:
         raise SystemExit(f"{target_db} exists. Stop the API and the workers, then run again with --force "
                          "(the current database is kept beside it).")
@@ -178,6 +192,10 @@ def restore(folder: str, target_db: Optional[str] = None, target_assets: Optiona
         os.makedirs(target_assets, exist_ok=True)
         with tarfile.open(os.path.join(folder, ASSETS_FILE), "r:gz") as tar:
             tar.extractall(target_assets, filter="data")
+    if manifest.get("glossary"):
+        kept.append(_set_aside(target_glossary, stamp))
+        os.makedirs(os.path.dirname(os.path.abspath(target_glossary)), exist_ok=True)
+        shutil.copyfile(os.path.join(folder, GLOSSARY_FILE), target_glossary)
     if _table_counts(target_db) != manifest["database"]["tables"]:
         raise SystemExit("The restored database does not hold what the backup recorded")
     return {"manifest": manifest, "kept": [k for k in kept if k]}
@@ -194,7 +212,11 @@ def drill(dest: Optional[str] = None) -> dict:
         folder = backup(dest or os.path.join(scratch, "backups"), keep=10 ** 6)
         restored_db = os.path.join(scratch, "restored", DB_FILE)
         restored_assets = os.path.join(scratch, "restored", "kt_assets")
-        result = restore(folder, restored_db, restored_assets)
+        restored_glossary = os.path.join(scratch, "restored", GLOSSARY_FILE)
+        result = restore(folder, restored_db, restored_assets, target_glossary=restored_glossary)
+        if result["manifest"].get("glossary"):
+            with open(restored_glossary, encoding="utf-8") as fh:
+                json.load(fh)                     # the vocabulary reads back
         store = JobStore(restored_db)
         db = sqlite3.connect(restored_db)
         ids = [r[0] for r in db.execute("SELECT job_id FROM jobs")]

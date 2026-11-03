@@ -2131,6 +2131,18 @@ _FIX_CUE_RE = re.compile(
     r"redeploy\w*|roll\w* back|increase\w*|bump\w*|purge\w*|recreate\w*|failover|fail over|archive\w*|verify|check)\b",
     re.IGNORECASE)
 _NO_FIX_STATED = "No fix was stated in the KT. Ask the outgoing owner."
+# A failure said by what goes wrong, with no failure word: "The slot worker
+# falls behind when a ship arrives late ..." (dev d11 without an LLM: the card
+# carded only its fix, as "Known failure", and the next failure inside it).
+_FAILURE_VERB_RE = re.compile(
+    r"\b(?:falls?\s+behind|backs?\s+up|times?\s+out|timing\s+out|runs?\s+out\s+of|fills?\s+up|crash(?:es|ed)?"
+    r"|hangs|stalls?|stalled|gets?\s+stuck|(?:is|are)\s+stuck|slows?\s+down|goes\s+down|fails\b|failing|breaks\b"
+    r"|lags\b|leaks\b|spikes\b|exhausts?|exhausted|saturat\w*|throttl\w*|sends?\s+duplicate|duplicates\b"
+    r"|stale\b|out\s+of\s+memory)", re.IGNORECASE)
+# A thing named on its own, the failure to follow: "Anything else? The
+# customs feed." No verb in it.
+_FAILURE_SUBJECT_RE = re.compile(r"^(?:the|our|a|an)\s+(?!.*\b(?:is|are|was|were|has|have|had|can|will|would|"
+                                 r"should|must|runs?|goes|uses?)\b)[\w' -]{2,40}$", re.IGNORECASE)
 
 
 def _qr_sentences(section: Optional[Dict[str, Any]], skip=None) -> List[str]:
@@ -2277,6 +2289,12 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
             items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
         elif _FAILURE_EFFECT_RE.match(bare) and not _FIX_CUE_RE.search(bare):
             items.append({"what": bare, "parts": []})
+        elif (_FAILURE_VERB_RE.search(bare) or _FAILURE_SUBJECT_RE.match(bare)) and not _FIX_CUE_RE.search(bare)                 and not (items and items[-1]["what"] and not items[-1]["parts"]):
+            items.append({"what": bare, "parts": []})
+        elif items and items[-1]["what"] and not items[-1]["parts"] and not _FIX_CUE_RE.search(bare):
+            # Before its fix, a sentence says more about the failure ("The
+            # queue backs up and hauliers see stale slots."): the situation.
+            items[-1].setdefault("detail", []).append(bare)
         elif items and not (_FAILURE_WORD_RE.search(bare) and not _FIX_CUE_RE.search(bare)):
             # A sentence that brings up another problem is not this one's fix.
             items[-1]["parts"].append(sentence)
@@ -2287,6 +2305,11 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
         action = " ".join(_clause(p).rstrip(".") + "." for p in item["parts"] if p and p.strip())
         if item["what"]:
             situation = _tidy(item["what"].rstrip("."))
+            for more in item.get("detail") or []:
+                more = more.strip().rstrip(".")
+                # "The customs feed: it sometimes sends duplicate release messages"
+                situation += (": " + more[:1].lower() + more[1:] if _FAILURE_SUBJECT_RE.match(item["what"].strip())
+                              and len(situation.split()) <= 6 else ". " + _tidy(more))
         elif re.match(r"^(?:check|start\s+with|look\s+at|first|for\s+[^,]{2,60},\s*(?:first\s+)?check)\b", action,
                       re.IGNORECASE):
             situation = "Where to look first"     # triage steps, not a named failure

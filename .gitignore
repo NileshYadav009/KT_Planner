@@ -30,6 +30,7 @@ MANIFEST
 venv/
 .venv
 .venv-1/
+.venv-tools/
 env/
 
 # IDE

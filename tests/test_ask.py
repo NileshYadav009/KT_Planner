@@ -96,3 +96,5 @@ def test_the_route_answers_for_any_role_in_the_workspace_only(tmp_path, monkeypa
     assert resp.status_code == 200 and "Marta" in resp.json()["answers"][0]["text"]
     assert client.post("/kt/ask-1/ask", json={"question": " "}, headers={"X-API-Key": reader}).status_code == 400
     assert client.post("/kt/ask-1/ask", json={"question": "Who?"}, headers={"X-API-Key": outsider}).status_code == 404
+    resp = client.post("/kt/ask-1/ask", json={"question": "Who do I call? " * 40}, headers={"X-API-Key": reader})
+    assert resp.status_code == 400 and "under 500 characters" in resp.json()["detail"]

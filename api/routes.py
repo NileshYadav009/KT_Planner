@@ -8,6 +8,7 @@ access, not `from pipeline import ...`). Submitted KTs are queued
 process or another; job state written by a worker is read from the database.
 """
 
+import json
 import logging
 import os
 import re
@@ -107,14 +108,27 @@ async def get_schema():
     return {"sections": SCHEMA}
 
 
+def _job_json(payload: dict) -> Response:
+    """A job payload as JSON, with its screenshot paths signed. Written once
+    with json.dumps: on a finished KT (100-200 KB of JSON) FastAPI's encoder
+    took about eight times as long, and signing deep-copied the whole job even
+    when it held no screenshot (audit §9abj)."""
+    def dumps(value):
+        return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+    text = dumps(payload)
+    if "/kt-assets/" in text:
+        text = dumps(sign_asset_urls(payload))
+    return Response(content=text, media_type="application/json")
+
+
 @router.get("/schema/{job_id}")
 async def get_job_schema(job_id: str, principal: Principal = Depends(require_principal)):
     with pipeline.JOB_LOCK:
         job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
-    job = sign_asset_urls(job)
     dynamic = job.get("dynamic_schema", SCHEMA)
     populated = job.get("populated_fields", {})
-    return {
+    return _job_json({
         "sections": dynamic,
         "populated_fields": populated,
         "field_count": sum(len(v) for v in populated.values()),
@@ -126,7 +140,7 @@ async def get_job_schema(job_id: str, principal: Principal = Depends(require_pri
         "knowledge_object": job.get("knowledge_object", {}),
         "validation_warnings": job.get("validation_warnings", []),
         "quality_score": job.get("quality_score", {}),
-    }
+    })
 
 
 @router.get("/export/pdf/{job_id}")
@@ -390,7 +404,16 @@ async def upload(file: UploadFile, request: Request, participants: Optional[str]
             pipeline.TASKS.release_key(principal.tenant_id, key, job_id)
         if isinstance(e, media_guard.MediaRejected):
             raise HTTPException(status_code=e.status, detail=e.message)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _upload_failed(e)
+
+
+def _upload_failed(exc: Exception) -> HTTPException:
+    """An unexpected upload failure: logged in full, and answered without the
+    exception's text, which can name server paths (it was returned as is)."""
+    rid = observability.REQUEST_ID.get()
+    logger.exception("Upload failed (request %s)", rid, exc_info=exc)
+    return HTTPException(status_code=400, detail="The upload could not be processed. Try again; if it keeps failing, "
+                                                 f"give your Continuum operator the request id {rid}.")
 
 
 def _paste_task(payload: dict) -> dict:
@@ -565,7 +588,7 @@ async def add_kt_session_recording(job_id: str, file: UploadFile,
             raise
         if isinstance(e, media_guard.MediaRejected):
             raise HTTPException(status_code=e.status, detail=e.message)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _upload_failed(e)
 
 
 @router.get("/jobs")
@@ -636,6 +659,9 @@ async def document_version(job_id: str, version: int, principal: Principal = Dep
     return dict(snap, version=version, current=document_model.current_version(job))
 
 
+ASK_MAX_CHARS = 500
+
+
 @router.post("/kt/{job_id}/ask")
 async def ask_kt(job_id: str, payload: dict, principal: Principal = Depends(require_principal)):
     """Ask the KT (P3-1): the document's own statements that answer the
@@ -644,6 +670,8 @@ async def ask_kt(job_id: str, payload: dict, principal: Principal = Depends(requ
     question = str(payload.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="Type a question")
+    if len(question) > ASK_MAX_CHARS:
+        raise HTTPException(status_code=400, detail=f"Keep the question under {ASK_MAX_CHARS} characters.")
     job = await _export_job(job_id, None, principal)
     return ask.answer(job.get("knowledge_object") or {}, question)
 
@@ -804,11 +832,12 @@ async def get_status(job_id: str, principal: Principal = Depends(require_princip
     """Poll job status."""
     with pipeline.JOB_LOCK:
         job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
-    job = sign_asset_urls(dict(job, job_id=job_id))
+    # A shallow copy: _with_signoff_view replaces top-level keys only.
+    job = dict(job, job_id=job_id)
     if job.get("status") == "queued":
         # KTs ahead of this one, across the deployment (a count only).
         job["queue_position"] = pipeline.TASKS.position(job_id)
-    return _with_signoff_view(job)
+    return _job_json(_with_signoff_view(job))
 
 
 def _with_signoff_view(job: dict) -> dict:
@@ -982,93 +1011,91 @@ async def receive_feedback(payload: dict, principal: Principal = Depends(require
 
     sentence_id = payload.get('sentence_id')
     corrected_section = payload.get('corrected_classification')
-    if sentence_id is None or not corrected_section:
+    if isinstance(sentence_id, bool) or not isinstance(sentence_id, (int, str)) or not corrected_section:
         raise HTTPException(status_code=400, detail='sentence_id and corrected_classification required')
 
     # Validate corrected_section against schema
     valid_section_ids = {s["id"] for s in SCHEMA}
-    if corrected_section not in valid_section_ids:
+    if not isinstance(corrected_section, str) or corrected_section not in valid_section_ids:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid section id '{corrected_section}'. Valid options: {sorted(valid_section_ids)}"
+            detail=f"Invalid section id '{str(corrected_section)[:60]}'. Valid options: {sorted(valid_section_ids)}"
         )
 
     with pipeline.JOB_LOCK:
         job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        if job.get("status") not in pipeline.COMPLETED_STATUSES:
+            raise HTTPException(status_code=409, detail="Only a finished KT can be corrected")
+        coverage = job.get('coverage', {})
+
+        # The sentence, by its number in the Transcript tab's list (every
+        # section's sentences in order, as the page counts them; this used
+        # to count within each section, so another section's sentence was
+        # moved) or by its text. Text sent with a number must match it: the
+        # list may have changed since the page was loaded.
+        placed = [(sec_id, sent) for sec_id, info in coverage.items() for sent in info.get('sentences', [])]
+        if isinstance(sentence_id, int):
+            match = placed[sentence_id] if 0 <= sentence_id < len(placed) else None
+        else:
+            match = next((p for p in placed if p[1].get('text') == sentence_id), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail="That sentence is not in this KT. Reload it and try again.")
+        expected = payload.get('sentence_text')
+        if isinstance(expected, str) and match[1].get('text') != expected:
+            raise HTTPException(status_code=409, detail="The sentence list changed since the page was loaded. "
+                                                        "Reload the KT and try again.")
+        notes = payload.get('feedback_notes', '')
 
         # Record feedback
         fb = {
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'sentence_id': sentence_id,
+            'sentence_id': sentence_id if isinstance(sentence_id, int) else sentence_id[:500],
             'corrected_classification': corrected_section,
             # Who made the change comes from the authenticated key, never
             # from the request body (which let any caller sign as anyone).
             'user': f"{principal.tenant_id}:{principal.key_label}",
-            'notes': payload.get('feedback_notes', '')
+            'notes': notes[:500] if isinstance(notes, str) else ''
         }
         job.setdefault('human_feedback', []).append(fb)
 
-        # Apply correction to coverage data
-        coverage = job.get('coverage', {})
+        # Move the sentence out of every other section (its text and its
+        # entry in the sentence list) into the corrected one.
+        sent = match[1]
+        sentence_text = sent.get('text', '')
+        for sec_id, info in coverage.items():
+            if sec_id == corrected_section:
+                continue
+            info['sentences'] = [s for s in info.get('sentences', []) if s is not sent]
+            if sentence_text in info.get('content', []):
+                info['content'].remove(sentence_text)
+        sent['assigned_sections'] = [corrected_section]
+        if corrected_section not in coverage:
+            coverage[corrected_section] = {
+                'title': corrected_section,
+                'status': 'covered',
+                'sentence_count': 0,
+                'confidence': 0.85,
+                'risk': 0.0,
+                'content': [],
+                'sentences': []
+            }
+        target = coverage[corrected_section]
+        if sentence_text not in target.setdefault('content', []):
+            target['content'].append(sentence_text)
+        if sent not in target.setdefault('sentences', []):
+            target['sentences'].append(sent)
 
-        # Find the sentence in the flat list across all sections
-        sentence_found = False
-        moved_text = None
-        for sec_id, sec_info in coverage.items():
-            sentences = sec_info.get('sentences', [])
-            for idx, sent in enumerate(sentences):
-                # Match by sentence text or by index
-                if idx == sentence_id or (isinstance(sentence_id, str) and sent.get('text') == sentence_id):
-                    # Remove sentence from old sections and add to new section
-                    old_sections = sent.get('assigned_sections', [])
-
-                    # Update the sentence's assigned_sections
-                    sent['assigned_sections'] = [corrected_section]
-
-                    # Move sentence content to the correct section
-                    sentence_text = sent.get('text', '')
-
-                    # Remove from old sections' content list
-                    for old_sec_id in old_sections:
-                        if old_sec_id in coverage and old_sec_id != corrected_section:
-                            old_content = coverage[old_sec_id].get('content', [])
-                            if sentence_text in old_content:
-                                old_content.remove(sentence_text)
-                            coverage[old_sec_id]['content'] = old_content
-                            coverage[old_sec_id]['sentence_count'] = len(coverage[old_sec_id].get('sentences', []))
-
-                    # Add to new section's content list
-                    if corrected_section not in coverage:
-                        coverage[corrected_section] = {
-                            'title': corrected_section,
-                            'status': 'covered',
-                            'sentence_count': 0,
-                            'confidence': 0.85,
-                            'risk': 0.0,
-                            'content': [],
-                            'sentences': []
-                        }
-                    if sentence_text not in coverage[corrected_section].get('content', []):
-                        coverage[corrected_section]['content'].append(sentence_text)
-                    if sent not in coverage[corrected_section].get('sentences', []):
-                        coverage[corrected_section]['sentences'].append(sent)
-
-                    # Recalculate section metrics
-                    for sec_data in coverage.values():
-                        sent_count = len(sec_data.get('sentences', []))
-                        sec_data['sentence_count'] = sent_count
-                        if sent_count >= 2:
-                            sec_data['status'] = 'covered'
-                        elif sent_count == 1:
-                            sec_data['status'] = 'weak'
-                        else:
-                            sec_data['status'] = 'missing'
-
-                    sentence_found = True
-                    moved_text = sentence_text
-                    break
-            if sentence_found:
-                break
+        # Recalculate section metrics
+        for sec_data in coverage.values():
+            sent_count = len(sec_data.get('sentences', []))
+            sec_data['sentence_count'] = sent_count
+            if sent_count >= 2:
+                sec_data['status'] = 'covered'
+            elif sent_count == 1:
+                sec_data['status'] = 'weak'
+            else:
+                sec_data['status'] = 'missing'
+        moved_text = sentence_text
 
         # Recalculate missing_required and progress
         missing_required = [sec_id for sec_id, info in coverage.items() if info.get('status') == 'missing' and info.get('required')]

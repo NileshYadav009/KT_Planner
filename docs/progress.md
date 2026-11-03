@@ -2016,3 +2016,34 @@ Results:
 - **Nightly test:** it now runs its queue in order, one recording at a time,
   and starts nothing after 08:30. On 29 Oct it had run the two held-back
   recordings ahead of the queue.
+
+## Whole-application audit (audit §9abj, 3 Nov)
+
+- **What:** an engineering, product, QA, receiver and security audit of the
+  whole app, with the fixes made. The reports are at the top of the
+  repository (`CONTINUUM_COMPLETE_AUDIT_REPORT.md` and four others).
+- **A bad bug:** moving a sentence to another section from the Transcript
+  tab moved a different sentence, from another section, and saved that as a
+  new version of the document. Fixed, and checked in a real browser.
+- **Robustness and security:** nine kinds of bad input crashed a request;
+  upload errors showed server details; most requests had no size limit.
+  All fixed. Twelve packages with published vulnerabilities on the input path
+  were upgraded (your choice); one of them, the PDF library, then quietly
+  dropped the font and screenshots from every PDF, which the tests caught and
+  which is fixed.
+- **Your approved vocabulary** is now kept with the database, so Docker no
+  longer loses it, and backups include it.
+- **Read as the new owner:** a question-and-answer KT's PDF printed the
+  receiver's questions in front of answers, listed "Thanks for doing this."
+  as something to confirm, called an answered question a gap, dropped "That's
+  something you should schedule.", and showed a fix on the incident card
+  without saying what it fixes. All fixed, without moving any accuracy figure.
+- **Tested in a browser:** a new script clicks through the whole app like a
+  user (sign in, paste, read, ask, edit, move, PDF, export, refresh, restart,
+  a receiver's view, phone width, sign out). It found the table editor
+  squeezed into one column; fixed.
+- **Faster:** opening a finished KT sends about a seventh of the data, and
+  the server prepares it about seven times faster.
+- **Full test suite** on the final code: 1416 passed, none failed (1 h 35
+  min). One test was skipped, as before: it needs a fresh recording of
+  Groq's answers (X106).

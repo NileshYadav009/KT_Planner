@@ -226,6 +226,50 @@ def test_a_section_correction_moves_the_sentence_and_changes_the_pdf(team, env):
     assert "PagerDuty pages the on-call engineer." in _units(job, "ownership_escalation")
 
 
+def test_a_move_picks_the_sentence_the_transcript_tab_numbered(team, env):
+    """The Transcript tab numbers sentences across every section, in order.
+    Sentence 2 is Danger Zones' first; counting within each section moved
+    Monitoring's third sentence instead (there is none) or another's."""
+    client, job_id, _, people = team
+    said = ["Datadog monitors the booking API.", "PagerDuty pages the on-call engineer.",
+            "Never delete bookings by hand."]
+    env.JOB_QUEUE[job_id] = dict(env.JOB_QUEUE[job_id], coverage={
+        "monitoring_observability": {"title": "Monitoring", "content": said[:2], "sentences": [
+            {"text": t, "assigned_sections": ["monitoring_observability"]} for t in said[:2]]},
+        "danger_zones": {"title": "Danger", "content": said[2:], "sentences": [
+            {"text": said[2], "assigned_sections": ["danger_zones"]}]}})
+    move = {"job_id": job_id, "sentence_id": 2, "sentence_text": said[2], "corrected_classification": "security_controls"}
+    resp = client.post("/feedback", json=move, headers=people["giver"]["h"])
+    assert resp.status_code == 200, resp.text
+    coverage = env.JOB_QUEUE[job_id]["coverage"]
+    assert [s["text"] for s in coverage["security_controls"]["sentences"]] == [said[2]]
+    # Gone from its old section's list too, so the tab shows it once.
+    assert coverage["danger_zones"]["sentences"] == [] and coverage["danger_zones"]["content"] == []
+    assert [s["text"] for s in coverage["monitoring_observability"]["sentences"]] == said[:2]
+
+    # The page's list is stale: number 2 is now another sentence.
+    stale = dict(move, sentence_text="Never delete bookings by hand, ever.")
+    assert client.post("/feedback", json=stale, headers=people["giver"]["h"]).status_code == 409
+    assert client.post("/feedback", json=dict(move, sentence_id=9), headers=people["giver"]["h"]).status_code == 404
+    for bad in ({"sentence_id": True}, {"sentence_id": [1]}, {"corrected_classification": {"a": 1}}):
+        assert client.post("/feedback", json=dict(move, **bad), headers=people["giver"]["h"]).status_code == 400
+    env.JOB_QUEUE[job_id] = dict(env.JOB_QUEUE[job_id], status="processing")
+    assert client.post("/feedback", json=dict(move, sentence_id=0, sentence_text=said[0]),
+                       headers=people["giver"]["h"]).status_code == 409
+
+
+def test_wrong_typed_version_numbers_are_refused_not_server_errors(team, env):
+    client, job_id, _, people = team
+    for base in ("x", None, [], {}, True):
+        resp = _edit(client, job_id, people["giver"], base, {"op": "approve", "section": "monitoring_observability",
+                                                             "block": 0, "unit": 0})
+        assert resp.status_code == 400, (base, resp.status_code)
+    huge = "99999999999999999999"
+    for path in (f"/documents/{job_id}/versions/{huge}", f"/export/pdf/{job_id}?version={huge}",
+                 f"/documents/{job_id}/diff?to={huge}", f"/export/markdown/{job_id}?version=-3"):
+        assert client.get(path, headers=people["giver"]["h"]).status_code == 404, path
+
+
 # --------------------------------------------------------------------------
 # P1-3 Sign-off
 # --------------------------------------------------------------------------
@@ -237,6 +281,13 @@ def _start(client, job_id, people):
 
 def _ack(client, job_id, people, role, version):
     return client.post(f"/signoff/{job_id}/acknowledge", headers=people[role]["h"], json={"role": role, "version": version})
+
+
+def test_an_acknowledgement_of_a_wrong_typed_version_is_refused_not_a_server_error(team):
+    client, job_id, _, people = team
+    assert _start(client, job_id, people).status_code == 200
+    for bad in ("x", None, [], True):
+        assert _ack(client, job_id, people, "receiver", bad).status_code == 400, bad
 
 
 def test_a_kt_cannot_be_signed_with_an_open_gap(team):

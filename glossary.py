@@ -5,10 +5,12 @@ Provides phrase- and token-level corrections for common technical terms
 and acronyms. Designed to run only when sentence-level audio confidence is
 low to avoid hallucination.
 """
-from typing import Tuple
+from typing import Optional, Tuple
 import json
 import os
 import re
+import shutil
+import tempfile
 import logging
 from difflib import SequenceMatcher, get_close_matches
 
@@ -143,8 +145,41 @@ DEFAULT_GLOSSARY = {
 }
 
 
-def load_glossary(path: str = "glossary.json") -> dict:
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def default_path() -> str:
+    """Where the approved vocabulary is kept: CONTINUUM_GLOSSARY_PATH, else
+    beside the job database (CONTINUUM_DB_PATH), on the data volume that is
+    backed up (scripts/backup.py). It was "glossary.json" in the working
+    directory, /app in the Docker image, so approvals were lost when the
+    container was recreated (X95)."""
+    explicit = os.getenv("CONTINUUM_GLOSSARY_PATH", "").strip()
+    if explicit:
+        return explicit
+    database = os.getenv("CONTINUUM_DB_PATH") or os.path.join(_REPO_DIR, "data", "continuum.sqlite")
+    return os.path.join(os.path.dirname(os.path.abspath(database)), "glossary.json")
+
+
+def _adopt_old_file(path: str) -> None:
+    """Copy a glossary from where it used to be written (the working
+    directory, or the repository root) to `path` once; the old file stays."""
+    if os.path.exists(path):
+        return
+    for old in (os.path.abspath("glossary.json"), os.path.join(_REPO_DIR, "glossary.json")):
+        if os.path.isfile(old) and os.path.abspath(old) != os.path.abspath(path):
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+                shutil.copy2(old, path)
+                logger.info("Approved vocabulary copied from %s to %s", old, path)
+            except OSError as e:
+                logger.warning("Could not copy the approved vocabulary from %s: %s", old, e)
+            return
+
+
+def load_glossary(path: Optional[str] = None) -> dict:
     """Load a user-provided glossary from workspace if present, else default."""
+    path = path or default_path()
     try:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -170,15 +205,18 @@ GLOSSARY = load_glossary()
 # the running server without a restart. Internal glossary.py functions and
 # devops_transcription.py both call get_glossary() rather than reading the
 # bare GLOSSARY name for this reason.
-_GLOSSARY_PATH_LOADED = "glossary.json"
-_GLOSSARY_MTIME = os.path.getmtime(_GLOSSARY_PATH_LOADED) if os.path.exists(_GLOSSARY_PATH_LOADED) else None
+_GLOSSARY_PATH_LOADED = None
+_GLOSSARY_MTIME = None
 
 
-def get_glossary(path: str = "glossary.json") -> dict:
+def get_glossary(path: Optional[str] = None) -> dict:
     """Return the current glossary, transparently reloading from disk if the
     file has changed since this process last read it (see note above)."""
     global GLOSSARY, _GLOSSARY_PATH_LOADED, _GLOSSARY_MTIME
 
+    path = path or default_path()
+    if path != _GLOSSARY_PATH_LOADED:
+        _adopt_old_file(path)
     try:
         mtime = os.path.getmtime(path) if os.path.exists(path) else None
     except Exception:
@@ -192,12 +230,28 @@ def get_glossary(path: str = "glossary.json") -> dict:
     return GLOSSARY
 
 
-def save_glossary(data: dict, path: str = "glossary.json") -> bool:
-    """Save glossary back to workspace path. Returns True on success."""
+def save_glossary(data: dict, path: Optional[str] = None) -> bool:
+    """Save glossary back to workspace path. Returns True on success.
+
+    Written to a temporary file and moved into place: a crash while writing
+    in place left a half-written file, which load_glossary reads as the
+    default glossary, dropping every approval."""
     global GLOSSARY, _GLOSSARY_PATH_LOADED, _GLOSSARY_MTIME
+    path = path or default_path()
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        folder = os.path.dirname(os.path.abspath(path))
+        os.makedirs(folder, exist_ok=True)
+        fd, partial = tempfile.mkstemp(prefix=".glossary-", suffix=".json", dir=folder)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(partial, path)
+        except BaseException:
+            if os.path.exists(partial):
+                os.unlink(partial)
+            raise
         # update in-memory cache + the mtime bookkeeping get_glossary() uses,
         # so a process that both saves and immediately reads sees its own write
         GLOSSARY = data

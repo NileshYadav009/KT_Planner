@@ -102,6 +102,15 @@ def test_what_the_receiver_says_alone_is_listed_to_confirm_not_shown():
                          "by": "Meera", "giver": "Arjun"}]
 
 
+def test_a_receivers_thanks_is_not_listed_to_confirm():
+    """"Thanks for doing this." was on the follow-up list as something Marcus
+    had not confirmed (dev d11, audit §9abj). It is left out, and that is all."""
+    kept, left_out, findings = _apply(_units(("Meera", "Thanks for doing this."),
+                                             ("Arjun", "Deploys go through ArgoCD.")))
+    assert kept == ["Arjun: Deploys go through ArgoCD."]
+    assert "Meera: Thanks for doing this." in left_out and findings == []
+
+
 def test_small_talk_and_asking_to_repeat_are_left_out_but_business_words_are_not():
     kept, left_out, _ = _apply(_units(("Arjun", "Before we start, how was the offsite?"),
                                       ("Meera", "Good, the food was great."),

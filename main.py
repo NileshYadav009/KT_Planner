@@ -1,6 +1,9 @@
+import contextlib
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 import re
@@ -20,8 +23,19 @@ import worker
 observability.configure_logging()
 observability.init_error_tracking()
 
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup and shutdown, load_models() and stop_worker() below (a lifespan
+    handler: on_event is deprecated in FastAPI)."""
+    load_models()
+    try:
+        yield
+    finally:
+        stop_worker()
+
+
 # The API reference is served by api/routes.py, to signed-in users only.
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 # CORS configuration - restrict to allowed origins
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
@@ -54,6 +68,10 @@ async def request_id(request: Request, call_next):
 
 
 _PASTE_PATH_RE = re.compile(r"/kt-from-transcript|/kt/[^/]+/sessions")
+_UPLOAD_PATH_RE = re.compile(r"/upload|/kt/[^/]+/sessions/upload")
+# Every other request body is a small JSON form (an edit, a question, a
+# sign-off step); none comes near this. They had no limit at all.
+MAX_JSON_BODY_BYTES = 1024 * 1024
 
 
 @app.middleware("http")
@@ -66,15 +84,20 @@ async def refuse_oversized_uploads(request: Request, call_next):
     if request.method == "POST":
         length = request.headers.get("content-length", "")
         length = int(length) if length.isdigit() else 0
-        if request.url.path == "/upload" and length > media_guard.max_upload_bytes() + 64 * 1024:   # + multipart overhead
-            detail = (f"The file is larger than {media_guard.upload_limit_label()}. "
-                      "Upload a shorter recording or the audio track only.")
-            return JSONResponse({"detail": detail}, status_code=413)
+        path = request.url.path
+        if _UPLOAD_PATH_RE.fullmatch(path):
+            if length > media_guard.max_upload_bytes() + 64 * 1024:   # + multipart overhead
+                detail = (f"The file is larger than {media_guard.upload_limit_label()}. "
+                          "Upload a shorter recording or the audio track only.")
+                return JSONResponse({"detail": detail}, status_code=413)
         # A character is at most 6 bytes of JSON ("é").
-        if _PASTE_PATH_RE.fullmatch(request.url.path) and length > input_gate.MAX_PASTE_CHARS * 6 + 64 * 1024:
-            detail = (f"The transcript is longer than the limit of {input_gate.MAX_PASTE_CHARS:,} characters. "
-                      "Split it into sessions and add them to the KT one by one.")
-            return JSONResponse({"detail": detail}, status_code=413)
+        elif _PASTE_PATH_RE.fullmatch(path):
+            if length > input_gate.MAX_PASTE_CHARS * 6 + 64 * 1024:
+                detail = (f"The transcript is longer than the limit of {input_gate.MAX_PASTE_CHARS:,} characters. "
+                          "Split it into sessions and add them to the KT one by one.")
+                return JSONResponse({"detail": detail}, status_code=413)
+        elif length > MAX_JSON_BODY_BYTES:
+            return JSONResponse({"detail": "The request is too large."}, status_code=413)
     return await call_next(request)
 
 
@@ -89,13 +112,17 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+# A finished KT's /status and /schema are 100-200 KB of JSON (the document
+# object); compressed they are about a seventh of that. Added last, so it
+# compresses the final response.
+app.add_middleware(GZipMiddleware, minimum_size=2048, compresslevel=5)     # 9 (the default) is slower, barely smaller
+
 # Serve the frontend static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.include_router(router)
 
 
-@app.on_event("startup")
 def load_models():
     """Load heavy models on startup so endpoints can use them."""
     interrupted = pipeline.JOB_STORE.mark_interrupted()
@@ -112,7 +139,6 @@ def load_models():
         app.state.worker = worker.Worker(threads).start()
 
 
-@app.on_event("shutdown")
 def stop_worker():
     """Stop claiming new KTs. A KT still running is picked up again by the
     next worker once its lease runs out (job_queue.py)."""

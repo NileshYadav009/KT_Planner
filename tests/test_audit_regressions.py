@@ -515,6 +515,10 @@ def test_platform_and_external_services_are_recognised():
         "A Go consumer service running on OpenShift calls Twilio. We go home early. Java is old."
     )
     assert found == ["Go", "OpenShift", "Twilio"]
+    # Said after the workload too (dev d11: the Python worker was missing from the Technology summary).
+    assert PATTERN_EXTRACTORS["tools"].findall("A slot allocation worker in Python and an API written in Go.") == [
+        "Python", "Go"]
+    assert PATTERN_EXTRACTORS["tools"].findall("She has ten years of experience in Java.") == []
     graph = build_architecture_graph(["Amazon ECS", "DynamoDB", "Stripe"])
     # A third-party API sits outside the cloud account; a database beside the platform.
     assert [n["label"] for n in graph["external"]] == ["Stripe"]

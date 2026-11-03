@@ -434,7 +434,8 @@ def test_roles_decide_who_may_create_correct_and_delete(client):
         assert client.get(f"/status/{job_id}", headers=_h(receiver)).status_code == 200
         feedback = {"job_id": job_id, "sentence_id": 0, "corrected_classification": "danger_zones"}
         assert client.post("/feedback", json=feedback, headers=_h(receiver)).status_code == 403
-        assert client.post("/feedback", json=feedback, headers=_h(giver)).status_code == 200
+        # The giver may correct; this KT is still queued, so there is nothing to move yet.
+        assert client.post("/feedback", json=feedback, headers=_h(giver)).status_code == 409
 
         listed = {j["job_id"]: j["can_delete"] for j in client.get("/jobs", headers=_h(giver)).json()["jobs"]}
         assert listed[job_id] is True and listed[other_job] is False

@@ -89,8 +89,11 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"|(?:read|standby|database|db|cross-?region|secondary)\s+replicas?"
          r"|replicas?\s+in\s+(?:another|a\s+(?:second|different)|the\s+other)\s+region"
          r"|secondary\s+(?:site|region|data\s*cent(?:er|re)))\b"),
+        # "Has anyone tested a restore?" (dev d11) as well as "test the failover".
         ("DR testing", ("dr_testing_frequency",),
-         r"\b(?:test\w*\s+(?:the\s+)?(?:failover|restores?|recovery|dr)|(?:failover|restore|recovery|dr)\s+(?:test|drill)\w*)\b"),
+         r"\b(?:test\w*\s+(?:(?:the|a|an|our|any|its)\s+)?(?:full\s+|real\s+|database\s+)?(?:failover|restores?|recovery|dr)"
+         r"|(?:failover|restores?|recovery|dr)\s+(?:(?:is|are|was|were|has|have|had)\s+(?:never\s+|not\s+)?(?:been\s+)?)?"
+         r"(?:test|drill)\w*)\b"),
     ],
     "security_controls": [
         # Where secrets are kept and how they reach the system, not any
@@ -153,7 +156,13 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
         ("Known failures", (),
          r"\b(?:problem|issue|failure|fail(?:s|ed|ing)?|error|outage|incident|backlog|lag|throttl\w*|timeout|crash\w*|"
          r"exhaust\w*|leak\w*|stuck|down|offline|unavailable|reject\w*|hang\w*|stall\w*|drops|dropped"
-         r"|backs\s+up\s+when|backed\s+up)\b"),
+         r"|backs\s+up\s+when|backed\s+up"
+         # Said by what goes wrong: "The slot worker falls behind when a ship
+         # arrives late", "the queue backs up and hauliers see stale slots" (dev
+         # d11: Common Failures read "only in passing under System Overview").
+         # Not "the job backs up the database".
+         r"|falls?\s+behind|(?:queues?|backlog|messages)\s+backs?\s+up|runs?\s+out\s+of|times?\s+out"
+         r"|out\s+of\s+memory|stale|(?:sends?|sent|shows?)\s+(?:\w+\s+)?duplicates?|duplicate\s+(?:messages|events|records))\b"),
         ("Fixes or workarounds", (),
          r"\b(?:fix\w*|resolv\w*|workaround|restart\w*|renew\w*|rotat\w*|switch\w*|drain\w*|redeploy\w*|scal\w+"
          r"|clear\w*|reset\w*|purge\w*|flush\w*|spread\w*|retr(?:y|ies|ied)|re-?run\w*|reboot\w*|fail\s*over\w*)\b"),

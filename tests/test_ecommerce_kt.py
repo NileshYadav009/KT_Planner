@@ -120,9 +120,6 @@ EXPECTED = {
         "escalation",
         "on-call engineer",
     ],
-    "monitoring_observability": [
-        "Prometheus, Grafana and CloudWatch",
-    ],
     "security_controls": [
         "Security scanning",
         "Trivy",

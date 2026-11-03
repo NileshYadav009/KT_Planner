@@ -349,3 +349,58 @@ def test_a_remark_that_says_nothing_specific_is_not_a_fact(said, remark):
     from dialogue import says_nothing_specific
 
     assert says_nothing_specific(said) is remark
+
+
+@pytest.mark.parametrize("unit,shown", [
+    # The statement after a yes or no says what the question asked.
+    ("Is there a cache? Yes, ElastiCache Redis holds the slot availability so the front end doesn't hammer the "
+     "database.", "ElastiCache Redis holds the slot availability so the front end doesn't hammer the database."),
+    ("Backups are nightly, I assume? No, Aurora takes continuous backups with point-in-time restore for fourteen days.",
+     "Aurora takes continuous backups with point-in-time restore for fourteen days."),
+    ("Is there anything I must never do? Never purge the SQS queue to fix a backlog.",
+     "Never purge the SQS queue to fix a backlog."),
+    ("Who owns it? The student systems team in IT owns Millbrook.", "The student systems team in IT owns Millbrook."),
+    # The question stays when the answer leans on it or says less than it asked.
+    ("Is there a staging environment? Yes, there's one for each team.", None),
+    ("Is there a runbook for that? Yes, Priya wrote it last year.", None),
+    ("Has anyone tested a restore? Not this year.", None),
+    ("Bad days to deploy? Avoid Monday mornings and the first week of January, when everyone rebooks.", None),
+    ("And my first week? Get access to the Azure subscription and the on-prem jump host.", None),
+])
+def test_an_answer_after_yes_or_no_stands_without_its_question(unit, shown):
+    """A receiver's reading of a Q&A KT (dev d11, audit §9abj): the question
+    was printed before about a dozen answers that say it all themselves."""
+    from dialogue import display_text
+
+    assert display_text(unit, set()) == (shown or unit)
+
+
+def test_a_corrected_assumption_is_not_a_stated_gap():
+    """"Backups are nightly, I assume? No, Aurora takes continuous backups ..."
+    was Disaster Recovery's stated gap and on the follow-up list (dev d11)."""
+    from dialogue import is_gap_statement
+
+    assert not is_gap_statement("Backups are nightly, I assume? No, Aurora takes continuous backups with "
+                                "point-in-time restore for fourteen days.")
+    assert not is_gap_statement("Is the API public? No, only the VPN can reach the gateway.")
+    # Asked whether something exists or was done, a no is a gap.
+    assert is_gap_statement("Do we have alerts on the queue? No, we rely on the daily report.")
+    assert is_gap_statement("Is there a DR plan? No.")
+    assert is_gap_statement("Has anyone tested a restore? Not this year.")
+    # A correction that is itself a gap stays one.
+    assert is_gap_statement("Backups are nightly, I assume? No, honestly there is no backup at all.")
+
+
+def test_an_action_on_the_sentence_before_stays_with_it():
+    """"Not this year. That's something you should schedule.": alone, the
+    second sentence said nothing specific and was left out with its action."""
+    from context_mapper import AudioSegment, segment_sentences
+    from dialogue import asks_to_act_on_before
+
+    assert asks_to_act_on_before("Not this year.", "That's something you should schedule.")
+    assert asks_to_act_on_before("The alert is noisy.", "You should really tune that.")
+    assert not asks_to_act_on_before("The alert is noisy.", "You should see my screen now.")       # no refer-back
+    assert not asks_to_act_on_before("Has anyone tested it?", "That's something you should schedule.")
+    said = "Restores are run by the platform team. Not this year. That's something you should schedule."
+    units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert "Not this year. That's something you should schedule." in units

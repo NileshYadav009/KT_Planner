@@ -125,6 +125,33 @@ def test_oversized_uploads_are_refused(client, media, monkeypatch):
         asyncio.run(media_guard.save_upload(FakeUpload(media["wav"].read_bytes())))
     assert exc.value.status == 413
 
+    # A follow-up session's recording is refused just as early.
+    resp = client.post("/kt/some-kt/sessions/upload", files={"file": ("s.wav", media["wav"].read_bytes())})
+    assert resp.status_code == 413 and "larger than" in resp.json()["detail"]
+
+
+def test_other_request_bodies_have_a_size_limit(client):
+    """Only uploads and pasted transcripts had a limit; a megabyte of JSON
+    sent to any other route was read whole."""
+    import main
+
+    big = {"question": "x" * (main.MAX_JSON_BODY_BYTES + 10)}
+    for path in ("/kt/some-kt/ask", "/documents/some-kt/edits", "/feedback", "/login"):
+        assert client.post(path, json=big).status_code == 413, path
+
+
+def test_an_unexpected_upload_failure_does_not_echo_server_details(client, media, monkeypatch):
+    def broken(path):
+        raise OSError(f"[Errno 13] Permission denied: '{path}'")
+
+    monkeypatch.setattr(media_guard, "probe", broken)
+    resp = _upload(client, media["wav"])
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "Errno" not in detail and "upload-" not in detail and "\\" not in detail
+    assert resp.headers["X-Request-ID"] in detail                  # what to tell the operator
+    assert client.queued == []
+
 
 def test_recordings_over_the_length_limit_are_refused(client, media, monkeypatch):
     monkeypatch.setenv("CONTINUUM_MAX_MEDIA_MINUTES", "0.01")              # 0.6 s; the tone is 2 s

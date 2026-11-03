@@ -154,6 +154,27 @@ def test_failures_are_split_one_row_each_with_their_fix():
     assert {r["Source"] for r in rows} == {"Common Failures"}
 
 
+def test_failures_said_by_what_goes_wrong_are_carded_with_their_fixes():
+    """The receiver's reading of a Q&A KT (dev d11, audit §9abj): "The slot
+    worker falls behind ..." named no failure word, so the card showed only its
+    fix, as "Known failure", with the customs feed's symptom as more fix."""
+    rows = _card(_section("common_failures", "Common Failures", [
+        "The renderer runs out of memory when a customer has more than ten thousand invoices.",
+        "Statements then stay stuck in the queue.",
+        "Restart the renderer with the large-memory profile and the queue drains in about ten minutes.",
+        "Anything else? The tax feed.",
+        "It sometimes sends the same rate twice, and totals come out doubled.",
+        "Delete the duplicate rate in the admin screen and re-run the statement.",
+    ]))
+    assert [(r["Situation"], r["What to do"]) for r in rows] == [
+        ("The renderer runs out of memory when a customer has more than ten thousand invoices. "
+         "Statements then stay stuck in the queue",
+         "Restart the renderer with the large-memory profile and the queue drains in about ten minutes."),
+        ("The tax feed: it sometimes sends the same rate twice, and totals come out doubled",
+         "Delete the duplicate rate in the admin screen and re-run the statement."),
+    ]
+
+
 def test_the_llms_structured_failures_are_used_when_present():
     rows = _card(_section("common_failures", "Common Failures", ["Something else entirely."],
                           structured={"failures": [{"symptom": "Checkout slow", "fix": "Switch to on-demand"}]}))

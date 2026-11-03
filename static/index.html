@@ -2086,9 +2086,17 @@ function editorShell(target, inner, onApply){
   const box = document.createElement('div'); box.className = 'unit-editor';
   box.innerHTML = inner + '<div class="row"><button type="button" class="btn btn-primary btn-sm" data-ed="ok">Apply</button>'
     + '<button type="button" class="btn btn-ghost btn-sm" data-ed="cancel">Cancel</button></div>';
-  target.insertAdjacentElement('afterend', box);
-  box.querySelector('[data-ed="cancel"]').addEventListener('click', () => box.remove());
-  box.querySelector('[data-ed="ok"]').addEventListener('click', () => { if(onApply(box) !== false){ box.remove(); rerenderDocument(); } });
+  // A table row's editor gets a row of its own across the table: put after
+  // the <tr> itself it was laid out in the first column, 177 px wide.
+  let holder = box;
+  if(target.tagName === 'TR'){
+    holder = document.createElement('tr'); holder.className = 'unit-editor-row';
+    const cell = document.createElement('td'); cell.colSpan = target.children.length || 1;
+    cell.appendChild(box); holder.appendChild(cell);
+  }
+  target.insertAdjacentElement('afterend', holder);
+  box.querySelector('[data-ed="cancel"]').addEventListener('click', () => holder.remove());
+  box.querySelector('[data-ed="ok"]').addEventListener('click', () => { if(onApply(box) !== false){ holder.remove(); rerenderDocument(); } });
   const first = box.querySelector('textarea,input,select'); if(first) first.focus();
   return box;
 }
@@ -2099,10 +2107,11 @@ function openUnitEditor(unitEl, addr){
   if(rowKey){
     const row = block[rowKey][addr.unit] || {};
     const cols = block.columns || Object.keys(row).filter(k => typeof row[k] === 'string');
-    const inner = cols.map(c => `<label>${escapeHtml(c)}<input data-col="${escapeHtml(c)}" value="${escapeHtml(String(rowValue({sec: addr.section, blk: addr.block}, addr.unit, row, c) || ''))}"/></label>`).join('');
+    // A cell can hold a sentence or two ("What to do"): a text box, not a one-line input.
+    const inner = cols.map(c => `<label>${escapeHtml(c)}<textarea rows="2" data-col="${escapeHtml(c)}">${escapeHtml(String(rowValue({sec: addr.section, blk: addr.block}, addr.unit, row, c) || ''))}</textarea></label>`).join('');
     editorShell(unitEl, inner, box => {
       const cells = {};
-      box.querySelectorAll('input[data-col]').forEach(inp => { cells[inp.dataset.col] = inp.value.trim(); });
+      box.querySelectorAll('[data-col]').forEach(inp => { cells[inp.dataset.col] = inp.value.trim(); });
       setPending(Object.assign({op: 'replace', cells}, addr));
     });
   } else {
@@ -2706,9 +2715,10 @@ async function confirmEditSentence(){
   const cs=document.getElementById('sectionSelect').value;
   if(!cs||editState.sentenceIndex===null){ showToast('Select a section'); return; }
   try{
-    const body={job_id:currentJobId,sentence_id:editState.sentenceIndex,corrected_classification:cs,user:'local_user',feedback_notes:'UI correction'};
+    const body={job_id:currentJobId,sentence_id:editState.sentenceIndex,sentence_text:editState.sentenceObj.text,
+                corrected_classification:cs,feedback_notes:'UI correction'};
     const r=await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(!r.ok){ showToast('Could not move the sentence', 6000, 'error'); return; }
+    if(!r.ok){ const err=await r.json().catch(()=>({})); showToast(err.detail || 'Could not move the sentence', 6000, 'error'); return; }
     const j=await r.json();
     if(j.coverage){ renderCoverage(j.coverage); renderSummary(j); }
     showToast('Moved to ' + sectionTitle(cs) + '. The correction is recorded.', 5000, 'success');

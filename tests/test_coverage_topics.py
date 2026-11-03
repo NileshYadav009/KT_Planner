@@ -172,6 +172,16 @@ def test_everyday_words_on_recorded_talks_do_not_cover_a_topic():
     assert _discussed("cost_optimization", "The reserved instances gave us savings of 30 percent.") == {"Cost levers"}
 
 
+def test_a_failure_said_by_what_goes_wrong_is_a_known_failure():
+    """Dev d11: Common Failures read "only in passing under System Overview"
+    though it described two failures and their fixes."""
+    for said in ["The slot worker falls behind when a ship arrives late.", "The queue backs up and hauliers see stale slots.",
+                 "It sometimes sends duplicate release messages.", "The renderer runs out of memory on large customers."]:
+        assert "Known failures" in _discussed("common_failures", said), said
+    # A backup is not a backlog.
+    assert "Known failures" not in _discussed("common_failures", "The nightly job backs up the database to S3.")
+
+
 def test_topics_said_the_way_written_kts_say_them():
     # The visible KTs (30 Oct): each of these sections was discussed, and its
     # statements matched none of its topics.
@@ -187,6 +197,8 @@ def test_topics_said_the_way_written_kts_say_them():
         ("cost_optimization", "Licences, we pay for VMware per socket, so we keep Quarry on the existing hosts.", "Cost levers"),
         ("danger_zones", "Under no circumstances should the matching tolerance setting be changed.", "Never-do rules"),
         ("disaster_recovery", "Snowflake time travel is set to thirty days on the reporting schema.", "Backups"),
+        ("disaster_recovery", "Has anyone tested a restore since the migration?", "DR testing"),
+        ("disaster_recovery", "Restores have never been tested on the new cluster.", "DR testing"),
         ("ownership_escalation", "Owned by the data science team, and revenue management are the business owners.",
          "Owning teams"),
         ("ownership_escalation", "If you're stuck, Omar Haddad, he's the head of data science.", "Escalation path"),
