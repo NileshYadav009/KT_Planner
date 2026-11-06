@@ -448,6 +448,29 @@ def test_on_a_recording_a_section_holding_only_statements_that_name_none_of_its_
             assert calendar["blocks"][0]["text"] == stray
 
 
+def test_on_a_recording_a_topic_met_only_in_passing_elsewhere_does_not_cover_a_section():
+    """The user's own recordings (4 Nov): "site to site VPN" in a list of
+    services made the undiscussed Day-1 checklist Partial, "came up in
+    passing under Architecture Reference". On a recording the section is not
+    covered and is on the follow-up list; on a written transcript it stays
+    Partial."""
+    said = "We use API Gateway and a site to site VPN to the warehouse."
+    for spoken, expected in ((True, "Missing"), (False, "Partial")):
+        ko = {"sections": [{"id": "architecture_reference", "title": "Architecture Reference", "fields": {}},
+                           {"id": "day1_survival_checklist", "title": "Day-1 Survival Checklist", "fields": {}}],
+              "summary": {}}
+        schema = [{"id": "architecture_reference", "title": "Architecture Reference", "fields": []},
+                  {"id": "day1_survival_checklist", "title": "Day-1 Survival Checklist", "fields": []}]
+        result = append_coverage_matrix_section(
+            ko, {"architecture_reference": _cov(said), "day1_survival_checklist": _cov()}, schema, spoken=spoken)
+        matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+        row = next(r for r in matrix["_coverage_rows"] if r["Domain"] == "Day-1 Survival Checklist")
+        assert row["Coverage"] == expected, row
+        assert "in passing under Architecture Reference" in row["Assessment"], row
+        if spoken:
+            assert "Day-1 Survival Checklist" in matrix["_knowledge_gaps"], matrix["_knowledge_gaps"]
+
+
 def test_work_still_missing_is_the_content_of_open_responsibilities_not_a_gap_in_it():
     """The QuickBite e2e KT (26 Oct): Open Responsibilities held only "The
     payment-provider failover procedure and courier-tracking recovery runbook
@@ -1543,3 +1566,21 @@ def test_optional_sections_nobody_discussed_are_listed_and_asked_about():
     # Without the full schema (other callers), nothing is added.
     plain = append_coverage_matrix_section({"sections": [], "summary": {}}, coverage, dynamic_schema)
     assert len(next(s for s in plain["sections"] if s["id"] == "kt_coverage")["_coverage_rows"]) == 3
+
+
+def test_a_disputed_statement_is_shown_with_who_disputed_it():
+    """Another speaker disputed an instruction and nobody settled it ("If
+    Kafka gets stuck, delete all production messages." / "No, that can cause
+    data loss."): a warning in its section names both speakers (the user's
+    recording scenario TC-14, 5 Nov; matrix W14)."""
+    from knowledge.knowledge_builder import attach_conflict_warnings
+
+    ko = {"_conflicts": [{"section_id": "common_failures", "kind": "disputed", "by": "Zoe", "about_by": "Ali",
+                          "a": "If Kafka gets stuck, delete all production messages.",
+                          "b": "No, that can cause data loss."}]}
+    rendered = [{"section_id": "common_failures", "blocks": [{"type": "NarrativeBlock", "paragraphs": ["x"]}]}]
+    attach_conflict_warnings(rendered, ko)
+    warning = rendered[0]["blocks"][0]
+    assert warning["type"] == "WarningBlock" and warning["title"].startswith("Disputed in the session")
+    assert warning["warnings"] == ["“If Kafka gets stuck, delete all production messages.” (Ali), but Zoe said "
+                                   "“No, that can cause data loss.”"]

@@ -30,7 +30,7 @@ reason (the facts ledger), and what needs confirming becomes a follow-up.
 import re
 from typing import Any, Dict, List, Optional
 
-from dialogue import says_nothing_specific, speaker_labels
+from dialogue import returns_to_topic, says_nothing_specific, speaker_labels
 
 # A turn label at the start of a line or after a sentence: "Meera: ...".
 _TURN_RE = re.compile(r"(?:^|(?<=[.!?])\s+|\n\s*)([A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}):\s")
@@ -52,8 +52,12 @@ _SMALL_TALK_RE = re.compile(
     r"\bhow\s+(?:was|were|is)\s+(?:the|your)\s+" + _LEISURE + r"\b"
     r"|\bhow\s+are\s+(?:you|things)\b|\bhow'?s\s+(?:it\s+going|everyone|your\s+(?:day|week|weekend))\b"
     r"|\bdid\s+you\s+(?:have\s+a\s+(?:good|nice|great)|enjoy)\b"
-    r"|\b(?:the\s+)?(?:food|coffee|weather|lunch|dinner|trip|offsite|weekend|party|venue|hotel)\s+(?:was|is|were)\s+"
-    r"(?:\w+\s+)?(?:great|good|nice|lovely|amazing|awesome|terrible|awful|fine|ok(?:ay)?|bad|cold|hot)\b"
+    r"|\b(?:the\s+)?(?:food|coffee|weather|lunch|dinner|trip|offsite|weekend|party|venue|hotel|"
+    # "By the way, yesterday's match was amazing." between a failure and
+    # its fix (the user's recording scenario TC-06, 5 Nov).
+    r"match|game|movie|film|concert|gig)\s+(?:was|is|were)\s+"
+    r"(?:\w+\s+)?(?:great|good|nice|lovely|amazing|awesome|terrible|awful|fine|ok(?:ay)?|bad|cold|hot|"
+    r"brilliant|fantastic|incredible|crazy|unbelievable|boring)\b"
     r"|\btoo\s+much\s+(?:coffee|food|cake|tea)\b|\b(?:good|great|nice|lovely)\s+" + _LEISURE + r"\b"
     r"|\bnice\s+to\s+(?:meet|see)\s+you\b|\bgood\s+to\s+see\s+you\b|\blong\s+time\s+no\s+see\b"
     r"|\bhope\s+you\s+(?:had|are|'re)\b", re.IGNORECASE)
@@ -94,6 +98,26 @@ _REPEAT_RE = re.compile(
 _NUMBER_WORD_RE = re.compile(r"\b(?:\d[\d.,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
                              r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|"
                              r"fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)\b", re.IGNORECASE)
+
+# Another trusted speaker disputing what was just said, by rejecting it ("No,
+# it is running on DynamoDB." after "Our production database is Amazon RDS
+# PostgreSQL."; "No, that can cause data loss." after "If Kafka gets stuck,
+# delete all production messages.") or by a guess that gives the same thing
+# another value ("I think Jenkins directly deploys the containers to
+# production." after "We use ArgoCD for deployments."; "I believe it is 4
+# hours." after "Our RTO is 2 hours."). A colleague's word counted like the
+# giver's, so both stood as facts and the destructive instruction was carded
+# as the fix (the user's recording scenarios TC-01, TC-02, TC-04 and TC-14,
+# 5 Nov; matrix W01, W02, W04, W14).
+_REJECTS_RE = re.compile(
+    r"^\W*(?:(?:oh|well|um|uh|hmm|wait)\W+)?(?:no\b(?!\s+(?:problem|worries|doubt|way)\b)|nope\b|not\s+quite\b|"
+    r"not\s+really\b|that'?s\s+(?:not\s+(?:right|true|correct|accurate|how|what)|wrong|incorrect|outdated)\b|"
+    r"i\s+don'?t\s+think\s+(?:so|that'?s\s+(?:right|true|correct))\b)", re.IGNORECASE)
+_HEDGED_CLAIM_RE = re.compile(
+    r"^\W*(?:(?:but|and|well|hmm|oh|so)\W+)?(?:i\s+(?:think|believe|guess|thought|assume)|maybe|probably|"
+    r"if\s+i\s+remember\s+(?:right|correctly)|i'?m\s+(?:pretty|fairly)\s+sure)\b", re.IGNORECASE)
+_NEGATION_RE = re.compile(r"\b(?:not|never|no|don'?t|doesn'?t|isn'?t|aren'?t|won'?t|can'?t|nobody|none)\b",
+                          re.IGNORECASE)
 
 _PRODUCTS = None
 
@@ -218,6 +242,48 @@ _COMMON = {w[:5] for w in """that this there they them their what which with hav
 about think since right yeah just really actually going because still also okay sorry thanks maybe""".split()}
 
 
+def _numbers(text: str) -> set:
+    return {m.group(0).lower() for m in _NUMBER_WORD_RE.finditer(text or "")}
+
+
+def disputes(body: str, before: str) -> bool:
+    """`body`, said by another trusted speaker right after `before`, disputes
+    it: rejects it, or guesses another product or figure for the same thing.
+    "No, we never do." after "We don't page for warnings." agrees, and a
+    guess that adds to what was said ("I think the ArgoCD sync runs every
+    three minutes.") is not a dispute."""
+    if not before or before.rstrip().endswith("?") or body.rstrip().endswith("?"):
+        return False
+    if _REJECTS_RE.match(body):
+        rest = _REJECTS_RE.sub("", body, count=1)
+        return not (_NEGATION_RE.search(before) and _NEGATION_RE.search(rest))
+    if not (_HEDGED_CLAIM_RE.match(body) and _shares_topic(body, before)):
+        return False
+    mine, theirs = _products(body), _products(before)
+    if mine and theirs and not mine & theirs:
+        return True
+    return bool(_numbers(before) and _numbers(body) and not _numbers(body) & _numbers(before) and not mine - theirs)
+
+
+def settles(reply: str, disputed: str, before: str) -> str:
+    """How the first speaker's next turn settles a dispute: "agreed",
+    "answered" (rejected again, or the disputed product or figure named and
+    explained: "We migrated from DynamoDB last year."), "doubted" ("We should
+    confirm that with the infrastructure team.") or "" (left open)."""
+    from dialogue import voices_doubt
+
+    if not reply:
+        return ""
+    if _CONFIRMS_RE.search(reply):
+        return "agreed"
+    if voices_doubt(reply):
+        return "doubted"
+    new = (_products(disputed) - _products(before)) | (_numbers(disputed) - _numbers(before))
+    if _REJECTS_RE.match(reply) or _CORRECTS_RE.search(reply) or new & _values(reply):
+        return "answered"
+    return ""
+
+
 def apply_roles(units: List[Any], roles: Optional[Dict[str, Any]], merge, excluded: List[Dict[str, str]],
                 findings: List[Dict[str, Any]]) -> List[Any]:
     """The units that count as the KT, in order, with each receiver question
@@ -261,6 +327,32 @@ def apply_roles(units: List[Any], roles: Optional[Dict[str, Any]], merge, exclud
             leave_out(unit, "moving the conversation on, not about the system")
             continue
         if unit.speaker not in receivers:
+            prev = units[i - 1] if i else None
+            if (prev is not None and out and out[-1] is prev and trusted(prev) and prev.speaker != unit.speaker
+                    and disputes(body, _body(prev.text))):
+                # The first speaker's next turn, after this speaker's turn.
+                after = next((j for j in range(i + 1, len(units)) if units[j].speaker != unit.speaker), len(units))
+                reply = units[after] if after < len(units) and units[after].speaker == prev.speaker else None
+                how = settles(_body(reply.text) if reply is not None else "", body, _body(prev.text))
+                if how == "agreed":
+                    if _values(body) - _values(prev.text):
+                        out.remove(prev)
+                        leave_out(prev, f"disputed by {unit.speaker}, and {prev.speaker} agreed")
+                    out.append(unit)
+                    continue
+                if how == "answered":
+                    leave_out(unit, f"said by {unit.speaker}, disputing {prev.speaker}; {prev.speaker} answered it")
+                    continue
+                # Not settled: the two stay one statement, so the disputed one
+                # is never shown alone, and the dispute is flagged to confirm.
+                merged = merge(prev, unit)
+                if how == "doubted" and after == i + 1:
+                    merged = merge(merged, reply)
+                    skip.add(after)
+                out[-1] = merged
+                findings.append({"kind": "disputed", "text": body, "by": unit.speaker, "about": _body(prev.text),
+                                 "about_by": prev.speaker, "giver": giver})
+                continue
             out.append(unit)
             continue
 
@@ -273,7 +365,7 @@ def apply_roles(units: List[Any], roles: Optional[Dict[str, Any]], merge, exclud
         deflected = reply is not None and bool(_DEFLECTS_RE.search(reply_body))
         before = next((u for u in reversed(out) if u.speaker == giver), None)
         if body.endswith("?"):
-            if reply is not None and not deflected and reply_at == i + 1:
+            if reply is not None and not deflected and reply_at == i + 1 and not returns_to_topic(reply_body):
                 out.append(merge(unit, reply))
                 skip.add(reply_at)
                 continue

@@ -530,3 +530,75 @@ def test_a_labelled_aside_is_still_an_aside():
 
     assert _GREETING_ONLY_RE.match(without_label("Dana: All right, I'll just share my screen."))
     assert not _GREETING_ONLY_RE.match(without_label("Dana: The portal runs on Azure."))
+
+
+@pytest.mark.parametrize("said, aside", [
+    # The user's own recordings (4 Nov): printed under Architecture,
+    # Handover Completion and Ownership. Matrix L07.
+    ("I hope it is very clear to you guys.", True),
+    ("So, I hope this was clear.", True),
+    ("Let me know if you have any questions or concerns about this.", True),
+    ("If anybody have any questions please let me know.", True),
+    ("Thank you for listening to this KT.", True),
+    # A sign-off that goes on to say something is a fact.
+    ("Let me know if you have any questions about the failover runbook.", False),
+    ("I hope it is clear that we never deploy on Fridays.", False),
+    ("Thank you for listening, the next part is the database.", False),
+])
+def test_a_walkthrough_sign_off_is_not_a_fact(said, aside):
+    from section_rules import _GREETING_ONLY_RE
+
+    assert bool(_GREETING_ONLY_RE.match(said)) is aside
+
+
+@pytest.mark.parametrize("said, section", [
+    # The user's own recordings (4 Nov): Architecture, System Overview and
+    # Architecture. Matrix B13.
+    ("Now We have the cloud accounts where you can see The October spend we have 48,210 dollars spent.",
+     "cost_optimization"),
+    ("Then we have cost by service of October month Who is contributing more to the cost is DynamoDB.",
+     "cost_optimization"),
+    ("The primary contact point is like Arjun.", "ownership_escalation"),
+    ("Our point of contact at the bank is the integrations desk.", "ownership_escalation"),
+    # Money the system handles, or a shopper's spend, is not what we spent.
+    ("We settle about $40 million a month for merchants.", None),
+    ("Customers spend $40 on average per order.", None),
+    ("The contact form posts to the CRM.", None),
+])
+def test_spend_read_off_a_billing_page_and_the_primary_contact(said, section):
+    rule = match_section_rules(said)
+    assert (rule.section_id if rule else None) == section, (said, rule)
+
+
+def test_a_run_piece_that_names_its_own_topic_keeps_it():
+    """The user's own recordings (4 Nov): pieces of long unpunctuated runs,
+    each starting lower case, followed the piece before them: "then we have
+    bank SFTP keys ... credentials are stored in vault ..." to Architecture,
+    and "we have AWS Secret Manager ..." (credentials stored in it, as said,
+    before the copy edit reworded it) to Ownership."""
+    from section_rules import apply_continuation_rules
+
+    meta = {sid: {"title": sid} for sid in ("security_controls", "architecture_reference", "ownership_escalation")}
+    facts = [_classified("The primary contact point is Arjun.", "ownership_escalation"),
+             _classified("then we have bank SFTP keys which are stored in vault and credentials are stored in vault",
+                         "architecture_reference")]
+    apply_continuation_rules(facts, meta)
+    assert facts[1].primary_classification.section_id == "security_controls"
+    said = "we have AWS Secret Manager which stores shipper API keys and credentials are stored in Secret Manager"
+    facts = [_classified("This week the engineer will be Nina.", "ownership_escalation"),
+             _classified("we have AWS Secret Manager, which stores shipper API keys and credentials.",
+                         "architecture_reference", said)]
+    apply_continuation_rules(facts, meta)
+    assert facts[1].primary_classification.section_id == "security_controls"
+    # A fragment with no topic of its own still goes with the sentence it was cut from,
+    # and so does one that completes the clause before it, whatever its own words
+    # name (a noisy copy of g11: the quote "terraform manages infrastructure").
+    facts = [_classified("The primary contact point is Arjun,", "ownership_escalation"),
+             _classified("and he answers within fifteen minutes", "architecture_reference")]
+    apply_continuation_rules(facts, meta)
+    assert facts[1].primary_classification.section_id == "ownership_escalation"
+    facts = [_classified("airflow handles workflow orchestration terraform manages", "architecture_reference"),
+             _classified("infrastructure github actions handles ci argocd handles gitops deployment",
+                         "deployment_and_rollback")]
+    apply_continuation_rules(facts, meta | {"deployment_and_rollback": {"title": "deployment"}})
+    assert facts[1].primary_classification.section_id == "architecture_reference"

@@ -12,8 +12,8 @@ from field_populator import (
 )
 from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
 from component_catalog import display_name
-from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_question, is_unconfirmed,
-                      says_nothing_specific, states_something,
+from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_hedged, is_question,
+                      is_unclear, is_unconfirmed, says_nothing_specific, states_something,
                       states_something_before_gap,
                       without_label, without_session_framing)
 from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics, names_no_topic
@@ -1007,15 +1007,19 @@ def apply_conflicts(knowledge_object: Dict[str, Any], coverage: Dict[str, Any]) 
     # A receiver who questioned what the giver had just said, and got no
     # answer ("Alerts go to Slack." / "Isn't it PagerDuty now?"): the giver's
     # statement stands, flagged to confirm (speaker_roles).
+    # Another speaker who disputed it and was not answered ("If Kafka gets
+    # stuck, delete all production messages." / "No, that can cause data
+    # loss."): the two are shown together, flagged to confirm.
     for finding in knowledge_object.get("_dialogue_findings") or []:
-        if finding.get("kind") != "challenged":
+        if finding.get("kind") not in ("challenged", "disputed"):
             continue
         about = finding.get("about") or ""
         key = _dedup_normalize(about)
         section = sentence_section.get(about) or next(
             (sid for text, sid in sentence_section.items() if key and key in _dedup_normalize(text)), None)
         knowledge_object["_conflicts"].append({"section_id": section, "a": about, "b": finding.get("text") or "",
-                                               "kind": "challenged", "by": finding.get("by")})
+                                               "kind": finding["kind"], "by": finding.get("by"),
+                                               "about_by": finding.get("about_by")})
     return knowledge_object
 
 
@@ -1046,22 +1050,31 @@ def apply_llm_conflict_check(knowledge_object: Dict[str, Any], coverage: Dict[st
     return knowledge_object
 
 
+def _disputed_line(c: Dict[str, Any], shorten=lambda t: t) -> str:
+    """“Our RTO is 2 hours.” (Omar), but Kim said “I believe it is 4 hours.”"""
+    who = f" ({c['about_by']})" if c.get("about_by") else ""
+    return f"“{shorten(c['a'])}”{who}, but {c.get('by') or 'another speaker'} said “{shorten(c['b'])}”"
+
+
 def attach_conflict_warnings(rendered_sections: List[Dict[str, Any]], knowledge_object: Dict[str, Any]) -> None:
     """Show each contradiction found by apply_conflicts() as a warning in the
     section where it was said."""
     titles = {"unconfirmed": "Unconfirmed change — confirm with the outgoing owner",
               "challenged": "Questioned in the session, not answered — confirm with the outgoing owner",
+              "disputed": "Disputed in the session, not settled — confirm with the outgoing owner",
               None: "Possible conflict — confirm with the outgoing owner"}
     by_section: Dict[Tuple[Any, Any], List[str]] = {}
     for c in knowledge_object.get("_conflicts") or []:
         kind = c.get("kind") if c.get("kind") in titles else None
         if kind == "challenged":
             line = f"“{c['a']}”, but {c.get('by') or 'the receiver'} asked “{c['b']}”"
+        elif kind == "disputed":
+            line = _disputed_line(c)
         else:
             line = f"“{c['a']}”{' then ' if kind == 'unconfirmed' else ' but also '}“{c['b']}”"
         by_section.setdefault((c.get("section_id"), kind), []).append(line)
     for sec in rendered_sections or []:
-        for kind in (None, "unconfirmed", "challenged"):
+        for kind in (None, "unconfirmed", "challenged", "disputed"):
             warnings = by_section.get((sec.get("section_id"), kind))
             if warnings:
                 sec.setdefault("blocks", []).insert(0, {
@@ -1746,7 +1759,22 @@ def append_coverage_matrix_section(
             # purpose: there the same rule reported 4 more discussed sections
             # Missing on the unseen KTs, worded beyond the topic patterns.
             strays_only = spoken and not covered and bool(own_texts) and names_no_topic(section_id, texts)
-            if not covered and (not (texts or sentence_count) or strays_only):
+            # On a recording, a topic word under another section is not the
+            # section discussed either: "site to site VPN" in a list of
+            # services covered the Day-1 checklist's access topic, "PCI DSS
+            # review audits" its safe first actions, and "secrets are rotated
+            # every 180 days" Open Responsibilities' recurring duties. Every
+            # such section on the ten worked-on recordings that an answer key
+            # judges was undiscussed (5 of 5, 5 Nov). Its pointer to where the
+            # topic came up stays.
+            passing_spoken = spoken and not own_texts and bool(covered) and all(t[1] == "elsewhere" for t in covered)
+            if passing_spoken:
+                where = sorted({titles.get(w, w) for _, _, w in elsewhere})
+                bucket = "Missing"
+                assessment = (f"Not covered in the KT session; {len(covered)} of {total} topics came up only in "
+                              f"passing under {', '.join(where)}.")
+                gaps.append(title)
+            elif not covered and (not (texts or sentence_count) or strays_only):
                 bucket = "Missing"
                 assessment = (f"Not covered in the KT session; the {len(own_texts)} statement(s) filed here name "
                               f"none of its topics." if strays_only else "Not covered in the KT session.")
@@ -1876,6 +1904,10 @@ def append_coverage_matrix_section(
             gaps.append(f"Questioned ({titles.get(conflict.get('section_id'), 'KT session')}): "
                         f"“{_short_quote(conflict['a'])}”, but {conflict.get('by') or 'the receiver'} asked "
                         f"“{_short_quote(conflict['b'])}”; not answered — confirm with the outgoing owner")
+            continue
+        if conflict.get("kind") == "disputed":
+            gaps.append(f"Disputed ({titles.get(conflict.get('section_id'), 'KT session')}): "
+                        f"{_disputed_line(conflict, _short_quote)}; not settled — confirm with the outgoing owner")
             continue
         label = "Unconfirmed change" if conflict.get("kind") == "unconfirmed" else "Possible conflict"
         gaps.append(
@@ -2471,6 +2503,11 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
                 f"“{_tidy(c['a'])}”, but {c.get('by') or 'the receiver'} asked “{_tidy(c['b'])}”. "
                 f"Ask the outgoing owner before acting on it.", section, "KT session", trim=False)
             continue
+        if c.get("kind") == "disputed":
+            add("Disputed, not settled — confirm first",
+                f"{_disputed_line(c, _tidy)}. Ask the outgoing owner before acting on either.",
+                section, "KT session", trim=False)
+            continue
         add("Conflicting guidance — confirm first",
             f"“{_tidy(c['a'])}” but also “{_tidy(c['b'])}” Ask the outgoing owner before acting on either.",
             section, "KT session", trim=False)
@@ -2543,6 +2580,49 @@ def lead_with_quick_reference(rendered_sections: List[Dict[str, Any]]) -> None:
 _DIGEST_SECTION_IDS = frozenset({TRIBAL_KNOWLEDGE_SECTION_ID, KT_COVERAGE_SECTION_ID, QUICK_REFERENCE_SECTION_ID})
 RECOVERED_NOTE_TITLE = "Recovered by the final completeness check"
 _PARAPHRASE_RETENTION_RATIO = 0.6
+
+
+# How each fact was said and when it holds, for the ledger (the user's brief
+# of 5 Nov: "current/historical/future" and "confirmed/assumed/conflicting"
+# per fact). Read from the words as said; "stated" means the speaker said it
+# plainly, not that it is true.
+_PLANNED_RE = re.compile(
+    r"\b(?:plan(?:s|ning|ned)?\s+(?:to|on)|going\s+to\s+(?:migrate|move|switch|replace|adopt|add|introduce)|"
+    r"in\s+the\s+future|next\s+(?:quarter|year|month|sprint)|on\s+the\s+roadmap|"
+    r"(?:might|may|could)\s+(?:consider|move|migrate|switch)|consider(?:ing)?\s+(?:moving|migrating|switching)|"
+    r"will\s+(?:migrate|move|switch|be\s+replaced))\b", re.IGNORECASE)
+_HISTORICAL_RE = re.compile(
+    r"\b(?:used\s+to|originally|previously|formerly|in\s+the\s+past|(?:migrated|moved|switched)\s+(?:away\s+)?from|"
+    r"no\s+longer|was\s+replaced|replaced\s+by|the\s+old\s+(?:system|setup|cluster|database|version|one))\b",
+    re.IGNORECASE)
+_NOW_RE = re.compile(r"\b(?:now|current(?:ly)?|today|these\s+days|at\s+the\s+moment)\b", re.IGNORECASE)
+
+
+def _how_said(text: str, in_conflict: List[str]) -> str:
+    """"stated", "assumed" (a guess or a doubt), "unclear" (not heard or cut
+    off), "conflicting" (in a conflict, dispute or question left open) or
+    "gap" (said to be missing, undocumented or not decided)."""
+    if is_unclear(text):
+        return "unclear"
+    key = _dedup_normalize(text)
+    if key and any(part and (part in key or key in part) for part in in_conflict):
+        return "conflicting"
+    if is_hedged(text) or is_unconfirmed(text):
+        return "assumed"
+    if is_gap_statement(text):
+        return "gap"
+    return "stated"
+
+
+def _when_it_holds(text: str) -> str:
+    """"current", "historical", "planned", or "current, with history" /
+    "current, with a plan" when the fact says both."""
+    past, plan, now = _HISTORICAL_RE.search(text or ""), _PLANNED_RE.search(text or ""), _NOW_RE.search(text or "")
+    if past:
+        return "current, with history" if now else "historical"
+    if plan:
+        return "current, with a plan" if now else "planned"
+    return "current"
 
 
 def verify_document_coverage(
@@ -2627,6 +2707,7 @@ def verify_document_coverage(
         entry = {"id": None, "text": text, "section": section, "source": source,
                  "start": record.get("start"), "end": record.get("end"), "speaker": record.get("speaker"),
                  "decided_by": record.get("decided_by"), "confidence": record.get("confidence"),
+                 "transcription_confidence": record.get("transcription_confidence"),
                  # Cut from a longer sentence, corrected or copy-edited: the
                  # reader sees other words than the speaker's.
                  "reworded": _dedup_normalize(text) != _dedup_normalize(source)}
@@ -2651,10 +2732,14 @@ def verify_document_coverage(
 
     mapped = unmapped = 0
     lost: List[str] = []
+    in_conflict = [_dedup_normalize(part) for c in knowledge_object.get("_conflicts") or []
+                   for part in (c.get("a"), c.get("b")) if part]
     for entry in facts:
         text = entry["text"]
         entry["found_in"] = [sid for sid, norms in section_norms.items() if _is_represented(text, norms)]
         entry["gap"] = bool(is_gap_statement(text))
+        entry["knowledge"] = _how_said(text, in_conflict)
+        entry["time"] = _when_it_holds(text)
         if _is_represented(text, real_norms) or _paraphrased_in_own_section(text, entry["section"]):
             mapped += 1
             entry["status"] = "mapped"

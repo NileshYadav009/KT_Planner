@@ -7,7 +7,7 @@ Populate KT fields from coverage content using pattern, semantic, and LLM passes
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import embedding_memo
 from devops_transcription import apply_devops_corrections
@@ -828,7 +828,7 @@ def extract_outage_audience(text: str) -> Optional[str]:
     return ", ".join(w[:1].upper() + w[1:] for w in seen) if seen else None
 
 
-def extract_rto_rpo(text: str) -> Dict[str, str]:
+def extract_rto_rpo(text: str, doubted: Iterable[str] = ()) -> Dict[str, str]:
     """Deterministically capture an explicitly stated RTO/RPO duration (e.g.
     "RTO is 2 hours and RPO is 15 minutes") independent of the LLM provider,
     into dedicated `rto_metric`/`rpo_metric` fields.
@@ -858,10 +858,19 @@ def extract_rto_rpo(text: str) -> Dict[str, str]:
     # ("Actually the RTO is thirty minutes, the four hours was the old
     # target") must not have the withdrawn value headlined (conflicts.py).
     from conflicts import resolve_single_value
+    # `doubted`: statements said as a guess, doubted or disputed ("Our RTO is
+    # 2 hours." / "I believe it is 4 hours." / "We should confirm that with
+    # the infrastructure team."): a value from them is not headlined as the
+    # objective (the user's recording scenario TC-04, 5 Nov).
+    doubted_text = " ".join(doubted or ())
     for field_id, rx in (("rto_metric", _RTO_RE), ("rpo_metric", _RPO_RE)):
         candidates = [(m.group(1).strip(), sentence)
                       for sentence in _split_sentences(text) for m in rx.finditer(sentence)]
         value, note = resolve_single_value(candidates)
+        if value and not note and doubted_text and any(
+                v == value and sentence.strip() and sentence.strip() in doubted_text for v, sentence in candidates):
+            result[field_id] = f"{value} - said with doubt or disputed; confirm with the outgoing owner"
+            continue
         if value:
             result[field_id] = f"{value} ({note})" if note and not value.startswith("Conflicting") else (
                 f"{value} - confirm with the outgoing owner" if note else value)

@@ -68,6 +68,7 @@ def tally(scores):
     return {"facts": facts, "correct": correct, "wrong": wrong, "lost": lost,
             "accuracy": round(correct / facts, 4) if facts else None,
             "false_missing": sum(len(s["false_missing"]) for s in scores),
+            "false_not_discussed": sum(len(s.get("false_not_discussed", [])) for s in scores),
             "false_covered": sum(len(s["false_covered"]) for s in scores),
             "violations": sum(len(s["violations"]) for s in scores),
             "repeats": sum(len(s["repeats"]) for s in scores),
@@ -79,7 +80,8 @@ def detail(scores):
     for s in scores:
         probs = [f for f in s["facts"] if f["status"] != "correct" or f["violations"]]
         rows.append({"id": s["id"], "accuracy": s["accuracy"], "problems": probs,
-                     "false_missing": s["false_missing"], "false_covered": s["false_covered"],
+                     "false_missing": s["false_missing"], "false_not_discussed": s.get("false_not_discussed", []),
+                     "false_covered": s["false_covered"],
                      "repeats": s["repeats"], "unsourced": s["unsourced"],
                      "facts": [{k: f[k] for k in ("id", "status", "found_in", "expected")} for f in s["facts"]]})
     return rows
@@ -134,11 +136,11 @@ with open(os.path.join(HERE, "results", label + ".json"), "w", encoding="utf-8")
 
 for key in ("dev", "tuning"):
     for row in out.get(key + "_detail", []):
-        if row["problems"] or row["false_missing"] or row["false_covered"]:
+        if row["problems"] or row["false_missing"] or row["false_not_discussed"] or row["false_covered"]:
             print(f"\n{row['id']}  {row['accuracy']:.0%}")
             for f in row["problems"]:
                 print(f"  {f['id']} {f['status']:6} exp {f['expected']} found {f['found_in']}  << {f['quote']}")
-            for k in ("false_missing", "false_covered"):
+            for k in ("false_missing", "false_not_discussed", "false_covered"):
                 if row[k]:
                     print(f"  {k}: {row[k]}")
 print("\nseconds", out["seconds"])

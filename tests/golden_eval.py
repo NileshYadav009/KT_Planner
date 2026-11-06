@@ -18,6 +18,9 @@ Scores, per golden:
     lost            facts shown nowhere (the completeness check should make this 0)
     violations      facts shown in a section they must never appear in
     false_missing   discussed sections reported Missing
+    false_not_discussed  discussed optional sections (Environments, Cost
+                    Optimization) reported "Not discussed": the same error,
+                    counted apart so the suite's floors keep their meaning
     false_covered   undiscussed sections reported covered
     repeats         fact sentences printed more than once (P1-10)
     unsourced       facts shown with no source sentence that states them (P1-2)
@@ -59,7 +62,8 @@ def norm(text: str) -> str:
 def _quotes_on_purpose(block: Dict[str, Any]) -> bool:
     title = str(block.get("title") or "")
     return (block.get("type") in ("ImageBlock", "DiagramBlock") or title in _QUOTING_TITLES
-            or (block.get("type") == "WarningBlock" and title.startswith(("Possible conflict", "Unconfirmed change"))))
+            or (block.get("type") == "WarningBlock" and title.startswith(
+                ("Possible conflict", "Unconfirmed change", "Questioned in the session", "Disputed in the session"))))
 
 
 def _block_strings(block: Dict[str, Any]) -> List[str]:
@@ -184,6 +188,7 @@ def score(golden: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "lost": [f["id"] for f in facts if f["status"] == "lost"],
         "violations": [f["id"] for f in facts if f["violations"]],
         "false_missing": [s for s in golden.get("covered", []) if buckets.get(s) == "Missing"],
+        "false_not_discussed": [s for s in golden.get("covered", []) if buckets.get(s) == "Not discussed"],
         # An optional section nobody discussed is listed as "Not discussed".
         "false_covered": [s for s in golden.get("missing", []) if buckets.get(s) not in ("Missing", "Not discussed", None)],
         "missing_conflicts": [c for c in golden.get("conflicts", []) if c.lower() not in conflicts.lower()],

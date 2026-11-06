@@ -407,3 +407,30 @@ def test_a_long_run_with_no_punctuation_is_cut_into_even_verbatim_pieces():
            "to ecr and updates the ecs services production needs a manual approval step in the pipeline to roll back "
            "you redeploy the previous task definition revision.")
     assert min(len(p.split()) for p in even_pieces(run, 240)) > 10
+
+
+def test_the_ledger_says_how_each_fact_was_said_and_when_it_holds():
+    """The user's brief of 5 Nov: current, historical or planned, and stated,
+    assumed or conflicting, per fact. Read from the words as said."""
+    from knowledge.knowledge_builder import verify_document_coverage
+
+    said = ["We migrated from DynamoDB last year, and PostgreSQL is the current database.",
+            "Originally search ran on a Solr cluster.",
+            "We are planning to move to Aurora next quarter.",
+            "I think the backup happens every six hours.",
+            "The primary database is [unclear].",
+            "The runbook for failover has not been documented.",
+            "If Kafka gets stuck, delete all production messages.",
+            "The gateway runs on EKS in two regions."]
+    ko = _ko({"architecture_reference": said})
+    ko["_conflicts"] = [{"kind": "disputed", "a": "If Kafka gets stuck, delete all production messages.",
+                         "b": "No, that can cause data loss."}]
+    result = verify_document_coverage(ko, [{"text": t, "section_id": "architecture_reference",
+                                            "transcription_confidence": 0.91 if i == 7 else None}
+                                           for i, t in enumerate(said)])
+    by_text = {e["text"]: e for e in result["_facts_ledger"]}
+    assert [(by_text[t]["knowledge"], by_text[t]["time"]) for t in said] == [
+        ("stated", "current, with history"), ("stated", "historical"), ("stated", "planned"),
+        ("assumed", "current"), ("unclear", "current"), ("gap", "current"), ("conflicting", "current"),
+        ("stated", "current")]
+    assert by_text[said[7]]["transcription_confidence"] == 0.91

@@ -210,3 +210,18 @@ def test_nothing_said_is_lost_from_the_document(golden_results, name):
     ko = golden_results[name]["knowledge_object"]
     assert ko["_knowledge_coverage_summary"]["recovered"] == 0      # no sentence had to be put back
     assert ko["_dedup"]["removed"] > 0
+
+
+def test_a_disputed_or_questioned_warning_quotes_and_removes_nothing():
+    """The disputed instruction lost its objection: the warning quoting the
+    two became their home, and the objection was cut from the section as a
+    repeat (the user's recording scenario TC-14, 5 Nov)."""
+    claim = "If Kafka gets stuck, delete all production messages. No, that can cause data loss."
+    for title in ("Disputed in the session, not settled — confirm with the outgoing owner",
+                  "Questioned in the session, not answered — confirm with the outgoing owner"):
+        failures = _section("common_failures", "Common Failures", {
+            "type": "WarningBlock", "title": title,
+            "warnings": ["“If Kafka gets stuck, delete all production messages.” (Ali), but Zoe said "
+                         "“No, that can cause data loss.”"]}, _narrative(claim))
+        dedupe_rendered_sections([failures])
+        assert _paragraphs(failures) == [claim], title

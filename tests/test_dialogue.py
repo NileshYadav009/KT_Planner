@@ -404,3 +404,70 @@ def test_an_action_on_the_sentence_before_stays_with_it():
     said = "Restores are run by the platform team. Not this year. That's something you should schedule."
     units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
     assert "Not this year. That's something you should schedule." in units
+
+
+# The user's recording scenarios of 5 Nov (matrix W04, W05, W17, W35).
+
+@pytest.mark.parametrize("raw, cut", [
+    ("The most important thing to remember before failing over is that you must never", True),
+    ("And the last thing about the backups is that they", True),
+    ("If the queue backs up, restart it", False),        # a whole sentence without its full stop
+    ("That's what it is", False),
+    ("Okay, thank you", False),
+    ("You must never fail over without the DBA.", False),
+    ("We never", False),                                 # too short to tell
+])
+def test_a_transcript_that_stops_mid_sentence(raw, cut):
+    from dialogue import CUT_OFF_MARK, is_cut_off, is_unconfirmed, mark_cut_off
+
+    assert is_cut_off(raw) is cut
+    if cut:
+        marked = mark_cut_off(raw + ".")
+        assert marked.endswith(" " + CUT_OFF_MARK) and ". [" not in marked
+        assert is_unconfirmed(marked) and is_gap_statement(marked)
+
+
+def test_speech_marked_unclear_is_to_confirm_not_a_value():
+    from dialogue import is_field_candidate, is_unconfirmed
+
+    for text in ("The primary database is [unclear].", "The backup retention is [inaudible] days.",
+                 "Failover takes (inaudible 00:12:31) minutes."):
+        assert is_gap_statement(text) and is_unconfirmed(text), text
+        assert not is_field_candidate(text), text
+    assert not is_gap_statement("We use Redis for caching.")
+
+
+def test_who_to_ask_is_a_doubt_but_an_instruction_to_check_is_not():
+    from dialogue import is_hedged, voices_doubt
+
+    assert voices_doubt("We should confirm that with the infrastructure team.")
+    assert voices_doubt("Let's check that with Priya.")
+    assert not voices_doubt("You should check that the pods are healthy before you scale.")
+    assert is_hedged("I think the backup happens every six hours.")
+    assert not is_hedged("The RTO should be under four hours.")       # a target, not a guess
+
+
+def test_a_question_is_not_joined_to_a_return_to_the_walkthrough():
+    from dialogue import returns_to_topic
+
+    assert returns_to_topic("Coming back to the production architecture, requests enter through CloudFront.")
+    assert returns_to_topic("Sam: Anyway, the ALB forwards requests to ECS.")
+    assert not returns_to_topic("Back up the database before the migration.")
+    merged = merge_question_answers(["Did you complete the deployment?",
+                                     "Coming back to the architecture, requests reach the ALB."],
+                                    lambda s: s, lambda a, b: f"{a} {b}")
+    assert merged == ["Did you complete the deployment?", "Coming back to the architecture, requests reach the ALB."]
+
+
+def test_only_a_speaker_s_own_sentences_are_joined_before_roles_are_read():
+    """"Kim: I believe it is 4 hours. Omar: We should confirm that ..." was
+    one sentence with no speaker, so the conversation was not seen."""
+    from context_mapper import AudioSegment, segment_sentences
+
+    said = ("Omar: This is the ledger service. Omar: Our RTO is 2 hours. Kim: I believe it is 4 hours. "
+            "Omar: We should confirm that with the infrastructure team.")
+    units = [s.text for s in segment_sentences([AudioSegment(text=said, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert not any("4 hours" in u and "confirm" in u and u.startswith("Kim") for u in units)
+    alone = "The RTO is 2 hours. That value needs confirmation."
+    units = [s.text for s in segment_sentences([AudioSegment(text=alone, start=0.0, end=9.0, avg_logprob=-0.2)])]
+    assert units == [alone]

@@ -196,6 +196,10 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bif\s+(?:(?:they|he|she|the\s+(?:on-?call|primary)(?:\s+(?:engineer|person))?)\s+(?:does\s+not|do\s+not|"
             r"doesn'?t|don'?t|did\s+not|didn'?t|fails?\s+to|can'?t|cannot)|nobody|no\s+one|no-one)\s+"
             r"(?:answer|respond|reply|pick\s+up|acknowledge|ack)s?\b",
+            # Who is reached first: "The primary contact point is like Arjun"
+            # went to Architecture (the user's own recording, 4 Nov).
+            r"\b(?:primary|secondary|main|first|backup)\s+(?:contact|point\s+of\s+contact|contact\s+point)\b",
+            r"\bpoint\s+of\s+contact\b",
         ],
         0.97,
     ),
@@ -468,6 +472,16 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             r"\bauto[\s-]?suspend\w*\b",
             r"\bwe\s+(?:spend|pay)\s+(?:a\s+lot|the\s+most|too\s+much)\b",
             r"\b(?:oversized|over-?provisioned|under-?utili[sz]ed|right-?siz\w+)\b",
+            # What was spent, read off a billing page: "The October spend we
+            # have 48,210 dollars spent" went to Architecture, "Then we have
+            # cost by service of October month Who is contributing more to the
+            # cost is DynamoDB" to System Overview (the user's own recordings,
+            # 4 Nov). Not money the system handles ("we settle $40 million a
+            # month"): only a sum spent.
+            r"(?:[$€£]\s?\d[\d,.]*|\b\d[\d,.]*\s*(?:k\s+)?(?:dollars?|euros?|pounds?))\s+(?:\w+\s+){0,3}?spent\b",
+            r"\b(?:we|account|accounts|team)\s+(?:\w+\s+){0,2}?(?:has|have|had)\s+spent\b",
+            r"\bcost\s+by\s+(?:service|resource|team|account|component)\b",
+            r"\bcontribut\w*\s+(?:the\s+)?(?:most|more)\s+to\s+(?:the\s+|our\s+)?(?:costs?|spend|bill)\b",
         ],
         0.94,
     ),
@@ -1214,6 +1228,19 @@ _CLOSING_ONLY = (
     r"(?:(?:the|our|my|this|today'?s)\s+)?(?:[\w/&'\-]+\s+){0,8}?"
     r"(?:session|kt|handover|hand-?off|walk-?through|overview|knowledge\s+transfer|presentation|call|meeting|demo|"
     r"platform|system|application|service|stack)(?:\s+(?:for\s+)?today)?"
+    # A presenter's sign-off on a recorded walkthrough: "I hope it is very
+    # clear to you guys.", "Thank you for listening to this KT.", "If
+    # anybody have any questions please let me know." (the user's own
+    # recordings, 4 Nov: printed under Architecture, Handover Completion and
+    # Ownership).
+    r"|(?:(?:so|okay|ok|well|and)[\s,]+)*i\s+hope\s+(?:it|this|that|everything)\s+(?:is|was)\s+"
+    r"(?:very\s+|quite\s+|all\s+)?clear(?:\s+to\s+(?:you|everyone|everybody)(?:\s+(?:guys|all))?)?"
+    r"|(?:(?:so|okay|ok|well|and)[\s,]+)*thank\s+you\s+(?:all\s+|everyone\s+)?for\s+(?:listening|watching|your\s+time)"
+    r"(?:\s+(?:to|in)\s+(?:this|the|my)\s+(?:kt|session|walk-?through|presentation|call))?"
+    r"|(?:(?:so|okay|ok|and)[\s,]+)*(?:please\s+)?let\s+me\s+know\s+if\s+(?:you|anybody|anyone|somebody|someone)\s+"
+    r"(?:have|has)\s+any\s+(?:questions?|doubts?)(?:\s+or\s+(?:concerns?|doubts?|questions?))?(?:\s+about\s+(?:this|it))?"
+    r"|(?:(?:so|okay|ok|and)[\s,]+)*if\s+(?:you|anybody|anyone|somebody|someone)\s+(?:have|has)\s+any\s+"
+    r"(?:questions?|doubts?)(?:\s+or\s+concerns?)?,?\s+(?:please\s+)?let\s+me\s+know"
 )
 _GREETING_ONLY_RE = re.compile(
     r"^\W*(?:" + _GREETING_WORD + r"(?:[\s,!.]+" + _GREETING_WORD + r")*|" + _CLOSING_ONLY + r")\W*$",
@@ -1381,6 +1408,13 @@ _ENUMERATION_WINDOW = 6
 _CONTINUATION_YIELDS_TO_SECTIONS = frozenset({"danger_zones"})
 # Openers that mark a clause cut from a longer sentence.
 _FRAGMENT_START_RE = re.compile(r"^(?:and|or|but|then|so|while|which|whereas|nor|plus)\b", re.IGNORECASE)
+# A piece of a spoken run that opens a statement of its own: a subject and
+# its verb, after any joining word ("then we have bank SFTP keys ...", "we
+# have AWS Secret Manager ...").
+_OPENS_A_STATEMENT_RE = re.compile(
+    r"^\W*(?:(?:and|so|then|now|also|plus|next)\W+)*(?:we|they|you|i|there|it)\s+"
+    r"(?:have|has|had|are|is|was|were|use|uses|used|keep|keeps|store|stores|run|runs|need|needs|send|sends|can)\b",
+    re.IGNORECASE)
 # A procedure said one step per sentence ("To roll back, first pause the
 # sync." "Then revert the image tag." "After that, resume the sync and watch
 # the error rate."): a step opens with a sequence word and gives an
@@ -1586,6 +1620,31 @@ def apply_continuation_rules(classified_sentences, schema_metadata: Dict[str, Di
         is_fragment = (bool(_FRAGMENT_START_RE.match(raw)) and cut_off) or (raw[:1].islower())
         if (is_fragment or _DEPENDENT_CONTINUATION_RE.search(text)) and idx > 0:
             prev = classified_sentences[idx - 1]
+            # A piece of a long spoken run that names its own topic is the
+            # speaker moving on, not a clause of the piece before: "then we
+            # have bank SFTP keys that which is stored in vault, credentials
+            # are stored in vault ..." followed "The primary contact point is
+            # Arjun" to Architecture, and "we have AWS Secret Manager ...
+            # credentials are stored in Secret Manager ..." an on-call line
+            # to Ownership (the user's own recordings, 4 Nov). Its own rule is
+            # read on what was said too: the copy edit had reworded the second
+            # to "... which stores shipper API keys and telematic credentials".
+            # Only a piece that opens a statement of its own ("we have ...",
+            # "then there is ..."): one that completes the clause before it
+            # stays with it. In a noisy copy of g11, "infrastructure github
+            # actions handles ci ..." after "... terraform manages", "then
+            # check grafana ..." and "review pub/sub ..." left their quotes
+            # split across two sections.
+            said = _source_of(cs)
+            own = own_rule or (match_section_rules(said) if said != text else None)
+            prev_section = getattr(prev.primary_classification, "section_id", None)
+            if is_fragment and _OPENS_A_STATEMENT_RE.match(said or raw) and own \
+                    and own.confidence >= RULE_OVERRIDE_CONFIDENCE and own.section_id != prev_section:
+                if getattr(cs.primary_classification, "section_id", None) != own.section_id:
+                    _assign_section(cs, own.section_id, schema_metadata, idx,
+                                    "Continuation: a fragment whose own words name its topic",
+                                    Classification, ExplainabilityLog, datetime)
+                continue
             if prev.primary_classification and (
                 prev.primary_classification.section_id != getattr(cs.primary_classification, "section_id", None)
             ):

@@ -2047,3 +2047,85 @@ Results:
 - **Full test suite** on the final code: 1416 passed, none failed (1 h 35
   min). One test was skipped, as before: it needs a fresh recording of
   Groq's answers (X106).
+
+## Your own recorded KTs (audit §9abk, 4-5 Nov)
+
+- **Faster testing of recordings:** checking a change on the eight earlier
+  recordings took 2 to 3 hours; it now takes about 7 minutes. Every slow
+  step that depends only on the recording (telling speakers apart, reading
+  the screen, the copy edit, the text model) is done once and saved, and two
+  runs of the same code give the same documents.
+- **Your three recordings** (Haulbase, Ledgerline, Wardline): answer keys
+  were written from a better transcript before the app saw them, and Wardline
+  was held back at random to check the fixes on something not studied.
+- **What went wrong:** about half the missed facts were the app's speech
+  recognition dropping or mishearing words (the larger model heard them all);
+  the rest were the app's own: spend figures not filed under Cost, "the
+  primary contact point is Arjun" not under Ownership, a security statement
+  following the on-call line into Ownership, sections shown as covered
+  because a word like "VPN" or "review" came up elsewhere, and the closing
+  "thank you for listening" printed as a fact.
+- **After the fixes:** Haulbase and Ledgerline 53 to 59 of 70 key facts in
+  the right section; no undiscussed section shown as covered (4 before); no
+  closing remarks printed. Every written test set, the noisy copies and the
+  sealed set are unchanged; the held-back Wardline is unchanged too (26 of
+  34), so its problems are different ones.
+
+## Your recording test scenarios (audit §9abl, 5-6 Nov)
+
+- **What was tested:** your 35 scenarios (people who disagree, corrections,
+  chatter, misheard names, guesses, failures with no fix, a dangerous
+  instruction, unclear or cut-off audio, instructions to the AI, and more)
+  became 33 short test KTs with the expected behaviour as checks; two
+  scenarios have no written form (the screen against the speech) or were
+  already covered (environments).
+- **What went wrong before:** when a second person contradicted the speaker
+  ("No, it is running on DynamoDB", "I think Jenkins deploys directly"),
+  both versions were printed as facts; "delete all production messages"
+  went onto the incident card although the other person objected; an RTO the
+  speaker said needed confirming was printed as settled; "Please share your
+  screen", "I will be on leave next Friday" and "yesterday's match was
+  amazing" were printed; a sentence addressed to the AI was printed and
+  counted Disaster Recovery as discussed; unclear speech and a recording cut
+  off mid-sentence read as real statements.
+- **After the fixes:** all 33 scenarios pass every essential check (26
+  before). A disagreement is now either settled by the first speaker's answer
+  or shown as "Disputed — confirm with the outgoing owner" with both people
+  named; a doubted RTO says to confirm; chatter and instructions to the AI
+  are left out; unclear and cut-off speech goes to the follow-up list. No
+  fact moved on any earlier test set.
+- **Not possible with the current tools:** telling when two people speak at
+  once, and comparing what is on screen with what is said. These are
+  recorded as limits, not faked.
+- **Still open:** 13 desirable behaviours (for example sarcasm, a runbook
+  that differs from practice, a procedure split across two speakers).
+- **Spoken by two computer voices (6 Nov):** the same scenarios read aloud
+  and run as uploaded recordings. With the speaker setting as it is, two
+  voices were heard as one person in 6 of 7 cases, so a disagreement could
+  not be seen; a slightly stricter setting told all of them apart. That
+  setting will be checked on the real recordings before it changes. The
+  sealed test set still reads 151 of 160.
+
+## Speech lost between chunks of a recording (audit §9abm, 6 Nov)
+
+- **What was wrong:** the speech model works through a recording in
+  30-second pieces, all at once to save time. When speech ran up to the end
+  of a piece, the model left the last few seconds for "the next piece",
+  which this fast mode never reads, so they were lost: the last sentence of
+  short recordings, and on your ledgerline recording 87 of 733 words,
+  including "prod, staging and dev", "99.96%" and "9 am to 3 pm UTC". These
+  were blamed on the small model before; it hears them.
+- **The fix:** a piece that stops early is read again from where it
+  stopped. On your two recordings the lost words went from 26 to 6 and from
+  87 to 5, and it stays faster than reading one piece after another.
+- **Measured on the ten recordings worked on:** with the fix the document
+  holds 158 of 194 key facts in the right place, against 148 before (76% to
+  81%), and no recording got worse. It takes about the same time as before
+  (0.46 minutes per minute of audio). The recordings held back are measured
+  next.
+- **The larger speech model:** on the same ten recordings it put 150 of 194
+  key facts in the right place, against 148 for the app's model, and
+  reported one discussed section as missing. It took two and a half to three
+  times as long and nearly twice the memory. Not worth it on this laptop; the
+  app keeps the small model (a machine with a graphics card could choose the
+  larger one).

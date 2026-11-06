@@ -41,6 +41,15 @@ _UNCONFIRMED_RES = [
     # own "I need to ... whether".
     re.compile(r"\bneeds?\s+to\s+(?:verify|confirm|double-check)\s+(?:this|it\b|that\s*(?:[.,;!?]|$))|"
                r"\bi\s+(?:still\s+)?need\s+to\s+(?:verify|confirm|check|find\s+out)\s+(?:whether|if)\b", re.IGNORECASE),
+    # Who to ask: "We should confirm that with the infrastructure team.",
+    # "Let's check that with Priya." (the user's recording scenario TC-04,
+    # 5 Nov). Not an instruction about the system ("you should check that
+    # the pods are healthy"): only "that", "this" or "it" with someone to ask
+    # or closing the sentence.
+    re.compile(r"\b(?:should|need\s+to|have\s+to|must|(?:will|'ll)\s+(?:need|have)\s+to)\s+(?:confirm|verify|"
+               r"double-check|check)\s+(?:that|this|it)\s+with\b|"
+               r"\b(?:let'?s|i'?ll|we'?ll|i\s+will|we\s+will)\s+(?:confirm|verify|double-check|check)\s+(?:that|this|it)"
+               r"(?:\s+with\b|\s*(?:[.,;!?]|$))", re.IGNORECASE),
 ]
 # A value given on an old document's word is a claim with doubt on it: "Our
 # recovery point objective is four hours, or at least that is what the
@@ -59,6 +68,36 @@ _DOCUMENT_CAVEAT_RE = re.compile(
     r"(?:the|this|that|these|those|our|any|it)\b[^.!?]{0,80}?\s+as\s+(?:an?\s+)?"
     r"(?:verified|confirmed|guaranteed|guarantee|final|fact|certain|settled)\b", re.IGNORECASE)
 _UNCONFIRMED_RES.append(_DOCUMENT_CAVEAT_RE)
+# Speech the transcript marks as not heard ("The primary database is
+# [unclear].", "[inaudible]"), or a recording that ends mid-sentence
+# (mark_cut_off): nothing to rely on, so to confirm, never a value and never
+# "not in place" (the user's recording scenarios TC-17 and TC-35, 5 Nov).
+_UNCLEAR_RE = re.compile(
+    r"[\[(](?:unclear|inaudible|indistinct|unintelligible|crosstalk|garbled|cut\s+off)(?:\s+[\d:.]+)?[\])]",
+    re.IGNORECASE)
+_UNCONFIRMED_RES.append(_UNCLEAR_RE)
+CUT_OFF_MARK = "[cut off]"
+# Words a finished sentence does not end on: "... is that you must never",
+# "... is that they". Not "restart it", "that's what it is" or "thank you".
+_DANGLING_END_RE = re.compile(r"\b(?:the|a|an|and|or|but|because|if|when|must|never|they|we|our|their|my|your)\W*$",
+                              re.IGNORECASE)
+
+
+def is_unclear(text: str) -> bool:
+    """Marked as not heard or cut off."""
+    return bool(_UNCLEAR_RE.search(text or ""))
+
+
+def is_cut_off(raw: str) -> bool:
+    """The last sentence of a transcript stops mid-sentence: no closing
+    punctuation, and it ends on a word that cannot end one."""
+    raw = (raw or "").strip()
+    return bool(raw) and raw[-1] not in ".!?\"'”)" and len(raw.split()) >= 5 and bool(_DANGLING_END_RE.search(raw))
+
+
+def mark_cut_off(text: str) -> str:
+    """The sentence as the document shows it: marked, not finished."""
+    return re.sub(r"[\s.]+$", "", text or "") + " " + CUT_OFF_MARK
 # An instruction about the document that says nothing about the system:
 # "Please ensure these uncertainties are clearly identified instead of
 # assuming values." (the user's KTs, 24 Oct; printed as a deployment step).
@@ -189,6 +228,22 @@ def is_gap_statement(text: str) -> bool:
     return bool(negative or any(rx.search(text) for rx in _GAP_RES))
 
 
+def voices_doubt(text: str) -> bool:
+    """The speaker leaves something open: "I'm not sure", "that needs
+    confirmation", "We should confirm that with the infrastructure team"."""
+    return any(rx.search(text or "") for rx in _UNCONFIRMED_RES)
+
+
+_GUESS_RE = re.compile(r"\b(?:i\s+(?:think|believe|guess|assume)|probably|maybe|perhaps|supposedly)\b", re.IGNORECASE)
+
+
+def is_hedged(text: str) -> bool:
+    """Said as a guess or with doubt: "I think the backup runs every six
+    hours", "..., but I'm not sure". Not a target ("the RTO should be under
+    four hours")."""
+    return bool(_GUESS_RE.search(text or "")) or voices_doubt(text)
+
+
 def is_unconfirmed(text: str) -> bool:
     """A stated gap that is a doubted claim, not an absence: "I think Redis is
     using 4 GB of memory, but I'm not completely sure" (a hedge on a claim,
@@ -198,7 +253,7 @@ def is_unconfirmed(text: str) -> bool:
     if not any(rx.search(text) for rx in _UNCONFIRMED_RES):
         return False
     return bool(_HEDGE_RE.search(text) or _DOUBTED_SOURCE_RE.search(text) or _DOCUMENT_CAVEAT_RE.search(text)
-                or states_something_before_gap(text))
+                or _UNCLEAR_RE.search(text) or states_something_before_gap(text))
 
 
 # A back-reference in a sentence that only doubts what came before it.
@@ -568,6 +623,20 @@ def is_field_candidate(text: str) -> bool:
     return not (is_question(text) or (is_gap_statement(text) and not states_something(text)))
 
 
+# A sentence that goes back to the walkthrough does not answer the question
+# before it: "Did you complete the deployment?" / "Coming back to the
+# production architecture, requests enter through CloudFront ..." was one
+# deployment statement (the user's recording scenario TC-05, 5 Nov).
+_RETURNS_TO_TOPIC_RE = re.compile(
+    r"^\W*(?:[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*){0,2}:\s+)?(?:(?:ok(?:ay)?|so|right|alright|anyway|now)\W+)*"
+    r"(?:(?:coming|getting|going)\s+back\s+to|back\s+to|returning\s+to|anyway\b|moving\s+on\b|let'?s\s+get\s+back\b)",
+    re.IGNORECASE)
+
+
+def returns_to_topic(text: str) -> bool:
+    return bool(_RETURNS_TO_TOPIC_RE.match(text or ""))
+
+
 def merge_question_answers(sentences: List[T], text_of: Callable[[T], str],
                            merge: Callable[[T, T], T]) -> List[T]:
     """Join each question with the sentence that answers it, so the pair is
@@ -579,7 +648,8 @@ def merge_question_answers(sentences: List[T], text_of: Callable[[T], str],
     while i < len(sentences):
         current = sentences[i]
         if (i + 1 < len(sentences) and text_of(current).strip().endswith("?")
-                and not text_of(sentences[i + 1]).strip().endswith("?")):
+                and not text_of(sentences[i + 1]).strip().endswith("?")
+                and not returns_to_topic(text_of(sentences[i + 1]))):
             out.append(merge(current, sentences[i + 1]))
             i += 2
             continue

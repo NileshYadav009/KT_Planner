@@ -21,13 +21,15 @@ from typing import List, Optional
 
 import ffmpeg
 import torch
+import numpy as np
 from faster_whisper import BatchedInferencePipeline, WhisperModel
+from faster_whisper.audio import pad_or_trim
 
 from ai import polish_coverage_sections, _extract_structured_section, wrap_structured_as_fields
 from context_mapper import ContextMappingPipeline
 from devops_transcription import clean_transcript, close_segment_sentences, continues_sentence
 from input_gate import assess_transcript, language_warning
-from dialogue import is_field_candidate
+from dialogue import is_field_candidate, is_hedged
 from field_populator import populate_fields, extract_rto_rpo, find_source_sentence_index
 from knowledge import (
     build_knowledge_object,
@@ -84,6 +86,14 @@ WHISPER_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").strip().lower() not
 # per second of audio instead of 0.74, with 4.4% word errors instead of 6.3%.
 WHISPER_BATCHED = os.getenv("WHISPER_BATCHED", "1").strip().lower() not in ("0", "false", "no", "off")
 WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
+# A batched chunk is decoded once. Whisper leaves speech near the end of its
+# 30 s window for the next window, which sequential decoding opens there and
+# batching never does, so the end of a chunk was lost: 87 of 733 words of a
+# 7-minute KT ("we have environments prod, staging and dev", "99.96%", "9 am
+# to 3 pm UTC") and the last sentence of short recordings. The word error
+# rate above missed it. Now the rest of such a chunk is decoded again
+# (`_ResumingBatchedPipeline`, audit §9abm); WHISPER_BATCHED_RESUME=0 turns it off.
+WHISPER_BATCHED_RESUME = os.getenv("WHISPER_BATCHED_RESUME", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def whisper_hotwords() -> Optional[str]:
@@ -571,7 +581,7 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         dr_sentence_texts = [s.get("text", "") for s in dr_sentences
                              if isinstance(s, dict) and is_field_candidate(s.get("text", ""))]
         dr_text = " ".join(dr_sentence_texts)
-        rto_rpo = extract_rto_rpo(dr_text)
+        rto_rpo = extract_rto_rpo(dr_text, doubted=[t for t in dr_sentence_texts if is_hedged(t)])
         if rto_rpo:
             # knowledge_builder._collect_evidence() resolves source_chunk_index
             # against kt.section_content, NOT this coverage-based list -- the
@@ -758,7 +768,12 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
                  "source": s.source_text or s.raw_text or s.text, "start": s.start + time_offset,
                  "end": s.end + time_offset, "speaker": s.speaker,
                  "decided_by": decided[i] if i < len(decided) else None,
-                 "confidence": scores[i] if i < len(scores) else None}
+                 "confidence": scores[i] if i < len(scores) else None,
+                 # Whisper's own confidence in the words, apart from the
+                 # classifier's in the section; only a recording has one
+                 # (a paste carries a fixed default).
+                 "transcription_confidence": round(float(s.audio_confidence), 3)
+                 if spoken and getattr(s, "audio_confidence", None) is not None else None}
                 for i, s in enumerate(kt.facts if kt.facts is not None else (kt.sentences or []))
             ]
             knowledge_object = verify_document_coverage(
@@ -978,12 +993,50 @@ def spoken_language_warning(audio_path: str) -> Optional[str]:
             f"KTs, so sections may be wrong or missing; review every section.")
 
 
+class _ResumingBatchedPipeline(BatchedInferencePipeline):
+    """faster-whisper's batched pipeline, except that a chunk whose text stops
+    more than RESUME_MARGIN seconds before the chunk ends is decoded again
+    from where it stopped (up to RESUME_PASSES times), as sequential Whisper
+    seeks to its last timestamp. Only chunks that stopped early cost a second
+    decode: a 6-minute KT took 1.3 times as long as batched alone, still under
+    sequential decoding."""
+
+    RESUME_MARGIN = 1.0
+    RESUME_PASSES = 3
+
+    def forward(self, features, tokenizer, chunks_metadata, options):
+        out = super().forward(features, tokenizer, chunks_metadata, options)
+        frames_per_second = self.model.frames_per_second
+        todo = [i for i, segments in enumerate(out) if segments]
+        for _ in range(self.RESUME_PASSES):
+            rest, metas, owners = [], [], []
+            for i in todo:
+                meta = chunks_metadata[i]
+                done = max(s["end"] for s in out[i]) - meta["offset"]
+                if meta["duration"] - done <= self.RESUME_MARGIN:
+                    continue
+                rest.append(pad_or_trim(features[i][..., int(round(done * frames_per_second)):]))
+                metas.append(dict(meta, offset=meta["offset"] + done, duration=meta["duration"] - done))
+                owners.append(i)
+            if not rest:
+                break
+            more = super().forward(np.stack(rest), tokenizer, metas, options)
+            todo = []
+            for i, segments in zip(owners, more):
+                segments = [s for s in segments if s["text"].strip()]
+                if segments:
+                    out[i].extend(segments)
+                    todo.append(i)
+        return out
+
+
 def _transcribe(audio_path: str, **kwargs):
     """Whisper on one recording: batched when WHISPER_BATCHED (the default)."""
     global _BATCHED_MODEL
     if WHISPER_BATCHED and isinstance(MODEL, WhisperModel):
-        if _BATCHED_MODEL is None or _BATCHED_MODEL.model is not MODEL:
-            _BATCHED_MODEL = BatchedInferencePipeline(model=MODEL)
+        kind = _ResumingBatchedPipeline if WHISPER_BATCHED_RESUME else BatchedInferencePipeline
+        if _BATCHED_MODEL is None or _BATCHED_MODEL.model is not MODEL or type(_BATCHED_MODEL) is not kind:
+            _BATCHED_MODEL = kind(model=MODEL)
         # Timestamps on: without them a segment is a whole 30 s speech chunk,
         # too coarse for source times and speaker labels.
         return _BATCHED_MODEL.transcribe(audio_path, batch_size=WHISPER_BATCH_SIZE, without_timestamps=False,

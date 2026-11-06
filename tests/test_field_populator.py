@@ -904,3 +904,17 @@ def test_a_tool_turned_down_or_said_to_be_the_old_one_is_not_current():
     assert "MySQL" not in current_tool_mentions("So it stores invoices in MySQL? No, it's PostgreSQL on Amazon RDS.")
     assert current_tool_mentions("MySQL was the old system.") == []
     assert current_tool_mentions("We use MySQL for reports.") == ["MySQL"]
+
+
+def test_an_objective_said_with_doubt_or_disputed_is_not_headlined():
+    """The user's recording scenario TC-04 (5 Nov): "Our RTO is 2 hours." /
+    "I believe it is 4 hours." / "We should confirm that with the
+    infrastructure team." printed "RTO: 2 hours" as settled."""
+    unit = "Our RTO is 2 hours. I believe it is 4 hours. We should confirm that with the infrastructure team."
+    assert extract_rto_rpo(unit, doubted=[unit]) == {
+        "rto_metric": "2 hours - said with doubt or disputed; confirm with the outgoing owner"}
+    assert extract_rto_rpo("Our RTO is 2 hours.") == {"rto_metric": "2 hours"}
+    # Only the doubted statement's value.
+    assert extract_rto_rpo("RTO is 2 hours. I think the RPO is 15 minutes.",
+                           doubted=["I think the RPO is 15 minutes."]) == {
+        "rto_metric": "2 hours", "rpo_metric": "15 minutes - said with doubt or disputed; confirm with the outgoing owner"}
