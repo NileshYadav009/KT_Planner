@@ -2120,9 +2120,24 @@ Results:
   87 to 5, and it stays faster than reading one piece after another.
 - **Measured on the ten recordings worked on:** with the fix the document
   holds 158 of 194 key facts in the right place, against 148 before (76% to
-  81%), and no recording got worse. It takes about the same time as before
-  (0.46 minutes per minute of audio). The recordings held back are measured
-  next.
+  81%), and no recording got worse.
+- **On the five recordings held back** (never looked at, read once, totals
+  only): 105 of 132 key facts in the right place with the fix, against 101
+  without it (76.5% to 79.5%). Nothing got worse.
+- **What it costs:** reading the pieces again takes time. Measured side by
+  side, the speech step takes about 1.4 to 1.5 times as long: 60 minutes
+  instead of 40 for 2 hours 19 minutes of audio (a 1-hour recording, about
+  26 minutes instead of 17). An earlier note here said it took about the
+  same time; that compared it with an old benchmark. It stays on;
+  `WHISPER_BATCHED_RESUME=0` gives the old speed.
+- **Your spoken scenarios with the fix:** 25 of 32 pass every must check, 22
+  before. The four sentences that went missing are back. What still fails is
+  two voices heard as one speaker (W01, W02, W05; they pass when the speaker
+  setting is 0.5, still to be checked on real recordings) and names misheard
+  (Grafana, Redis, OpenSearch, APNs).
+- **The slow replays:** the laptop went to sleep during them (one 25-minute
+  stall on 6 Nov, and 02:00 to 10:46 overnight). The run asks Windows to stay
+  awake, but that does not cover a closed lid. Not a fault in the code.
 - **The larger speech model:** on the same ten recordings it put 150 of 194
   key facts in the right place, against 148 for the app's model, and
   reported one discussed section as missing. It took two and a half to three

@@ -7521,17 +7521,54 @@ the app's captures (no LLM, the fast replay):
 | Words in the transcripts | 20,100 | 21,556 (+7.2%) | 20,456 |
 | Discussed sections reported Missing | 0 | 0 | 1 |
 | Undiscussed sections shown covered | 5 | 5 | 5 |
-| Whisper time / audio time | about 0.44 (8 Oct benchmark) | 0.46 | 1.33 |
+| Whisper time / audio time | about 0.44 (8 Oct benchmark, not side by side) | 0.46 | 1.33 |
 
 No recording lost a fact with the fix: iXDy 8 to 11, ledgerline 27 to 31,
 D3id 9 to 11, zdVz 14 to 15, the rest unchanged. Without the two whose keys
 were written from large-v3-turbo transcripts: 89, 95 and 92 of 124. The
 written sets, noisy copies, matrix and gates do not transcribe audio, so the
-fix cannot move them. The held-back recordings are measured once, next.
+fix cannot move them.
+
+**The held-back recordings** (the five never worked on, read once and in
+aggregate only, 7 Nov): captured without the fix (`WHISPER_BATCHED_RESUME=0`)
+and with it, one after the other with nothing else running, and replayed on
+the same code (labels resume1-before-holdout and resume1-resume-holdout):
+
+| | Without the fix | With the fix |
+|---|---|---|
+| Key facts in an allowed section | 101/132 (76.5%) | **105/132 (79.5%)** |
+| Key-fact quotes in the cleaned transcript | 123/132 | 125/132 |
+| Words in the transcripts | 19,801 | 20,726 (+4.7%) |
+| Facts in the wrong section / lost | 23 / 8 | 20 / 7 |
+| Discussed sections reported Missing | 1 | 1 |
+| Undiscussed sections shown covered | 2 | 2 |
+| Noise printed, repeats, unsourced | 4, 0, 2 | 4, 0, 2 |
+| Whisper time / audio time (four recordings, 139 min) | 0.29 | 0.43 |
+
+The gain holds on recordings it was not found on, smaller than on the ten
+(3.0 points against 5.1), and nothing measured is worse. Its cost is the
+second decode: measured side by side, Whisper takes 1.4 to 1.5 times as long
+(40 to 60 minutes for these 139; 1.41 without the one capture a short sleep
+may have touched). The 0.46 above was set against an older benchmark, not
+measured side by side. Kept on by default; `WHISPER_BATCHED_RESUME=0` gives
+the old speed.
+
+**The spoken W cases with the fix** (label resume1, diarisation at the
+default 0.6, as s2): cases with every must 22 to 25 of 32, must 55 to 60 of
+69, should 11 to 14 of 29. The four sentences the batched decoding dropped
+are back (W01, W02, W18, W22), and W35 passes with the harness fixed. The
+nine must checks left: two voices taken as one speaker, so no dispute is
+seen (W01, W02, W05; X142, all three pass at 0.5), and names misheard
+(W08 Grafana, W17 Redis, W21 OpenSearch Service, W28 APNs and "expiry
+alert"; X108).
 
 One replay (bAOq) took 27 minutes, 25 of them in one batch of sentence
-embeddings that takes seconds elsewhere; the transcript is ordinary and the
-laptop was on mains power. Not explained (X144).
+embeddings that takes seconds elsewhere (X144). The laptop was asleep for
+them: Windows logs it entering sleep at 21:41 and returning at 22:04, though
+the run asks it to stay awake (that holds off idle sleep, not a closed lid
+or the power button). Not a defect of the code. The held-back replays of the
+same night slept from 02:00 to 10:46 inside one diarisation (33,917 s logged
+for about 35 minutes of work); stage times that span a sleep are not used.
 
 ## 9. Fix from this audit already worth doing next
 
