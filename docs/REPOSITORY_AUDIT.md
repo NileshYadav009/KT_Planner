@@ -7570,6 +7570,209 @@ or the power button). Not a defect of the code. The held-back replays of the
 same night slept from 02:00 to 10:46 inside one diarisation (33,917 s logged
 for about 35 minutes of work); stage times that span a sleep are not used.
 
+### 9abn. Speed on the laptop, speakers told apart, and three small items (7-8 Nov)
+
+**The user's request (7 Nov):** work on the weak points, fix the small
+issues and make the application faster, before a demonstration on 1 Dec.
+
+**Where the time goes.** The laptop is an i3-7020U: 2 cores, 4 threads,
+12 GB. Running stages side by side does not help on 2 cores, so time can only
+come from doing less work. Stage times (`job_runs.stage_seconds`) of the
+held-back recordings' replays, 72 minutes of audio, in aggregate, without
+Whisper:
+
+| Stage | Minutes |
+|---|---|
+| Speaker diarisation | 37.9 |
+| Classification, with the copy edit | 37.0 |
+| Screen capture (OCR of shared screens) | 31.2 |
+| Whole run | 107 |
+
+Whisper with the X143 re-decode adds about 0.43 times the audio's length.
+On one visible recording (zdVz, 15.2 minutes, 2,094 words) the text stages
+took 589.5 s, profiled:
+
+| Step | Seconds |
+|---|---|
+| Copy edit, local model (stops at 300 s, 2 threads) | 305 |
+| Sentence embeddings, bge-large (torch, 2 threads) | 185.6 |
+| GLiNER entities (already batched, §9abg) | 57.8 |
+| Field population: word stems, 1.7 million calls | 28 |
+
+**Diarisation (X142, the user's decision).** sherpa-onnx reads the
+recording in 10-second windows. Its default moves each window on by a tenth
+of a window, so every second is read ten times and every window's speakers
+are embedded. Measured with `../online_kts/tools/diar_bench.py` on the
+visible recordings and the synthetic cases (7 of two voices, 25 of one):
+
+| Window step / threshold | Two voices told apart | One voice kept whole | Speech given to the right speaker | Labels as the app's today | Time / audio |
+|---|---|---|---|---|---|
+| 0.1 / 0.6 (the app before) | 1/7 | 25/25 | 77.9% | - | about 0.53 |
+| 0.1 / 0.5 | 7/7 | 25/25 | 79.7% | - | - |
+| 0.25 / 0.6 | 1/7 | 25/25 | 77.5% | 90.9% | 0.227 |
+| 0.5 / 0.6 | 0/7 | 25/25 | 77.8% | 95.2% | about 0.1 |
+| **0.5 / 0.5** | **7/7** | **25/25** | **80.6%** | 94.3% | **0.111** |
+
+The synthetic cases took 433 s at the old setting and 78-100 s at step 0.5.
+Two runs of the bench were stretched by the laptop sleeping (17:35, 20:23,
+22:32 on 7 Nov, Kernel-Power 42/107); those spans are not used.
+
+The ten recordings worked on, replayed on the same code at three settings
+(labels diar1-base, diar1-step, diar1-diar; no LLM, the fast replay):
+
+| | 0.1 / 0.6 | 0.5 / 0.6 | 0.5 / 0.5 |
+|---|---|---|---|
+| Key facts in an allowed section | 158/194 | 158/194 | 158/194 |
+| Discussed sections reported Missing | 0 | 0 | 0 |
+| Undiscussed sections shown covered | 5 | 5 | 5 |
+
+No key fact moved on any recording. Speakers found at 0.5 / 0.5 against
+before: D3id 1 (1), wQJp 5 (5), bAOq 2 (2), _UVS 2 (1), zdVz 1 (1), 04p 4
+(6), ll10 2 (4), iXDy 1 (2), haulbase 1 (1), ledgerline 1 (1). The YouTube
+captions name no speaker, so the right counts are not known: the ledger's
+note that they did was wrong.
+
+The spoken W cases at 0.5 / 0.5 (label synthetic-diar1-diar, against
+resume1): cases with every must 25 to 28 of 32, must 60 to 64 of 69, should
+14 of 29 both. W01, W02 and W05 pass: the second voice is heard, so the
+dispute is seen. The five must checks left, in four cases, are names
+misheard (W08 Grafana, W17 Redis, W21 OpenSearch Service, W28 APNs and
+"expiry alert"; X108); every case of two voices finds two speakers.
+
+**Fix.** `diarization.CLUSTER_THRESHOLD` 0.5 and `WINDOW_SHIFT` 0.5
+(`CONTINUUM_DIARIZATION_THRESHOLD`, `CONTINUUM_DIARIZATION_WINDOW_SHIFT`;
+docs/OPERATIONS.md). The two-speaker fixture test with the real models passes
+at the new defaults; a new test checks both values reach sherpa-onnx.
+
+**Embedding threads.** torch uses one thread per physical core by default,
+so 2 here. bge-large on 320 texts of zdVz (`embed_threads.py`, the order
+2, 4, 2): 137.1 s and 162.7 s on 2 threads, 109.4 s on 4; vectors equal to
+1.2e-7 (lowest cosine 0.9999998). **Fix:** a started worker sets torch's
+threads to the logical CPUs divided among the KTs it runs at once, never
+fewer than torch's default (`worker.configure_torch_threads`,
+`CONTINUUM_TORCH_THREADS`, `0` for torch's default; tests keep the default).
+The accuracy harness keeps embeddings on disk (`evaluation/enccache.py`), so
+a run on it would reuse vectors made at 2 threads; the dev and e2e KTs were
+run again at 4 threads with that cache off (`NO_ENC_CACHE=1`, label n1t4nc,
+995 s): all 2,374 per-fact values of dev and every e2e value are the same as
+the cached run's. torch on this build ignores `OMP_NUM_THREADS`; the harness
+runs were given their threads by `with_threads.py` (scratchpad), as a worker
+sets them.
+
+**Field population.** `field_populator._stem` and the word-against-stem test
+are cached (`functools.lru_cache`): the same words are stemmed for every
+field and candidate. Same output. Profiled the same way on zdVz before and
+after: `_has_topic_evidence`, called 642 times both times, 28.2 s to 0.5 s
+under cProfile (which inflates small calls; the time without the profiler is
+smaller on both sides). The whole profiled text pipeline took 589.5 s and
+476.1 s, but that difference is not all the cache's: GLiNER alone took 57.8 s
+and 33.3 s on unchanged code, the machine's load differing between the runs.
+
+**Whisper's re-decode (X143), per pass** (`resume_probe.py`, iXDy,
+haulbase, ledgerline): the batched pass 381 s; the first re-decode 137.4 s,
+17 chunks, 200 words; the second 23.6 s, 3 chunks, 5 words; a third never
+ran. Requiring more than 1 s left before a re-decode would save little: at
+2 s, 4 chunks and 13 words fewer; at 3 s, 5 and 16. Left as it is.
+
+**Screen capture.** OCR is most of it: 77 calls at 10.4 s each on three
+recordings (haulbase, ledgerline, D3id), against 83 s finding stable screens
+and 77 s grabbing frames. Reusing the text of a screen seen before was
+looked at: no two frames the app reads are the same, and frames within a few
+bits of each other differ in text.
+
+OCR settings, compared fairly (`ocr_interleaved.py`: 28 of the 111 frames the
+app reads on four visible recordings, every fourth, 1600 x 900; each frame
+read by every setting in turn, the order rotated, so background load falls on
+all alike; lines kept as the app keeps them, score 0.6 or more):
+
+| Setting | Seconds per frame | Frames read as the app reads them | Lines lost | Lines gained |
+|---|---|---|---|---|
+| The app's (RapidOCR defaults) | 13.61 | 28/28 | 0 | 0 |
+| The same, passed explicitly | 12.88 | 28/28 | 0 | 0 |
+| No text-direction check (`Global.use_cls=false`) | 12.57 | 3/28 | 20 | 51 |
+| Detection at most 960 px (`Det.limit_type=max`, 960) | 28.23 | 7/28 | 610 | 213 |
+
+The first two rows are one setting: their gap (5%) is the noise. Dropping the
+direction check is within it and reads 25 of 28 frames differently; the
+smaller detection is twice as slow. An earlier run of the settings one after
+another (`screen_bench.py ocr o2`) read the first at 10.1 s a frame and the
+second at over 40 s with Chrome busy and 2.4 GB free: that is why the fair
+run interleaves. The OCR settings stay.
+
+**Three small items from the ledger, and one found on the way.**
+
+- **X117.** "Is there a queue? Yes, RabbitMQ holds the jobs ..." kept its
+  question: an answer after "yes" or "no" lets its question go only when it
+  says the question's word again, and "queue" is not said again. Now a
+  question that asks for a kind of component ("is there", "are there", "do
+  we have", "does it use" with "a", "an" or "any" and a kind: queue, broker,
+  cache, database, CDN, load balancer, registry, secrets store, ...) also
+  goes when one of the answer's first three words names a tool of that kind
+  (`dialogue._names_kind_asked`, read from the diagram's layer terms). "Is
+  there a runbook for that? Yes, Priya wrote it last year." keeps its
+  question (a runbook is not a component), and so does "Is there a queue?
+  No, the API writes straight to the database." (`tests/test_dialogue.py`,
+  four cases).
+- **X118.** A coverage row listed a topic as "not discussed" while quoting a
+  stated gap about it ("DR testing" beside "Has anyone tested a restore? Not
+  this year."). A topic that one of the section's stated gaps matches by its
+  topic pattern now reads "stated as not done" and is not listed as not
+  discussed (`knowledge_builder`, `coverage_topics.topic_pattern`). The gap
+  still does not cover the topic: the section's status is unchanged.
+- **X120.** The Quayside diagram (dev d11) drew no line for "The worker picks
+  jobs off an SQS queue.". "Picks, takes or grabs (up) jobs, messages, tasks,
+  events or work off or from" now reads as consuming
+  (`architecture_diagram._CONSUME_RE`). Run through the whole pipeline with
+  no LLM, d11 draws "consumes from Amazon SQS" with that sentence; its entry
+  row is Users, React, CloudFront, then Quayside: "a React front end served
+  from CloudFront" is drawn as the way in, which the connections table does
+  not list (it lists stated lines only), so the ledger's "no line" there was
+  the table, not the picture.
+- **ElastiCache.** The same diagram drew "Amazon ElastiCache" and "Redis" as
+  two caches for "ElastiCache Redis holds the slot availability". ElastiCache
+  is now read as Redis's managed offering, as Azure Cache for Redis and
+  Memorystore already were: one box, "Redis (Amazon ElastiCache)".
+
+**Measured** (label n1t4: this batch's code, torch at 4 threads, the
+embedding cache as always; against w5): every set the same.
+
+| Set | Before (w5) | This batch (n1t4) |
+|---|---|---|
+| Tuning | 534/534, 1 discussed section Missing | 534/534, 1 |
+| Dev | 551/551, 2 unsourced | 551/551, 2 |
+| Holdouts (aggregate) | 88/95 | 88/95 |
+| Blind2 (aggregate) | 109/114 | 109/114 |
+| Blind3 (aggregate) | 118/132, 3 Missing | 118/132, 3 |
+| e2e (six KTs) | 1.0 each, no problems | 1.0 each, no problems |
+
+The ElastiCache change came after this run started; it changes only the
+diagram, which the gates below measure.
+
+The noisy copies (n1, against w5): 1057/1085, 1 discussed section Missing,
+1 undiscussed shown covered, both runs. The adversarial matrix (n1, against
+w6): 125 cases, every must passing in all of them (409/409 both), should 76 to
+77 of 94: T04's question before "Yes, RabbitMQ ..." is gone (X117). The
+gates (gn1, against gw6, with the ElastiCache change; no LLM, and the
+recorded Groq replay on five KTs): every gate passes, relations 100% and no
+connection drawn that a KT does not state (`docs/QUALITY_GATES.md`,
+`docs/ADVERSARIAL_MATRIX.md`). Tests: `tests/test_diarization.py` (7, the
+real-model two-speaker case at the new defaults), `tests/test_job_queue.py`
+(15), `tests/test_architecture_diagram.py` (22), `tests/test_dialogue.py` and
+`tests/test_knowledge_builders.py` (the new cases).
+
+The browser journey (label n1, no LLM): 19 of 19 checks pass, as j5 did.
+Its three KTs at once took 109 s against j5's 70 s. That is not the thread
+setting: the same three KTs, after one to warm the models, with torch's default
+and the new setting in turn (0, auto, auto, 0; `thread_ab.py`, scratchpad)
+took 99.7 and 101.1 s against 101.7 and 99.4 s. In j5 the local copy edit
+skipped itself on four KTs for want of memory (under 1.5 GB free), in n1 on
+one, so n1 copy edited the three (X131).
+
+**The laptop.** At 15:22 on 8 Nov, with three runs at once, Windows began to
+sleep, hung (`SleepInProgress=1`, no bug check, the dump not written) and was
+switched off with the power button; the runs were repeated one at a time.
+Three heavy runs together are too many for this machine.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

@@ -4,6 +4,7 @@ field_populator.py
 Populate KT fields from coverage content using pattern, semantic, and LLM passes.
 """
 
+import functools
 import logging
 import os
 import re
@@ -67,6 +68,11 @@ def _field_query_text(field: Dict[str, Any]) -> str:
     return ". ".join(out)
 
 
+# Field population asks the same few thousand words and sentences again for
+# every field and candidate (1.7 million stems on a 15-minute recording:
+# the topic test took 28.2 s under the profiler, 0.5 s cached, §9abn); the
+# answers depend only on the text, so they are kept.
+@functools.lru_cache(maxsize=1 << 16)
 def _stem(word: str) -> str:
     word = word.lower()
     for suffix in _STEM_SUFFIXES:
@@ -96,11 +102,13 @@ def _word_matches_stem(word: str, stem: str) -> bool:
     return len(word_stem) >= 4 and stem.startswith(word_stem)
 
 
+@functools.lru_cache(maxsize=1 << 17)
+def _mentions_stem(sentence: str, stem: str) -> bool:
+    return any(_word_matches_stem(w, stem) for w in re.findall(r"[a-z][a-z0-9]+", sentence.lower()))
+
+
 def _mentions_topic(sentence: str, stems: Set[str]) -> bool:
-    if not stems:
-        return False
-    words = re.findall(r"[a-z][a-z0-9]+", sentence.lower())
-    return any(_word_matches_stem(w, stem) for w in words for stem in stems)
+    return any(_mentions_stem(sentence, stem) for stem in stems)
 
 
 # A sentence that states something is NOT done / still outstanding must never

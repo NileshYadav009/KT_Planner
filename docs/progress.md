@@ -2144,3 +2144,44 @@ Results:
   times as long and nearly twice the memory. Not worth it on this laptop; the
   app keeps the small model (a machine with a graphics card could choose the
   larger one).
+
+## Faster on the laptop, speakers told apart, three small fixes (audit §9abn, 7-8 Nov)
+
+- **What you asked:** fix the weak points and small issues, and make the
+  application faster, before the demonstration on 1 December.
+- **Where the time went:** on 72 minutes of recordings, finding who speaks
+  took 38 minutes, sorting the sentences 37 (most of it the local rewrite of
+  speech into written English, which stops itself at 5 minutes) and reading
+  the shared screens 31, besides the speech step. With 2 cores, running steps
+  side by side does not help, so the gains come from doing less work.
+- **Finding who speaks, about 5 times faster** (your decision): it read
+  every second of audio ten times over; it now reads it twice, and the
+  setting for telling two voices apart is a little stricter. A 30-minute
+  recording saves about 12 minutes. On your ten recordings the document
+  holds the same 158 of 194 key facts. Two voices are now told apart in 7 of
+  7 test cases (1 before), and your spoken scenarios pass every must check in
+  28 of 32 (25 before); what still fails is names misheard. The speaker count
+  changed on 4 public recordings; their captions do not say who spoke, so
+  which count is right is not known.
+- **The sentence model uses all 4 threads:** 20 to 30% faster on that step,
+  with the same results (checked fact by fact without the cache).
+- **A slow check made quick:** the step that fills the document's fields
+  worked out the same word roots 1.7 million times on one recording; it now
+  remembers them (28 seconds to half a second, measured the same way).
+- **Small fixes:** "Is there a queue? Yes, RabbitMQ holds the jobs" now
+  shows just the answer; a coverage row says "stated as not done" instead of
+  "not discussed" when the speaker said it was not done; the diagram draws
+  the worker taking jobs off its queue; ElastiCache and Redis are one box,
+  not two.
+- **Measured:** every test set gives exactly the same results as before
+  (all 534 and 551 facts of the two visible sets; the held-back sets the
+  same in total); the 125 adversarial cases pass every must check (one more
+  desirable check passes); every release gate passes.
+- **Looked at and left alone:** other settings for reading the screen
+  (none was both faster and gave the same text), and the second re-read of
+  the speech pieces (24 seconds for 5 words). Reading the screen and the
+  local rewrite are still the slowest steps.
+- **The laptop:** at 15:22 on 8 November, with three test runs at once, it
+  hung while going to sleep and was restarted with the power button. The
+  runs were repeated one at a time. Keep the lid open and the charger in
+  during long runs.

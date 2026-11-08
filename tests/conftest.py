@@ -18,6 +18,10 @@ os.environ.setdefault("CONTINUUM_COPYEDIT", "0")
 # The punctuation model (punctuation.py) is downloaded on first use; tests
 # give it a stand-in (tests/test_punctuation.py) and run without it.
 os.environ.setdefault("PUNCTUATION_MODEL", "0")
+# A started worker sets torch's CPU threads for the whole process
+# (worker.configure_torch_threads); tests keep torch's default, so a test
+# that starts one does not change the timing of every test after it.
+os.environ.setdefault("CONTINUUM_TORCH_THREADS", "0")
 # Models load from the local cache only, as in CI and the image: a model
 # load that reached huggingface.co made tests fail with the network, not
 # the code ("client has been closed"). Fetch them once with

@@ -36,6 +36,44 @@ def test_switched_off_or_without_models_nothing_is_labelled(monkeypatch):
     assert "speaker" not in segments[0]
 
 
+def test_the_window_step_and_the_threshold_reach_the_diarizer(monkeypatch):
+    """Defaults 0.5 and 0.5 (§9abn); each can be set in the environment, and
+    both are passed to sherpa-onnx (a fake module here, no models needed)."""
+    import sys
+    import types
+
+    def defaults(**env):
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("CONTINUUM_DIARIZATION_")}
+        out = subprocess.run([sys.executable, "-c", "import diarization as d; print(d.WINDOW_SHIFT, d.CLUSTER_THRESHOLD)"],
+                             capture_output=True, text=True, check=True, env={**clean, **env},
+                             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return out.stdout.split()
+
+    assert defaults() == ["0.5", "0.5"]
+    assert defaults(CONTINUUM_DIARIZATION_WINDOW_SHIFT="0.1", CONTINUUM_DIARIZATION_THRESHOLD="0.6") == ["0.1", "0.6"]
+
+    seen = {}
+
+    def recorder(name):
+        def make(*args, **kwargs):
+            seen[name] = kwargs
+            return types.SimpleNamespace(validate=lambda: True, **kwargs)
+        return make
+
+    fake = types.ModuleType("sherpa_onnx")
+    for name in ("OfflineSpeakerDiarizationConfig", "OfflineSpeakerSegmentationModelConfig",
+                 "OfflineSpeakerSegmentationPyannoteModelConfig", "SpeakerEmbeddingExtractorConfig",
+                 "FastClusteringConfig", "OfflineSpeakerDiarization"):
+        setattr(fake, name, recorder(name))
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", fake)
+    monkeypatch.setattr(diarization, "_DIARIZER", None)
+    monkeypatch.setattr(diarization, "WINDOW_SHIFT", 0.25)
+    monkeypatch.setattr(diarization, "CLUSTER_THRESHOLD", 0.45)
+    diarization._diarizer()
+    assert seen["OfflineSpeakerSegmentationPyannoteModelConfig"]["window_shift_ratio"] == 0.25
+    assert seen["FastClusteringConfig"]["threshold"] == 0.45
+
+
 def test_the_notice_says_how_many_speakers_and_who_talked_most():
     assert diarization.speaker_notice(None) is None
     line = diarization.speaker_notice({"count": 2, "speakers": [{"label": "Speaker 1", "share": 0.806}]})

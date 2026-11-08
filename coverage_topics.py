@@ -322,6 +322,11 @@ _ELSEWHERE_CONTEXT = {
 }
 
 
+def topic_pattern(section_id: str, label: str) -> Optional["re.Pattern[str]"]:
+    """The evidence pattern of one of a section's topics, if it has one."""
+    return next((rx for topic, _fields, rx in _COMPILED.get(section_id, ()) if topic == label), None)
+
+
 def field_topic_pattern(field_id: str) -> Optional["re.Pattern[str]"]:
     """The evidence pattern of the topic `field_id` captures, if it has one."""
     for topics in _COMPILED.values():

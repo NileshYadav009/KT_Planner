@@ -737,6 +737,31 @@ def _stands_alone(answer: str, opening_only: bool = False) -> bool:
     return len(answer.split()) >= 4 and not leaning and not _FRAGMENT_ANSWER_RE.match(answer)
 
 
+# "Is there a queue? Yes, RabbitMQ holds the jobs ...": the answer names a
+# product of the kind asked about, so it says what the question asked though
+# it never repeats the question's word (X117). The kinds are the diagram's
+# layers; "Is there a runbook for that? Yes, Priya wrote it" asks for no kind.
+_ASKS_FOR_KIND_RE = re.compile(
+    r"^\W*(?:is\s+there|are\s+there|do\s+(?:we|you|they)\s+(?:have|use)|does\s+(?:it|this|the\s+\w+)\s+(?:have|use))"
+    r"\s+(?:an?|any)\s+(?P<kind>[a-z][a-z -]{1,30}?)\s*(?:\b(?:for|in|on)\b[^?]*)?\?\s*$", re.IGNORECASE)
+_KIND_LAYERS = {"queue": "queue", "message queue": "queue", "message broker": "queue", "broker": "queue",
+                "event bus": "queue", "cache": "cache", "database": "database", "db": "database",
+                "data store": "database", "datastore": "database", "cdn": "cdn", "load balancer": "load_balancer",
+                "container registry": "registry", "registry": "registry", "secrets manager": "secrets",
+                "secret store": "secrets", "vault": "secrets"}
+
+
+def _names_kind_asked(question: str, answer: str) -> bool:
+    m = _ASKS_FOR_KIND_RE.match(question)
+    layer = _KIND_LAYERS.get(" ".join(m.group("kind").lower().split())) if m else None
+    if not layer:
+        return False
+    from architecture_diagram import _LAYER_TERMS
+    opening = " ".join(answer.lower().split()[:3])
+    return any(re.search(r"(?<![\w.-])" + re.escape(term) + r"(?![\w-])", opening)
+               for term in _LAYER_TERMS.get(layer, ()))
+
+
 def without_redundant_question(text: str) -> str:
     """"How do I deploy? Merge to main and GitHub Actions deploys to a staging
     slot." -> the answer alone, when it says everything the question asked.
@@ -755,7 +780,8 @@ def without_redundant_question(text: str) -> str:
         rest = rest[:1].upper() + rest[1:]
         words = re.findall(r"[a-z][a-z'-]+", rest.lower())
         stems = _question_stems(question)
-        if _stands_alone(rest, opening_only=True) and (not stems or any(s in w for s in stems for w in words)):
+        if _stands_alone(rest, opening_only=True) and (not stems or any(s in w for s in stems for w in words)
+                                                       or _names_kind_asked(question, rest)):
             return rest
     return text
 

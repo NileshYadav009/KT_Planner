@@ -134,6 +134,9 @@ _MANAGED_OFFERING_OF = {
     "amazon aurora": "postgresql",
     "azure cache for redis": "redis",
     "memorystore": "redis",
+    # "ElastiCache Redis holds the slot availability" (dev d11): one cache.
+    "amazon elasticache": "redis",
+    "elasticache": "redis",
 }
 
 
@@ -241,8 +244,10 @@ _READ_RE = re.compile(r"\b(?:read(?:s|ing)?|quer(?:y|ies|ied)|fetch\w*|look(?:s|
 _CACHE_RE = re.compile(r"\b(?:cach\w*|session\w*)\b", re.IGNORECASE)
 _PUBLISH_RE = re.compile(r"\b(?:publish\w*|emit\w*|produc\w*|enqueue\w*|queue[sd]?|send(?:s|ing)? (?:messages?|events?|"
                          r"jobs?)|events? (?:go|are sent) to)\b|\bto queue\b", re.IGNORECASE)
+# "The worker picks jobs off an SQS queue" (X120, dev d11).
 _CONSUME_RE = re.compile(r"\b(?:consum\w*|subscrib\w*|listen\w*|pull\w*|process(?:es|ed)? (?:messages|events|jobs) "
-                         r"from)\b", re.IGNORECASE)
+                         r"from|(?:pick|take|grab)(?:s|ed|ing)?\s+(?:up\s+)?(?:the\s+)?(?:jobs?|messages?|tasks?|"
+                         r"events?|work)\s+(?:off|from)(?:\s+of)?)\b", re.IGNORECASE)
 _CALL_RE = re.compile(r"\b(?:call\w*|go(?:es)? through|via|sent (?:with|through|via)|send\w* (?:with|through|via)|"
                       r"integrat\w*|talk\w* to|hit\w*|handled by|powered by|process(?:es|ed)? (?:by|with|through))\b",
                       re.IGNORECASE)

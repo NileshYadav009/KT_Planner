@@ -16,7 +16,8 @@ from dialogue import (is_gap_statement, is_field_candidate, is_handover_announce
                       is_unclear, is_unconfirmed, says_nothing_specific, states_something,
                       states_something_before_gap,
                       without_label, without_session_framing)
-from coverage_topics import AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics, names_no_topic
+from coverage_topics import (AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics, names_no_topic,
+                             topic_pattern)
 from fact_units import fact_texts
 
 
@@ -1816,9 +1817,16 @@ def append_coverage_matrix_section(
                 # "Our RTO and RPO have never been documented" discusses RTO
                 # and RPO: they are known to be unknown, not undiscussed.
                 unknown = [m for m in missing if _named_in(m, stated_gaps)]
-                missing = [m for m in missing if m not in unknown]
+                # A gap that states the topic in other words is not the topic
+                # undiscussed either: "Has anyone tested a restore? Not this
+                # year." said "not discussed: DR testing" beside quoting it (X118).
+                not_done = [m for m in missing if m not in unknown and (rx := topic_pattern(section_id, m))
+                            and any(rx.search(g) for g in stated_gaps)]
+                missing = [m for m in missing if m not in unknown and m not in not_done]
                 if unknown:
                     assessment += f"; stated as not documented: {', '.join(unknown)}"
+                if not_done:
+                    assessment += f"; stated as not done: {', '.join(not_done)}"
                 assessment += f"; not discussed: {', '.join(missing)}." if missing else "."
                 if missing:
                     gaps.append(f"{title}: {', '.join(missing)}")

@@ -897,6 +897,23 @@ def test_a_guess_is_reported_as_unconfirmed_not_as_absent():
     assert any(g.startswith("Common Failures & Fixes: unconfirmed") for g in matrix["_knowledge_gaps"])
 
 
+def test_a_topic_a_stated_gap_states_in_other_words_is_not_reported_undiscussed():
+    # X118 (dev d11): the row said "not discussed: DR testing" and quoted the
+    # gap about it, "Has anyone tested a restore? Not this year."
+    ko = {"sections": [], "summary": {}}
+    dynamic_schema = [{"id": "disaster_recovery", "title": "Disaster Recovery"}]
+    coverage = {"disaster_recovery": _cov("Aurora takes automated snapshots every night and keeps them for 14 days.",
+                                          "Has anyone tested a restore? Not this year.")}
+    result = append_coverage_matrix_section(ko, coverage, dynamic_schema)
+    matrix = next(s for s in result["sections"] if s["id"] == "kt_coverage")
+    row = next(r for r in matrix["_coverage_rows"] if r["Domain"] == "Disaster Recovery")
+    assert "stated as not done: DR testing" in row["Assessment"]
+    undiscussed = row["Assessment"].partition("not discussed:")[2].partition(".")[0]
+    assert "DR testing" not in undiscussed
+    assert not any(g.startswith("Disaster Recovery:") and "DR testing" in g and "“" not in g
+                   for g in matrix["_knowledge_gaps"])
+
+
 def test_a_section_covered_well_covers_most_of_its_topics_itself():
     # Matrix J04 (no LLM): Common Failures held only "we should scale out";
     # its known failure was said under Deployment. Half its topics in passing

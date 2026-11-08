@@ -236,6 +236,16 @@ def test_a_deploy_verb_belongs_to_the_tool_that_says_it():
     assert {("prometheus", "monitors", "central"), ("grafana", "monitors", "central")} <= edges
 
 
+def test_a_worker_that_picks_jobs_off_a_queue_consumes_from_it():
+    # X120 (dev d11, Quayside): "The worker picks jobs off an SQS queue" drew no line.
+    g = build_architecture_graph(
+        ["Amazon ECS", "Fargate", "Node.js", "Python", "Aurora PostgreSQL", "Amazon SQS"],
+        ["It's a set of containers on AWS ECS with Fargate.", "Bookings live in Aurora PostgreSQL.",
+         "The worker picks jobs off an SQS queue."],
+        {"amazon sqs": ["sqs"]}, "Quayside")
+    assert ("central", "consumes from", "amazon-sqs") in _edges(g)
+
+
 def test_a_pipeline_reads_the_queue_and_its_results_land_in_the_warehouse():
     g = build_architecture_graph(
         ["Pub/Sub", "Dataflow", "BigQuery", "Google Kubernetes Engine"],
@@ -316,3 +326,16 @@ def test_a_store_that_opens_its_sentence_and_says_what_it_holds_gets_its_line():
     edges = {e["to"]: e["label"] for e in g["edges"] if e["from"] == "central"}
     assert edges == {"amazon-rds": "stores data in", "kafka-amazon-msk": "sends messages via",
                      "amazon-sqs": "sends messages via", "redis": "caches in"}
+
+
+def test_elasticache_redis_is_one_cache():
+    # dev d11 (Quayside): "ElastiCache Redis holds the slot availability" drew
+    # "Amazon ElastiCache" and "Redis" as two caches.
+    g = build_architecture_graph(
+        ["Amazon ECS", "Fargate", "Aurora PostgreSQL", "Amazon ElastiCache", "Redis", "Amazon SQS"],
+        ["It's a set of containers on AWS ECS with Fargate.", "Bookings live in Aurora PostgreSQL.",
+         "Yes, ElastiCache Redis holds the slot availability so the front end doesn't hammer the database."],
+        {"amazon elasticache": ["elasticache"]}, "Quayside")
+    labels = [n["label"] for n in g["data"]]
+    assert labels.count("Redis (Amazon ElastiCache)") == 1
+    assert not any(label in ("Amazon ElastiCache", "Redis") for label in labels)

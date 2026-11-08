@@ -218,6 +218,25 @@ def test_a_worker_runs_at_most_its_concurrency(env, monkeypatch):
     assert peak[0] == 2
 
 
+def test_the_models_share_the_logical_cpus_among_the_kts_a_worker_runs(monkeypatch):
+    import torch
+
+    import worker
+
+    calls = []
+    monkeypatch.setattr(torch, "set_num_threads", calls.append)
+    monkeypatch.setattr(torch, "get_num_threads", lambda: 2)      # torch's default: the physical cores
+    monkeypatch.setattr(worker.os, "cpu_count", lambda: 4)
+    monkeypatch.setenv("CONTINUUM_TORCH_THREADS", "auto")
+    assert worker.configure_torch_threads(1) == 4
+    assert worker.configure_torch_threads(2) is None               # 2 each: never fewer than the default
+    monkeypatch.setenv("CONTINUUM_TORCH_THREADS", "3")
+    assert worker.configure_torch_threads(2) == 3
+    monkeypatch.setenv("CONTINUUM_TORCH_THREADS", "0")
+    assert worker.configure_torch_threads(1) is None
+    assert calls == [4, 3]
+
+
 def test_progress_written_by_a_worker_process_is_seen_by_the_api_process(env):
     api = PersistentJobs(env.JOB_STORE)
     api["shared-0001"] = {"status": "queued", "progress": 0}

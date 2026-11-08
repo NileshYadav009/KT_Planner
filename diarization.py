@@ -53,10 +53,17 @@ MODELS = {
 }
 _FILE_NAMES = {"segmentation": "pyannote-segmentation-3.0.onnx", "embedding": "wespeaker-voxceleb-resnet34.onnx"}
 
-# Speaker embeddings closer than this are one speaker. On a two-speaker test
-# recording, 0.5-0.7 all found exactly two speakers with every labelled
-# stretch right; lower values split one speaker in two.
-CLUSTER_THRESHOLD = float(os.getenv("CONTINUUM_DIARIZATION_THRESHOLD", "0.6"))
+# Speaker embeddings closer than this are one speaker. At 0.6 two synthetic
+# voices were one speaker in 6 of 7 recordings of two people (X142); 0.5 told
+# all seven apart and kept all 25 one-voice recordings whole; 0.3 split one
+# speaker in two (§9abl, §9abn).
+CLUSTER_THRESHOLD = float(os.getenv("CONTINUUM_DIARIZATION_THRESHOLD", "0.5"))
+# The segmentation reads 10 s windows, moved on by this share of a window
+# each time; every window's speakers are embedded. At 0.1 (the library's
+# default) each second is read ten times and diarisation took about half the
+# recording's length on a 2-core laptop; at 0.5 about a tenth, with the same
+# key facts placed on the ten recordings worked on (§9abn).
+WINDOW_SHIFT = float(os.getenv("CONTINUUM_DIARIZATION_WINDOW_SHIFT", "0.5"))
 # A Whisper segment with no diarised speech under it (a short pause) takes
 # the speaker of the nearest turn within this many seconds.
 _NEAREST_TURN_SECONDS = 1.0
@@ -141,7 +148,8 @@ def _diarizer():
         threads = max(1, min(4, os.cpu_count() or 1))
         config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
             segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
-                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=paths["segmentation"]),
+                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
+                    model=paths["segmentation"], window_shift_ratio=WINDOW_SHIFT),
                 num_threads=threads),
             embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=paths["embedding"], num_threads=threads),
             clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=CLUSTER_THRESHOLD),

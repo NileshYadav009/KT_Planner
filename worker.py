@@ -40,6 +40,31 @@ def configured_threads() -> int:
         return 1
 
 
+def configure_torch_threads(slots: int) -> Optional[int]:
+    """CPU threads for the embedding and entity models (torch), shared by the
+    `slots` KTs this process runs at once. torch's own default is one thread
+    per physical core; on the 2-core, 4-thread laptop bge-large embedded 320
+    texts in 109 s on 4 threads against 137-163 s on 2, the vectors equal to
+    1e-7 (§9abn). CONTINUUM_TORCH_THREADS: "auto" (the logical CPUs divided
+    among the slots, never fewer than torch's default), a number, or 0 for
+    torch's default. Returns the count set, None when left alone."""
+    setting = os.getenv("CONTINUUM_TORCH_THREADS", "auto").strip().lower()
+    if setting in ("", "0", "off"):
+        return None
+    try:
+        import torch
+    except ImportError:
+        return None
+    if setting.isdigit():
+        wanted = int(setting)
+    else:
+        wanted = max(1, (os.cpu_count() or 1) // max(1, slots))
+        if wanted <= torch.get_num_threads():
+            return None
+    torch.set_num_threads(wanted)
+    return wanted
+
+
 def run_task(task: Dict[str, Any], worker_id: str) -> None:
     """Run one claimed task to a final job state, store its PDF, record its
     numbers (P1-6) and close it."""
@@ -149,6 +174,9 @@ class Worker:
     # -- background threads ---------------------------------------------------
 
     def start(self) -> "Worker":
+        threads = configure_torch_threads(self.concurrency)
+        if threads:
+            logger.info("Models use %d CPU threads", threads)
         pipeline.TASKS.heartbeat(self.worker_id, self.concurrency, 0)
         for i in range(self.concurrency):
             thread = threading.Thread(target=self._loop, name=f"kt-worker-{i}", daemon=True)

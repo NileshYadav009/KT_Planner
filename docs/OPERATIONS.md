@@ -105,6 +105,7 @@ local disk (not NFS).
 |---|---|---|
 | `CONTINUUM_WORKERS` | `1` | Worker threads inside the API process; `0` when workers run separately. |
 | `CONTINUUM_WORKER_CONCURRENCY` | `1` | KTs one worker process runs at once (each needs its own memory). |
+| `CONTINUUM_TORCH_THREADS` | `auto` | CPU threads for the embedding and entity models. `auto` shares the logical CPUs among the KTs a worker runs at once, never fewer than torch's own default (one per physical core); on a 2-core, 4-thread laptop that made embedding 20-30% faster with the same results. A number sets it; `0` keeps torch's default. On a large server, measure before relying on `auto`. |
 | `CONTINUUM_TASK_LEASE_SECONDS` | `120` | How long a worker may go silent before its KT is retried. |
 | `CONTINUUM_TASK_MAX_ATTEMPTS` | `2` | Tries before a KT whose worker keeps dying fails. |
 | `CONTINUUM_UPLOAD_DIR` | system temp | Where uploads wait for a worker; shared with the workers. |
@@ -128,7 +129,8 @@ local disk (not NFS).
 | `WHISPER_BATCH_SIZE` | `8` | Speech chunks transcribed together when batched. |
 | `CONTINUUM_DIARIZATION` | `1` | `0` skips speaker diarisation (sources then show no speaker). |
 | `CONTINUUM_DIARIZATION_DIR` | `$HF_HOME/continuum-diarization` | Where the diarisation models are. |
-| `CONTINUUM_DIARIZATION_THRESHOLD` | `0.6` | How alike two voices must be to count as one speaker. |
+| `CONTINUUM_DIARIZATION_THRESHOLD` | `0.5` | How alike two voices must be to count as one speaker. Higher values merge more voices into one (at `0.6` two similar voices were often one speaker); lower ones split one speaker in two (`0.3`). |
+| `CONTINUUM_DIARIZATION_WINDOW_SHIFT` | `0.5` | How far the 10-second listening window moves each step, as a share of the window. `0.1` (the library's default) reads each second ten times and takes about five times as long, with the same results on the recordings measured. |
 | `CONTINUUM_COPYEDIT` | `1` | `0` turns off the copy edit, which rewrites sentences that read as speech into written English (`copyedit.py`). It uses the LLM provider when one is configured and the workspace allows it, else the local 4-bit model; sentences the LLM could not take (a dead key, a rate limit mid-KT, no network, the per-KT call limit) go to the local model. A rewrite is refused, and the speaker's sentence kept, when it drops a tool name, a number, a "never"/"must"/"still" or more than 15% of the content words, or adds words the speaker never said. |
 | `CONTINUUM_COPYEDIT_MODEL` | Qwen2.5-1.5B-Instruct, 4-bit | The local model: a path to a `.gguf` file, or `off`. The default (1.1 GB, Apache-2.0) is downloaded by `scripts/fetch_models.py`, never during a KT. It is loaded only for the copy edit, freed after it, and needs about 1.3 GB of RAM while it runs. |
 | `CONTINUUM_COPYEDIT_MAX_SECONDS` | `300` | Time limit for the local copy edit in one KT. Sentences after it stay as said. |

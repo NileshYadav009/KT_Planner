@@ -360,7 +360,14 @@ def test_a_remark_that_says_nothing_specific_is_not_a_fact(said, remark):
     ("Is there anything I must never do? Never purge the SQS queue to fix a backlog.",
      "Never purge the SQS queue to fix a backlog."),
     ("Who owns it? The student systems team in IT owns Millbrook.", "The student systems team in IT owns Millbrook."),
+    # X117 (matrix T04): the answer names a product of the kind asked about.
+    ("Is there a queue? Yes, RabbitMQ holds the statement jobs until the renderer picks them up.",
+     "RabbitMQ holds the statement jobs until the renderer picks them up."),
+    ("Do we have a database for that? Yes, Aurora PostgreSQL keeps the bookings.",
+     "Aurora PostgreSQL keeps the bookings."),
     # The question stays when the answer leans on it or says less than it asked.
+    ("Is there a queue? Yes, it is on the roadmap.", None),
+    ("Is there a queue? No, the API writes straight to the database.", None),
     ("Is there a staging environment? Yes, there's one for each team.", None),
     ("Is there a runbook for that? Yes, Priya wrote it last year.", None),
     ("Has anyone tested a restore? Not this year.", None),
