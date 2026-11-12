@@ -42,6 +42,12 @@ Roles (what each may do is in PERMISSIONS):
     python -m auth integrations <tenant_id>
     python -m auth integration-remove <tenant_id> confluence|jira   # see atlassian.py
 
+    python -m auth review-webhook-set <tenant_id> --url-env VAR    # this workspace's sign-off and review channel
+    python -m auth review-webhook-remove <tenant_id>               # (observability.review_webhook_url)
+
+    python -m auth limits <tenant_id>                              # daily limits and use in the last 24 hours
+    python -m auth limits-set <tenant_id> [--kts N] [--minutes N] [--tokens N]   # 0: none; "default": the deployment's
+
 CONTINUUM_AUTH=disabled turns authentication off for local development only
 (every request then acts as tenant "local"); it is logged loudly.
 """
@@ -305,14 +311,17 @@ def delete_tenant(tenant_id: str) -> dict:
     keys, people, sessions, its SSO configuration and its Confluence and Jira
     connections."""
     import pipeline
+    import quotas
     import vocabulary_learning
     from llm import cache
 
     job_ids = [j["job_id"] for j in pipeline.JOB_STORE.list(tenant_id, limit=1_000_000)]
     for job_id in job_ids:
         pipeline.delete_job_data(job_id)
+    pipeline.JOB_STORE.delete_tenant(tenant_id)        # what outlives a KT: its run numbers, idempotency keys
     cached = cache.purge_tenant(tenant_id)
     vocabulary_learning.delete_tenant_candidates(tenant_id)
+    quotas.delete_tenant(tenant_id)
     with _lock, _connect() as db:
         keys = db.execute("DELETE FROM api_keys WHERE tenant_id = ?", (tenant_id,)).rowcount
         people = db.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,)).rowcount
@@ -664,6 +673,41 @@ def sign_asset_urls(value):
 # CLI
 # --------------------------------------------------------------------------
 
+def _limits_cli(cmd: str, args: list) -> int:
+    """Show or set a workspace's daily limits (quotas.py, P1-3)."""
+    import quotas
+
+    tenant_id = args[0]
+    with _connect() as db:
+        _require_tenant(db, tenant_id)
+    if cmd == "limits-set":
+        values = {}
+        for kind in quotas.KINDS:
+            value = _option(args, f"--{kind}")
+            if value is None:
+                continue
+            try:
+                values[kind] = None if value.strip().lower() == "default" else float(value)
+            except ValueError:
+                print(f"error: --{kind} takes a number (0: no limit) or \"default\"")
+                return 2
+        if not values:
+            print("usage: python -m auth limits-set <tenant_id> [--kts N] [--minutes N] [--tokens N]")
+            return 2
+        try:
+            quotas.set_limits(tenant_id, **values)
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 2
+    own, use = quotas.own_limits(tenant_id), quotas.usage(tenant_id)
+    for kind, label, key in (("kts", "KTs and sessions", "kts"), ("minutes", "recording minutes", "recording_minutes"),
+                             ("tokens", "LLM tokens", "llm_tokens")):
+        limit = use[key]["limit"]
+        source = "this workspace" if own[kind] is not None else "deployment"
+        print(f"{label:18} used {use[key]['used']:>10,} in 24 h   limit {limit if limit else 'none':>10}  ({source})")
+    return 0
+
+
 def _option(args: list, name: str, default=None):
     if name in args:
         i = args.index(name)
@@ -730,9 +774,22 @@ def _main(argv) -> int:
     elif cmd in ("sso-set", "sso-show", "sso-remove") and args:
         import sso
         return sso.cli(cmd, args)
+    elif cmd == "review-webhook-set" and args:
+        import observability
+        try:
+            observability.set_review_webhook(args[0], _option(args, "--url-env"))
+        except ValueError as exc:
+            print(f"error: {exc}\nusage: python -m auth review-webhook-set <tenant_id> --url-env VAR")
+            return 2
+        print("ok")
+    elif cmd == "review-webhook-remove" and len(args) == 1:
+        import observability
+        print("removed" if observability.remove_review_webhook(args[0]) else "no review webhook was set")
     elif cmd in ("confluence-set", "jira-set", "integrations", "integration-remove") and args:
         import atlassian
         return atlassian.cli(cmd, args)
+    elif cmd in ("limits", "limits-set") and args:
+        return _limits_cli(cmd, args)
     else:
         print(__doc__)
         return 2

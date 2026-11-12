@@ -13,6 +13,8 @@ import copyedit
 def _enabled(monkeypatch):
     # tests/conftest.py turns the copy edit off for every other test.
     monkeypatch.setattr(copyedit, "ENABLED", True)
+    # The local model is decided once per process; each test decides afresh.
+    monkeypatch.setattr(copyedit, "_LOCAL_DECISION", None)
 
 
 def test_a_clean_grammar_fix_is_accepted():
@@ -127,6 +129,51 @@ def test_sentences_the_llm_could_not_take_go_to_the_local_model(monkeypatch):
     assert stats["model"] == "llm + model.gguf" and stats["rewritten"] == 20
 
 
+def test_the_local_model_takes_the_same_first_sentences_on_every_run(monkeypatch):
+    # The due-diligence review (P1-5, the user's decision): a clock made the
+    # copy edit stop at a different sentence on every run (X131). Now a
+    # sentence budget decides, whatever the machine's speed.
+    class FakeLlama:
+        def __init__(self, *a, **k):
+            pass
+
+        def create_chat_completion(self, messages, **kwargs):
+            spoken = messages[-1]["content"]
+            return {"choices": [{"message": {"content": spoken[0].upper() + spoken[1:] + "."}}]}
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", types.SimpleNamespace(Llama=FakeLlama))
+    monkeypatch.setattr("llm_provider.get_llm_provider", lambda: None)
+    monkeypatch.setattr(copyedit, "local_model_path", lambda: "model.gguf")
+    monkeypatch.setattr(copyedit, "available_memory_gb", lambda: 8.0)
+    monkeypatch.setattr(copyedit, "MAX_SENTENCES", 3)
+    sentences = [f"the worker number {n} runs on the cluster" for n in range(5)]
+    runs = [copyedit.copyedit_sentences(sentences) for _ in range(2)]
+    for edited, stats in runs:
+        assert edited[:3] == [s[0].upper() + s[1:] + "." for s in sentences[:3]] and edited[3:] == sentences[3:]
+        assert stats["over_budget"] == 2 and "stopped" not in stats
+    assert runs[0][0] == runs[1][0]
+
+
+def test_free_memory_is_checked_once_per_process_not_per_kt(monkeypatch):
+    loaded, free = [], [8.0]
+
+    class FakeLlama:
+        def __init__(self, *a, **k):
+            loaded.append(True)
+
+        def create_chat_completion(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "The service runs on EKS."}}]}
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", types.SimpleNamespace(Llama=FakeLlama))
+    monkeypatch.setattr("llm_provider.get_llm_provider", lambda: None)
+    monkeypatch.setattr(copyedit, "local_model_path", lambda: "model.gguf")
+    monkeypatch.setattr(copyedit, "available_memory_gb", lambda: free[0])
+    assert copyedit.check_local_model() == "model.gguf"         # the worker starts with memory to spare
+    free[0] = 0.4                                               # later the machine is busy
+    edited, _ = copyedit.copyedit_sentences(["so the service Runs on EKS right"])
+    assert edited == ["The service runs on EKS."] and loaded == [True]
+
+
 def test_the_local_model_is_freed_after_use_and_stops_at_its_time_limit(monkeypatch):
     made, freed, clock = [], [], [1000.0]
 
@@ -154,6 +201,7 @@ def test_the_local_model_is_freed_after_use_and_stops_at_its_time_limit(monkeypa
     assert edited[3:] == sentences[3:]                                       # after 100 s: left as said
     assert made == [copyedit.THREADS] and freed == [True]
     assert stats["model"] == "model.gguf" and stats["rewritten"] == 3
+    assert stats["stopped"] == 2                                             # reported in the document's notices
 
 
 def test_the_local_model_takes_over_when_every_llm_call_fails(monkeypatch):
@@ -189,7 +237,7 @@ def test_the_local_model_is_not_loaded_when_memory_is_short(monkeypatch):
     monkeypatch.setattr(copyedit, "available_memory_gb", lambda: 0.9)
     text = ["so yeah the service Runs on EKS right"]
     edited, stats = copyedit.copyedit_sentences(text)
-    assert edited == text and loaded == [] and stats["skipped"] == "low memory"
+    assert edited == text and loaded == [] and stats["skipped"].startswith("0.9 GB of memory free at start")
     assert copyedit.available_memory_gb.__name__ == "<lambda>"   # the real reading is patched out here
     monkeypatch.undo()
     assert copyedit.available_memory_gb() is None or copyedit.available_memory_gb() > 0

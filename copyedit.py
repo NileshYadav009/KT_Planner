@@ -24,10 +24,12 @@ The model, in order:
    the local model;
 2. else a local 4-bit model through llama.cpp (about 1.1 GB on disk, about
    1.5 GB of RAM while it runs). It is loaded for the copy edit only and
-   freed straight after, runs on half the CPU cores so the machine stays
-   usable, is skipped when less than CONTINUUM_COPYEDIT_MIN_FREE_GB of
-   memory is free, and stops after CONTINUUM_COPYEDIT_MAX_SECONDS (later
-   sentences stay as said). It is never downloaded during a KT
+   freed straight after, and runs on half the CPU cores so the machine stays
+   usable. Whether it can run is decided once per process (enough memory
+   free, CONTINUUM_COPYEDIT_MIN_FREE_GB), and it takes at most
+   CONTINUUM_COPYEDIT_MAX_SENTENCES sentences of a KT, so the same input
+   gives the same document; CONTINUUM_COPYEDIT_MAX_SECONDS is a safety stop
+   the document reports. It is never downloaded during a KT
    (scripts/fetch_models.py fetches it);
 3. else nothing is rewritten.
 
@@ -57,12 +59,21 @@ LOCAL_REVISION = "91cad51170dc346986eccefdc2dd33a9da36ead9"
 LOCAL_MODEL = os.getenv("CONTINUUM_COPYEDIT_MODEL", "").strip()
 # "0" turns the copy edit off whatever the model.
 ENABLED = os.getenv("CONTINUUM_COPYEDIT", "1").strip().lower() not in ("0", "false", "off", "no")
-MAX_SECONDS = float(os.getenv("CONTINUUM_COPYEDIT_MAX_SECONDS", "300") or 300)
+# The same input gives the same document (the due-diligence review, P1-5, the
+# user's decision, 10 Nov): the local model takes at most this many sentences
+# of a KT, in order, the rest staying as said, instead of stopping on a clock
+# that ran out at a different sentence on every run (X131: 22 to 281
+# sentences left as said on one recording). It takes about 2.7 s a sentence
+# on a 2-core laptop; the recordings measured needed 20 to 152.
+MAX_SENTENCES = int(os.getenv("CONTINUUM_COPYEDIT_MAX_SENTENCES", "200") or 200)
+# A safety stop only, so every KT finishes (invariant 5). A KT that reaches it
+# says so in its document.
+MAX_SECONDS = float(os.getenv("CONTINUUM_COPYEDIT_MAX_SECONDS", "1800") or 1800)
 THREADS = int(os.getenv("CONTINUUM_COPYEDIT_THREADS", "0") or 0) or max(1, (os.cpu_count() or 2) // 2)
 # The local model adds about 1.5 GB while it runs (0.8 GB committed; the rest
-# is the model file, mapped, which the OS can drop under pressure). With less
-# free memory than this the KT keeps its rules-only sentences instead of
-# pushing the machine into swap.
+# is the model file, mapped, which the OS can drop under pressure). Checked
+# once per process (worker start, or its first KT), never per KT: a check per
+# KT made the document depend on what else the machine was doing.
 MIN_FREE_GB = float(os.getenv("CONTINUUM_COPYEDIT_MIN_FREE_GB", "1.5") or 1.5)
 # Sentences per LLM call (one numbered list per call).
 _BATCH = 15
@@ -297,10 +308,12 @@ def _messages(sentence: str) -> List[Dict[str, str]]:
     return msgs
 
 
-def _rewrite_local(path: str, sentences: Sequence[str], deadline: float) -> List[Optional[str]]:
-    """One rewrite per sentence until the deadline; the model is freed on
-    return. llama.cpp reuses the shared prompt prefix (instructions and
-    examples) between sentences, so each costs only its own words."""
+def _rewrite_local(path: str, sentences: Sequence[str], deadline: float,
+                   stats: Optional[Dict[str, Any]] = None) -> List[Optional[str]]:
+    """One rewrite per sentence; the model is freed on return. llama.cpp
+    reuses the shared prompt prefix (instructions and examples) between
+    sentences, so each costs only its own words. At the safety stop the
+    rest stay as said, counted in stats["stopped"]."""
     from llama_cpp import Llama
 
     out: List[Optional[str]] = [None] * len(sentences)
@@ -308,7 +321,10 @@ def _rewrite_local(path: str, sentences: Sequence[str], deadline: float) -> List
     try:
         for i, s in enumerate(sentences):
             if time.time() > deadline:
-                LOGGER.info("Copy edit stopped at its time limit; %d sentences left as said", len(sentences) - i)
+                LOGGER.warning("Copy edit reached its safety stop (%.0f s); %d sentences left as said",
+                               MAX_SECONDS, len(sentences) - i)
+                if stats is not None:
+                    stats["stopped"] = len(sentences) - i
                 break
             try:
                 reply = llm.create_chat_completion(messages=_messages(s), temperature=0.0,
@@ -363,29 +379,53 @@ def _rewrite_remote(provider: Any, sentences: Sequence[str]) -> Tuple[List[Optio
 # Entry point
 # --------------------------------------------------------------------------
 
+_LOCAL_DECISION: Optional[Tuple[Optional[str], Optional[str]]] = None   # (path, why not), once per process
+
+
+def check_local_model() -> Optional[str]:
+    """Decide, once for this process, whether the local model can run:
+    downloaded, llama.cpp installed, and enough memory free now. Called when
+    a worker starts (else at the first KT); every KT after uses the same
+    answer, so the copy edit never depends on the machine's load at the time
+    of one KT. Returns the model's path, or None."""
+    global _LOCAL_DECISION
+    if _LOCAL_DECISION is None:
+        path, why = local_model_path(), None
+        if path is None:
+            why = "no local model"
+        else:
+            try:
+                import llama_cpp  # noqa: F401
+            except ImportError:
+                path, why = None, "llama-cpp-python is not installed"
+        if path is not None:
+            free = available_memory_gb()
+            if free is not None and free < MIN_FREE_GB:
+                path, why = None, f"{free:.1f} GB of memory free at start, {MIN_FREE_GB:.1f} GB needed"
+        _LOCAL_DECISION = (path, why)
+        if path:
+            LOGGER.info("Copy edit: local model %s, at most %d sentences a KT", os.path.basename(path), MAX_SENTENCES)
+        elif why != "no local model":
+            LOGGER.warning("Copy edit: no local model in this process (%s); sentences stay as said.", why)
+    return _LOCAL_DECISION[0]
+
+
 def _usable_local_model(stats: Dict[str, Any]) -> Optional[str]:
-    """The local model's path when it can run now: downloaded, llama.cpp
-    installed, and enough free memory (else stats["skipped"] says why)."""
-    path = local_model_path()
-    if path is None:
-        return None
-    try:
-        import llama_cpp  # noqa: F401
-    except ImportError:
-        LOGGER.warning("llama-cpp-python is not installed; sentences are not copy-edited.")
-        return None
-    free = available_memory_gb()
-    if free is not None and free < MIN_FREE_GB:
-        LOGGER.warning("Copy edit skipped: %.1f GB of memory free, %.1f GB needed.", free, MIN_FREE_GB)
-        stats["skipped"] = "low memory"
-        return None
+    """The local model's path, as decided for this process (else
+    stats["skipped"] says why)."""
+    path = check_local_model()
+    if path is None and _LOCAL_DECISION and _LOCAL_DECISION[1] not in (None, "no local model"):
+        stats["skipped"] = _LOCAL_DECISION[1]
     return path
 
 
 def copyedit_sentences(sentences: Sequence[str]) -> Tuple[List[str], Dict[str, Any]]:
     """Each sentence rewritten as written English where it reads as speech
     and the rewrite passes problems(), else unchanged; with stats {"model",
-    "considered", "rewritten", "rejected", "seconds"}."""
+    "considered", "rewritten", "rejected", "seconds"}, and when sentences
+    were left as said, "over_budget" (past the local model's sentence
+    budget), "stopped" (at its safety stop) or "skipped" (why it could not
+    run in this process)."""
     stats: Dict[str, Any] = {"model": None, "considered": 0, "rewritten": 0, "rejected": 0, "seconds": 0.0}
     texts = list(sentences)
     if not ENABLED or not texts:
@@ -410,7 +450,14 @@ def copyedit_sentences(sentences: Sequence[str]) -> Tuple[List[str], Dict[str, A
     if left:
         path = _usable_local_model(stats)
         if path is not None:
-            for k, new in zip(left, _rewrite_local(path, [texts[todo[k]] for k in left], started + MAX_SECONDS)):
+            if len(left) > MAX_SENTENCES:
+                # The same sentences every run: the first ones, in order.
+                stats["over_budget"] = len(left) - MAX_SENTENCES
+                LOGGER.info("Copy edit: the local model takes the first %d of %d sentences; the rest stay as said",
+                            MAX_SENTENCES, len(left))
+                left = left[:MAX_SENTENCES]
+            for k, new in zip(left, _rewrite_local(path, [texts[todo[k]] for k in left], started + MAX_SECONDS,
+                                                   stats)):
                 rewrites[k] = new
             models.append(os.path.basename(path))
     stats["model"] = " + ".join(models) or None

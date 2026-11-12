@@ -292,8 +292,10 @@ def add_session(job_id: str, payload: Dict[str, Any]) -> None:
         warnings: List[str] = []
         notices: List[str] = []
         if payload.get("input_path"):
-            rec = pipeline.transcribe_recording(job_id, payload["input_path"], payload.get("media_format"),
-                                                capture_screen=False)
+            # Checked here by ffprobe, never in the API (P1-4); a refusal is
+            # this session's error, the KT left as it was.
+            media_format = pipeline.check_recording(job_id, payload)
+            rec = pipeline.transcribe_recording(job_id, payload["input_path"], media_format, capture_screen=False)
             session.update(kind="audio", transcript=rec["transcript"], segments=rec["segments"],
                            time_offset=rec["time_offset"])
             warnings += [f"Session {n}: {w}" for w in rec["warnings"]]

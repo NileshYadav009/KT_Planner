@@ -2185,3 +2185,109 @@ Results:
   hung while going to sleep and was restarted with the power button. The
   runs were repeated one at a time. Keep the lid open and the charger in
   during long runs.
+
+## The weak points from the due-diligence review (audit §9abo, 10 Nov)
+
+You asked for an investor-level review of the whole product
+(`CONTINUUM_DUE_DILIGENCE_REPORT.md`), then to fix the weak parts first.
+This batch fixes the ones that are code:
+
+- **The PDF a CTO reads first:** a "never" rule in the Tribal Knowledge
+  table was cut to eight words ("... during an…"), dropping "without
+  approval"; it is now shown whole. The Architecture section no longer
+  prints three "Not discussed" rows on every KT (the gaps list still names
+  them). A failure with no fix reads "Redis memory saturation, which can
+  make courier locations appear stale" instead of a pasted sentence. The
+  internal job id moved from the cover's headline to its footer. The
+  QuickBite PDF is a page shorter.
+- **Notices stay in their workspace:** sign-off messages and review
+  reminders went to one channel for the whole server, so with several
+  customers on one server each would have seen the others' KT names and
+  people. Each workspace now has its own channel; the shared one works only
+  when the server has one workspace.
+- **Same input, same document (your choice):** the local rewriting of
+  spoken sentences used to stop after 5 minutes and skip itself when memory
+  was short, so the same recording could come out differently. It now
+  rewrites up to 200 sentences whatever the time (every recording so far
+  needs fewer), and checks memory once when the worker starts.
+- **Try again:** a KT whose worker crashed twice (out of memory, a restart)
+  keeps its input for a day, and its page has a Try again button; no need
+  to upload the recording again. After a day, or when the KT is deleted, the
+  input is deleted. A small queue bug turned up on the way: after giving up
+  on one KT, the next one waited an extra poll.
+- **README:** rewritten. It described folders and files that do not exist;
+  it now says what Continuum does, what it guarantees, how well it works and
+  on what material (no customer KT measured yet), how to run and test it,
+  and its limits.
+- **Measured:** every test set exactly as before; the noisy copies read one
+  fact more, which is the scorer, not a fix (two halves of one cut sentence
+  now sit side by side); 126 adversarial cases pass every must check (6 new
+  ones for the PDF); every release gate passes.
+- **Still yours to do:** merge the work to `main` so the GitHub checks run,
+  prepare the demo material, and say where each accuracy figure comes from.
+
+## One workspace cannot crowd out the others (audit §9abp, 10 Nov)
+
+The next weak point from the review: every customer on one server shares
+its workers and its LLM account, so one customer's batch could hold up
+everyone else's KTs and use up the day's LLM tokens.
+
+- **Taking turns:** the queue used to run KTs strictly in the order they
+  came, so a customer who queued ten made the next customer wait for all
+  ten. Now the workers take turns between workspaces: the next customer
+  waits for one KT at most. A server with one workspace runs KTs in the
+  order they came, as before, and "N KTs ahead of this one" counts the turns.
+- **Daily limits:** each workspace can be held to a number of KTs and
+  sessions, minutes of recording and LLM tokens per 24 hours. A KT over a
+  limit is refused at once with a message saying which limit and when the
+  next one can go ("The next one can be submitted in about 3 h 10 min (at
+  14:05 UTC)."); nothing is queued. A KT that reaches the token limit part
+  way is finished without the LLM and says so. The limits are off until the
+  person running the server sets them, for the server or for one workspace
+  (`python -m auth limits-set`); every KT, minute and token is counted
+  either way, so use can be shown and billed later.
+- **Measured:** the tests pass, including the review's own: ten KTs of one
+  workspace hold another's back by one. The 126 adversarial cases come
+  out exactly as before, check for check. The limits add about 4 ms to a KT.
+- **Left to the server setup:** limits on requests per second and on
+  sign-in attempts belong to the proxy in front of the app, which comes with
+  hosting (P1-1).
+
+## The security answers a pilot will ask for (audit §9abq, 11-12 Nov)
+
+The next weak point from the review: what a customer's security team asks
+first. You asked for it with one condition: the quality must not drop.
+
+- **Packages with known security problems:** a scan listed 148 advisories in
+  16 packages, most in the AI model libraries, which had been left alone
+  because changing them could change where facts land. They are now on the
+  first releases that fix them. One advisory package is left, with no fix
+  published, used only by the optional local rewriting model.
+- **Did quality drop? No, and it was checked properly:** the tools that
+  measure accuracy kept a memory of the old libraries' results, so they
+  would have reported "no change" without measuring anything. That memory is
+  now kept per library version, and every test set was run again from
+  scratch on the new libraries. Every set came out the same, fact for fact:
+  the practice and development KTs, the three held-back sets, the six
+  end-to-end KTs, the unpunctuated copies, the 126 tricky cases and the
+  release gates. The sealed set, read once at the end: 151 of 160, as before.
+- **What the check caught:** one of the upgraded libraries stopped the
+  punctuation model loading when the internet is off, which is how the
+  server image runs. Unpunctuated transcripts would have lost their sentence
+  breaks (one test KT dropped from 83% to 46%). Fixed before anything else
+  was measured; every model now loads offline.
+- **Single sign-on:** the token checking library had a security problem with
+  no fix; it is replaced by a maintained one, and the checks are stricter.
+- **Uploads:** the part of the server that receives files no longer runs any
+  media tool on them. Wrong file types are still refused at once; a real
+  recording that turns out to have no sound, or is too long, now fails a few
+  seconds after upload with the same message (your choice).
+- **How data is handled:** `docs/DATA_HANDLING.md`, one page for a
+  customer's security review: what is processed where, what goes to the AI
+  service (short pieces of text with passwords removed, and a workspace can
+  switch it off), what is kept and for how long, and who can see it.
+  Writing it found two small things, fixed: a log line that quoted a piece
+  of rejected AI output, and deleting a workspace left some run statistics.
+- **The laptop:** the full re-measurement took most of a night because the
+  laptop slept twice (low battery with the charger disconnecting, then the
+  lid). Keep it awake and on a working charger for long runs.

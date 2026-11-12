@@ -9,10 +9,10 @@ pydantic>=2.12.0          # Data validation with improved speed and accuracy
 
 # AI/ML Core (Latest Stable Versions for Better Accuracy)
 faster-whisper>=1.1.0     # Optimized Whisper with faster inference and better accuracy (replaces openai-whisper)
-transformers>=4.45.0      # Hugging Face transformers for advanced NLP tasks
-sentence-transformers>=5.2.0  # Semantic embeddings for accurate section classification
-torch>=2.2.0              # PyTorch backend (required by transformers and sentence-transformers)
-gliner>=0.2.13            # Entity extraction for classification signals (entity_extractor.py)
+transformers>=5.10.4      # Hugging Face transformers (earlier releases have 2026 advisories; 5.10.0 was yanked)
+sentence-transformers>=5.6.1  # Semantic embeddings for section classification (5.6.0 fixes a 2026 advisory)
+torch>=2.13.0             # PyTorch backend (2.13.0 fixes the 2026 advisories)
+gliner>=0.2.28            # Entity extraction for classification signals (entity_extractor.py); first to allow transformers 5.10
 llama-cpp-python>=0.3.36  # Local copy-edit model, 4-bit (copyedit.py). Prebuilt CPU wheels: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 openai>=1.0.0             # OpenAI-compatible client, used by llm_provider.GroqProvider (Groq's API is OpenAI-compatible)
 
@@ -36,7 +36,7 @@ typing-extensions>=4.12.0 # Extended type hints for better IDE support
 
 # Security & Authentication (Enterprise Features - NEW)
 cryptography>=42.0.0      # Cryptographic recipes and primitives
-python-jose[cryptography]>=3.4.0  # Verifies SSO ID tokens (sso.py); 3.4.0 fixes the algorithm-confusion CVEs
+PyJWT>=2.10.0             # Verifies SSO ID tokens (sso.py); replaced python-jose, which has an advisory with no fixed release
 httpx>=0.27.0             # Talks to the SSO identity provider (discovery, keys, token endpoint)
 google-genai>=2.7.0
 rapidfuzz>=3.9.0          # Fuzzy matching for transcript cleanup (same scores as textdistance, compiled)

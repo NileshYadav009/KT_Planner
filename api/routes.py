@@ -46,6 +46,7 @@ import observability
 import media_guard
 import pdf_rendering
 import pipeline
+import quotas
 import runbook
 import sessions
 import sso
@@ -65,18 +66,17 @@ async def healthz():
 
 @router.get("/readyz")
 async def readyz():
-    """Readiness: send traffic only once the database is writable, ffmpeg is
-    installed and, when this process runs KTs itself, the models are loaded.
-    503 lists what is not ready."""
+    """Readiness: send traffic only once the database is writable and, when
+    this process runs KTs itself, ffmpeg is installed and the models are
+    loaded. An API-only process runs no media tool (P1-4), so it needs no
+    ffmpeg. 503 lists what is not ready."""
     import shutil
 
     import worker
 
-    checks = {
-        "database_writable": pipeline.JOB_STORE.writable(),
-        "ffmpeg": shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None,
-    }
+    checks = {"database_writable": pipeline.JOB_STORE.writable()}
     if worker.configured_threads():
+        checks["ffmpeg"] = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
         checks["models_loaded"] = pipeline.MAPPER_PIPELINE is not None and pipeline.MODEL is not None
     ready = all(checks.values())
     return JSONResponse({"ready": ready, "checks": checks}, status_code=200 if ready else 503)
@@ -363,6 +363,13 @@ def _queued_response(job_id: str, message: str, duplicate: bool = False) -> dict
     return response
 
 
+def _limit_reached(exc: "quotas.LimitReached") -> HTTPException:
+    """A workspace's daily limit (P1-3, quotas.py): 429, the message saying
+    which limit and when the next submission fits."""
+    headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+    return HTTPException(status_code=429, detail=exc.message, headers=headers)
+
+
 async def _reserve(principal: Principal, key: Optional[str], job_id: str) -> Optional[str]:
     """None when this request may create `job_id`; the earlier job's id when
     the key was already used."""
@@ -384,24 +391,32 @@ async def upload(file: UploadFile, request: Request, participants: Optional[str]
         return _queued_response(earlier, "Already submitted. Poll /status/{job_id} for results.", duplicate=True)
 
     input_path = None
+    admitted: list = []
     try:
-        # Streamed to disk with a size cap, then identified by ffprobe with
-        # only audio/video containers allowed, before anything decodes it
-        # (media_guard.py). A refusal comes back now, not as a failed job.
+        # Streamed to disk with a size cap; a file that is not an audio or
+        # video container by its leading bytes is refused now. No media tool
+        # runs here (P1-4): a worker probes it with ffprobe before decoding
+        # it, and counts its minutes (pipeline.check_recording).
         input_path = await media_guard.save_upload(file)
-        media = await run_in_threadpool(media_guard.probe, input_path)
+        await run_in_threadpool(media_guard.sniff, input_path)
+        # Counted against the workspace's daily KTs, or refused (429).
+        admitted = await run_in_threadpool(quotas.admit, principal.tenant_id, job_id)
 
         with pipeline.JOB_LOCK:
             pipeline.JOB_QUEUE[job_id] = _new_job(principal, participants)
-        # A worker transcribes and builds it (worker.py); the file is deleted
-        # when the task ends.
-        pipeline.TASKS.enqueue(job_id, "upload", {"input_path": input_path, "media_format": media["format"]})
+        # A worker checks, transcribes and builds it (worker.py); the file is
+        # deleted when the task ends.
+        pipeline.TASKS.enqueue(job_id, "upload", {"input_path": input_path, "count_minutes": True,
+                                                  "usage_rows": admitted, "usage_ref": uuid.uuid4().hex})
         return _queued_response(job_id, "File queued for processing. Poll /status/{job_id} for results.")
     except Exception as e:
         if input_path and os.path.exists(input_path):
             os.unlink(input_path)
         if key:
             pipeline.TASKS.release_key(principal.tenant_id, key, job_id)
+        quotas.release(admitted)
+        if isinstance(e, quotas.LimitReached):
+            raise _limit_reached(e) from e
         if isinstance(e, media_guard.MediaRejected):
             raise HTTPException(status_code=e.status, detail=e.message)
         raise _upload_failed(e)
@@ -466,9 +481,19 @@ async def kt_from_transcript(payload: dict, request: Request,
     earlier = await _reserve(principal, key, job_id)
     if earlier:
         return _queued_response(earlier, "Already submitted. Poll /status/{job_id} for results.", duplicate=True)
-    with pipeline.JOB_LOCK:
-        pipeline.JOB_QUEUE[job_id] = _new_job(principal, payload.get("participants"))
-    pipeline.TASKS.enqueue(job_id, "transcript", task)
+    try:
+        admitted = await run_in_threadpool(quotas.admit, principal.tenant_id, job_id)
+    except quotas.LimitReached as exc:
+        if key:
+            pipeline.TASKS.release_key(principal.tenant_id, key, job_id)
+        raise _limit_reached(exc) from exc
+    try:
+        with pipeline.JOB_LOCK:
+            pipeline.JOB_QUEUE[job_id] = _new_job(principal, payload.get("participants"))
+        pipeline.TASKS.enqueue(job_id, "transcript", task)
+    except Exception:
+        quotas.release(admitted)
+        raise
     return _queued_response(job_id, "Transcript queued for processing. Poll /status/{job_id} for results.")
 
 
@@ -492,7 +517,9 @@ async def kt_sessions(job_id: str, principal: Principal = Depends(require_princi
 
 
 def _queue_session(job_id: str, principal: Principal, payload: dict) -> dict:
-    """Mark the KT as taking a session and queue it; a worker rebuilds the document."""
+    """Mark the KT as taking a session and queue it; a worker rebuilds the
+    document. A session counts against the workspace's daily limits as a
+    KT does (P1-3)."""
     with pipeline.JOB_LOCK:
         job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
         try:
@@ -500,8 +527,14 @@ def _queue_session(job_id: str, principal: Principal, payload: dict) -> dict:
         except sessions.SessionError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc))
         try:
-            pipeline.TASKS.enqueue(job_id, "session", dict(payload, added_by=principal.key_label))
+            admitted = quotas.admit(principal.tenant_id, job_id)
+        except quotas.LimitReached as exc:
+            raise _limit_reached(exc) from exc
+        try:
+            pipeline.TASKS.enqueue(job_id, "session", dict(payload, added_by=principal.key_label,
+                                                           usage_rows=admitted))
         except ValueError:
+            quotas.release(admitted)
             raise HTTPException(status_code=409, detail="This KT is still being processed")
         job["session_pending"] = True
         job.pop("session_error", None)
@@ -579,8 +612,9 @@ async def add_kt_session_recording(job_id: str, file: UploadFile,
     input_path = None
     try:
         input_path = await media_guard.save_upload(file)
-        media = await run_in_threadpool(media_guard.probe, input_path)
-        return _queue_session(job_id, principal, {"input_path": input_path, "media_format": media["format"]})
+        await run_in_threadpool(media_guard.sniff, input_path)        # a worker probes it (P1-4)
+        return _queue_session(job_id, principal, {"input_path": input_path, "count_minutes": True,
+                                                  "usage_ref": uuid.uuid4().hex})
     except Exception as e:
         if input_path and os.path.exists(input_path):
             os.unlink(input_path)
@@ -600,6 +634,13 @@ async def list_jobs(limit: int = 50, principal: Principal = Depends(require_prin
         job.pop("created_by_id", None)
         staleness.annotate(job)                 # "Review due" (P3-3)
     return {"jobs": jobs}
+
+
+@router.get("/usage")
+async def workspace_usage(principal: Principal = Depends(require_principal)):
+    """The workspace's use in the last 24 hours (KTs and sessions, recording
+    minutes, LLM tokens) and its daily limits, null where none (P1-3)."""
+    return await run_in_threadpool(quotas.usage, principal.tenant_id)
 
 
 @router.get("/dependencies")
@@ -636,6 +677,25 @@ async def delete_job(job_id: str, principal: Principal = Depends(require_princip
         pipeline.delete_job_data(job_id)
     audit(principal.tenant_id, principal.key_label, "kt_deleted", {"job_id": job_id, "title": title})
     return {"status": "deleted", "job_id": job_id}
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(job_id: str, principal: Principal = Depends(require_permission("kt:create"))):
+    """Try a KT again whose worker died (out of memory, a restart), from the
+    input kept for a day: no new upload (the due-diligence review, P1-6). A
+    KT that failed on what was in it would fail the same way again: 409."""
+    with pipeline.JOB_LOCK:
+        job = ensure_job_access(pipeline.JOB_QUEUE.get(job_id), principal)
+        if job.get("status") != "failed" or not pipeline.TASKS.retryable(job_id):
+            raise HTTPException(status_code=409, detail="This KT cannot be tried again: its input is no longer kept, "
+                                                        "or it failed on what was in it. Submit it again.")
+        previous = dict(job)
+        pipeline.JOB_QUEUE[job_id] = dict(job, status="queued", progress=0, error=None, failure=None)
+        if not pipeline.TASKS.retry(job_id):                 # taken by another request in between
+            pipeline.JOB_QUEUE[job_id] = previous
+            raise HTTPException(status_code=409, detail="This KT cannot be tried again. Submit it again.")
+    audit(principal.tenant_id, principal.key_label, "kt_retried", {"job_id": job_id})
+    return {"status": "queued", "job_id": job_id}
 
 
 # --------------------------------------------------------------------------
@@ -785,7 +845,8 @@ def _kt_name(job: dict) -> str:
 
 async def _notify_review(job_id: str, job: dict, text: str) -> None:
     """Post a sign-off step to the team's channel (P2-2), off the event loop."""
-    await run_in_threadpool(observability.notify_review, text, job_id=job_id, kt=_kt_name(job))
+    await run_in_threadpool(observability.notify_review, text, tenant_id=job.get("tenant_id") or "local",
+                            job_id=job_id, kt=_kt_name(job))
 
 
 @router.post("/signoff/{job_id}/gaps/{gap_id}")
@@ -837,6 +898,9 @@ async def get_status(job_id: str, principal: Principal = Depends(require_princip
     if job.get("status") == "queued":
         # KTs ahead of this one, across the deployment (a count only).
         job["queue_position"] = pipeline.TASKS.position(job_id)
+    elif job.get("status") == "failed":
+        # Its worker died and its input is kept: the page offers Try again.
+        job["can_retry"] = principal.can("kt:create") and pipeline.TASKS.retryable(job_id)
     return _job_json(_with_signoff_view(job))
 
 

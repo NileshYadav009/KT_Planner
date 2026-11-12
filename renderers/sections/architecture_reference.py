@@ -76,19 +76,19 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
             blocks.append(build_table_block(CONNECTIONS_TABLE_TITLE,
                                             ["From", "Connection", "To", "Said in the KT"], connections))
 
-    # Architecture Metadata: always render all 3 admin fields explicitly,
-    # one row each, with "Not discussed" for anything genuinely never
-    # mentioned — rather than silently omitting the row or letting an
-    # empty administrative field make the section look incomplete overall.
+    # Architecture Metadata: only what the KT stated. Rows reading "Not
+    # discussed" for all three were filler a reader had to skip (the
+    # due-diligence review, P0-2); an undiscussed one is still reported, in
+    # the coverage matrix and the follow-up list, never silently dropped.
     metadata_rows = []
     for field_id, label in _METADATA_FIELD_SPECS:
         value = fields.get(field_id, {}).get("value")
         if isinstance(value, bool):
-            display_value = "Confirmed" if value else "Not confirmed"
-        else:
-            display_value = str(value) if value not in (None, "", []) else "Not discussed"
-        metadata_rows.append({"label": label, "value": display_value})
-    blocks.append(build_technology_grid("Architecture Metadata", metadata_rows))
+            metadata_rows.append({"label": label, "value": "Confirmed" if value else "Not confirmed"})
+        elif value not in (None, "", []):
+            metadata_rows.append({"label": label, "value": str(value)})
+    if metadata_rows:
+        blocks.append(build_technology_grid("Architecture Metadata", metadata_rows))
 
     if not blocks:
         blocks.append(no_coverage_block(title))

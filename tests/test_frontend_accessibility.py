@@ -30,7 +30,7 @@ def test_every_element_the_script_looks_up_is_on_the_page():
     markup = html.split("<script>\n/* ── Theme")[0]
     ids = set(re.findall(r'\bid="([A-Za-z][\w-]*)"', markup))
     looked_up = set(re.findall(r"getElementById\('([\w-]+)'\)", html))
-    made_by_the_script = {"diffAgainst", "docDiff", "signOutBtn"}
+    made_by_the_script = {"diffAgainst", "docDiff", "signOutBtn", "retryKtBtn"}
     assert looked_up - made_by_the_script <= ids, sorted(looked_up - made_by_the_script - ids)
 
 

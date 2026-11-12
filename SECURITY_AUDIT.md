@@ -27,6 +27,30 @@ model stack that was deliberately left alone.
 | Mitigated in code, recorded | 3 (python-jose, diskcache, gzip) |
 | Open, low risk on a local machine | 5 |
 
+## Update, 11 Nov 2026: the due-diligence review's P1-4
+
+The open items below that a pilot's security review would ask about first
+are closed (`docs/REPOSITORY_AUDIT.md` §9abq):
+
+| Item | Now |
+|---|---|
+| Model stack advisories (torch 2.10, transformers 5.1, sentence-transformers 5.2.3) | Upgraded to the first releases that fix them: torch 2.13.0, transformers 5.10.4 (5.10.0 was yanked), sentence-transformers 5.6.1, with gliner 0.2.28 (the first that allows transformers 5.10). The models compute the same: on five visible KTs every embedding is bit-identical and every entity result equal, and every accuracy set was run again on the new versions (§9abq). |
+| python-jose (an advisory with no fixed release) | Removed. SSO ID tokens are verified with PyJWT 2.15, still with exactly one algorithm from the asymmetric allow-list. A token without an audience, issuer or expiry is refused (tested), and at_hash is checked as before. |
+| ffmpeg in the API process | The API runs no media tool on an upload. It checks the file's leading bytes and refuses anything that is not an audio or video container. Workers, which take no requests, run ffprobe before anything decodes the file. `/readyz` asks for ffmpeg only where KTs run. |
+| Tooling and test-only packages (nltk, pypdf, pip, setuptools, pygments, filelock, fsspec, msgpack, brotli, pydantic-settings, ecdsa) | Upgraded to fixed releases; ecdsa left with python-jose. |
+| No written description of data handling | `docs/DATA_HANDLING.md`: what comes in, what goes to the optional LLM, what is stored and for how long, who can see it, encryption. |
+
+The upgrade brought huggingface_hub 1.4 to 1.33, which stopped the
+punctuation model loading offline (it lists the repository even for a pinned
+revision); the noisy copies caught it, and the model's files are now fetched
+one by one from the cache (§9abq, X159). Every model loads offline again
+(`scripts/fetch_models.py --verify`).
+
+pip-audit over the app's environment: 148 advisories in 16 packages before,
+2 in 1 package after. The two are diskcache's (no fixed release), used only
+by the optional local copy-edit model's library, as recorded below.
+Encryption at rest is still the host's (see `docs/DATA_HANDLING.md`).
+
 ## What is in place (verified)
 
 | Area | Control | Where |

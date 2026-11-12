@@ -174,6 +174,73 @@ def test_a_kt_whose_worker_died_runs_again_then_fails_with_a_reason(env, monkeyp
     assert job["status"] == "failed" and job["error"] == GAVE_UP_MESSAGE.format(attempts=2)
 
 
+def test_giving_up_on_one_kt_does_not_hold_back_the_next(env, monkeypatch):
+    # claim() reused `job_id` for the KT it gave up, then looked only for
+    # that KT: the next queued one waited for another poll.
+    first, second = _queue(env, 2)
+    monkeypatch.setattr(job_queue, "LEASE_SECONDS", -1)
+    assert [env.TASKS.claim("w")["job_id"] for _ in range(2)] == [first, first]
+    claimed = env.TASKS.claim("w")
+    assert claimed is not None and claimed["job_id"] == second
+    assert env.JOB_QUEUE[first]["status"] == "failed"
+
+
+def _give_up(env, monkeypatch):
+    """Every queued KT's worker dies on every attempt, until the queue gives up."""
+    monkeypatch.setattr(job_queue, "LEASE_SECONDS", -1)                    # every lease has already run out
+    while env.TASKS.claim("dying-worker") is not None:
+        pass
+    monkeypatch.setattr(job_queue, "LEASE_SECONDS", 120.0)
+
+
+def test_a_kt_whose_worker_died_is_tried_again_from_its_kept_input(client, env, monkeypatch):
+    # The due-diligence review (P1-6): the user had to submit it again, a
+    # recording uploaded again.
+    job_id = _submit(client).json()["job_id"]
+    _give_up(env, monkeypatch)
+    status = client.get(f"/status/{job_id}").json()
+    assert status["status"] == "failed" and status["can_retry"] is True and "Try again" in status["error"]
+    assert client.post(f"/jobs/{job_id}/retry").json() == {"status": "queued", "job_id": job_id}
+    assert env.JOB_QUEUE[job_id]["status"] == "queued" and env.JOB_QUEUE[job_id]["error"] is None
+    Worker(worker_id="w4").drain(job_id)
+    assert env.JOB_QUEUE[job_id]["status"] == "completed" and client.ran == [job_id]
+    assert env.TASKS.task(job_id)["payload"] == {}                         # forgotten once it ran
+    assert client.post(f"/jobs/{job_id}/retry").status_code == 409
+
+
+def test_a_kt_that_failed_on_its_input_or_in_the_pipeline_is_not_offered_a_retry(client, env, monkeypatch):
+    def broken(job_id, transcript, **kwargs):
+        raise RuntimeError("a bug in a stage")
+    monkeypatch.setattr(env, "run_kt_pipeline", broken)
+    job_id = _submit(client).json()["job_id"]
+    Worker(worker_id="w1").drain(job_id)
+    status = client.get(f"/status/{job_id}").json()
+    assert status["status"] == "failed" and status["can_retry"] is False
+    assert client.post(f"/jobs/{job_id}/retry").status_code == 409
+
+
+def test_a_kept_upload_is_deleted_after_a_day_or_with_its_kt(env, tmp_path, monkeypatch):
+    kept, other = tmp_path / "upload-1.mp4", tmp_path / "upload-2.mp4"
+    for path, job_id in ((kept, "upload-job-0001"), (other, "upload-job-0002")):
+        path.write_bytes(b"media")
+        (tmp_path / f"{path.name}.wav").write_bytes(b"audio")
+        env.JOB_QUEUE[job_id] = {"status": "queued", "progress": 0, "tenant_id": "local"}
+        env.TASKS.enqueue(job_id, "upload", {"input_path": str(path), "media_format": "mp4"})
+    _give_up(env, monkeypatch)
+    assert env.TASKS.retryable("upload-job-0001") and env.TASKS.retryable("upload-job-0002")
+    assert env.TASKS.purge_failed_inputs(now=time.time()) == 0               # within the day: kept
+    assert env.TASKS.purge_failed_inputs(now=time.time() + 25 * 3600) == 2
+    assert not kept.exists() and not (tmp_path / "upload-1.mp4.wav").exists()
+    assert not env.TASKS.retryable("upload-job-0001") and env.TASKS.task("upload-job-0001")["payload"] == {}
+    # Deleting a KT removes what it kept, without waiting for the day.
+    other.write_bytes(b"media")
+    env.JOB_QUEUE["upload-job-0003"] = {"status": "queued", "progress": 0, "tenant_id": "local"}
+    env.TASKS.enqueue("upload-job-0003", "upload", {"input_path": str(other), "media_format": "mp4"})
+    _give_up(env, monkeypatch)
+    env.delete_job_data("upload-job-0003")
+    assert not other.exists()
+
+
 def test_a_restart_leaves_queued_kts_to_the_workers(env):
     queued, = _queue(env, 1)
     env.JOB_QUEUE["legacy-0001"] = {"status": "processing", "progress": 30}   # ran in-process before the queue
@@ -252,3 +319,4 @@ def test_an_api_only_process_is_ready_without_models(client, env, monkeypatch):
     monkeypatch.setattr(env, "MODEL", None)
     checks = client.get("/readyz").json()["checks"]
     assert "models_loaded" not in checks and checks["database_writable"] is True
+    assert "ffmpeg" not in checks                     # the API runs no media tool (P1-4)

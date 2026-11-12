@@ -90,7 +90,10 @@ def _run(task: Dict[str, Any], worker_id: str) -> Optional[str]:
     try:
         if kind == "upload":
             input_path = payload["input_path"]
-            pipeline.process_upload_task(job_id, input_path, f"{input_path}.mp3", media_format=payload.get("media_format"))
+            # ffprobe runs here, never in the API (P1-4); a refusal fails the
+            # KT with the reason (InputRejected, below).
+            media_format = pipeline.check_recording(job_id, payload)
+            pipeline.process_upload_task(job_id, input_path, f"{input_path}.mp3", media_format=media_format)
         elif kind == "transcript":
             payload = pipeline.clean_queued_paste(payload)
             pipeline.run_kt_pipeline(job_id, payload["transcript"], warnings=payload.get("warnings") or [])
@@ -177,6 +180,15 @@ class Worker:
         threads = configure_torch_threads(self.concurrency)
         if threads:
             logger.info("Models use %d CPU threads", threads)
+        # Whether the local copy-edit model can run is decided now, once,
+        # never per KT, so a busy machine cannot change a document (P1-5).
+        try:
+            import copyedit
+
+            if copyedit.ENABLED:
+                copyedit.check_local_model()
+        except Exception:
+            logger.warning("Could not check the local copy-edit model", exc_info=True)
         pipeline.TASKS.heartbeat(self.worker_id, self.concurrency, 0)
         for i in range(self.concurrency):
             thread = threading.Thread(target=self._loop, name=f"kt-worker-{i}", daemon=True)
@@ -216,6 +228,7 @@ class Worker:
                 observability.check_queue_age(pipeline.TASKS.stats())
                 staleness.check_due_reviews()
                 pipeline.apply_retention_when_due()
+                pipeline.TASKS.purge_failed_inputs()         # inputs kept for Try again, past their day
             except Exception:
                 logger.warning("Worker heartbeat failed", exc_info=True)
 

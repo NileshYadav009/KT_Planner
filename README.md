@@ -1,261 +1,163 @@
-﻿# 📚 Continuum KT Planner
+﻿# Continuum KT Planner
 
-## Overview
+Continuum turns a knowledge-transfer session into a handover document another
+engineer can operate from. The input can be a recording, a Teams or Zoom
+caption file, or a pasted transcript. The output is a 17-section KT document:
 
-Continuum KT Planner is a Python-based knowledge transfer automation system. It ingests audio or video, transcribes the spoken content, maps each sentence into structured knowledge transfer sections, detects missing coverage, and produces a coherent KT output.
+- a quick reference for incidents;
+- the architecture, with a diagram of the connections that were actually
+  stated;
+- deployment and rollback, common failures and fixes, danger zones, and
+  ownership and escalation;
+- what was **not** covered, as a list to take back to the outgoing owner.
 
-## What this repository contains
+Every line of the document cites the sentence it came from.
 
-- `main.py` - primary application entry point and API server
-- `context_mapper.py` - sentence-level semantic classification pipeline
-- `kt_schema_new.json` - active knowledge transfer schema
-- `requirements.txt` - Python dependency list
-- `static/` - simple UI and captured screenshot assets
-- `docs/` - technical documentation for the pipeline
-- `tests/` - validation and regression tests
-- `archive/` - legacy docs and moved artifacts
+It isn't a summariser. With no LLM at all it builds the whole document from
+local models and rules. When an LLM (Groq) is configured, every answer it
+gives is checked against the transcript and refused if it adds, drops or
+reverses anything.
 
-## Functionality
+## What holds on every KT
 
-Continuum currently supports:
+1. **No fact lost.** Every statement classified from the transcript appears
+   in the document. One a section left out is added under Additional Notes,
+   and every fact has a ledger record
+   (`knowledge_builder.verify_document_coverage`).
+2. **Nothing invented.** LLM output is checked against the transcript or
+   refused (`grounding.py`). Inferred values are marked as inferred.
+3. **No meaning changed.** Rewrites keep every number, tool, negation, speaker
+   and tense, and safety rules stay word for word.
+4. **Gaps are honest.** A section is "covered" only when it was discussed.
+   Undiscussed topics are named in a coverage matrix and a follow-up list.
+5. **Every job finishes.** Each LLM request, each KT's LLM time and call
+   count, and the local models are bounded. Any LLM failure falls back to the
+   rules-only result.
 
-- Audio/video ingestion and transcription
-- Sentence segmentation with timestamps
-- Semantic section classification using sentence embeddings
-- Context-aware neighbor scoring for better placement
-- Confidence assessment and gap detection
-- Evidence extraction from text and screenshots
-- Template-based schema management for required sections
-- Structured KT assembly for downstream review or export
+## How well it works
 
-## Core architecture
+Measured with the evaluation harness in `evaluation/`. The answer keys are
+fixed in advance and are never edited to match output.
 
-The active pipeline is centered around `main.py` and `context_mapper.py`.
+| Material | Facts placed in the right section |
+|---|---|
+| Written KTs the system was never tuned on (synthetic, written for testing; four held-back sets, one of them sealed), no LLM | 466 / 501 (93.0%) |
+| The same, with Groq's section check | 482 / 501 (96.2%) |
+| The visible KTs as unpunctuated speech-to-text | 1,057 / 1,085 (97.4%) |
+| Recorded meetings (public DevOps meetings and mock KT sessions, Whisper `small`), ten worked on | 158 / 194 key facts (81.4%) |
+| The same, five recordings held back | 105 / 132 key facts (79.5%) |
 
-- `main.py` receives upload requests, tracks jobs, and returns processed results.
-- `context_mapper.py` performs the 7-stage mapping pipeline:
-  1. Audio confidence validation
-  2. Sentence segmentation
-  3. Semantic classification
-  4. Repair of unclear or low-confidence text
-  5. Gap detection for missing sections
-  6. Evidence extraction
-  7. Structured knowledge assembly
+Two cautions:
 
-Additional helpers such as `policy.py`, `runtime_policy.py`, and `glossary.py` support runtime configuration and glossary-based text corrections.
+- No customer's own KT has been measured yet.
+- Recordings are the weakest input: misheard terms and personal asides reach
+  the document. See Known limits.
 
-## Folder structure
-
-```
-KT_Planner/
-├── archive/                    # Legacy documents and moved artifacts
-├── app/                        # Placeholder for API/models/services modules
-│   ├── api/
-│   ├── models/
-│   └── services/
-├── docs/                       # All project documentation (*.md), except this README
-│   ├── CONTEXT_MAPPING_PIPELINE.md
-│   ├── DOCUMENTATION_INDEX.md  # Index of active documentation files
-│   ├── QUICK_REFERENCE.md      # Short project overview and quick start
-│   ├── QUICK_START.md          # Setup and run instructions
-│   ├── DEVELOPERS_GUIDE.md     # Developer guide and architecture notes
-│   ├── TESTING_AND_VALIDATION.md # Testing and validation instructions
-│   ├── CODE_ORGANIZATION.md    # Code layout and responsibilities
-│   ├── REQUIREMENTS_AUDIT.md   # Dependency and compliance checklist
-│   ├── REPOSITORY_AUDIT.md     # Full session-by-session technical audit trail
-│   ├── progress.md             # Handoff/orientation doc for picking work back up
-│   └── ...                     # ARCHITECTURE.md, TESTING.md, etc.
-├── scripts/                    # Helper scripts for manual workflows (not part of the app or the test suite)
-│   ├── check_kt.py
-│   ├── demo_coverage_polish.py
-│   ├── demo_topic_blocks.py
-│   ├── generate_audio.py
-│   ├── README.md
-│   ├── test_coverage_extraction.py
-│   ├── test_kt_from_transcript.py
-│   ├── test_pipeline.py
-│   └── upload_and_get_kt.py
-├── static/                     # Web UI files and evidence screenshots
-│   ├── index.html
-│   └── screenshots/
-├── tests/                      # The pytest suite (pytest.ini limits collection to this folder)
-├── ai.py                       # LLM helpers: structured extraction, polish
-├── context_mapper.py           # Main semantic mapping pipeline
-├── devops_transcription.py     # Transcription-specific helper script
-├── glossary.json               # Glossary term definitions
-├── glossary.py                 # Glossary support and corrections
-├── README.md                   # This file
-├── requirements.txt            # Python dependencies
-├── kt_schema_new.json          # Active schema definition
-├── policy.json                 # Runtime policy configuration
-├── runtime_policy.py           # Policy loader and runtime behavior
-└── main.py                     # FastAPI application entry point
-```
-
-## File descriptions
-
-### `main.py`
-The main application entry point. It handles HTTP API routes, file uploads, job scheduling, and result delivery.
-
-### `context_mapper.py`
-The core processing engine. This file contains the sentence-level semantic mapper and the 7-stage pipeline for turning transcript text into structured KT output.
-
-### `kt_schema_new.json`
-The active knowledge transfer schema. It defines section IDs, labels, hints, and required status for the current KT model.
-
-### `policy.json` and `runtime_policy.py`
-`policy.json` stores runtime thresholds and policy flags. `runtime_policy.py` loads those settings and makes them available to the pipeline.
-
-### `glossary.json` and `glossary.py`
-Defines glossary terms and applies conservative corrections to transcription text to improve semantic quality.
-
-### `ai.py`
-LLM helpers used by the pipeline: structured extraction per section, the coverage polish pass (with its lossless and grounding checks). Sentence classification itself is done only by `context_mapper.py`; the second classifier (`enterprise_semantic_mapper.py`) and the `/semantic-placement` endpoint were removed.
-
-### `pii_anonymizer.py`
-Wraps PII detection and anonymization logic (based on Microsoft Presidio). It provides:
-- `PIIAnonymizer`: class that detects and (optionally) redacts PII from strings
-- `anonymize_transcript_before_classification()`: convenience function used by the transcription pipeline
-
-Note: In the current workspace the automatic redaction call that replaced detected values with the literal "[REDACTED]" has been commented out to avoid blocking transcripts and test coverage output. See the "Recent Changes" section below for details and how to re-enable.
-
-### `devops_transcription.py`
-Transcription-specific cleanup and normalization helpers (fillers removal, repeated phrase collapse, DevOps-specific corrections). The pipeline previously invoked `pii_anonymizer` as the first normalization step; that call is now commented out to preserve original transcript content by default.
-
-### `scripts/`
-Contains helper scripts for manual workflows, such as generating audio, uploading test files, and performing KT checks.
-
-### `static/`
-Contains the browser-based UI and screenshot storage for evidence capture during processing.
-
-### `docs/`
-Contains deeper technical documentation about the system and pipeline.
-
-### `tests/test_pipeline.py`
-Contains the automated pipeline validation logic. Run this file to verify the core processing stages.
-
-### `archive/`
-Contains legacy or moved documents that are not required for the current setup. This folder preserves historical references without cluttering the active project root.
-
-## Setup and run
-
-1. Create and activate a Python virtual environment.
-2. Install dependencies (the lock pins every version the tests ran with):
-
-```powershell
-python -m pip install -r requirements.lock
-```
-
-3. Start the server (it also runs one KT worker thread):
-
-```powershell
-uvicorn main:app --reload
-```
-
-4. Open http://localhost:8000/ and sign in.
-
-For the container image, separate worker processes, health checks, metrics,
-alerts, and the review and sign-off workflow, see
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
-
-## Quick commands
-
-- Run the tests (no LLM calls are made with the LLM keys unset):
-
-```powershell
-python -m pytest
-```
-
-- Score the golden KTs (where each annotated fact landed):
-
-```powershell
-python scripts/golden_report.py
-```
-
-## Notes
-## Recent Changes
-
-- The Presidio-based anonymization that replaced sensitive tokens with "[REDACTED]" has been temporarily disabled in the codebase to prevent those placeholders from blocking downstream transcript and coverage outputs. Affected files:
-  - `pii_anonymizer.py` — the `anonymize_transcript`/`anonymize_transcript_before_classification` call is commented and now returns the original transcript with an empty report.
-  - `devops_transcription.py` — the call that invoked `anonymize_transcript_before_classification` at the start of `clean_transcript()` is commented out.
-
-These changes preserve original transcripts while keeping the detection code in place for future toggling.
-
-## Python libraries and why they are used
-
-Key runtime dependencies (see `requirements.txt`):
-
-- **fastapi, uvicorn**: Web API server and ASGI runtime for job submission and result retrieval.
-- **pydantic / pydantic-settings**: Structured configuration and input validation.
-- **faster-whisper**: Fast local transcription engine (Whisper-compatible) for audio -> text.
-- **transformers, sentence-transformers, torch**: Semantic models and embeddings used by `context_mapper.py` for accurate section classification.
-- **ffmpeg-python, librosa, soundfile, pydub**: Audio processing and normalization utilities used by the transcription helpers.
-- **numpy, scipy, pandas**: Numeric and data utilities for scoring, signal processing, and structured logs.
-- **scikit-learn, nltk, textdistance**: Scoring, text cleanup, and fuzzy matching to improve mapping accuracy.
-- **presidio-analyzer, presidio-anonymizer**: PII detection and anonymization (these are present in `requirements.txt`; anonymization calls are currently disabled but detection wrappers remain in `pii_anonymizer.py`).
-- **python-dotenv, python-json-logger**: Environment and structured logging helpers for production deployments.
-- **security libs (python-jose, passlib, cryptography)**: JWT and credential handling for API security and auth flows.
-
-If you decide to re-enable Presidio anonymization, ensure the Presidio packages and their NLP model dependencies (e.g. spacy models) are installed and available in the runtime environment.
-
-## Application flow (high level)
+## Architecture
 
 ```mermaid
-flowchart TD
-  A[Upload audio/video] --> B[Transcription]
-  B --> C[clean_transcript() - normalization]
-  C --> D[context_mapper.py - sentence segmentation & classification]
-  D --> E[Evidence extraction & gap detection]
-  E --> F[Assemble KT (fixed 17-section schema)]
-  F --> G[KT artifact storage & API response]
-  subgraph optional
-    C --> H[PII detection (`pii_anonymizer.py`) - detection only]
-  end
+flowchart LR
+  UI["Web app (static/index.html)"] --> API["FastAPI API (main.py, api/routes.py)<br/>sign-in, tenants, roles"]
+  API --> Q[("SQLite: jobs, queue, versions, audit")]
+  Q --> W["Worker (worker.py)"]
+  W --> T["Transcribe and diarise<br/>faster-whisper, sherpa-onnx, screen OCR"]
+  T --> C["Clean and segment<br/>devops_transcription, dialogue, fact_units"]
+  C --> M["Classify into sections<br/>bge-large + learned section model + rules"]
+  M --> K["Knowledge object<br/>facts ledger, coverage, conflicts, grounding"]
+  K --> R["Render<br/>renderers/sections, WeasyPrint PDF"]
+  R --> Q
+  M -. optional, checked .-> L["Groq (llm/cached_provider)"]
+  K -. optional, checked .-> L
 ```
 
-## How to re-enable or configure PII anonymization
+Every stage is described in [docs/KT_PIPELINE.md](docs/KT_PIPELINE.md). How
+corrections, changes and contradictions are handled is specified in
+[docs/CORRECTIONS.md](docs/CORRECTIONS.md).
 
-1. Install the Presidio dependencies (already listed in `requirements.txt`) and the required NLP models (e.g., spacy model if needed).
-2. In `pii_anonymizer.py` restore the anonymization call in `anonymize_transcript()` (the commented block), or set `use_anonymizer=False` to run detection-only flows.
-3. In `devops_transcription.py` re-enable the `anonymize_transcript_before_classification` invocation in `clean_transcript()` if you want PII replaced prior to mapping.
+## Run it
 
-Notes:
-- Replacing values with literal placeholders (e.g., "[REDACTED]") affects downstream entity extraction and coverage metrics; consider running detection-only reports (no replacement) if you need counts without modifying the transcript text.
+Python 3.13. From the repository root:
 
-## Tests & verification
-
-- Unit & integration test targeting Presidio behavior: `test_presidio_integration.py` (useful when toggling anonymization).
-- Pipeline tests: `tests/test_pipeline.py` and `test_pipeline.py` in root.
-
-Run tests locally inside the activated environment:
-
-```powershell
-python -m pip install -r requirements.txt
-python test_presidio_integration.py
-python tests/test_pipeline.py
+```bash
+python -m venv .venv && .venv/Scripts/activate        # or: source .venv/bin/activate
+python -m pip install -r requirements.lock             # every version the tests ran with
+python scripts/fetch_models.py                         # local models, once (never during a KT)
+python -m auth create-tenant "Your team"               # prints a workspace id and its first admin key
+uvicorn main:app                                       # the API, with one KT worker thread inside it
 ```
 
-## Files changed in this update
+Open http://localhost:8000/ and sign in with the key.
 
-- `pii_anonymizer.py` — anonymization return behavior adjusted to avoid replacing text by default.
-- `devops_transcription.py` — anonymization invocation commented out from `clean_transcript()`.
+- **LLM.** Put `GROQ_API_KEY` in `.env` to switch on the LLM checks. Without
+  it every KT runs rules-only, and the document says so.
+- **Separate workers, containers, single sign-on, Confluence and Jira,
+  workspace limits, backups, metrics and alerts:** see
+  [docs/OPERATIONS.md](docs/OPERATIONS.md).
+  Example: `CONTINUUM_SECRET_KEY=... docker compose up --build`.
 
-## Extra notes & next steps
+## Tests and evaluation
 
-- If you need configurable toggles, I can add an environment-driven flag (via `runtime_policy.py` or `.env`) to enable detection-only vs. replacement modes without editing code.
-- I can also add a short migration script to produce a redaction audit report linking original -> redacted values for audited stores if required for compliance.
+- **Tests:** about 1,050 test functions in `tests/`. Tests never call an LLM.
+  The full suite takes hours on a laptop, so run the area you changed (the
+  table in [CLAUDE.md](CLAUDE.md) lists them):
 
----
+  ```bash
+  python -m pytest -q tests/test_section_rules.py tests/test_coverage_topics.py
+  ```
 
-If you'd like, I can:
+- **Accuracy:** `python evaluation/accuracy.py LABEL tuning,dev,holdout,blind2,blind3,e2e`
+  ([evaluation/README.md](evaluation/README.md)).
+- **Adversarial matrix:** `python evaluation/matrix.py LABEL`. Each of its
+  short KTs targets one failure: corrections, hedges, contradictions,
+  numbers, noise, conversation, PDF text. See
+  [docs/ADVERSARIAL_MATRIX.md](docs/ADVERSARIAL_MATRIX.md).
+- **Release gates:** `python evaluation/quality_gates.py LABEL --replay`, run
+  on the PDFs ([docs/QUALITY_GATES.md](docs/QUALITY_GATES.md)).
+- **Browser journey:** `evaluation/browser_journey.py`, about 20 minutes.
+  It clicks through sign-in, building a KT, editing, exports, a server
+  restart, a reader's view and phone width.
+- **CI:** `.github/workflows/ci.yml` runs the tests from the lock file and
+  builds the image.
 
-- Add an environment-configurable toggle to switch anonymization modes.
-- Re-run tests and report any failures after these README changes.
+## Repository map
 
-Tell me which of those you'd like next.
+| Path | What it is |
+|---|---|
+| `main.py`, `api/routes.py` | The web app and API |
+| `auth.py`, `sso.py` | Workspaces, people, roles, API keys, OpenID Connect sign-in, audit log |
+| `job_store.py`, `job_queue.py`, `worker.py` | Storage, the task queue (leases, retries, workspaces taking turns) and the workers |
+| `quotas.py` | Each workspace's daily limits (KTs, recording minutes, LLM tokens) and its recorded use |
+| `pipeline.py` | One KT end to end |
+| `devops_transcription.py`, `punctuation.py`, `copyedit.py` | Cleaning speech into sentences |
+| `dialogue.py`, `speaker_roles.py`, `fact_units.py` | Conversation: questions and answers, giver and receiver, disputes, one fact per unit |
+| `context_mapper.py`, `section_rules.py`, `section_model.npz` | Placing each fact in its section |
+| `knowledge/`, `coverage_topics.py`, `conflicts.py`, `grounding.py` | The knowledge object, coverage, contradictions, checks on LLM output |
+| `field_populator.py`, `architecture_diagram.py` | Section fields; the architecture diagram |
+| `renderers/`, `pdf_rendering.py`, `pdf/templates/` | The document and its PDF |
+| `ask.py`, `signoff.py`, `sessions.py`, `document_model.py` | Ask the KT, sign-off, follow-up sessions, edits and versions |
+| `llm/`, `llm_provider.py` | The optional LLM: cache, budgets, pacing |
+| `evaluation/`, `tests/` | The evaluation harness and the tests |
 
+## Known limits
 
-- The active schema configuration is `kt_schema_new.json`.
-- `archive/` contains older documentation and artifacts moved out of the core setup.
-- `app/` currently contains placeholder folders for future API, model, and service code.
-- Use `docs/QUICK_REFERENCE.md` for a short operational overview and `docs/DEVELOPERS_GUIDE.md` for deeper implementation details.
+- **Recordings.** About 80% of key facts are placed. Whisper `small`
+  mishears some technical terms, and overlapping speech is not detected.
+  Teams or Zoom caption files avoid most of this.
+- **One fixed template.** The schema has 17 sections. Customer templates are
+  not supported yet.
+- **One host.** Storage is SQLite on one host, so the API and its workers must
+  share a disk.
+- **Administration from the command line.** Workspaces, people, keys, sign-in
+  and integrations are managed with `python -m auth ...` (see the commands in
+  `auth.py`).
+
+For a security review: [SECURITY_AUDIT.md](SECURITY_AUDIT.md) (controls,
+findings, dependency advisories) and
+[docs/DATA_HANDLING.md](docs/DATA_HANDLING.md) (what is processed where, what
+goes to the optional LLM, what is kept and for how long).
+
+The full product and technical assessment, with what to fix in what order, is
+[CONTINUUM_DUE_DILIGENCE_REPORT.md](CONTINUUM_DUE_DILIGENCE_REPORT.md). The
+engineering record and issue ledger is [CLAUDE.md](CLAUDE.md), with the
+evidence for every change in
+[docs/REPOSITORY_AUDIT.md](docs/REPOSITORY_AUDIT.md).

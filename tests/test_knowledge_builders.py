@@ -9,6 +9,8 @@ import sys
 import os
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from knowledge.facts import build_facts
@@ -1555,6 +1557,38 @@ def test_a_failure_named_without_its_fix_is_a_gap_even_when_another_has_one():
         "; no fix stated for: Delayed video processing when background jobs accumulate in Amazon SQS.")
     assert result["_not_stated"]["common_failures"] == [
         "a fix for Delayed video processing when background jobs accumulate in Amazon SQS"]
+
+
+@pytest.mark.parametrize("situation, expected", [
+    # A clause read "a fix for Redis memory saturation can also make courier
+    # locations appear stale" (QuickBite, the due-diligence review, P0-2).
+    ("Redis memory saturation can also make courier locations appear stale",
+     "Redis memory saturation, which can make courier locations appear stale"),
+    ("Disk pressure on the bastion host blocks SSH sessions.",
+     "Disk pressure on the bastion host, which blocks SSH sessions"),
+    # Noun phrases, and anything that is not plainly subject and verb, stay.
+    ("Database connection exhaustion on RDS", "Database connection exhaustion on RDS"),
+    ("Delayed order processing caused by Kafka consumer lag (during dinner peaks)",
+     "Delayed order processing caused by Kafka consumer lag (during dinner peaks)"),
+    ("When the cache is cold it causes slow logins", "When the cache is cold it causes slow logins"),
+    ("It sometimes makes the import fail", "It sometimes makes the import fail"),
+])
+def test_a_failure_said_as_a_clause_reads_as_a_noun_after_no_fix_stated_for(situation, expected):
+    from knowledge.knowledge_builder import failure_as_noun_phrase
+
+    assert failure_as_noun_phrase(situation) == expected
+
+
+def test_the_follow_up_list_names_an_unfixed_failure_said_as_a_clause():
+    said = ["During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag.",
+            "Check consumer lag and the Order Service error rate before restarting consumers.",
+            "Redis memory saturation can also make courier locations appear stale."]
+    ko = {"sections": [_section("common_failures", "COMMON FAILURES & FIXES", coverage_content=said)], "summary": {}}
+    result = append_coverage_matrix_section(ko, {"common_failures": _cov(*said)},
+                                            [{"id": "common_failures", "title": "COMMON FAILURES & FIXES"}])
+    row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
+    assert row["Assessment"].endswith(
+        "; no fix stated for: Redis memory saturation, which can make courier locations appear stale.")
 
 
 def test_optional_sections_nobody_discussed_are_listed_and_asked_about():

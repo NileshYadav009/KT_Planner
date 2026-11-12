@@ -96,7 +96,7 @@ local disk (not NFS).
 | Endpoint | Meaning |
 |---|---|
 | `GET /healthz` | Liveness: the process is serving. Restart the container only if this fails. |
-| `GET /readyz` | Readiness: database writable, ffmpeg present and, if this process runs KTs, models loaded. 503 lists what is not ready. |
+| `GET /readyz` | Readiness: database writable and, if this process runs KTs, ffmpeg present and models loaded (an API-only process runs no media tool, so it needs no ffmpeg). 503 lists what is not ready. |
 | `python job_queue.py --worker-alive` | A worker on this host checked in within the last minute (the compose health check for workers). |
 
 ### Settings
@@ -108,6 +108,10 @@ local disk (not NFS).
 | `CONTINUUM_TORCH_THREADS` | `auto` | CPU threads for the embedding and entity models. `auto` shares the logical CPUs among the KTs a worker runs at once, never fewer than torch's own default (one per physical core); on a 2-core, 4-thread laptop that made embedding 20-30% faster with the same results. A number sets it; `0` keeps torch's default. On a large server, measure before relying on `auto`. |
 | `CONTINUUM_TASK_LEASE_SECONDS` | `120` | How long a worker may go silent before its KT is retried. |
 | `CONTINUUM_TASK_MAX_ATTEMPTS` | `2` | Tries before a KT whose worker keeps dying fails. |
+| `CONTINUUM_RETRY_HOURS` | `24` | A KT that failed that way keeps its input (the pasted text, or the uploaded recording) this long, and its page offers Try again (`POST /jobs/{job_id}/retry`), with no new upload. Then the workers delete the input and the recording's files; deleting the KT deletes them at once. A KT that failed on what was in it, or in a pipeline stage, is not offered a retry: it would fail the same way. `0` keeps nothing. |
+| `CONTINUUM_KTS_PER_DAY` | `0` (no limit) | KTs and follow-up sessions one workspace may submit in any 24 hours. One more is refused with 429, a message saying when the next one fits, and `Retry-After`; nothing is queued. A workspace's own limit replaces it (`python -m auth limits-set`; see Submitting KTs, "Workspace limits"). |
+| `CONTINUUM_RECORDING_MINUTES_PER_DAY` | `0` (no limit) | Minutes of recording one workspace may submit in any 24 hours, by the length ffprobe reads when a worker checks the recording (the API runs no media tool). Over it, the KT or session fails with a message saying when it fits, its upload is deleted and it is not counted as a KT. A recording is counted once, however many times its worker tries. A file whose container does not state its length counts as a KT only, and is cut at the length limit. |
+| `CONTINUUM_LLM_TOKENS_PER_DAY` | `0` (no limit) | LLM tokens (sent and received) one workspace's KTs may use in any 24 hours. Checked before each LLM call; once reached, the KT's remaining LLM steps keep their rules-only results and the document says so. Counted when a KT ends, so two KTs of one workspace running at once can go over it by what they use. |
 | `CONTINUUM_UPLOAD_DIR` | system temp | Where uploads wait for a worker; shared with the workers. |
 | `CONTINUUM_MAX_UPLOAD_MB` | `2048` | Largest upload accepted. |
 | `CONTINUUM_LOG_FORMAT` | unset (`json` in the image) | `json` or `text` log lines with job, tenant and request ids. |
@@ -115,14 +119,14 @@ local disk (not NFS).
 | `CONTINUUM_ALERT_WEBHOOK_URL` | unset | Slack/Teams-style webhook for alerts. |
 | `CONTINUUM_ALERT_QUEUE_AGE_SECONDS` | `900` | Alert when the oldest queued KT has waited this long. |
 | `SENTRY_DSN` | unset | Send errors to Sentry (no request bodies, local variables or personal data). |
-| `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges and the KT is signed. |
+| `CONTINUUM_REVIEW_WEBHOOK_URL` | unset | Slack/Teams-style webhook told when a sign-off starts, someone acknowledges, the KT is signed or its review is due. Used only on a deployment with one workspace (or sign-in off): with several, give each its own channel, `python -m auth review-webhook-set <tenant_id> --url-env VAR` (VAR holds that workspace's webhook URL), so no workspace's KT names or people reach another's channel. |
 | `LLM_BATCH_CALLS` | `1` | Batches classification checks and field gap-fills (see Submitting KTs); `0` sends one call each. |
 | `LLM_MAX_CALLS_PER_KT` | `0` (no limit) | Live LLM requests one KT may send. Later requests are skipped (the KT keeps its rules-only results) and counted as skipped in the KT's LLM usage, so one long KT cannot empty a daily quota. Cache hits do not count. |
 | `LLM_INPUT_TOKENS_PER_MINUTE` | `0` (learn) | Input tokens a minute the provider allows. `0` learns it from the first refusal that names it (Groq's free plan for `qwen/qwen3.8-27b`: 7,000 on this account). |
 | `LLM_OUTPUT_TOKENS_PER_MINUTE` | `0` (learn) | Output tokens a minute (1,000 on this account). A call never asks for more than this less the headroom. |
 | `LLM_RATE_HEADROOM` | `0.9` | Share of each per-minute limit the throttle uses. The nightly recording test uses 0.85. |
 | `LLM_CACHE` | `readwrite` | `read`, `off`, or `replay`: answer only from stored responses and never send an unrecorded request (offline runs of recorded LLM output; `scripts/e2e_kts.py --llm replay`). |
-| `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to `CONTINUUM_REVIEW_WEBHOOK_URL`, naming the incoming owner. `0` turns it off. |
+| `CONTINUUM_KT_REVIEW_DAYS` | `180` | A finished KT nobody has changed for this many days shows "Review due", and the workers post one reminder per KT to its workspace's review webhook (above), naming the incoming owner. `0` turns it off. |
 | `WHISPER_MODEL` | `small` | The Whisper model. A GPU is used automatically when one is present; there `medium` or `large-v3` transcribes more accurately at a usable speed. On CPU, `medium` also needs `WHISPER_ALLOW_MEDIUM_CPU=1`. |
 | `WHISPER_COMPUTE_TYPE` | `auto` | Passed to faster-whisper (`int8` on CPU, `float16` on GPU when `auto`). |
 | `WHISPER_BATCHED` | `1` | `0` transcribes segment by segment instead of in batches (about twice as slow on CPU). |
@@ -133,10 +137,11 @@ local disk (not NFS).
 | `CONTINUUM_DIARIZATION_WINDOW_SHIFT` | `0.5` | How far the 10-second listening window moves each step, as a share of the window. `0.1` (the library's default) reads each second ten times and takes about five times as long, with the same results on the recordings measured. |
 | `CONTINUUM_COPYEDIT` | `1` | `0` turns off the copy edit, which rewrites sentences that read as speech into written English (`copyedit.py`). It uses the LLM provider when one is configured and the workspace allows it, else the local 4-bit model; sentences the LLM could not take (a dead key, a rate limit mid-KT, no network, the per-KT call limit) go to the local model. A rewrite is refused, and the speaker's sentence kept, when it drops a tool name, a number, a "never"/"must"/"still" or more than 15% of the content words, or adds words the speaker never said. |
 | `CONTINUUM_COPYEDIT_MODEL` | Qwen2.5-1.5B-Instruct, 4-bit | The local model: a path to a `.gguf` file, or `off`. The default (1.1 GB, Apache-2.0) is downloaded by `scripts/fetch_models.py`, never during a KT. It is loaded only for the copy edit, freed after it, and needs about 1.3 GB of RAM while it runs. |
-| `CONTINUUM_COPYEDIT_MAX_SECONDS` | `300` | Time limit for the local copy edit in one KT. Sentences after it stay as said. |
+| `CONTINUUM_COPYEDIT_MAX_SENTENCES` | `200` | Sentences of one KT the local model rewrites: the first ones that read as speech, in order; later ones stay as said. A count, not a clock, so the same input gives the same document however busy the machine is (about 2.7 s a sentence on a 2-core laptop; the recordings measured needed 20 to 152). |
+| `CONTINUUM_COPYEDIT_MAX_SECONDS` | `1800` | Safety stop for the local copy edit in one KT, so every KT finishes. A KT that reaches it says so in its document's notices ("shown as said"). |
 | `CONTINUUM_COPYEDIT_THREADS` | half the CPU cores | CPU threads for the local model, so the machine stays usable while it runs. |
 | `PUNCTUATION_MODEL` | on | `0` turns off the punctuation model (`punctuation.py`). It runs only on a run of 120 words or more with fewer than one punctuation mark per 30 words (some speech-to-text exports; Whisper punctuates), and takes only the sentence ends from it: the words stay as said. A missing package or model leaves the text as it is. Loading takes about 10 s, once per worker; a 400-word run takes under a second. Only workers load it: the API queues such a paste as it came, and the worker cleans and checks it (a paste it cannot use fails with the reason, as the API would have refused it). |
-| `CONTINUUM_COPYEDIT_MIN_FREE_GB` | `1.5` | The local copy edit is skipped for a KT, which keeps its rules-only sentences, when less memory than this is free as it starts. |
+| `CONTINUUM_COPYEDIT_MIN_FREE_GB` | `1.5` | Checked once, when a worker starts (or at its first KT): with less memory free than this, that worker never uses the local model and its KTs keep their rules-only sentences. Never checked per KT, which made the same recording read differently on a busy machine (X131). Size the worker's memory limit to include the model's 1.5 GB. |
 | `CONTINUUM_MAX_TRANSCRIPT_CHARS` | `150000` | The longest pasted transcript or session (about 25,000 words); a longer one is refused (413) and should be added as sessions. Cleaning runs off the request path, on a thread; 150,000 characters take about 13 s on a laptop. |
 | `CONTINUUM_SESSION_TTL` | `43200` (12 h) | A browser session's longest life. |
 | `CONTINUUM_SESSION_IDLE` | `1800` (30 min) | A session also ends after this long with no activity; `0` keeps only the lifetime. What the page asks for on its own (polling) does not count as activity; reading and scrolling do (the page reports them every 5 minutes at most). |
@@ -213,13 +218,49 @@ When a KT finishes, the worker renders its PDF and stores it, so a download is
 a read. A document changed after that (an edit, a sign-off step) is rendered
 again on the next download.
 
+**Workspaces take turns.** The workers are shared by every workspace of a
+deployment. Of the KTs waiting, a worker takes one of the workspace with the
+fewest KTs running, then the one whose last KT started longest ago, and within
+a workspace the oldest: ten KTs one workspace queued hold another's back by one
+KT at most. With one workspace, KTs run in the order they came.
+`queue_position` counts the KTs that will start first in that order.
+
+**Recordings are checked by the workers.** The API saves an upload and looks
+only at its leading bytes: a document, an image, a playlist or anything else
+that is not an audio or video container is refused at once (422). It runs no
+media tool on the file. A worker then probes it with ffprobe before anything
+decodes it; a recording it refuses (no audio track, longer than
+`CONTINUUM_MAX_MEDIA_MINUTES`, unreadable) fails its KT with the reason, and
+the upload is deleted. With `CONTINUUM_WORKERS=0` and separate workers (the
+compose file), the process that takes requests never parses media.
+
+**Workspace limits.** Each workspace may also be held to daily limits: KTs and
+sessions, recording minutes and LLM tokens, each over the last 24 hours. Set
+them for the deployment (`CONTINUUM_KTS_PER_DAY`,
+`CONTINUUM_RECORDING_MINUTES_PER_DAY`, `CONTINUUM_LLM_TOKENS_PER_DAY`) and,
+where one workspace needs more or less, for that workspace:
+
+```bash
+python -m auth limits <tenant_id>                                   # limits and use in the last 24 hours
+python -m auth limits-set <tenant_id> --kts 30 --tokens 80000       # 0: no limit; "default": the deployment's
+```
+
+`GET /usage` gives a signed-in user the same for their own workspace. Every
+submission, recording minute and LLM token is recorded with or without a limit
+(numbers and ids only, removed with the workspace). On Groq's free plan the
+whole account has 200,000 tokens a day; three pilot workspaces could each have
+60,000: 20 to 30 minutes of recorded KT a day each with the LLM (a recorded KT
+uses 1,900-2,800 tokens a minute of audio), and rules only after that. Request rate limits (sign-in
+attempts, API calls a second) belong to the reverse proxy.
+
 **Follow-up sessions.** `POST /kt/{job_id}/sessions` (a pasted transcript) or
 `POST /kt/{job_id}/sessions/upload` (a recording) adds a session to a
 finished KT. A worker rebuilds the document from every session as the next
 version; sources name their session (`S2 · 03:15`). `GET /kt/{job_id}/sessions`
 lists the sessions and the agenda for the next one (the knowledge gaps left).
 A signed KT takes no more sessions; a failed rebuild leaves the KT as it was
-and shows the reason. Reviewer edits to the previous version are not carried
+and shows the reason. A session counts against the workspace's daily limits
+as a KT does. Reviewer edits to the previous version are not carried
 onto the rebuilt document; that version stays in History.
 
 **Exports and search.** `GET /export/markdown/{job_id}` (any `?version=`) for

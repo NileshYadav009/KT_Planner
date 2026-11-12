@@ -62,9 +62,14 @@ def _with_commas() -> bool:
 
 
 def fetch() -> str:
-    """The model's directory, downloaded at the pinned revision if needed."""
-    from huggingface_hub import snapshot_download
-    return snapshot_download(repo_id=LOCAL_REPO, revision=LOCAL_REVISION, allow_patterns=list(_FILES.values()))
+    """The model's directory, at the pinned revision: from the local cache
+    when it is there (offline, as in the image and the harnesses), else
+    downloaded. File by file: huggingface_hub 1.33's snapshot_download lists
+    the repository online even for a pinned revision, so with HF_HUB_OFFLINE
+    the model never loaded and pastes without punctuation lost it (§9abq)."""
+    from huggingface_hub import hf_hub_download
+    paths = [hf_hub_download(repo_id=LOCAL_REPO, filename=name, revision=LOCAL_REVISION) for name in _FILES.values()]
+    return os.path.dirname(paths[0])
 
 
 def _load():

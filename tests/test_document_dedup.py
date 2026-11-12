@@ -94,19 +94,42 @@ def test_text_that_quotes_on_purpose_is_left_alone():
 
 def test_tribal_knowledge_points_to_the_full_statement_instead_of_copying_it():
     rule = "Never delete items from the bookings table by hand, since refunds depend on that history."
+    behaviour = "The nightly export holds a lock on the bookings table for about four minutes."
     danger = _section("danger_zones", "Danger Zones", _narrative(rule))
+    arch = _section("architecture_reference", "Architecture Reference", _narrative(behaviour))
     tribal = _section("tribal_knowledge", "Tribal Knowledge", {
         "type": "DecisionTable", "title": "Non-obvious operational knowledge", "columns": ["Knowledge", "Classification"],
         "rows": [{"Knowledge": rule, "Classification": "Safety-critical"},
+                 {"Knowledge": behaviour, "Classification": "Tribal / operational"},
                  {"Knowledge": "CloudFront invalidation can take longer than expected during large releases.",
                   "Classification": "Operational"}]})
-    stats = dedupe_rendered_sections([danger, tribal])
+    stats = dedupe_rendered_sections([danger, arch, tribal])
     rows = tribal["blocks"][0]["rows"]
-    assert rows[0]["Knowledge"] == "Never delete items from the bookings table by…"
-    assert rows[0][WHERE_COLUMN] == "Danger Zones"
-    assert rows[1]["Knowledge"].startswith("CloudFront invalidation") and rows[1][WHERE_COLUMN] == "Only here"
+    # A rule is quoted whole: its first eight words dropped "by hand", a
+    # stronger rule than the one said (P0-2).
+    assert rows[0]["Knowledge"] == rule and rows[0][WHERE_COLUMN] == "Danger Zones"
+    # A description points with an excerpt that does not stop on "a" or "on".
+    assert rows[1]["Knowledge"] == "The nightly export holds a lock on the bookings…"
+    assert rows[1][WHERE_COLUMN] == "Architecture Reference"
+    assert rows[2]["Knowledge"].startswith("CloudFront invalidation") and rows[2][WHERE_COLUMN] == "Only here"
     assert tribal["blocks"][0]["columns"] == ["Knowledge", "Classification", WHERE_COLUMN]
-    assert stats["referenced"] == 1
+    assert stats["referenced"] == 2
+
+
+@pytest.mark.parametrize("rule", [
+    "Never delete messages from production queues during an incident without approval.",
+    "Do not restart the ledger service until the settlement batch has finished.",
+    "Only the release manager can approve a production deployment.",
+    "You must drain the node before patching it.",
+])
+def test_a_rule_in_the_digest_keeps_every_word(rule):
+    danger = _section("danger_zones", "Danger Zones", _narrative(rule))
+    tribal = _section("tribal_knowledge", "Tribal Knowledge", {
+        "type": "DecisionTable", "title": "Non-obvious operational knowledge", "columns": ["Knowledge", "Classification"],
+        "rows": [{"Knowledge": rule, "Classification": "Operational"}]})
+    dedupe_rendered_sections([danger, tribal])
+    row = tribal["blocks"][0]["rows"][0]
+    assert row["Knowledge"] == rule and row[WHERE_COLUMN] == "Danger Zones"
 
 
 def test_danger_zones_own_warning_block_is_a_home_for_the_digest():
@@ -129,9 +152,10 @@ def test_placeholder_text_is_not_a_fact():
 
 
 def test_excerpt():
+    # Never just after a word that needs the next one ("table by…", "is our…").
     assert excerpt("Never delete items from the bookings table by hand, since refunds depend on that history.") \
-        == "Never delete items from the bookings table by…"
-    assert excerpt("Datadog is our monitoring tool.") == "Datadog is our…"
+        == "Never delete items from the bookings table by hand…"
+    assert excerpt("Datadog is our monitoring tool.") == "Datadog is our monitoring…"
     # Never a whole sentence, even when the first sentence is short.
     first_sentence_is_short = "Another common issue is missing Kubernetes secrets. If pods fail, check secret references."
     assert excerpt(first_sentence_is_short) == "Another common issue is missing…"
@@ -160,10 +184,14 @@ def _repeated_sentences(result):
                                                                               MENTIONED_ELSEWHERE_TITLE):
                 continue
             # What a reader sees: a table's displayed columns only, less the
-            # digest's "Where it is" pointer (a section name, not a fact).
+            # digest's "Where it is" pointer (a section name, not a fact). A
+            # digest row that names another section as its home quotes it on
+            # purpose (a rule is quoted whole, P0-2).
             columns = [c for c in block.get("columns") or [] if c != WHERE_COLUMN]
+            rows = [r for r in block.get("rows") or []
+                    if not (isinstance(r, dict) and r.get(WHERE_COLUMN) not in (None, "Only here"))]
             texts = block.get("paragraphs") or block.get("warnings") \
-                or [str(r.get(c, "")) for r in block.get("rows") or [] for c in (columns or list(r))] \
+                or [str(r.get(c, "")) for r in rows for c in (columns or list(r))] \
                 or [str(i) for i in block.get("items") or []]
             for text in texts:
                 for sentence in re.split(r"(?<=[.!?])\s+", str(text)):

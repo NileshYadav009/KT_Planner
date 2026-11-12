@@ -62,6 +62,8 @@ from job_queue import TaskQueue
 from observability import FAILURE_ERROR, FAILURE_INPUT, checkpoint
 from job_store import JobStore, PersistentJobs
 from auth import tenant_llm_policy
+import quotas
+from llm.cached_provider import WORKSPACE_LIMIT_REASON
 from llm.tenant_context import CURRENT_TENANT, LLM_POLICY
 from redaction import redact_secrets
 
@@ -128,10 +130,15 @@ COMPLETED_STATUSES = ("completed", "completed_with_warnings")
 
 
 def delete_job_data(job_id: str) -> bool:
-    """Remove a job's record and its captured screenshots."""
+    """Remove a job's record, its captured screenshots, and any input kept
+    for a retry (an upload's files included)."""
     import shutil
     if re.fullmatch(r"[0-9A-Za-z-]{8,64}", job_id or ""):
         shutil.rmtree(os.path.join(KT_ASSETS_DIR, job_id), ignore_errors=True)
+    try:
+        TASKS.discard_input(job_id)
+    except Exception:
+        logger.warning("Could not remove the kept input of %s", job_id, exc_info=True)
     try:
         del JOB_QUEUE[job_id]
         return True
@@ -225,6 +232,34 @@ class InputRejected(ValueError):
     a KT). The job fails with this message; it is not a system error."""
 
 
+def check_recording(job_id: str, payload: dict) -> str:
+    """A queued recording's checks, run by the worker before anything decodes
+    it: the API only looked at its leading bytes (media_guard.sniff), so no
+    media tool runs in the process that takes requests (the due-diligence
+    review, P1-4). ffprobe decides what it is (media_guard.probe), and its
+    length counts against the workspace's recording minutes (quotas.py).
+    Returns the container's demuxer. Raises InputRejected with the reason,
+    the upload deleted and the KT (or session) it was counted as taken back.
+    A task queued before this change was probed by the API: it is probed
+    again, and its minutes, counted then, are not counted twice."""
+    input_path = payload["input_path"]
+    try:
+        media = media_guard.probe(input_path)
+        if payload.get("count_minutes") and media.get("duration"):
+            tenant_id = (JOB_QUEUE.get(job_id) or {}).get("tenant_id") or "local"
+            quotas.admit(tenant_id, job_id, minutes=media["duration"] / 60, count_kt=False,
+                         ref=payload.get("usage_ref"))
+    except (media_guard.MediaRejected, quotas.LimitReached) as exc:
+        quotas.release(payload.get("usage_rows") or [])
+        remove_upload(input_path)
+        if isinstance(exc, media_guard.MediaRejected) and exc.status >= 500:
+            # ffprobe missing on this worker: the server's fault, reported
+            # and alerted as one, not as a bad file.
+            raise RuntimeError(exc.message) from exc
+        raise InputRejected(exc.message) from exc
+    return media["format"]
+
+
 def clean_queued_paste(payload: dict) -> dict:
     """A paste the API queued as it came (`"clean": true`), because its text
     needs the punctuation model, which only workers load: cleaned and checked
@@ -302,6 +337,12 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
     job_record = (JOB_QUEUE.get(job_id) or {}) if job_id in JOB_QUEUE else {}
     tenant_id = job_record.get("tenant_id") or "local"
     llm_policy = tenant_llm_policy(tenant_id)
+    # The LLM tokens its workspace may still use today (P1-3, quotas.py):
+    # past them, this KT's LLM steps keep their rules-only results.
+    try:
+        usage_tracker.token_allowance = quotas.tokens_left(tenant_id)
+    except Exception:
+        logger.warning("Could not read the workspace's LLM token limit", exc_info=True)
     tenant_token = CURRENT_TENANT.set(tenant_id)
     policy_token = LLM_POLICY.set(llm_policy)
 
@@ -872,6 +913,9 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             # The roles found in a conversation, and the giver the user chose
             # (None: detected). A rebuild keeps the choice.
             "speaker_roles": kt.speaker_roles,
+            # Which model copy-edited the spoken sentences and how many stayed
+            # as said (copyedit.copyedit_sentences), for the document's notice.
+            "copy_edit": getattr(kt, "copy_edit", None),
             "giver": giver,
             # The people listed on upload, offered when the speakers are named.
             "participants": job_record.get("participants"),
@@ -891,6 +935,10 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         stop_tracking(usage_token)
         LLM_POLICY.reset(policy_token)
         CURRENT_TENANT.reset(tenant_token)
+        try:
+            quotas.record_tokens(tenant_id, job_id, usage_tracker.live_tokens())
+        except Exception:
+            logger.warning("Could not record the LLM tokens of %s", job_id, exc_info=True)
     result["llm_usage"] = usage_tracker.summary()
     result["stage_errors"] = stage_errors
 
@@ -912,7 +960,16 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
         roles_line = roles_notice(result.get("speaker_roles"))
         if roles_line:
             result["notices"].append(roles_line)
+        stopped = int((result.get("copy_edit") or {}).get("stopped") or 0)
+        if stopped:
+            # The one way two runs of the same KT can read differently (P1-5).
+            result["notices"].append(f"The copy edit reached its time limit: {stopped} spoken sentence(s) are "
+                                     "shown as said, not rewritten as written English.")
         result["notices"].extend(notices or [])
+        over_limit = sum(int((st.get("skip_reasons") or {}).get(WORKSPACE_LIMIT_REASON) or 0)
+                         for st in result["llm_usage"].get("stages") or [])
+        if over_limit:
+            result["notices"].append(quotas.token_limit_notice(tenant_id, over_limit))
         rejected = int(result["llm_usage"].get("rejected") or 0)
         if rejected:
             result["notices"].append(
@@ -1052,13 +1109,16 @@ def _extract_audio(input_path: str, media_format: Optional[str]) -> str:
 
 def process_upload_task(job_id: str, input_path: str, audio_path: str, media_format: Optional[str] = None):
     """Background task for transcription and classification from an uploaded
-    recording. The route has already checked it (media_guard.probe)."""
+    recording. The worker has already checked it (check_recording)."""
     try:
         rec = transcribe_recording(job_id, input_path, media_format)
         run_kt_pipeline(job_id, rec["transcript"], rec["segments"], screen=rec["screen"], warnings=rec["warnings"],
                         time_offset=rec["time_offset"], speakers=rec["speakers"], notices=rec["notices"])
     except Exception as e:
-        if not isinstance(e, InputRejected):
+        # A file ffprobe accepted that ffmpeg cannot read is the input's
+        # fault too (media_guard.MediaRejected), not the system's.
+        refused = isinstance(e, (InputRejected, media_guard.MediaRejected))
+        if not refused:
             logger.exception("Upload processing failed for %s", job_id)
         with JOB_LOCK:
             JOB_QUEUE[job_id] = {
@@ -1066,7 +1126,7 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
                 "error": str(e),
                 # What was uploaded cannot make a KT: the user is told why,
                 # and nobody is paged (observability.alert_on_run).
-                "failure": FAILURE_INPUT if isinstance(e, InputRejected) else FAILURE_ERROR,
+                "failure": FAILURE_INPUT if refused else FAILURE_ERROR,
             }
     finally:
         remove_upload(input_path)
@@ -1074,12 +1134,9 @@ def process_upload_task(job_id: str, input_path: str, audio_path: str, media_for
 
 def remove_upload(input_path: str) -> None:
     """The upload and every audio file made from it."""
-    for path in (input_path, f"{input_path}.wav", f"{input_path}.mp3", f"{input_path}.trimmed.wav"):
-        if path and os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+    from job_queue import remove_upload_files
+
+    remove_upload_files(input_path)
 
 
 def transcribe_recording(job_id: str, input_path: str, media_format: Optional[str] = None,

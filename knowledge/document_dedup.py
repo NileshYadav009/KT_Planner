@@ -11,6 +11,8 @@ three times printed it three times. This pass runs on the rendered document:
   their sentences only count as already shown.
 - Digests point instead of copying: a Tribal Knowledge row whose sentence
   has a home elsewhere shows a short excerpt and where the full statement is.
+  A rule (safety-critical, or with a negation, obligation or condition) is
+  quoted whole, with where it is: an excerpt can drop its condition.
 - Text that quotes on purpose is left alone: the Quick Reference (the
   incident card), the coverage page, warnings, captions and the Connections
   evidence table.
@@ -139,14 +141,38 @@ def _without(paragraph: str, sentences: List[str]) -> str:
     return paragraph.strip()
 
 
+# A rule keeps every word in the digest: cut to its first words, "Never
+# delete messages from production queues during an incident without approval"
+# read "Never delete messages from production queues during an…", a stronger
+# rule than the one said (the due-diligence review, P0-2; invariant 3). Its
+# "Where it is" column still names the section that holds it.
+_RULE_RE = re.compile(r"\b(?:never|not|no|must|avoid|without|unless|only|except)\b|n't\b", re.IGNORECASE)
+_RULE_CLASSIFICATIONS = frozenset({"Safety-critical"})
+# An excerpt does not stop on a word that needs the next one ("is our…",
+# "during an…", "table by…").
+_FUNCTION_WORDS = frozenset(
+    "a an the our their its his her your my this that these those of to in on at by for from with during "
+    "before after into over under and or but so than as is are was were be been can will should may might "
+    "would could if when while because since until".split())
+
+
+def states_a_rule(text: str, classification: str = "") -> bool:
+    """A statement whose meaning depends on every word: a safety-critical
+    row, or one with a negation, an obligation or a condition."""
+    return classification in _RULE_CLASSIFICATIONS or bool(_RULE_RE.search(text or ""))
+
+
 def excerpt(text: str, words: int = 8) -> str:
     """The start of a statement, for a digest row that points to it: always
-    cut inside the first sentence, so the pointer never repeats a sentence."""
+    cut inside the first sentence, so the pointer never repeats a sentence,
+    and never just after a word that needs the next one."""
     sentences = _split(text)
     parts = (sentences[0] if sentences else text).split()
     if len(parts) <= 2:
         return " ".join(parts).rstrip(",;:.") + "…"
     keep = min(words, max(3, len(parts) - 2))
+    while keep < len(parts) - 1 and parts[keep - 1].lower().strip(",;:.") in _FUNCTION_WORDS:
+        keep += 1
     return " ".join(parts[:keep]).rstrip(",;:.") + "…"
 
 
@@ -238,7 +264,8 @@ def dedupe_rendered_sections(rendered_sections: List[Dict[str, Any]]) -> Dict[st
                 sentences = _split(text) or [text]
                 homes = [facts.home_of(s) for s in sentences]
                 if all(homes):
-                    row["Knowledge"] = excerpt(text)
+                    if not states_a_rule(text, str(row.get("Classification") or "")):
+                        row["Knowledge"] = excerpt(text)
                     row[WHERE_COLUMN] = homes[0]
                     stats["referenced"] += 1
                 else:

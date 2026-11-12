@@ -5,12 +5,21 @@ Patches SentenceTransformer.encode, CrossEncoder.predict and
 GLiNER.predict_entities so the same input (same model) is computed once
 across runs. Embeddings are computed per uncached text in one batch and
 stored as float32.
+
+A cache file holds the outputs of one set of library versions (torch,
+transformers, sentence-transformers, tokenizers, gliner, numpy), stamped in
+its meta table. With other versions installed, install() uses a file of
+their own beside it (enc_cache-<hash>.sqlite), so an upgrade is measured on
+what the new versions compute, never on the old versions' cached outputs.
+A file without a stamp (made before 11 Nov) takes the versions installed
+when it is first opened.
 """
 import hashlib
 import json
 import pickle
 import os
 import sqlite3
+import sys
 import threading
 
 import numpy as np
@@ -43,12 +52,49 @@ def _put_many(items):
         _db.commit()
 
 
+_VERSIONED = ("torch", "transformers", "sentence-transformers", "tokenizers", "gliner", "numpy")
+PATH = None          # the cache file in use, after install()
+
+
+def library_versions() -> str:
+    from importlib import metadata
+
+    found = []
+    for name in _VERSIONED:
+        try:
+            found.append(f"{name}=={metadata.version(name)}")
+        except metadata.PackageNotFoundError:
+            pass
+    return ";".join(found)
+
+
+def _open(path, versions):
+    """The cache file for these versions: `path` if it was written by them
+    (or has no stamp yet), else a file of their own beside it."""
+    db = sqlite3.connect(path, check_same_thread=False)
+    db.execute("CREATE TABLE IF NOT EXISTS memo (k TEXT PRIMARY KEY, v BLOB)")
+    db.execute("CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    row = db.execute("SELECT value FROM meta WHERE name = 'versions'").fetchone()
+    if row is None:
+        db.execute("INSERT INTO meta (name, value) VALUES ('versions', ?)", (versions,))
+        db.commit()
+        return db, path
+    if row[0] == versions:
+        return db, path
+    db.close()
+    base, ext = os.path.splitext(path)
+    own = f"{base}-{hashlib.sha256(versions.encode()).hexdigest()[:10]}{ext}"
+    if own == path:
+        raise RuntimeError(f"{path} was written by other library versions: {row[0]}")
+    return _open(own, versions)
+
+
 def install(path):
-    global _db
+    global _db, PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    _db = sqlite3.connect(path, check_same_thread=False)
-    _db.execute("CREATE TABLE IF NOT EXISTS memo (k TEXT PRIMARY KEY, v BLOB)")
-    _db.commit()
+    versions = library_versions()
+    _db, PATH = _open(path, versions)
+    print(f"[enccache] {os.path.basename(PATH)} ({versions})", file=sys.stderr, flush=True)
 
     import torch
     from sentence_transformers import CrossEncoder, SentenceTransformer

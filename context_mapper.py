@@ -3044,9 +3044,11 @@ class ContextMappingPipeline:
         said_texts = [s.text for s in sentences]
         for i, s in enumerate(sentences):
             s.text = resolve_self_corrections(corrected.get(i, s.text))
+        copy_edit_stats = None             # this KT's own (the mapper is shared between KTs)
         try:
             import copyedit
-            edited, self.copyedit_stats = copyedit.copyedit_sentences([s.text for s in sentences])
+            edited, copy_edit_stats = copyedit.copyedit_sentences([s.text for s in sentences])
+            self.copyedit_stats = copy_edit_stats
             for s, text in zip(sentences, edited):
                 s.text = text
         except Exception as exc:
@@ -3393,6 +3395,7 @@ class ContextMappingPipeline:
         kt.excluded_statements = excluded
         kt.speaker_roles = roles or None
         kt.dialogue_findings = findings
+        kt.copy_edit = copy_edit_stats
         logger.info(f"Stage 7: KT assembled ({kt.overall_coverage_percent:.1f}% coverage, {kt.overall_risk_score:.2f} risk)")
         
         return kt

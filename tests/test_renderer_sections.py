@@ -355,8 +355,9 @@ def test_architecture_reference_separates_knowledge_from_metadata():
     # (doc link, last updated, verified-by) — real architecture knowledge
     # (the detected component stack) must render as its own "Architecture
     # Knowledge" block, independent of whether those 3 admin fields were
-    # ever discussed, and "Architecture Metadata" must always list all 3
-    # explicitly rather than silently omitting an undiscussed one.
+    # ever discussed. "Architecture Metadata" lists only what was stated:
+    # rows reading "Not discussed" were filler (the due-diligence review,
+    # P0-2); the coverage matrix and follow-up list report the others.
     section = {
         "id": "architecture_reference", "title": "Architecture Reference",
         "fields": {
@@ -377,11 +378,7 @@ def test_architecture_reference_separates_knowledge_from_metadata():
     assert metadata_block["type"] == "TechnologyGrid"
     assert metadata_block["title"] == "Architecture Metadata"
     values = {row["label"]: row["value"] for row in metadata_block["rows"]}
-    assert values == {
-        "Documentation link": "Confluence",
-        "Last updated": "Not discussed",
-        "Verified by incoming owner": "Not discussed",
-    }
+    assert values == {"Documentation link": "Confluence"}
 
 
 def test_architecture_reference_falls_back_to_raw_content_when_no_components_detected():
@@ -413,17 +410,23 @@ def test_architecture_reference_falls_back_to_raw_content_when_no_components_det
     assert "Amazon EKS" in " ".join(knowledge_block["paragraphs"])
 
 
-def test_architecture_reference_marks_undiscussed_metadata_fields_not_discussed_even_with_no_knowledge():
+def test_architecture_reference_with_nothing_stated_says_it_was_not_covered():
+    # No "Not discussed" metadata rows standing in for a section nobody
+    # discussed: the section says plainly that it was not covered.
     section = {"id": "architecture_reference", "title": "Architecture Reference", "fields": {}}
     result = render_architecture_reference(section)
-    metadata_block = result["blocks"][-1]
-    assert metadata_block["title"] == "Architecture Metadata"
-    values = {row["label"]: row["value"] for row in metadata_block["rows"]}
-    assert values == {
-        "Documentation link": "Not discussed",
-        "Last updated": "Not discussed",
-        "Verified by incoming owner": "Not discussed",
-    }
+    assert [b["title"] for b in result["blocks"]] == ["Architecture Reference"]
+    assert "not covered" in " ".join(result["blocks"][0]["paragraphs"]).lower()
+
+
+def test_architecture_metadata_shows_a_stated_verification_but_never_filler():
+    section = {"id": "architecture_reference", "title": "Architecture Reference",
+               "fields": {"last_updated": {"value": "March 2026"}, "verified_by_incoming_owner": {"value": False}},
+               "_architecture_sentences": ["Amazon RDS PostgreSQL is the primary database."],
+               "_architecture_components": ["Amazon RDS"]}
+    metadata = next(b for b in render_architecture_reference(section)["blocks"] if b["title"] == "Architecture Metadata")
+    assert {r["label"]: r["value"] for r in metadata["rows"]} == {
+        "Last updated": "March 2026", "Verified by incoming owner": "Not confirmed"}
 
 
 def test_architecture_reference_renders_details_and_diagram_blocks_when_present():
@@ -444,7 +447,7 @@ def test_architecture_reference_renders_details_and_diagram_blocks_when_present(
     assert "Architecture Knowledge" not in titles            # the diagram names every component (X62)
     assert "Architecture Details" in titles
     assert "High-Level Architecture" in titles
-    assert "Architecture Metadata" in titles
+    assert "Architecture Metadata" not in titles             # nothing stated about the documentation
 
     details_block = next(b for b in result["blocks"] if b["title"] == "Architecture Details")
     assert details_block["type"] == "NarrativeBlock"

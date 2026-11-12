@@ -16,7 +16,7 @@ import urllib.parse
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwt
+import jwt                     # PyJWT, as sso.py
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -200,12 +200,21 @@ def _hmac_with_public_key_token(idp):
 
 
 @pytest.mark.parametrize("case", ["wrong_audience", "wrong_issuer", "expired", "wrong_nonce", "no_subject",
-                                  "wrong_key", "alg_none", "alg_confusion", "garbage"])
+                                  "wrong_key", "alg_none", "alg_confusion", "garbage", "no_audience", "no_issuer",
+                                  "no_expiry", "wrong_at_hash"])
 def test_forged_or_stale_id_tokens_are_refused(client, idp, acme, case):
     now = int(time.time())
     claims, token = None, None
     if case == "wrong_audience":
         claims = {"aud": "some-other-app"}
+    elif case == "no_audience":
+        claims = {"aud": None}
+    elif case == "no_issuer":
+        claims = {"iss": None}
+    elif case == "no_expiry":
+        claims = {"exp": None}
+    elif case == "wrong_at_hash":
+        claims = {"at_hash": sso._at_hash("some-other-access-token", "RS256")}
     elif case == "wrong_issuer":
         claims = {"iss": "https://evil.example.test/"}
     elif case == "expired":
@@ -227,6 +236,17 @@ def test_forged_or_stale_id_tokens_are_refused(client, idp, acme, case):
     assert auth.SESSION_COOKIE not in resp.headers.get("set-cookie", "")
     assert client.get("/jobs").status_code == 401
     assert any(e["action"] == "sign_in_failed" for e in auth.audit_events(acme))
+
+
+def test_an_at_hash_matching_the_access_token_is_accepted(client, idp, acme):
+    # Values computed by python-jose's calculate_at_hash before it was
+    # replaced (10 Nov), so the check means what it meant before.
+    assert sso._at_hash("access-token-123", "RS256") == "mM63-bjbemsf_U6XcvDT4w"
+    assert sso._at_hash("access-token-123", "RS384") == "_XTwdYXVbeTU291KhA0MgWauiMOt_Lup"
+    assert sso._at_hash("access-token-123", "ES512") == "aQj51gl9b1kbUdlvutUD2V5kN8UM2MFL4F05bCxqfdY"
+    resp, _ = _sign_in(client, idp, claims={"at_hash": sso._at_hash("access-token-123", "RS256")})
+    assert resp.status_code == 302 and resp.headers["location"] == "/"
+    assert auth.SESSION_COOKIE in resp.headers.get("set-cookie", "")
 
 
 def test_a_wrong_pkce_verifier_is_refused(client, idp, acme, monkeypatch):

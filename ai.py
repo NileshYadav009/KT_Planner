@@ -361,7 +361,9 @@ def _extract_structured_section(
             dropped: List[str] = []
             parsed = ground_structured(parsed, "\n".join(cleaned[:STRUCTURED_MAX_FRAGMENTS]), dropped)
             for item in dropped:
-                logger.warning("Discarded unsupported structured value for %s: %s", section_id, item[:200])
+                # The value itself stays with the KT (its usage record), out
+                # of the logs, which hold ids and counts (docs/DATA_HANDLING.md).
+                logger.warning("Discarded an unsupported structured value for %s (%d characters)", section_id, len(item))
                 record_llm_rejected("structured_extraction", f"{section_id}: {item[:120]}")
             return parsed
     except Exception as e:

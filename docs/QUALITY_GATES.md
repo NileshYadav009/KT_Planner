@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report gw6 gn1`.
+then `python evaluation/quality_gates.py --report gn1 gdd1`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (gw6) | After (gn1) | |
+| Gate | Target | Before (gn1) | After (gdd1) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -56,14 +56,14 @@ model was called for this page.
 | e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 38/38 | 0 |
 | e2e_c_gcp_data_platform | 8 | 12/12 | 100% | 3/3 | 32/32 | 0 |
 | e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 22/22 | 0 |
-| e2e_e_quickbite_food_delivery | 12 | 32/32 | 100% | 7/7 | 55/55 | 0 |
+| e2e_e_quickbite_food_delivery | 11 | 32/32 | 100% | 7/7 | 55/55 | 0 |
 | e2e_f_online_learning | 11 | 20/20 | 100% | 5/5 | 41/41 | 0 |
 
 ## llm-replay
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (gw6) | After (gn1) | |
+| Gate | Target | Before (gn1) | After (gdd1) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -87,7 +87,7 @@ model was called for this page.
 | e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 40/40 | 0 |
 | e2e_c_gcp_data_platform | 10 | 12/12 | 100% | 3/3 | 35/36 | 0 |
 | e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 25/25 | 0 |
-| e2e_e_quickbite_food_delivery | 13 | 32/32 | 100% | 7/7 | 60/60 | 0 |
+| e2e_e_quickbite_food_delivery | 12 | 32/32 | 100% | 7/7 | 60/60 | 0 |
 
 A blocked KT has no answers in `tests/fixtures/e2e_kts_llm_recording.json`; recording them
 spends Groq quota and must be agreed first. One recorded from a user's own run can instead be
@@ -95,7 +95,7 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `n1t4`. Holdouts and blind KTs are unseen and are
+From `evaluation/accuracy.py` run `dd1`. Holdouts and blind KTs are unseen and are
 reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
 Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
@@ -109,5 +109,5 @@ Groq's section check, as the app runs, see the latest accuracy section of the au
 
 ## Adversarial matrix
 
-Run `n1`: 125 cases, must checks 409/409, should checks 77/94
+Run `dd1`: 126 cases, must checks 415/415, should checks 77/94
 (`docs/ADVERSARIAL_MATRIX.md`).

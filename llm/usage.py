@@ -40,6 +40,10 @@ class LLMUsageTracker:
         self.llm_first_call: Optional[float] = None
         self.provider: Optional[str] = None
         self.model: Optional[str] = None
+        # LLM tokens the KT's workspace may still use today, read when the
+        # KT starts (quotas.tokens_left); None: no limit.
+        self.token_allowance: Optional[float] = None
+        self._live_tokens = 0
         self._lock = threading.Lock()
         self._stages: Dict[str, Dict[str, Any]] = {}
 
@@ -62,6 +66,8 @@ class LLMUsageTracker:
             st["estimated_tokens"] = st["estimated_tokens"] or bool(estimated)
             st["llm_seconds"] += float(seconds or 0.0)
             st["retries"] += int(retries or 0)
+            if not failed:
+                self._live_tokens += int(input_tokens or 0) + int(output_tokens or 0)
             self.provider = provider or self.provider
             self.model = model or self.model
 
@@ -69,6 +75,12 @@ class LLMUsageTracker:
         """Requests actually sent to the provider for this KT so far."""
         with self._lock:
             return sum(st["llm_calls"] for st in self._stages.values())
+
+    def live_tokens(self) -> int:
+        """Tokens of the requests the provider answered for this KT so far
+        (what counts against the workspace's daily limit, quotas.py)."""
+        with self._lock:
+            return self._live_tokens
 
     def record_cache_hit(self, call_site: str, *, input_tokens: int = 0, output_tokens: int = 0,
                          provider: Optional[str] = None, model: Optional[str] = None) -> None:

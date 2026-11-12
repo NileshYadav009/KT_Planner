@@ -32,6 +32,10 @@ os.environ.update({
     "CONTINUUM_AUTH": "disabled", "CONTINUUM_COPYEDIT": "0",
     "LLM_CACHE_PATH": os.path.join(state, "llm.sqlite"),
 })
+# Models from the local cache only, as in the tests and the image: a
+# measurement never depends on a model revision published since.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 for key in ("GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
     os.environ[key] = ""
 sys.path[:0] = [REPO, os.path.join(REPO, "tests"), HERE]

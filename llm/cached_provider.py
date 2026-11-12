@@ -44,7 +44,11 @@ class LLMNotRecorded(RuntimeError):
 
 
 class LLMBudgetExhausted(RuntimeError):
-    """This KT has already sent LLM_MAX_CALLS_PER_KT requests."""
+    """This KT has already sent LLM_MAX_CALLS_PER_KT requests, spent its LLM
+    time, or its workspace used its daily LLM tokens."""
+
+
+WORKSPACE_LIMIT_REASON = "workspace daily LLM token limit reached"
 
 
 def max_calls_per_kt() -> int:
@@ -136,6 +140,12 @@ class CachedLLMProvider:
         if left is not None and left <= 0:
             tracker.record_skip(call_site, f"per-KT LLM time limit ({kt_deadline_seconds():g}s) reached")
             raise LLMBudgetExhausted(f"LLM_KT_DEADLINE_SECONDS={kt_deadline_seconds():g} reached for this KT")
+        allowance = getattr(tracker, "token_allowance", None) if tracker is not None else None
+        if allowance is not None and tracker.live_tokens() >= allowance:
+            # The workspace's daily LLM tokens are used up (quotas.py): the
+            # rest of this KT keeps its rules-only results.
+            tracker.record_skip(call_site, WORKSPACE_LIMIT_REASON)
+            raise LLMBudgetExhausted("The workspace's daily LLM token limit is reached")
         if tracker is not None and getattr(tracker, "llm_first_call", None) is None:
             tracker.llm_first_call = time.monotonic()
 

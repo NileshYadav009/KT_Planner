@@ -18,7 +18,11 @@ server or fetch URLs, which is a standard pentest finding. Now:
     (-protocol_whitelist file), may use only the allowed demuxers, and has a
     time limit.
 
-Running ffmpeg in a separate, unprivileged worker is the remaining step (P1-4).
+The API that receives uploads runs no media tool on them (the due-diligence
+review, P1-4): it saves the file and checks its leading bytes (sniff), so a
+document or an image is still refused at once. ffprobe and ffmpeg run in
+the workers (pipeline.check_recording, then the transcription), which take
+no requests; a recording ffprobe refuses fails its KT with the same message.
 """
 import json
 import os
@@ -100,6 +104,41 @@ async def save_upload(upload) -> str:
             pass
         raise
     return path
+
+
+def _unsupported() -> "MediaRejected":
+    return MediaRejected(422, f"This file isn't a supported recording. Upload {SUPPORTED_DESCRIPTION} audio or video.")
+
+
+# Box types an MP4, MOV or M4A file opens with, after its 4-byte size.
+_ISO_BOXES = (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot")
+
+
+def sniff(path: str) -> str:
+    """Which accepted container the file looks like from its leading bytes
+    alone: nothing is decoded and no tool runs, so the API can refuse a
+    document, an image, a playlist or a concat list at once without parsing
+    media. Not a verdict: the worker probes it (probe) before decoding.
+    Raises MediaRejected otherwise."""
+    with open(path, "rb") as fh:
+        head = fh.read(16)
+    if head[4:8] in _ISO_BOXES:
+        return "mov"
+    if head.startswith(b"\x1a\x45\xdf\xa3"):                  # EBML: Matroska, WebM
+        return "matroska"
+    if head[:4] in (b"RIFF", b"RF64", b"BW64") and head[8:12] == b"WAVE":
+        return "wav"
+    if head.startswith(b"OggS"):
+        return "ogg"
+    if head.startswith(b"fLaC"):
+        return "flac"
+    if head.startswith(b"ID3"):                               # a tag before MP3 (sometimes FLAC or AAC) frames
+        return "mp3"
+    if head.startswith(b"ADIF"):
+        return "aac"
+    if len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0:
+        return "aac" if head[1] & 0x06 == 0 else "mp3"        # frame sync: ADTS has layer 00, MPEG audio not
+    raise _unsupported()
 
 
 def probe(path: str) -> dict:

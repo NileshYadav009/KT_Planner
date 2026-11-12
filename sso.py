@@ -318,28 +318,51 @@ def _signing_keys(jwks_uri: str, kid: Optional[str], alg: str) -> dict:
     return {"keys": keys}
 
 
+def _at_hash(access_token: str, alg: str) -> str:
+    """OpenID Connect's at_hash: the left half of the access token's hash
+    (the hash of the ID token's algorithm), base64url without padding."""
+    digest = {"256": hashlib.sha256, "384": hashlib.sha384, "512": hashlib.sha512}[alg[-3:]](
+        access_token.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest[:len(digest) // 2]).rstrip(b"=").decode("ascii")
+
+
 def verify_id_token(id_token: str, provider: dict, meta: dict, nonce: str,
                     access_token: Optional[str] = None) -> dict:
-    from jose import jwt
-    from jose.exceptions import JOSEError
+    # PyJWT, not python-jose: python-jose has an advisory with no fixed
+    # release (the due-diligence review, P1-4). Either way exactly one
+    # algorithm is accepted, from an asymmetric allow-list, so a token
+    # signed with HS256 and the public key as its secret is refused.
+    import jwt
 
     try:
         header = jwt.get_unverified_header(id_token)
-    except JOSEError as exc:
+    except jwt.PyJWTError as exc:
         raise SSOError("sso_failed", "malformed ID token") from exc
     alg = header.get("alg")
     if alg not in ALLOWED_ALGORITHMS:
         raise SSOError("sso_failed", f"ID token algorithm {alg!r} is not accepted")
-    keys = _signing_keys(meta["jwks_uri"], header.get("kid"), alg)
-    try:
-        claims = jwt.decode(
-            id_token, keys, algorithms=[alg], audience=provider["client_id"], issuer=provider["issuer"],
-            access_token=access_token,
-            options={"leeway": CLOCK_SKEW_SECONDS, "require_exp": True, "require_iat": True, "require_sub": True,
-                     "verify_at_hash": access_token is not None},
-        )
-    except JOSEError as exc:
-        raise SSOError("sso_failed", f"ID token rejected: {exc}") from exc
+    keys = _signing_keys(meta["jwks_uri"], header.get("kid"), alg)["keys"]
+    claims, error = None, None
+    for jwk in keys:                         # without a kid, each key of the right type is tried
+        try:
+            key = jwt.PyJWK(jwk, algorithm=alg).key
+            claims = jwt.decode(
+                id_token, key, algorithms=[alg], audience=provider["client_id"], issuer=provider["issuer"],
+                leeway=CLOCK_SKEW_SECONDS, options={"require": ["exp", "iat", "sub"]})
+            break
+        except jwt.InvalidSignatureError as exc:
+            error = exc
+        except jwt.PyJWTError as exc:
+            raise SSOError("sso_failed", f"ID token rejected: {exc}") from exc
+    if claims is None:
+        raise SSOError("sso_failed", f"ID token rejected: {error or 'no usable signing key'}")
+    if "at_hash" in claims:
+        # As OpenID Connect asks when the token response carried an access token.
+        if not access_token:
+            raise SSOError("sso_failed", "ID token rejected: at_hash given but no access token to check it against")
+        if not isinstance(claims["at_hash"], str) or not hmac.compare_digest(claims["at_hash"],
+                                                                             _at_hash(access_token, alg)):
+            raise SSOError("sso_failed", "ID token rejected: at_hash does not match the access token")
     audience = claims.get("aud")
     if isinstance(audience, list) and len(audience) > 1 and claims.get("azp") != provider["client_id"]:
         raise SSOError("sso_failed", "ID token was issued to another client (azp)")

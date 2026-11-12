@@ -2,7 +2,12 @@
 ffmpeg's decoders, playlist and concat tricks cannot make ffmpeg read other
 files, and size and length are capped. Before, any file was handed to
 ffmpeg, and the original was passed to the Whisper decoder if conversion
-failed."""
+failed.
+
+The due-diligence review (P1-4): the API runs no media tool on an upload.
+It refuses what is not an audio or video container by its leading bytes
+(media_guard.sniff); a worker probes the rest with ffprobe before decoding,
+and a recording it refuses fails its KT with the reason."""
 import asyncio
 import io
 import os
@@ -75,6 +80,18 @@ def _upload(client, path, name=None):
         return client.post("/upload", files={"file": (name or os.path.basename(path), fh, "application/octet-stream")})
 
 
+def _upload_and_run(client, path):
+    """Accepted by the API, then taken by a worker, which probes it first."""
+    import pipeline
+    from worker import Worker
+
+    resp = _upload(client, path)
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+    Worker(worker_id="test-upload").drain(job_id)
+    return job_id, pipeline.JOB_QUEUE[job_id]
+
+
 # --------------------------------------------------------------------------
 # What is refused
 # --------------------------------------------------------------------------
@@ -102,9 +119,53 @@ def test_a_playlist_cannot_make_ffmpeg_read_a_server_file(media, tmp_path):
     assert screen_capture.has_video_stream(str(media["concat"])) is False
 
 
-def test_a_video_without_an_audio_track_is_refused(client, media):
-    resp = _upload(client, media["silent_video"])
-    assert resp.status_code == 422 and "no audio track" in resp.json()["detail"]
+def test_a_video_without_an_audio_track_is_refused(client, media, tmp_path, monkeypatch):
+    import observability
+    import pipeline
+
+    monkeypatch.setenv("CONTINUUM_UPLOAD_DIR", str(tmp_path / "uploads"))
+    job_id, job = _upload_and_run(client, media["silent_video"])
+    assert job["status"] == "failed" and "no audio track" in job["error"]
+    assert job["failure"] == observability.FAILURE_INPUT                 # the input's fault: nobody is paged
+    assert client.queued == []                                           # nothing reached ffmpeg's decoding or Whisper
+    assert os.listdir(tmp_path / "uploads") == []                        # the upload is deleted
+    assert pipeline.TASKS.retryable(job_id) is False                     # trying again would fail the same way
+
+
+def test_the_api_runs_no_media_tool_on_an_upload(client, media, monkeypatch):
+    probed = []
+    real_probe = media_guard.probe
+    monkeypatch.setattr(media_guard, "probe", lambda path: probed.append(path) or real_probe(path))
+    resp = _upload(client, media["mp4"])
+    assert resp.status_code == 200 and probed == []
+    from worker import Worker
+    Worker(worker_id="test-upload").drain(resp.json()["job_id"])
+    assert len(probed) == 1                                              # by the worker, before decoding
+    (args, kwargs), = client.queued
+    assert kwargs["media_format"] == "mov"
+    os.unlink(args[1])
+
+
+@pytest.mark.parametrize("head,expected", [
+    (b"\x00\x00\x00\x18ftypM4A isom", "mov"), (b"\x00\x00\x00\x08wide\x00\x00", "mov"),
+    (b"\x1a\x45\xdf\xa3\x9f\x42\x86\x81", "matroska"), (b"RIFF\x24\x08\x00\x00WAVEfmt ", "wav"),
+    (b"OggS\x00\x02\x00\x00", "ogg"), (b"fLaC\x00\x00\x00\x22", "flac"), (b"ID3\x04\x00\x00", "mp3"),
+    (b"\xff\xfb\x90\x64\x00", "mp3"), (b"\xff\xf1\x50\x80\x02", "aac"), (b"ADIF\x00\x00", "aac")])
+def test_the_api_recognises_each_accepted_container_by_its_leading_bytes(tmp_path, head, expected):
+    path = tmp_path / "upload"
+    path.write_bytes(head + b"\x00" * 32)
+    assert media_guard.sniff(str(path)) == expected
+
+
+@pytest.mark.parametrize("head", [b"%PDF-1.7\n", b"#EXTM3U\n#EXT-X-TARGETDURATION", b"ffconcat version 1.0\n",
+                                  b"\x89PNG\r\n\x1a\n\x00\x00", b"PK\x03\x04\x14\x00", b"Hello, this is text",
+                                  b"\xff\xd8\xff\xe0\x00\x10JFIF", b""])
+def test_anything_else_is_refused_by_its_leading_bytes(tmp_path, head):
+    path = tmp_path / "upload"
+    path.write_bytes(head)
+    with pytest.raises(media_guard.MediaRejected) as refused:
+        media_guard.sniff(str(path))
+    assert refused.value.status == 422 and "supported recording" in refused.value.message
 
 
 def test_oversized_uploads_are_refused(client, media, monkeypatch):
@@ -144,7 +205,7 @@ def test_an_unexpected_upload_failure_does_not_echo_server_details(client, media
     def broken(path):
         raise OSError(f"[Errno 13] Permission denied: '{path}'")
 
-    monkeypatch.setattr(media_guard, "probe", broken)
+    monkeypatch.setattr(media_guard, "sniff", broken)
     resp = _upload(client, media["wav"])
     assert resp.status_code == 400
     detail = resp.json()["detail"]
@@ -155,8 +216,9 @@ def test_an_unexpected_upload_failure_does_not_echo_server_details(client, media
 
 def test_recordings_over_the_length_limit_are_refused(client, media, monkeypatch):
     monkeypatch.setenv("CONTINUUM_MAX_MEDIA_MINUTES", "0.01")              # 0.6 s; the tone is 2 s
-    resp = _upload(client, media["wav"])
-    assert resp.status_code == 422 and "limit is" in resp.json()["detail"]
+    _, job = _upload_and_run(client, media["wav"])
+    assert job["status"] == "failed" and "limit is" in job["error"]
+    assert client.queued == []
 
 
 # --------------------------------------------------------------------------

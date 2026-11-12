@@ -8,8 +8,8 @@ a follow-up session, a sign-off step) for CONTINUUM_KT_REVIEW_DAYS days
 (default 180; 0 turns this off).
 
 A KT that is due shows "Review due" in the app's list, and the workers post
-one reminder per quiet period to the team channel
-(CONTINUUM_REVIEW_WEBHOOK_URL), naming the incoming owner from the sign-off
+one reminder per quiet period to the KT's own workspace channel
+(observability.review_webhook_url), naming the incoming owner from the sign-off
 (or whoever created the KT). Any change to the KT starts a new period.
 """
 import logging
@@ -70,12 +70,15 @@ def send_reminders(store, get_job: Callable[[str], Optional[Dict[str, Any]]], no
     import observability
 
     days = review_days()
-    if not days or not os.getenv("CONTINUUM_REVIEW_WEBHOOK_URL"):
+    if not days:
         return 0
     notify = notify or observability.notify_review
     now = now or time.time()
     sent = 0
     for row in store.due_for_review(now - days * DAY, limit=limit):
+        # Only to the KT's own workspace channel (P1-2); none, no reminder.
+        if not observability.review_webhook_url(row.get("tenant_id")):
+            continue
         if not store.claim_review_reminder(row["job_id"], row["updated_at"], now):
             continue                        # another worker took it
         job = get_job(row["job_id"]) or {}

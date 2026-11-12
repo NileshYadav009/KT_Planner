@@ -16,8 +16,11 @@ Alerts    CONTINUUM_ALERT_WEBHOOK_URL receives {"text": ...} (Slack and Teams
           incoming webhooks accept it) when a KT fails for a reason other
           than its input, and when the oldest queued KT has waited longer
           than CONTINUUM_ALERT_QUEUE_AGE_SECONDS (default 900).
-Review    CONTINUUM_REVIEW_WEBHOOK_URL receives the same shape when a
-          sign-off starts, someone acknowledges, and the KT is signed.
+Review    A workspace's review webhook (python -m auth review-webhook-set)
+          receives the same shape when a sign-off starts, someone
+          acknowledges, the KT is signed, or its review is due.
+          CONTINUUM_REVIEW_WEBHOOK_URL serves a deployment with one
+          workspace only.
 Errors    SENTRY_DSN sends exceptions to Sentry, with no request bodies, no
           local variables and no personal data.
 
@@ -290,8 +293,7 @@ def prometheus_text(runs: List[Dict[str, Any]], queue: Dict[str, Any]) -> str:
 # Alerts
 # --------------------------------------------------------------------------
 
-def _post_webhook(env_var: str, text: str, fields: Dict[str, Any]) -> bool:
-    url = os.getenv(env_var)
+def _post(url: Optional[str], label: str, text: str, fields: Dict[str, Any]) -> bool:
     if not url:
         return False
     body = json.dumps(dict(fields, text=text), default=str).encode("utf-8")
@@ -300,8 +302,12 @@ def _post_webhook(env_var: str, text: str, fields: Dict[str, Any]) -> bool:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 (operator-configured URL)
             return 200 <= resp.status < 300
     except Exception as exc:
-        logger.warning("Webhook %s failed: %s", env_var, exc)
+        logger.warning("Webhook %s failed: %s", label, exc)
         return False
+
+
+def _post_webhook(env_var: str, text: str, fields: Dict[str, Any]) -> bool:
+    return _post(os.getenv(env_var), env_var, text, fields)
 
 
 def send_alert(text: str, **fields: Any) -> bool:
@@ -309,11 +315,81 @@ def send_alert(text: str, **fields: Any) -> bool:
     return _post_webhook("CONTINUUM_ALERT_WEBHOOK_URL", text, fields)
 
 
-def notify_review(text: str, **fields: Any) -> bool:
-    """Tell the team's channel about a sign-off step (P2-2): POST {"text": ...}
-    to CONTINUUM_REVIEW_WEBHOOK_URL (a Slack or Teams incoming webhook).
-    Never raises; unset sends nothing."""
-    return _post_webhook("CONTINUUM_REVIEW_WEBHOOK_URL", text, fields)
+# A workspace's own channel for sign-off notices and review reminders, kept
+# in the integrations table like Confluence and Jira: the NAME of the
+# environment variable that holds the webhook URL, never the URL itself.
+REVIEW_WEBHOOK_KIND = "review_webhook"
+_SHARED_REVIEW_WEBHOOK = "CONTINUUM_REVIEW_WEBHOOK_URL"
+_warned_shared_webhook = False
+
+
+def set_review_webhook(tenant_id: str, url_env: str) -> None:
+    import re
+
+    import auth
+
+    if not url_env or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,63}", url_env):
+        raise ValueError("--url-env takes the NAME of an environment variable holding the webhook URL, "
+                         "not the URL itself")
+    with auth._lock, auth._connect() as db:
+        auth._require_tenant(db, tenant_id)
+        db.execute("INSERT INTO integrations (tenant_id, kind, config, created_at) VALUES (?, ?, ?, ?) "
+                   "ON CONFLICT(tenant_id, kind) DO UPDATE SET config = excluded.config",
+                   (tenant_id, REVIEW_WEBHOOK_KIND, json.dumps({"url_env": url_env}), time.time()))
+    auth.audit(tenant_id, "cli", "integration_configured", {"kind": REVIEW_WEBHOOK_KIND, "url_env": url_env})
+
+
+def remove_review_webhook(tenant_id: str) -> bool:
+    import auth
+
+    with auth._lock, auth._connect() as db:
+        removed = db.execute("DELETE FROM integrations WHERE tenant_id = ? AND kind = ?",
+                             (tenant_id, REVIEW_WEBHOOK_KIND)).rowcount > 0
+    if removed:
+        auth.audit(tenant_id, "cli", "integration_removed", {"kind": REVIEW_WEBHOOK_KIND})
+    return removed
+
+
+def review_webhook_url(tenant_id: Optional[str]) -> Optional[str]:
+    """Where a workspace's sign-off notices and review reminders go: its own
+    webhook (python -m auth review-webhook-set), or else the deployment-wide
+    CONTINUUM_REVIEW_WEBHOOK_URL, but only on a deployment with one
+    workspace. With several, that one channel received every workspace's KT
+    names and people's emails (the due-diligence review, P1-2)."""
+    global _warned_shared_webhook
+    import auth
+
+    try:
+        with auth._connect() as db:
+            row = db.execute("SELECT config FROM integrations WHERE tenant_id = ? AND kind = ?",
+                             (tenant_id or "local", REVIEW_WEBHOOK_KIND)).fetchone()
+            workspaces = db.execute("SELECT COUNT(*) FROM tenants").fetchone()[0]
+    except Exception:
+        logger.warning("Could not read the review webhook settings", exc_info=True)
+        return None
+    if row:
+        return os.getenv(json.loads(row[0]).get("url_env") or "") or None
+    shared = os.getenv(_SHARED_REVIEW_WEBHOOK)
+    if not shared:
+        return None
+    if not auth.auth_enabled() or workspaces <= 1:
+        return shared
+    if not _warned_shared_webhook:
+        logger.warning("%s is not used: this deployment has %d workspaces, and one channel would receive all "
+                       "of their sign-offs. Give each its own: python -m auth review-webhook-set.",
+                       _SHARED_REVIEW_WEBHOOK, workspaces)
+        _warned_shared_webhook = True
+    return None
+
+
+def notify_review(text: str, tenant_id: Optional[str] = None, **fields: Any) -> bool:
+    """Tell a workspace's channel about a sign-off step or a review that is
+    due (P2-2): POST {"text": ...} to its review webhook (a Slack or Teams
+    incoming webhook; see review_webhook_url). Never raises; none set sends
+    nothing."""
+    if tenant_id:
+        fields = dict(fields, tenant_id=tenant_id)
+    return _post(review_webhook_url(tenant_id), "review", text, fields)
 
 
 def alert_on_run(run: Dict[str, Any], error: Optional[str]) -> bool:

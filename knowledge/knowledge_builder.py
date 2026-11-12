@@ -1840,7 +1840,7 @@ def append_coverage_matrix_section(
                 # one: "Fixes or workarounds" counted as covered and the
                 # section as covered well, with nothing said about the other
                 # (delayed video processing, the user's online learning KT).
-                unfixed = [s for s, fix in _known_failures(section_obj) if fix == _NO_FIX_STATED] \
+                unfixed = [failure_as_noun_phrase(s) for s, fix in _known_failures(section_obj) if fix == _NO_FIX_STATED] \
                     if section_id == "common_failures" and section_obj and "Fixes or workarounds" not in missing else []
                 if unfixed:
                     bucket = "Partial" if bucket == "Strong" else bucket
@@ -2171,6 +2171,34 @@ _FIX_CUE_RE = re.compile(
     r"redeploy\w*|roll\w* back|increase\w*|bump\w*|purge\w*|recreate\w*|failover|fail over|archive\w*|verify|check)\b",
     re.IGNORECASE)
 _NO_FIX_STATED = "No fix was stated in the KT. Ask the outgoing owner."
+# A failure said as a whole clause reads badly after "no fix stated for" ("a
+# fix for Redis memory saturation can also make courier locations appear
+# stale"; the due-diligence review, P0-2). Its subject becomes the noun and
+# the rest a relative clause, every word kept but a discourse "also".
+_FAILURE_CLAUSE_RE = re.compile(
+    r"^(?P<subject>[A-Za-z0-9][\w.'/-]*(?:\s+[\w.'/-]+){0,5}?)\s+"
+    r"(?P<predicate>(?:(?:can|could|may|might|will|would|sometimes|often|usually|also)\s+)*"
+    r"(?:make|makes|cause|causes|lead|leads|slow|slows|block|blocks|break|breaks|fill|fills|stop|stops|"
+    r"crash|crashes|trigger|triggers|result|results|take|takes|knock|knocks|delay|delays)\b.+)$",
+    re.IGNORECASE)
+_CLAUSE_SUBJECT_STOP_RE = re.compile(
+    r"\b(?:it|this|that|these|those|they|we|you|is|are|was|were|when|if|while|because|after|before|and|or)\b",
+    re.IGNORECASE)
+
+
+def failure_as_noun_phrase(situation: str) -> str:
+    """'Redis memory saturation can also make courier locations appear
+    stale' -> 'Redis memory saturation, which can make courier locations
+    appear stale'. A noun phrase ('Database connection exhaustion on RDS')
+    or anything not plainly subject-and-verb is returned as it is."""
+    text = (situation or "").strip().rstrip(".")
+    match = _FAILURE_CLAUSE_RE.match(text)
+    if not match or _CLAUSE_SUBJECT_STOP_RE.search(match.group("subject")):
+        return text
+    predicate = re.sub(r"\balso\s+", "", match.group("predicate"), flags=re.IGNORECASE)
+    return f"{match.group('subject')}, which {predicate}"
+
+
 # A failure said by what goes wrong, with no failure word: "The slot worker
 # falls behind when a ship arrives late ..." (dev d11 without an LLM: the card
 # carded only its fix, as "Known failure", and the next failure inside it).

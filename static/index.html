@@ -2473,8 +2473,29 @@ function pollJobStatus(jobId){
         KT_STATUS = data;
         updateKtHeader(data);
         const host = document.getElementById('ktBanners');
+        // Its worker died (out of memory, a restart) and its input is kept
+        // for a day: one click runs it again, with no new upload (P1-6).
+        const advice = data.can_retry ? '' : ' Start a new KT with the same input to try again.';
         host.innerHTML = `<div class="alert-row danger">${WARN_ICON}<span><strong>This KT could not be built.</strong> `
-          + `${escapeHtml(data.error || 'Unknown error')} Start a new KT with the same input to try again.</span></div>`;
+          + `${escapeHtml(data.error || 'Unknown error')}${advice}</span>`
+          + (data.can_retry ? '<button id="retryKtBtn" class="btn btn-primary" type="button">Try again</button>' : '')
+          + `</div>`;
+        const retryBtn = document.getElementById('retryKtBtn');
+        if(retryBtn) retryBtn.addEventListener('click', async()=>{
+          retryBtn.disabled = true;
+          try{
+            const resp = await fetch(`/jobs/${encodeURIComponent(jobId)}/retry`, {method: 'POST'});
+            if(!resp.ok){
+              const body = await resp.json().catch(()=>({}));
+              showToast(body.detail || 'This KT cannot be tried again.', 6000, 'warn');
+              retryBtn.disabled = false;
+              return;
+            }
+            host.innerHTML = '';
+            showToast('Trying this KT again', 3000);
+            pollJobStatus(jobId);
+          }catch(err){ showToast('Could not reach the server: ' + err, 6000, 'warn'); retryBtn.disabled = false; }
+        });
         loadHistory();
       }
     }catch(err){ fail('Poll error: '+err); }
@@ -2528,7 +2549,8 @@ uploadBtn.addEventListener('click',async()=>{
       const t = await resp.text();
       let msg = t;
       try{ const j = JSON.parse(t); if(typeof j.detail === 'string') msg = j.detail; }catch(e){}
-      showToast((resp.status===422 ? 'Not a usable KT transcript: ' : 'Submission failed: '+resp.status+' ') + msg, 9000, 'error');
+      // 429: the workspace's daily limit; the message says which and when.
+      showToast((resp.status===422 ? 'Not a usable KT transcript: ' : resp.status===429 ? '' : 'Submission failed: '+resp.status+' ') + msg, 9000, 'error');
       return;
     }
     const data=await resp.json();

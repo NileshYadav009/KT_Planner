@@ -374,7 +374,7 @@ def test_the_document_downloads_as_markdown_with_edits_and_sources(team):
     assert "Never delete bookings by hand." in first and "ever." not in first
 
 
-def test_a_sign_off_step_is_posted_to_the_team_channel(team, monkeypatch):
+def test_a_sign_off_step_is_posted_to_the_team_channel(env, team, monkeypatch):
     import http.server
     import json
     import threading
@@ -390,11 +390,16 @@ def test_a_sign_off_step_is_posted_to_the_team_channel(team, monkeypatch):
         def log_message(self, *args):
             pass
 
+    import observability
+
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    monkeypatch.setenv("CONTINUUM_REVIEW_WEBHOOK_URL", f"http://127.0.0.1:{server.server_port}/hook")
+    # The workspace's own channel (P1-2): the test database holds many
+    # workspaces, so the deployment-wide URL is not used here.
+    monkeypatch.setenv("REVIEW_HOOK_TEST", f"http://127.0.0.1:{server.server_port}/hook")
+    client, job_id, _, people = team
+    observability.set_review_webhook(env.JOB_QUEUE[job_id]["tenant_id"], "REVIEW_HOOK_TEST")
     try:
-        client, job_id, _, people = team
         _start(client, job_id, people)
         assert _ack(client, job_id, people, "receiver", 1).status_code == 409        # blocked: nothing posted
     finally:
@@ -402,3 +407,49 @@ def test_a_sign_off_step_is_posted_to_the_team_channel(team, monkeypatch):
     note, = received
     assert note["job_id"] == job_id and note["text"].startswith("Sign-off started for TripWise")
     assert people["approver"]["email"] in note["text"] and "2 knowledge gap(s)" in note["text"]
+
+
+@pytest.fixture
+def workspaces(tmp_path, monkeypatch):
+    """A deployment's own auth database, with sign-in on."""
+    monkeypatch.setenv("CONTINUUM_DB_PATH", str(tmp_path / "auth.sqlite"))
+    monkeypatch.setenv("CONTINUUM_AUTH", "required")
+    monkeypatch.delenv("CONTINUUM_REVIEW_WEBHOOK_URL", raising=False)
+    return tmp_path
+
+
+def test_each_workspace_gets_only_its_own_sign_off_notices(workspaces, monkeypatch):
+    # The due-diligence review (P1-2): one deployment-wide webhook received
+    # every workspace's KT names and people's emails.
+    import observability
+
+    acme, globex = auth.create_tenant("Acme"), auth.create_tenant("Globex")
+    monkeypatch.setenv("ACME_HOOK", "https://hooks.example/acme")
+    monkeypatch.setenv("GLOBEX_HOOK", "https://hooks.example/globex")
+    observability.set_review_webhook(acme, "ACME_HOOK")
+    observability.set_review_webhook(globex, "GLOBEX_HOOK")
+    posted = []
+    monkeypatch.setattr(observability, "_post", lambda url, label, text, fields: posted.append((url, fields)) or True)
+    observability.notify_review("Sign-off started for Ledger", tenant_id=acme, job_id="j1")
+    observability.notify_review("Sign-off started for Billing", tenant_id=globex, job_id="j2")
+    assert posted == [("https://hooks.example/acme", {"job_id": "j1", "tenant_id": acme}),
+                      ("https://hooks.example/globex", {"job_id": "j2", "tenant_id": globex})]
+
+
+def test_the_deployment_wide_webhook_serves_one_workspace_but_never_several(workspaces, monkeypatch):
+    import observability
+
+    monkeypatch.setenv("CONTINUUM_REVIEW_WEBHOOK_URL", "https://hooks.example/shared")
+    only = auth.create_tenant("Only Co")
+    assert observability.review_webhook_url(only) == "https://hooks.example/shared"
+    other = auth.create_tenant("Second Co")
+    assert observability.review_webhook_url(only) is None and observability.review_webhook_url(other) is None
+    # A workspace with its own webhook uses it; one whose variable is unset
+    # sends nothing rather than falling back to the shared channel.
+    observability.set_review_webhook(only, "ONLY_HOOK")
+    assert observability.review_webhook_url(only) is None
+    monkeypatch.setenv("ONLY_HOOK", "https://hooks.example/only")
+    assert observability.review_webhook_url(only) == "https://hooks.example/only"
+    assert observability.remove_review_webhook(only) and observability.review_webhook_url(only) is None
+    with pytest.raises(ValueError):
+        observability.set_review_webhook(only, "https://hooks.example/a-url-not-a-name")

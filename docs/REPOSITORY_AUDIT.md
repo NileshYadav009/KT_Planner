@@ -7773,6 +7773,352 @@ sleep, hung (`SleepInProgress=1`, no bug check, the dump not written) and was
 switched off with the power button; the runs were repeated one at a time.
 Three heavy runs together are too many for this machine.
 
+### 9abo. The weak points the due-diligence review found (10 Nov)
+
+**The user's request (10 Nov):** an investor-level due-diligence review of
+the whole product (`CONTINUUM_DUE_DILIGENCE_REPORT.md`, read-only), then
+"start with the weak parts first". This batch fixes the findings that are
+code: the PDF's visible flaws (P0-2), notices that crossed workspaces
+(P1-2), documents that depended on the machine's load (P1-5), no way to
+retry a KT whose worker died (P1-6), and the README (P0-4). P0-1 and P0-3
+(demo material, how figures are quoted) are preparation, not code; merging
+to `main` so CI runs is the user's step.
+
+**A safety rule shortened until it said something else (X147).** The
+QuickBite PDF's Tribal Knowledge table printed "Never delete messages from
+production queues during an…": `document_dedup.excerpt` turns every digest
+row whose statement is shown in its own section into its first eight words,
+and "without approval" was cut. The unit test expected the same defect
+("Never delete items from the bookings table by…" for "by hand"). Now a
+rule (a safety-critical row, or one with never, not, no, n't, must, avoid,
+without, unless, only or except) is quoted whole, its "Where it is" column
+still naming its section; a description keeps its excerpt, which no longer
+stops on a word that needs the next one ("Datadog is our monitoring…", not
+"Datadog is our…"). The repeat counters already left the digest out
+(`golden_eval._DIGESTS`); the dedup test's own counter now treats a digest
+row that names another section as a quote on purpose.
+
+**Filler and machine-made sentences (X148).** Architecture Reference printed
+three rows on every KT that did not state them: "Documentation link: Not
+discussed", "Last updated: Not discussed", "Verified by incoming owner: Not
+discussed". They are now shown only when stated; the coverage matrix and
+the follow-up list still name the undiscussed ones, and a section with
+nothing stated says it was not covered. A failure said as a clause read
+badly in the gap lines ("a fix for Redis memory saturation can also make
+courier locations appear stale"): `knowledge_builder.failure_as_noun_phrase`
+makes its subject the noun and the rest a relative clause ("Redis memory
+saturation, which can make courier locations appear stale"), every word
+kept but a discourse "also"; a noun phrase ("Database connection exhaustion
+on RDS") or anything not plainly subject and verb ("When the cache is cold
+it causes ...", "It sometimes makes ...") stays as it is. The cover's
+headline "Job ID" became "Reference ..." in its footer.
+
+**Notices across workspaces (X149).** `observability.notify_review` posted
+sign-off steps (KT name, participants' emails) and the workers' review
+reminders to one URL for the whole deployment. Each workspace now has its
+own (`python -m auth review-webhook-set <tenant> --url-env VAR`, stored like
+the Confluence and Jira settings: the variable's name, never the URL). The
+deployment-wide `CONTINUUM_REVIEW_WEBHOOK_URL` still serves a deployment
+with one workspace (or sign-in off), the recommended pilot setup; with
+several it is not used, and the log says why once. A workspace whose own
+variable is unset sends nothing rather than falling back.
+
+**The same input, the same document (X131, the user's decision).** The
+local copy edit (Qwen, llama.cpp) stopped after 300 s and skipped itself
+when less than 1.5 GB was free at the start of a KT: on 2-3 Nov one
+recording gave 22 to 281 sentences left as said, and the browser journey
+skipped it on four KTs on 3 Nov and one on 8 Nov. The run logs give its
+speed: 91 sentences in 250 s (about 2.7 s each); the recordings measured
+needed 20 to 152. Now it takes at most `CONTINUUM_COPYEDIT_MAX_SENTENCES`
+(200) sentences of a KT, the first ones in order, whatever the clock; free
+memory is checked once per process (`copyedit.check_local_model`, called
+when a worker starts), never per KT; `CONTINUUM_COPYEDIT_MAX_SECONDS`
+(1800) is a safety stop, and a KT that reaches it says so in its notices.
+Every recording measured is edited whole, as the fast replay measured them,
+so the recording figures stand. The copy edit's numbers now reach the job
+(`result["copy_edit"]`); before, the mapper kept them on itself, where
+nothing read them, and two KTs at once would have overwritten each other's.
+
+**Try again (X150), and a queue bug found on the way (X151).** A KT whose
+worker died twice (out of memory, a restart) failed with "Submit the KT
+again": a recording had to be uploaded again, and the dead worker's upload
+stayed on disk with nothing to remove it. Its input (the paste, or the
+upload's path) now stays `CONTINUUM_RETRY_HOURS` (24); `/status` says
+`can_retry` and the page shows Try again (`POST /jobs/{id}/retry`, a
+`kt:create` permission, 409 when not retryable); then the workers delete
+the input and the recording's files, and deleting the KT deletes them at
+once. A KT that failed on its input or inside a stage is not offered a
+retry: it would fail the same way. The retry tests found that
+`TaskQueue.claim` reused `job_id` for the KT it was giving up and then
+looked only for that KT, so every other queued KT waited for the next poll.
+
+**The README (X152)** described an `app/` folder, `pii_anonymizer.py` and
+`test_presidio_integration.py`, none of which exist, and template management
+that was removed. Rewritten: what Continuum does, the five invariants, the
+measured figures with their basis (no customer KT measured yet), the
+architecture, how to run and test it, a repository map and the known
+limits.
+
+**Measured** (label dd1 against n1t4/w5, n1 and gn1; no LLM; blind4 not read):
+
+| Set | Before | This batch |
+|---|---|---|
+| Tuning | 534/534, 1 discussed section Missing | 534/534, 1 |
+| Dev | 551/551, 2 unsourced | 551/551, 2 |
+| Holdouts (aggregate) | 88/95 | 88/95 |
+| Blind2 (aggregate) | 109/114 | 109/114 |
+| Blind3 (aggregate) | 118/132, 3 Missing | 118/132, 3 |
+| e2e (six KTs) | 1.0 each, no problems | 1.0 each, no problems |
+| Noisy copies | 1057/1085, 1 Missing, 1 shown covered | 1058/1085, 1, 1 |
+| Matrix | 125 cases, must 409/409, should 77/94 | 126 cases (R07 new), must 415/415, should 77/94 |
+| Gates (gn1, gdd1) | every gate passes | every gate passes, the same values |
+
+The noisy copies' one more fact is the scorer, not a fix: h11 F06 ("Azure
+Service Bus between the booking service and the notification service") is
+one sentence `fact_units.even_pieces` cut in two, both pieces in
+Architecture Reference (traced, `trace_h11.py` in the scratchpad); the
+scorer joins a section's strings, and with the metadata rows no longer
+between the pieces the quote now spans them. The QuickBite PDF is a page
+shorter (12 to 11 without an LLM, 13 to 12 with the replay), the rows
+removed. `docs/ADVERSARIAL_MATRIX.md` (n1 to dd1) and
+`docs/QUALITY_GATES.md` (gn1 to gdd1) regenerated.
+
+Tests: the 14 files this batch touched, 403 passed
+(`test_knowledge_builders`, `test_review_signoff`, `test_auth`,
+`test_input_gate`, `test_job_queue`, `test_copyedit`,
+`test_frontend_accessibility`, `test_pdf_rendering_helpers`,
+`test_staleness`, `test_observability`, `test_renderer_sections`,
+`test_incident_card`, `test_section_rules`, `test_coverage_topics`), and
+`test_document_dedup` with the golden KTs, `test_pdf_export`,
+`test_incident_tables`: 147 passed. New: the digest keeps a rule whole
+(four rules), excerpts stop on a content word, a clause failure reads as a
+noun, metadata only when stated, one webhook per workspace and the shared
+one only for one workspace, the same copy edit on every run and memory
+checked once, Try again from a kept input and none after a stage failure,
+a kept upload deleted after a day or with its KT, and giving up on one KT
+not holding back the next.
+
+### 9abp. One workspace cannot starve the others (10 Nov)
+
+**The user's request (10 Nov):** "yes goahead", to the offer to take P1-3 of
+the due-diligence review next: "one tenant can starve the others".
+
+**What was there.** A deployment's workers and its LLM account are shared by
+every workspace. `TaskQueue.claim` took the oldest queued KT, so ten KTs one
+workspace queued held another's back by ten. Nothing limited a workspace's
+KTs, recording minutes or LLM tokens: `LLM_MAX_CALLS_PER_KT` and
+`LLM_KT_DEADLINE_SECONDS` bound one KT, not a workspace or a day, and Groq's
+free plan gives the whole account 200,000 tokens a day (one 67-minute KT uses
+most of it, OPERATIONS.md).
+
+**Workspaces take turns (X153).** Of the KTs a worker may take (queued, or
+running on a lease that ran out), `job_queue._next_turn` picks one of the
+workspace with the fewest KTs running, then the workspace whose last KT
+started longest ago (`MAX(started_at)` of its tasks), and within a workspace
+the oldest. The workspace comes from the jobs table (a join, no schema
+change); a task with no job row counts as one workspace of its own. With
+one workspace waiting the order is the order they came, by the same single
+query as before. `position` (the page's "N KTs ahead of this one") plays the
+turns forward one KT at a time, nothing new submitted; a queue over 500 is
+counted in arrival order. The review's acceptance test: ten of acme's KTs
+queued, then one of globex's, runs globex's second, and `position` said 1
+before any ran. Two workers: acme's KT running, globex's next takes the free
+worker.
+
+**Daily limits (X153).** `quotas.py`: KTs and follow-up sessions,
+recording minutes (ffprobe's length at upload) and LLM tokens (sent and
+received), each over the last 24 hours, rolling. The deployment sets them
+(`CONTINUUM_KTS_PER_DAY`, `CONTINUUM_RECORDING_MINUTES_PER_DAY`,
+`CONTINUUM_LLM_TOKENS_PER_DAY`), a workspace's own replaces them
+(`python -m auth limits-set <tenant> --kts 30 --tokens 80000`; 0 no limit,
+"default" the deployment's; `python -m auth limits <tenant>` shows them with
+the use). All off by default: what a workspace may use is a commercial
+decision, and OPERATIONS.md works one example (Groq's 200,000 tokens shared
+by three pilot workspaces). A submission (`/upload`,
+`/kt-from-transcript`, a session pasted or uploaded) is checked and recorded
+in one `BEGIN IMMEDIATE` transaction, so two at the same moment cannot both
+take the last place; over a limit it is refused with 429, `Retry-After`, and
+a message naming the limit and when the next one fits ("This workspace has
+submitted 20 KTs and sessions in the last 24 hours, its daily limit of 20.
+The next one can be submitted in about 3 h 10 min (at 14:05 UTC). Your
+Continuum operator can raise the limit."); its upload is deleted, its
+Idempotency-Key freed, nothing queued, and a submission admitted but not
+queued after all is taken back. Try again, choosing the giver and naming
+speakers are not counted (the KT was counted when submitted). The tokens are
+read when a KT starts (`quotas.tokens_left`, onto the usage tracker) and
+checked before each LLM call (`llm/cached_provider`): once the KT's own
+calls reach what is left, its remaining LLM steps keep their rules-only
+results, as when a per-KT budget runs out, and the document says "This
+workspace reached its daily LLM limit (N tokens in 24 hours): K LLM step(s)
+of this KT kept their rules-only result." A KT's tokens are recorded when it
+ends, so two KTs of one workspace running at once can go over by what they
+use. Every submission, minute and token is recorded with or without a
+limit (`usage_events`: numbers and ids, removed with the workspace), so P2-7
+(usage per workspace, plans) has its data. `GET /usage` gives a signed-in
+user their workspace's use and limits. The page shows a 429's message as it
+is, without "Submission failed: 429".
+
+Not done here: request rate limits (calls a second, sign-in attempts) stay
+with the reverse proxy that comes with hosting (P1-1); a recording whose
+container does not state its length counts as a KT only (media_guard cuts it
+at the length limit).
+
+**Measured.** No figure can move: with no limit set a KT reads one value
+(None) and records nothing without live LLM tokens, and the turn order
+changes nothing with one workspace. The adversarial matrix (q1 against
+dd1) is the same on every check of its 126 cases (must 415/415, should
+77/94). The two reads the change adds to a KT take about 4 ms; the run took
+249 s against 164 s because the machine was slower (the first case, which
+loads the models, 43 s against 8 s, and the others about 1.5 times as long
+throughout). Accuracy, the noisy copies and the gates were not run again: no
+placement or rendering path changed.
+
+Tests: `tests/test_quotas.py` (15, new), `test_job_queue.py` and
+`test_llm_cost_controls.py` (57 with the new ones); the files whose routes
+or functions changed (`test_auth`, `test_browser_security`,
+`test_data_handling`, `test_input_gate`, `test_sessions`,
+`test_upload_hardening`, `test_sso`, `test_frontend_accessibility`,
+`test_review_signoff`, `test_job_status`, `test_migrations`, `test_backup`):
+158 passed. Ruff (F, E9, B) finds nothing new but one more FastAPI
+`Depends` default (B008), the idiom of every route.
+
+### 9abq. The security answers a pilot will ask for (11 Nov)
+
+**The user's request (11 Nov):** "do it, but the quality should not degrade
+keep that in mind", to the offer to take P1-4 of the due-diligence review:
+the model stack's advisories, python-jose in the SSO path, ffmpeg in the API
+process, and a written statement of how data is handled.
+
+**How "the quality should not degrade" was made checkable (X158).** The
+harnesses' embedding cache (`evaluation/enccache.py`) keyed an output on the
+model's name and the text, not on the libraries that computed it: after an
+upgrade every harness would have reused the old versions' embeddings and
+reported "no change" without measuring anything. Each cache file is now
+stamped with the versions that wrote it (torch, transformers,
+sentence-transformers, tokenizers, gliner, numpy); other versions get a file
+of their own, so an upgrade is measured on what it computes. The existing
+file was first checked against fresh computation on the versions then
+installed (840 embeddings within 1.5e-7, 153 entity results equal) and
+stamped with them. The four harnesses also load models from the local cache
+only (`HF_HUB_OFFLINE`, as the tests and the image do), so no measurement
+depends on a model revision published since.
+
+**The upgrade (X154).** pip-audit over the app's environment found 148
+advisories in 16 packages. The smallest releases that fix them were
+installed: torch 2.10.0 to 2.13.0, transformers 5.1.0 to 5.10.4 (5.10.0 was
+yanked: "missing a bunch of fixes"), sentence-transformers 5.2.3 to 5.6.1,
+and gliner 0.2.26 to 0.2.28, because 0.2.26 declares transformers below 5.2
+(pip check, and the image's install from the lock, would refuse it) and
+0.2.28 is the first to allow 5.10. pip brought huggingface_hub 1.4.1 to
+1.33.0, click 8.3.1 to 8.5.1 and two small new packages with them. Tooling
+and test-only packages went to their fixed releases (nltk 3.10.4, pypdf
+6.21.4, filelock 4.2.1, fsspec 2026.6.0, msgpack 1.2.3, Pygments 2.20.0,
+pydantic-settings 2.14.2, setuptools 84.1.0, brotli 1.2.1, pip 26.2).
+python-jose, ecdsa and rsa were removed (X155). Afterwards: 2 advisories in 1
+package, diskcache (no fixed release; only the optional local copy-edit
+model's library uses it, as recorded in SECURITY_AUDIT.md). torch 2.13.0 is
+on the CPU wheel index the image installs from. `requirements.txt` raises
+the minimums; `requirements.lock` regenerated (`scripts/lock_requirements.py`).
+
+First, what the models compute: five visible KTs (dev d01-d03, tuning g01,
+g02) run with no cache on the old versions and on the new, every encode and
+GLiNER batch recorded. 840 of 840 embeddings bit-identical (largest
+difference 0.0), 153 of 153 entity results the same, 149 of 149 facts in the
+same place. Then every set, run fresh on the new versions (a cache file
+of their own), against the last runs (dd1, q1, gdd1):
+
+| Set | Before | New versions |
+|---|---|---|
+| Tuning | 534/534, 1 discussed section Missing | 534/534, 1 (every fact the same) |
+| Dev | 551/551, 2 unsourced | 551/551, 2 (every fact the same) |
+| Holdouts (aggregate) | 88/95 | 88/95 |
+| Blind2 (aggregate) | 109/114 | 109/114 |
+| Blind3 (aggregate) | 118/132, 3 Missing | 118/132, 3 |
+| e2e (six KTs) | 1.0 each | 1.0 each, every figure the same |
+| Noisy copies | 1058/1085 | 1049/1085 first (X159, below), then 1058/1085, every fact the same |
+| Matrix | 126 cases, must 415/415, should 77/94 | the same, check for check |
+| Gates (no LLM, recorded Groq) | all pass | all pass, every value the same |
+| Blind4 (sealed, read once) | 151/160 (§9abd) | 151/160 (aggregate; unseen in all 466/501 as before) |
+
+**What the measurement caught (X159).** The noisy copies first came back
+nine facts short, all in g11 (0.833 to 0.458), g11's figures without the
+punctuation model (X90). huggingface_hub 1.33 lists a repository online even
+for a pinned revision, so `punctuation.fetch` (`snapshot_download` with a
+file filter) failed wherever the hub is offline: the harnesses (offline
+since this batch) and the image (always). Now the three pinned files are
+fetched one by one (`hf_hub_download`), from the cache when offline; the
+noisy copies read 1058 again with every fact as before. Each model the app
+loads at run time was then loaded offline: Whisper, bge-large, MiniLM,
+GLiNER and the copy-edit model already did; `scripts/fetch_models.py
+--verify` (the image's build check, which runs offline and would have failed
+the build) says "all models load offline". No KT of the six accuracy sets
+or the matrix needed the punctuation model (no "unavailable" line in their
+logs), so their comparisons stand.
+
+**The run itself.** Computing every set fresh took most of a night on the
+laptop: it slept twice (17:33, low battery, the charger connecting and
+disconnecting about 30 times; 22:54, the lid) and, after waking, a run paged
+out of memory crawled until restarted. A profile of one uncached KT (165 s,
+80 of them embedding) showed the harness itself was not the cause.
+
+**SSO on PyJWT (X155).** python-jose has an advisory with no fixed
+release (an HS256 token keyed with the public key, when algorithms are not
+restricted). `sso.verify_id_token` already passed exactly one algorithm
+from an asymmetric allow-list; it now does so with PyJWT 2.15: the
+provider's key for the token's kid (each key of the right type without
+one), the client as audience, the provider as issuer, two minutes of clock
+skew, exp, iat and sub required; a token with no audience, issuer or expiry
+is refused.
+at_hash is checked when present, as before (`sso._at_hash`, equal to
+python-jose's calculation for RS256, RS384 and ES512 on the test values).
+New cases: no audience, no issuer, no expiry, a wrong at_hash; a right
+at_hash signs in.
+
+**No media tool in the API (X156, the user's decision).** The API ran
+ffprobe on every upload in the process that takes requests. Now it saves the
+upload and reads its first 16 bytes (`media_guard.sniff`): MP4, MOV and M4A
+boxes, Matroska and WebM, WAV (RIFF, RF64, BW64), OGG, FLAC, an ID3 tag,
+ADIF, and MPEG or ADTS frame sync; anything else (a document, an image, a
+playlist, a concat list, text) is refused at once, as before. A worker runs
+ffprobe before anything decodes the file (`pipeline.check_recording`, for a
+new KT and for a session); a recording it refuses (no audio track, over the
+length limit, unreadable) fails its KT, or its session, with the same
+message, its upload deleted and the KT it was counted as taken back; a
+file ffprobe accepted and ffmpeg could not read is now the input's failure
+too, not an alert. ffprobe missing on a worker is reported as the server's
+fault. The recording-minutes limit (§9abp) moved with the probe: a
+recording's length is known only there, so over the limit its KT fails
+with the message instead of a 429, and its minutes count once whatever the
+attempts (`usage_ref`). `/readyz` asks for ffmpeg only where this process
+runs KTs. With separate workers (`CONTINUUM_WORKERS=0`, the compose file)
+the process that takes requests never parses media. The user chose this
+over hardening ffprobe in the API, knowing that a recording with no audio
+track now fails a few seconds after upload instead of at upload.
+
+**How data is handled (X157).** `docs/DATA_HANDLING.md`, for a customer's
+security review: what comes in, what is processed where (everything on the
+deployment's servers; models in the image, offline), what goes to the
+optional LLM (short redacted transcript pieces; a workspace can forbid it),
+what is stored and for how long (a table: upload, KT, screenshots, PDF, LLM
+cache, vocabulary, audit log, run numbers, logs, error reports), who can
+see it, encryption (TLS at the proxy; at rest, the host's disks), and what
+the application does not do yet. Writing it found two things, fixed: a
+warning quoted up to 200 characters of a refused LLM value in the logs (now
+its length), and deleting a workspace left its run records (`job_runs`;
+`auth.delete_tenant` now also calls `JobStore.delete_tenant`). One honest
+line stays in it: deleting a KT does not remove its cached LLM responses
+(they expire after 90 days, or with the workspace).
+
+Tests: the files of the changed areas and the model-dependent ones (SSO,
+upload hardening, limits, queue, sign-in, data handling, punctuation, LLM
+controls and provider, input gate, section model and examples, embedding
+memo, fields, PDF security and export, deployment steps, batched Whisper,
+sessions, browser security, backup, migrations): 361 passed; the end-to-end
+KTs with the recorded Groq replay: 67 passed, 1 skipped (no recorded answer
+for the current prompts, X106; no prompt changed here). Browser journey
+19/19 (three KTs at once in 80 s). Ruff (F, E9, B) against HEAD: three more
+FastAPI `Depends` defaults (B008, the routes' idiom), nothing else new.
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.
