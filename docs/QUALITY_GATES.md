@@ -2,7 +2,7 @@
 
 The thresholds a KT document must meet, measured on the PDF a reader gets.
 Regenerate with `python evaluation/quality_gates.py LABEL --replay --accuracy ACC --matrix M`,
-then `python evaluation/quality_gates.py --report gn1 gdd1`.
+then `python evaluation/quality_gates.py --report gpc2 gec8`.
 
 ## Method
 
@@ -32,7 +32,7 @@ model was called for this page.
 
 6 KTs.
 
-| Gate | Target | Before (gn1) | After (gdd1) | |
+| Gate | Target | Before (gpc2) | After (gec8) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -42,6 +42,7 @@ model was called for this page.
 | Fact units with a transcript source (inferred values excluded) | ≥ 95% | 100.0% | 100.0% | pass |
 | Stated connections drawn | 100% | 100.0% | 100.0% | pass |
 | Connections drawn that the KT does not state | 0 | 0 | 0 | pass |
+| Diagram lines whose sentence does not bear out their basis (stated, inferred), monitoring lines not stated, or lines the connections table does not list | 0 | – | 0 | pass |
 | Answer-key facts marked “no source” | 0 | 0 | 0 | pass |
 | Claims that the handover is complete or signed | 0 | 0 | 0 | pass |
 | Safety rules outside Danger Zones, or incidents inside it | 0 | 0 | 0 | pass |
@@ -52,18 +53,18 @@ model was called for this page.
 
 | KT | Pages | Facts in PDF | Placement | Relations | Sources | Problems |
 |---|---|---|---|---|---|---|
-| e2e_a_aws_ecommerce | 10 | 15/15 | 100% | 6/6 | 36/36 | 0 |
-| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 38/38 | 0 |
-| e2e_c_gcp_data_platform | 8 | 12/12 | 100% | 3/3 | 32/32 | 0 |
-| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 22/22 | 0 |
-| e2e_e_quickbite_food_delivery | 11 | 32/32 | 100% | 7/7 | 55/55 | 0 |
-| e2e_f_online_learning | 11 | 20/20 | 100% | 5/5 | 41/41 | 0 |
+| e2e_a_aws_ecommerce | 8 | 15/15 | 100% | 6/6 | 39/39 | 0 |
+| e2e_b_azure_payments | 8 | 17/17 | 100% | 7/7 | 44/44 | 0 |
+| e2e_c_gcp_data_platform | 7 | 12/12 | 100% | 3/3 | 31/31 | 0 |
+| e2e_d_ambiguous_handover | 7 | 11/11 | 100% | 3/3 | 20/20 | 0 |
+| e2e_e_quickbite_food_delivery | 9 | 32/32 | 100% | 7/7 | 57/57 | 0 |
+| e2e_f_online_learning | 8 | 20/20 | 100% | 5/5 | 43/43 | 0 |
 
 ## llm-replay
 
 5 KTs; blocked (no recorded answers): e2e_f_online_learning.
 
-| Gate | Target | Before (gn1) | After (gdd1) | |
+| Gate | Target | Before (gpc2) | After (gec8) | |
 |---|---|---|---|---|
 | Answer-key facts shown in the PDF text | ≥ 95% | 100.0% | 100.0% | pass |
 | Facts shown nowhere in the document | 0 | 0 | 0 | pass |
@@ -73,6 +74,7 @@ model was called for this page.
 | Fact units with a transcript source (inferred values excluded) | ≥ 95% | 99.5% | 99.5% | pass |
 | Stated connections drawn | 100% | 100.0% | 100.0% | pass |
 | Connections drawn that the KT does not state | 0 | 0 | 0 | pass |
+| Diagram lines whose sentence does not bear out their basis (stated, inferred), monitoring lines not stated, or lines the connections table does not list | 0 | – | 0 | pass |
 | Answer-key facts marked “no source” | 0 | 0 | 0 | pass |
 | Claims that the handover is complete or signed | 0 | 0 | 0 | pass |
 | Safety rules outside Danger Zones, or incidents inside it | 0 | 0 | 0 | pass |
@@ -83,11 +85,11 @@ model was called for this page.
 
 | KT | Pages | Facts in PDF | Placement | Relations | Sources | Problems |
 |---|---|---|---|---|---|---|
-| e2e_a_aws_ecommerce | 11 | 15/15 | 100% | 6/6 | 41/41 | 0 |
-| e2e_b_azure_payments | 11 | 17/17 | 100% | 7/7 | 40/40 | 0 |
-| e2e_c_gcp_data_platform | 10 | 12/12 | 100% | 3/3 | 35/36 | 0 |
-| e2e_d_ambiguous_handover | 8 | 11/11 | 100% | 3/3 | 25/25 | 0 |
-| e2e_e_quickbite_food_delivery | 12 | 32/32 | 100% | 7/7 | 60/60 | 0 |
+| e2e_a_aws_ecommerce | 8 | 15/15 | 100% | 6/6 | 42/42 | 0 |
+| e2e_b_azure_payments | 9 | 17/17 | 100% | 7/7 | 44/44 | 0 |
+| e2e_c_gcp_data_platform | 7 | 12/12 | 100% | 3/3 | 31/32 | 0 |
+| e2e_d_ambiguous_handover | 7 | 11/11 | 100% | 3/3 | 22/22 | 0 |
+| e2e_e_quickbite_food_delivery | 9 | 32/32 | 100% | 7/7 | 58/58 | 0 |
 
 A blocked KT has no answers in `tests/fixtures/e2e_kts_llm_recording.json`; recording them
 spends Groq quota and must be agreed first. One recorded from a user's own run can instead be
@@ -95,7 +97,7 @@ replayed from the app's LLM cache and scored with `e2e_eval.evaluate` (see the a
 
 ## Placement on other KTs (no LLM)
 
-From `evaluation/accuracy.py` run `dd1`. Holdouts and blind KTs are unseen and are
+From `evaluation/accuracy.py` run `ec8`. Holdouts and blind KTs are unseen and are
 reported in aggregate only. The target is 90% on unseen KTs. These are without an LLM; with
 Groq's section check, as the app runs, see the latest accuracy section of the audit.
 
@@ -109,5 +111,5 @@ Groq's section check, as the app runs, see the latest accuracy section of the au
 
 ## Adversarial matrix
 
-Run `dd1`: 126 cases, must checks 415/415, should checks 77/94
+Run `ec8`: 128 cases, must checks 451/451, should checks 77/94
 (`docs/ADVERSARIAL_MATRIX.md`).

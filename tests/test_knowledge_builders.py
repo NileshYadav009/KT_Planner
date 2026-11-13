@@ -755,8 +755,12 @@ def test_enrich_architecture_knowledge_attaches_a_flow_diagram_when_a_request_fl
     arch = next(s for s in result["sections"] if s["id"] == "architecture_reference")
     assert "Amazon EKS" in arch["_architecture_svg"]
     assert arch["_architecture_graph"]["central"]["header"] == "Amazon EKS"
-    # "...Amazon EKS, which uses Amazon RDS": a stated connection, with its sentence.
-    assert [(c["Connection"], c["To"]) for c in arch["_architecture_connections"]] == [("stores data in", "Amazon RDS")]
+    # "...Amazon EKS, which uses Amazon RDS": a stated connection, with its
+    # sentence; the table also lists the request path it draws (the client's
+    # review, 13 Nov), each link with its basis.
+    rows = [(c["Connection"], c["To"], c["Basis"]) for c in arch["_architecture_connections"]]
+    assert rows[-1] == ("stores data in", "Amazon RDS", "Stated")
+    assert ("request path to", "CloudFront", "Stated") in rows
 
 
 def test_enrich_architecture_knowledge_diagram_has_no_main_chain_when_only_supporting_infrastructure_is_named():
@@ -1553,10 +1557,11 @@ def test_a_failure_named_without_its_fix_is_a_gap_even_when_another_has_one():
                                             [{"id": "common_failures", "title": "COMMON FAILURES & FIXES"}])
     row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
     assert row["Coverage"] == "Partial"
+    # First checks are not a fix (the client's review, 13 Nov): both failures
+    # are asked about. The records' Fix cells say so; no gap box repeats it.
     assert row["Assessment"].endswith(
-        "; no fix stated for: Delayed video processing when background jobs accumulate in Amazon SQS.")
-    assert result["_not_stated"]["common_failures"] == [
-        "a fix for Delayed video processing when background jobs accumulate in Amazon SQS"]
+        "; no fix stated for: database connections are exhausted (first checks only); delayed video processing.")
+    assert "common_failures" not in (result.get("_not_stated") or {})
 
 
 @pytest.mark.parametrize("situation, expected", [
@@ -1588,7 +1593,8 @@ def test_the_follow_up_list_names_an_unfixed_failure_said_as_a_clause():
                                             [{"id": "common_failures", "title": "COMMON FAILURES & FIXES"}])
     row = next(s for s in result["sections"] if s["id"] == "kt_coverage")["_coverage_rows"][0]
     assert row["Assessment"].endswith(
-        "; no fix stated for: Redis memory saturation, which can make courier locations appear stale.")
+        "; no fix stated for: delayed order processing caused by Kafka consumer lag (first checks only); "
+        "Redis memory saturation, which can make courier locations appear stale.")
 
 
 def test_optional_sections_nobody_discussed_are_listed_and_asked_about():
@@ -1635,3 +1641,141 @@ def test_a_disputed_statement_is_shown_with_who_disputed_it():
     assert warning["type"] == "WarningBlock" and warning["title"].startswith("Disputed in the session")
     assert warning["warnings"] == ["“If Kafka gets stuck, delete all production messages.” (Ali), but Zoe said "
                                    "“No, that can cause data loss.”"]
+
+
+# --------------------------------------------------------------------------
+# The client's review of the e-commerce KT (13 Nov)
+# --------------------------------------------------------------------------
+
+def _failures_section(*sentences):
+    return {"id": "common_failures", "title": "Common Failures & Fixes", "coverage_content": list(sentences),
+            "_source_sentences": list(sentences)}
+
+
+def test_failure_records_say_when_no_fix_was_stated():
+    from knowledge.knowledge_builder import FIX_NOT_STATED, failure_records
+
+    found = failure_records(_failures_section(
+        "If an alert occurs, first check Grafana dashboards and application logs before restarting any service.",
+        "A recurring issue is database connection exhaustion during peak traffic.",
+        "Check active connections and connection-pool metrics before restarting application pods.",
+        "Another issue is delayed order notifications when SQS messages accumulate."))
+    # Any alert: the first response as said, not a failure.
+    assert found["triage"] == ["If an alert occurs, first check Grafana dashboards and application logs before "
+                               "restarting any service."]
+    first, second = found["records"]
+    # The failure as said (its condition and how often in its own words), named for the follow-up list.
+    assert (first["failure"], first["name"]) == ("A recurring issue is database connection exhaustion during peak "
+                                                 "traffic.", "database connection exhaustion")
+    # A check is a first check, not the fix.
+    assert first["first_checks"] == ("Check active connections and connection-pool metrics before restarting "
+                                     "application pods.")
+    assert first["fix"] == FIX_NOT_STATED
+    assert (second["failure"], second["name"], second["fix"]) == (
+        "Another issue is delayed order notifications when SQS messages accumulate.", "delayed order notifications",
+        FIX_NOT_STATED)
+    # A stated fix is the fix.
+    fixed = failure_records(_failures_section("A common issue is the Redis cache filling up.",
+                                              "Flush the session keys with the cleanup job."))["records"]
+    assert fixed[0]["fix"] == "Flush the session keys with the cleanup job."
+
+
+def test_ownership_details_find_named_people_second_levels_and_approvers():
+    from knowledge.knowledge_builder import ownership_details
+
+    def ko(*sentences, section="ownership_escalation"):
+        return {"sections": [{"id": section, "coverage_content": list(sentences)}]}
+
+    teams_only = ownership_details(ko("Developers own application code, while Platform Engineering manages "
+                                      "Kubernetes, CI/CD pipelines, and infrastructure.",
+                                      "During production incidents, contact the Platform Engineering team through "
+                                      "PagerDuty."))
+    assert teams_only == {"people": [], "second_level": False, "approvals": []}
+    named = ownership_details(ko("Page the on-call through PagerDuty, and if they do not answer, call Maria, the "
+                                 "engineering manager."))
+    assert named["people"] == ["Maria"] and named["second_level"]
+    approvals = ownership_details(ko("Never delete production queue messages without approval.",
+                                     "Schema changes need approval from the DBA team.", section="danger_zones"))
+    assert approvals["approvals"] == ["Never delete production queue messages without approval."]
+
+
+def test_operational_readiness_is_apart_from_fact_retention():
+    from knowledge.knowledge_builder import operational_readiness
+
+    ko = {"sections": [_failures_section("A recurring issue is database connection exhaustion during peak traffic."),
+                       {"id": "ownership_escalation", "coverage_content": [
+                           "During production incidents, contact the Platform Engineering team through PagerDuty."]}]}
+    topics = {"common_failures": {"covered": ["Known failures", "Fixes or workarounds"], "unknown": []},
+              "disaster_recovery": {"covered": ["Backups", "DR testing"], "unknown": ["RTO", "RPO"]},
+              "ownership_escalation": {"covered": ["Owning teams", "Escalation path", "On-call tool"], "unknown": []},
+              "danger_zones": {"covered": ["Never-do rules"], "unknown": []}}
+    readiness = operational_readiness(ko, topics)
+    by_task = {c["capability"]: c for c in readiness["checks"]}
+    # Every topic of the failures covered, but a failure with no fix: not ready.
+    assert by_task["Recognise and fix the known failures"]["status"] == "Partly"
+    # How many; the follow-up list names them.
+    assert by_task["Recognise and fix the known failures"]["detail"] == "not stated: a fix for 1 of the known failures"
+    assert by_task["Recover from data loss or an outage"]["detail"] == "to confirm: RTO, RPO; not stated: Failover / standby"
+    assert by_task["Know who to contact in an incident"]["detail"] == "not stated: named people, a second escalation level"
+    assert by_task["Know what not to touch"]["status"] == "Stated"
+    assert by_task["Get access on day one"]["status"] == "Not stated"
+    assert readiness["verdict"] == "Partly ready"
+
+
+def test_day1_access_is_derived_from_the_tools_named_and_marked_so():
+    from knowledge.knowledge_builder import enrich_day1_checklist
+
+    ko = {"sections": [
+        {"id": "day1_survival_checklist", "coverage_content": ["Please review the deployment pipeline before taking "
+                                                               "ownership."]},
+        {"id": "architecture_reference", "_architecture_components": ["Amazon EKS", "GitHub Actions", "ArgoCD",
+                                                                      "Prometheus", "Grafana", "PagerDuty"]}]}
+    day1 = enrich_day1_checklist(ko)["sections"][0]
+    assert day1["_derived_access"] == [
+        {"Get access to": "the deployment pipeline", "Tools the KT names": "GitHub Actions, ArgoCD"},
+        {"Get access to": "monitoring and logs", "Tools the KT names": "Prometheus, Grafana"},
+        {"Get access to": "alerts and on-call", "Tools the KT names": "PagerDuty"}]
+    # When the KT says what access to get, nothing is derived.
+    ko["sections"][0] = {"id": "day1_survival_checklist", "coverage_content": ["On day one, get access to the AWS "
+                                                                              "console and ArgoCD."]}
+    assert "_derived_access" not in enrich_day1_checklist(ko)["sections"][0]
+
+
+
+def test_failure_records_keep_run_on_speech_as_said_and_a_shared_sentence_with_neither():
+    from knowledge.knowledge_builder import failure_records, unfixed_failures
+
+    # Speech to text with no sentence ends, cut into pieces (the noisy copy
+    # of dev d01): records would split what was said across cells.
+    pieces = ["The most frequent incident is a bank changing its file format which causes the parser to reject the "
+              "file the remedy is to update the column mapping in the configuration table",
+              "and re-trigger the parse for that file"]
+    found = failure_records(_failures_section(*pieces))
+    assert found == {"records": [], "triage": [], "as_said": True}
+    assert isinstance(unfixed_failures(_failures_section(*pieces), found), list)
+    # The LLM's two failures from one sentence: the sentence is neither record's.
+    section = _failures_section("The two incidents you will see most are database connection exhaustion on RDS "
+                                "and pods that fail to start because a Kubernetes secret reference is wrong.")
+    section["_structured"] = {"failures": [
+        {"symptom": "database connection exhaustion on RDS"},
+        {"symptom": "pods that fail to start because a Kubernetes secret reference is wrong"}]}
+    records = failure_records(section)["records"]
+    assert [r["failure"] for r in records] == ["Database connection exhaustion on RDS",
+                                               "Pods that fail to start because a Kubernetes secret reference is wrong"]
+
+
+def test_a_check_followed_by_what_to_do_is_the_fix():
+    from knowledge.knowledge_builder import FIX_NOT_STATED, failure_records
+
+    record = failure_records(_failures_section(
+        "When invoices get stuck, check whether the PDF worker pods are running and restart them."))["records"][0]
+    assert record["fix"] == "When invoices get stuck, check whether the PDF worker pods are running and restart them."
+    assert record["fix"] != FIX_NOT_STATED and record["first_checks"] == ""
+
+
+def test_a_component_said_only_in_a_disputed_statement_is_contested():
+    from knowledge.knowledge_builder import _contested_names
+
+    ko = {"_conflicts": [{"kind": "disputed", "a": "It runs on PostgreSQL.", "b": "No, it is running on DynamoDB."}]}
+    texts = ["It runs on PostgreSQL.", "No, it is running on DynamoDB.", "PostgreSQL backups run nightly."]
+    assert _contested_names(ko, ["DynamoDB", "PostgreSQL"], texts) == {"DynamoDB"}

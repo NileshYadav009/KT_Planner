@@ -60,7 +60,8 @@ topics do not ask for them (`FEATURE_ROADMAP.md`, P2).
 
 The appendix and folding changes are recommendations, not done: they
 change what the release gates and the matrix read on the page, so they need
-their own measurement.
+their own measurement. (Done on 12 Nov, measured on every set:
+`docs/REPOSITORY_AUDIT.md` §9abr.)
 
 ## Notes on accuracy
 

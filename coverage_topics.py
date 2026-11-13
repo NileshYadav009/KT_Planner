@@ -221,7 +221,18 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"\b(?:call|contact|ring)(?!\s+cent(?:re|er)\b)\s+(?:the\s+)?(?:[\w'-]+,?\s+){0,4}?"
          r"(?:manager|lead|head\s+of\s+[\w-]+|director|duty\s+manager)\b|"
          # "If you're stuck, Omar Haddad, he's the head of data science."
-         r"\bif\s+you(?:'re|\s+are|\s+get)\s+stuck\b"),
+         r"\bif\s+you(?:'re|\s+are|\s+get)\s+stuck\b|"
+         # Who to reach in an incident, and how: "During production incidents,
+         # contact the Platform Engineering team through PagerDuty." read
+         # "Escalation path: not discussed" below that sentence (the client's
+         # e-commerce KT, 13 Nov).
+         r"\b(?:during|for|in\s+(?:case\s+of|an?))\s+(?:a\s+|an\s+)?(?:[\w-]+\s+){0,2}?(?:incidents?|outages?|"
+         r"emergenc(?:y|ies)|sev(?:erity)?[\s-]?[12])\b[^.]{0,30}?\b(?:contact|call|ring|reach|notify|"
+         r"escalate)\b|"
+         # Told to contact someone, not an alert that pages ("Alerts page
+         # the on-call through PagerDuty" names the on-call tool).
+         r"(?:^|[,;:]\s*|\b(?:then|and|please|always)\s+)(?:contact|call|reach|notify)\s+(?:the\s+)?(?:[\w-]+\s+){0,3}?"
+         r"(?:team|on-?call|engineer|manager|lead)\s+(?:through|via|on|in|using)\s+\w+"),
         ("On-call tool", ("oncall_tool",), r"\b(?:pagerduty|opsgenie|on-?call)\b"),
     ],
     "first_30_day_ownership": [
@@ -249,8 +260,14 @@ SECTION_TOPICS: Dict[str, List[Tuple[str, Tuple[str, ...], Optional[str]]]] = {
          r"|\b(?:ongoing|planned|pending|unfinished|half[\s-]done|in[\s-]flight)\s+(?:\w+\s+)?migration\b"
          r"|\bmigrat(?:e|es|ing|ion)\s+(?:off|away\s+from)\b|\bmigrating\s+(?:to|from)\b"
          r"|\bmigration\s+(?:is|was)\s+(?:not\s+(?:yet\s+)?(?:done|finished|complete)|still|half|planned|scheduled)\b"),
+        # A duty that recurs, not a failure that does: "A recurring issue is
+        # database connection exhaustion during peak traffic" pointed Open
+        # Responsibilities to Common Failures as its recurring duties (the
+        # client's e-commerce KT, 13 Nov).
         ("Recurring duties", ("recurring_responsibilities",),
-         r"\b(?:every\s+(?:week|month|day|quarter)|weekly|monthly|recurring|renew\w*|rotat\w*)\b"),
+         r"\b(?:every\s+(?:week|month|day|quarter)|weekly|monthly|"
+         r"recurring(?!\s+(?:\w+\s+)?(?:issues?|problems?|failures?|incidents?|errors?|outages?|bugs?|alerts?)\b)|"
+         r"renew\w*|rotat\w*)\b"),
     ],
     # Readiness is confirmed, not "discussed": only captured fields count.
     "handover_completion": [

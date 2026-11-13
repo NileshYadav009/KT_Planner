@@ -347,6 +347,10 @@ def smart_title(name: str, source_text: str = "") -> str:
 _ACCESS_LINE_RE = re.compile(
     r"\b(?:access|permissions?|accounts?|roles?|credentials?|log\s*in|login|vpn|sso|groups?|rotation|console|"
     r"repos?|repositor(?:y|ies)|admin|licen[cs]es?|tokens?|keys?)\b", re.IGNORECASE)
+# An instruction to read or review things, not to request access to them.
+_REVIEW_LIST_RE = re.compile(r"^\W*(?:(?:so|and|also|then|first)[\s,]+)*(?:please\s+)?(?:you\s+(?:should|need\s+to|must)\s+)?"
+                             r"(?:review|read|study|go\s+(?:through|over)|walk\s+through|look\s+(?:at|through)|"
+                             r"familiari[sz]e\s+yourself\s+with)\b", re.IGNORECASE)
 
 
 # A capture can open with the words that introduce the name: "Today I'll
@@ -1201,6 +1205,13 @@ def _extract_by_pattern(
             for line in lines[:10]:
                 has_enough_commas = line.count(",") >= 2
                 has_and_join = line.count(",") >= 1 and re.search(r"\band\b", line, re.IGNORECASE)
+                if _REVIEW_LIST_RE.match(line) and not _ACCESS_LINE_RE.search(line):
+                    # "Please review the deployment pipeline, monitoring
+                    # dashboards, and unresolved recovery documentation before
+                    # taking ownership": things to read, not access to request
+                    # (the client's e-commerce KT, 13 Nov; the checklist shows
+                    # it as such, renderers/sections/day1.py).
+                    continue
                 if has_enough_commas or has_and_join:
                     items = _split_enumerated_items(line)
                     if len(items) >= 3:

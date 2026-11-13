@@ -314,6 +314,11 @@ def block_units(block: Dict[str, Any]) -> Optional[List[str]]:
         # Read off the screen (screen_capture.py), with its time: no sentence
         # says it.
         return None
+    if block.get("document_note"):
+        # The document's own note: a pointer to another section or what the
+        # KT did not state ("No escalation was stated for a particular
+        # failure; ..."), not a transcript fact to source.
+        return None
     if kind == "NarrativeBlock":
         return [str(p) for p in block.get("paragraphs") or []]
     if kind == "ChecklistBlock":

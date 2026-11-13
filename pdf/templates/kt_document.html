@@ -8,7 +8,7 @@
   </style>
 </head>
 <body>
-  <div class="cover-page">
+  <div class="cover-page{% if compact_cover %} cover-compact{% endif %}">
     <div class="cover-content">
       <p class="eyebrow">Knowledge Transfer & Handover</p>
       <h1>{{ title }}</h1>
@@ -65,7 +65,7 @@
   </div>
   {% endif %}
 
-  <div class="document-body">
+  <div class="document-body{% if dense %} dense{% endif %}">
     {{ content_html | safe }}
   </div>
   {# The date and job id are on the cover. A closing note here landed alone

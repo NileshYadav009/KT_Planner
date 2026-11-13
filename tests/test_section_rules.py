@@ -602,3 +602,23 @@ def test_a_run_piece_that_names_its_own_topic_keeps_it():
                          "deployment_and_rollback")]
     apply_continuation_rules(facts, meta | {"deployment_and_rollback": {"title": "deployment"}})
     assert facts[1].primary_classification.section_id == "architecture_reference"
+
+
+def test_a_team_that_manages_something_is_ownership_and_a_tool_is_not():
+    # The client's e-commerce KT (13 Nov): the second clause went to
+    # Deployment on its "CI/CD pipelines".
+    assert match_section_rules("Platform Engineering manages Kubernetes, CI/CD pipelines, and infrastructure."
+                               ).section_id == "ownership_escalation"
+    assert match_section_rules("The data team maintains the ETL scripts.").section_id == "ownership_escalation"
+    rule = match_section_rules("Terraform manages infrastructure provisioning.")
+    assert rule is None or rule.section_id != "ownership_escalation"
+
+
+def test_what_to_do_before_taking_ownership_is_the_day1_checklist():
+    assert match_section_rules("Please review the deployment pipeline, monitoring dashboards, and unresolved "
+                               "recovery documentation before taking ownership.").section_id == "day1_survival_checklist"
+    assert match_section_rules("Before you go on-call, read the runbooks.").section_id == "day1_survival_checklist"
+    # A never-do rule stays a danger zone, an escalation stays ownership.
+    assert match_section_rules("Never delete production queue messages before taking over.").section_id == "danger_zones"
+    assert match_section_rules("Escalate to the platform team before taking over the pager."
+                               ).section_id == "ownership_escalation"

@@ -68,6 +68,8 @@ GATES = [
     ("evidence", "Fact units with a transcript source (inferred values excluded)", 0.95, "min"),
     ("relations", "Stated connections drawn", 1.0, "min"),
     ("wrong_relations", "Connections drawn that the KT does not state", 0, "zero"),
+    ("unsupported_relations", "Diagram lines whose sentence does not bear out their basis (stated, inferred), "
+                              "monitoring lines not stated, or lines the connections table does not list", 0, "zero"),
     ("false_no_source", "Answer-key facts marked “no source”", 0, "zero"),
     ("false_signoff", "Claims that the handover is complete or signed", 0, "zero"),
     ("safety", "Safety rules outside Danger Zones, or incidents inside it", 0, "zero"),
@@ -101,6 +103,9 @@ def _measure(reports):
         "evidence": round(sourced / units, 4) if units else None,
         "relations": round(sum(r["relations"]["found"] for r in reports) / stated, 4) if stated else None,
         "wrong_relations": count("false_positives", "wrong_relations"),
+        "unsupported_relations": sum(len(r["false_positives"].get("connections_unsupported_or_unlisted", []))
+                                     for r in reports) if any("connections_unsupported_or_unlisted"
+                                                              in r["false_positives"] for r in reports) else None,
         "false_no_source": count("false_positives", "known_facts_marked_no_source"),
         "false_signoff": count("false_positives", "false_signoff"),
         "safety": count("false_negatives", "safety_warnings_misplaced") + count("false_positives",

@@ -177,3 +177,14 @@ def test_a_rewrite_that_shows_a_withdrawn_value_alone_is_refused(monkeypatch):
     text = " ".join(out["deployment_and_rollback"])
     assert "seven days" in text and "30 days" in text
     assert not any("seven days" in line and "30 days" not in line for line in text.splitlines())
+
+
+def test_a_placeholder_on_the_line_after_its_label_is_removed():
+    # The client's e-commerce KT with Groq (13 Nov): "**Rollback trigger:**\nNot
+    # specified" reached the incident card as "Rollback trigger: Not specified".
+    from ai import _without_placeholder_lines
+    polished = ("Helm maintains application deployment configurations.\n\n**Rollback trigger:**\nNot specified\n\n"
+                "**Action:**\nThe rollback procedure uses ArgoCD.\n\n**Target time:**\nNot specified")
+    out = _without_placeholder_lines(polished)
+    assert "Not specified" not in out and "The rollback procedure uses ArgoCD." in out
+    assert _without_placeholder_lines("**Approver:**\nMaria") == "**Approver:**\nMaria"

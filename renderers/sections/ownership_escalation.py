@@ -37,6 +37,43 @@ _WE_OWN_RE = re.compile(r"^(?:we|our team)\s+(?:own|are\s+responsible\s+for)\s+(
 _PRONOUN_OBJECT_RE = re.compile(r"^(?:it|this|that|them|everything)\b[\s,]*", re.IGNORECASE)
 
 
+def _owner_clauses(fact: str) -> List[str]:
+    """The fact cut at its connectives, except a list's short last item:
+    "Platform Engineering manages Kubernetes, CI/CD pipelines, and
+    infrastructure" lost "and infrastructure" when cut at ", and" (the
+    client's e-commerce KT, 13 Nov)."""
+    pieces = re.split("(" + _CLAUSE_SPLIT_RE.pattern + ")", fact, flags=re.IGNORECASE)
+    clauses: List[str] = []
+    for i in range(0, len(pieces), 2):
+        part = pieces[i]
+        joint = pieces[i - 1] if i else ""
+        head = _LEAD_IN_RE.sub("", part.strip())
+        # Only a list's short tail joins the clause before it; a clause of its
+        # own ("while the Platform team recreates application infrastructure
+        # using Terraform", a user's KT U05) stays apart, as before.
+        if clauses and not (_OWNS_RE.match(head) or _WE_OWN_RE.match(head)) and len(head.split()) <= 4:
+            clauses[-1] += joint + part
+        else:
+            clauses.append(part)
+    return clauses
+
+
+def _escalation_sentences(section: Dict[str, Any]) -> List[str]:
+    """Who to contact in an incident, as said: kept apart from who owns what
+    (the client's review, 13 Nov)."""
+    from coverage_topics import topic_pattern
+
+    rx = topic_pattern("ownership_escalation", "Escalation path")
+    out: List[str] = []
+    for text in _coverage_paragraphs(section):
+        for sentence in _SENTENCE_SPLIT_RE.split(text):
+            sentence = sentence.strip()
+            if sentence and not sentence.endswith("?") and rx is not None and rx.search(sentence) \
+                    and sentence not in out:
+                out.append(sentence)
+    return out
+
+
 def _clean_what(what: str) -> str:
     what = what.strip().rstrip(".")
     # "owns it since the reorg": the pronoun stands for the system itself.
@@ -52,7 +89,7 @@ def _explicit_ownership_statements(section: Dict[str, Any]) -> List[Tuple[str, s
         for sentence in _SENTENCE_SPLIT_RE.split(text):
             if sentence.strip().endswith("?"):
                 continue  # a question names no owner
-            clauses = [c for fact in fact_texts(sentence) for c in _CLAUSE_SPLIT_RE.split(fact)]
+            clauses = [c for fact in fact_texts(sentence) for c in _owner_clauses(fact)]
             for clause in clauses:
                 clause = _LEAD_IN_RE.sub("", clause.strip())
                 we = _WE_OWN_RE.match(clause)
@@ -123,6 +160,12 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     guidance_paragraphs: List[str] = []
     if fields.get("operational_escalation_guidance", {}).get("value"):
         guidance_paragraphs.append(fields["operational_escalation_guidance"]["value"])
+
+    # Incident escalation as said, its own row apart from who owns what
+    # (the client's review, 13 Nov: application ownership, infrastructure
+    # ownership and escalation read as one list).
+    if not paragraphs:
+        rows.extend({"role": "Incident escalation", "team": s} for s in _escalation_sentences(section))
 
     blocks = []
     if paragraphs:

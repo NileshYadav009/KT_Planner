@@ -2291,3 +2291,61 @@ first. You asked for it with one condition: the quality must not drop.
 - **The laptop:** the full re-measurement took most of a night because the
   laptop slept twice (low battery with the charger disconnecting, then the
   lid). Keep it awake and on a working charger for long runs.
+
+## A shorter PDF without the repeats (audit §9abr, 12 Nov)
+
+You asked whether the KT PDF could be simpler. Reading the QuickBite PDF
+page by page showed about three of its 11 pages were things already shown
+elsewhere, or placeholders. All seven clean-ups you agreed to are done:
+
+- **A gap is shown once in detail:** the follow-up list has the detail;
+  the coverage table shows each section's status in a few words, and the
+  box under each section no longer ends with the same reminder every time.
+- **Removed:** the "Not Covered in This KT" section (the coverage table,
+  the cover and the follow-up list already say it), the "Not signed yet"
+  section before anyone has started a sign-off, and Tribal Knowledge rows
+  that only repeated another section word for word.
+- **Moved:** the table listing each line of the architecture diagram is at
+  the end, next to the Sources, instead of between the diagram and the next
+  section. The section list goes on the cover when that saves a page.
+- **Shorter wording:** one line instead of a paragraph of counts about the
+  transcript's facts; the incident card names a failure the way the
+  follow-up list does.
+- **Found on the way:** on one of your test KTs, a section the KT never
+  discussed still showed a value borrowed from another section's sentence,
+  while the cover called it not covered. It now shows as not covered; the
+  sentence is still in its own section.
+- **Result:** the six end-to-end KTs went from 59 pages to 49; QuickBite
+  from 11 to 10, the online learning KT from 11 to 8. Every accuracy test
+  set came out the same, fact for fact, and every release check passes.
+
+## The client's review of the e-commerce KT (audit §9abs, 13 Nov)
+
+The client reviewed the PDF made from a 260-word e-commerce transcript and
+asked for seven things. Everything was done as a general rule, not for this
+KT, and checked on every test set.
+
+- **Architecture diagram:** a line now shows only what a sentence says. A
+  line the KT only implies is dashed and the table says why; a monitoring
+  tool gets no line unless the KT says what it monitors; components with no
+  stated connection are listed under the diagram and on the follow-up list.
+  The table lists every line in the diagram.
+- **Day-1 checklist:** "Please review X, Y and Z before taking ownership"
+  becomes a checklist (with the sentence as said), and the access a new owner
+  needs is derived from the tools the KT names, marked as derived.
+- **Failures:** one record per failure, in the speaker's words, with "Not
+  stated in the KT" when no fix was given. A failure with only first checks
+  now counts as having no fix.
+- **Ownership:** who owns what, and who to call in an incident, apart.
+  Missing named people, a second escalation level and approvers are listed,
+  never invented.
+- **Coverage:** facts kept, where they were placed, and whether a new owner
+  could run the system (eight tasks) are now separate measures.
+- **Length:** the client's KT went from 11 pages to 10 with more in it; no
+  page is nearly empty and the monitoring facts are no longer shown three
+  times. Sections are not merged.
+- **Found on the way:** on one test KT a sentence was hidden because another
+  sentence shared three of its words; fixed.
+
+Every accuracy test set came out the same, fact for fact, and every release
+check passes, with a new one for the diagram.

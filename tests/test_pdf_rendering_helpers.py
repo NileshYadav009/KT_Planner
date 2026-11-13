@@ -84,7 +84,7 @@ def test_render_section_blocks_tags_grid_table_for_decision_table():
         {"type": "DecisionTable", "title": "A", "columns": ["C1", "C2"], "rows": [{"C1": "x", "C2": "y"}]},
     ])]
     html = render_section_blocks(sections)
-    assert 'class="grid-table"' in html
+    assert 'class="grid-table two-col"' in html          # two columns: widths of their own in the coverage page
     assert 'class="kv-table"' not in html
 
 

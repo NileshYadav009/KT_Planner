@@ -918,3 +918,12 @@ def test_an_objective_said_with_doubt_or_disputed_is_not_headlined():
     assert extract_rto_rpo("RTO is 2 hours. I think the RPO is 15 minutes.",
                            doubted=["I think the RPO is 15 minutes."]) == {
         "rto_metric": "2 hours", "rpo_metric": "15 minutes - said with doubt or disputed; confirm with the outgoing owner"}
+
+
+def test_things_to_review_are_not_access_to_request():
+    from field_populator import _REVIEW_LIST_RE, _ACCESS_LINE_RE
+    said = ("Please review the deployment pipeline, monitoring dashboards, and unresolved recovery documentation "
+            "before taking ownership.")
+    assert _REVIEW_LIST_RE.match(said) and not _ACCESS_LINE_RE.search(said)
+    # Access named: still a list of access to request.
+    assert _ACCESS_LINE_RE.search("Review Grafana dashboards, Azure DevOps repositories and AKS namespaces.")

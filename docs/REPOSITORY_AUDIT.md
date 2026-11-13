@@ -8119,6 +8119,303 @@ for the current prompts, X106; no prompt changed here). Browser journey
 19/19 (three KTs at once in 80 s). Ruff (F, E9, B) against HEAD: three more
 FastAPI `Depends` defaults (B008, the routes' idiom), nothing else new.
 
+### 9abr. The PDF without its repeats (12 Nov)
+
+**The user's request (12 Nov):** "is there any changes planned for the KT
+PDF? can we simplify it or remove any clutter from it?", then "go ahead and
+do all 7". Nothing was in progress: the receiver's review of 3 Nov
+(`KT_RECEIVER_FEEDBACK.md`) and the audit of that day had recommended
+moving the coverage report and Sources after the body and folding the
+empty and repeated parts, not done because they change what the gates and
+the matrix read. The QuickBite PDF (the browser journey's, 11 pages for a
+KT of about 22 sentences) was read page by page; about three pages were
+the same thing shown again or placeholders.
+
+**What was shown more than once, and what changed (X160).**
+
+1. A gap appeared in a box under its section, in the coverage matrix's
+   Assessment column and in the follow-up list, word for word. The matrix
+   now shows each section's status in a few words
+   (`kt_coverage.short_assessment`: "4 of 5 topics covered.", "All 2 topics
+   covered; not every failure has a fix.", "Optional."), with one line
+   saying the follow-up list holds what is missing; the rows keep the full
+   assessment, which the web page and the scorers read. Every detail the
+   column dropped (not discussed, stated as not documented or not done, no
+   fix stated, the stated gap's quote) is on the follow-up list. The box
+   under a section keeps its one sentence without "(confirm with the
+   outgoing owner before relying on this section)", which its title says.
+2. "Not Covered in This KT" listed the sections the matrix calls Missing,
+   the cover counts and the follow-up list names: left out. The sections
+   themselves are still left out of the body.
+3. "Sign-off: Not signed yet." before any sign-off: left out; once a
+   sign-off starts its section shows the record (`signoff.apply_to_document`).
+4. Tribal Knowledge printed the Danger Zones rule again (a pointer since
+   P1-10, the rule whole since X147): a digest row whose sentence another
+   section shows is left out, and the digest when nothing is left
+   (`document_dedup`); a row said nowhere else stays, as that fact's home.
+   `excerpt` and `states_a_rule` went with the pointers.
+5. The diagram's "Connections stated in the KT" table (most of a page)
+   sat between the diagram and the next section: it is evidence for the
+   diagram's lines, now an appendix before the Sources
+   (`pdf_rendering.take_connections_table`, "§", the table's own name, so
+   its rows still print sentence numbers). The web page keeps it under
+   Architecture.
+6. A contents page of its own for a dozen lines: the sections are listed
+   on the cover whenever that saves the page (it did only up to 9 pages).
+7. The knowledge coverage paragraph of counts is one line ("All 30 facts
+   from the transcript are in this document; 2 say something is missing
+   or undecided (in the follow-up list); 1 remark(s) with no content were
+   left out."; when any fact is not shown it says how many are); the
+   matrix's Sign-off row ("recorded at review") is left out; the incident
+   card names a failure said as a clause as the follow-up list does
+   ("Redis memory saturation, which can make courier locations appear
+   stale").
+
+**What the stricter check found (X161).** The matrix's `gaps_consistent`
+check compared the "Not Covered" list with the matrix's Missing rows, but
+the list was copied from those rows, so it could not fail.
+`not_covered_titles` now returns what the body actually leaves out. On the
+user's KT U05 it failed: Deployment & Rollback, never discussed, Missing in
+the matrix and on the cover, still showed "Terraform Workspace / State
+Location: The Data Engineering team owns database restoration, while the
+Platform team recreates application infrastructure using Terraform.", a
+value its field borrowed from a sentence shown in full under Ownership. The
+old PDF showed that section and named it under "Not Covered" too. A
+section the matrix finds nothing said about (no statements of its own, no
+topic covered; not one whose stray statements were filed there, X103) is
+recorded (`_not_covered_sections`) and rendered as not covered, before the
+duplicate removal and the completeness check, which would put back any
+fact that had no other home.
+
+**Measured** (label pc2 against up1, up2 and gup1; no LLM; blind4 not
+read: no placement changed):
+
+| Set | Before | After |
+|---|---|---|
+| Tuning, dev, holdouts, blind2, blind3, e2e | as §9abq | the same, fact for fact |
+| Noisy copies | 1058/1085 | the same, fact for fact |
+| Matrix | 126 cases, must 415/415, should 77/94 | 127 cases (R08 new; R04's card wording updated), must 424/424, should 77/94 |
+| Gates | all pass | all pass; one evidence unit fewer per KT (the repeated digest row); evidence with the replay 0.995 to 0.9949, the same one unsourced unit |
+| e2e PDF pages, no LLM | 10, 11, 8, 8, 11, 11 (59) | 8, 9, 7, 7, 10, 8 (49) |
+| e2e PDF pages, recorded Groq | 11, 11, 10, 8, 12 (52) | 9, 9, 8, 7, 10 (43) |
+
+QuickBite saves one page: what is left is its content, the coverage
+report and follow-up list (about a page and a half), the connections
+appendix and the Sources.
+
+Tests: every file that reads the rendered sections, the coverage page,
+the sign-off or the exports (Ask, Atlassian, audit regressions, conflicts,
+dialogue, dedup, evidence, exports, fact units, web page structure, golden
+KT, grounding, incident card, queue, job status and store, knowledge
+builders, observability, PDF export, rendering helpers and security,
+renderers, sign-off, runbooks, screen capture, sessions, staleness, speaker
+names, and the e2e KTs with the recorded replay): 685 passed, 1 skipped
+(no recorded answer for the current prompts, X106). Browser journey
+19/19 (its KT, QuickBite with an edit, 11 to 10 pages). Ruff (F, E9, B) against HEAD: nothing new.
+
+### 9abs. The client's review of the e-commerce KT (13 Nov)
+
+**The request (13 Nov).** The user generated a KT from a 260-word e-commerce
+transcript, and the client reviewed the PDF (11 pages) against a reference
+document of their own: architecture lines not backed by the transcript,
+length, no real Day-1 checklist, coverage reported as readiness, failures
+scattered, ownership mixed with escalation, and a regression run asked for.
+The changes had to be generic, not for this KT.
+
+**Reproduced first.** The client's run was in the app's database (read
+only): job BB058DA0, 16 Groq answers in the LLM cache. A copy of that cache
+replayed with `LLM_CACHE=replay` (nothing sent) gave the client's PDF line
+for line, 11 pages; without an LLM the same transcript gave 10. The pages
+were rendered to images with pdf.js in the Playwright Chromium of
+`.venv-tools` (the Read tool has no rasteriser here) and read one by one,
+before and after.
+
+**What was wrong, and what changed.**
+
+1. *Architecture (X162).* The diagram's caption said "Lines show only
+   connections stated in the KT", and it drew React first in the request
+   path (no sentence places it), lines from the workload to RDS and Redis
+   from "PostgreSQL on Amazon RDS stores transactional data, and Redis
+   handles caching" (no service named), and Prometheus and Grafana
+   "monitoring" the workload from "For monitoring, we use Prometheus and
+   Grafana" and "first check Grafana dashboards". The request path was not
+   in the connections table. Now every line has a basis
+   (`architecture_diagram.add_edge`): stated (its sentence names both ends),
+   or inferred and why (`_INFERRED_WHY`: a store's role stated, no sender,
+   a deployment target not named, an order assumed), drawn dashed. A
+   monitoring tool gets a line only when its clause names what it watches
+   (`_MONITOR_TARGET_RE`); a deployment tool's line is stated when the
+   target is named (`_DEPLOY_TARGET_RE`). The request path is checked link
+   by link (`said_together`, with a path verb); a frontend no sentence
+   places stands apart (`unplaced`). Components named without a line are
+   listed under the diagram and asked about in the follow-up list (not
+   delivery or alerting tools; not a component named only in a disputed
+   statement, `_contested_names`, matrix W01). The table, renamed
+   "Connections in the diagram", lists every line with its basis
+   (`describe_connections`). `check_connections` reads each line against its
+   sentence again and against the table the document stores; it is a new
+   gate, `unsupported_relations` (0 in both modes).
+2. *Placement (X163).* "Developers own application code, while Platform
+   Engineering manages Kubernetes, CI/CD pipelines, and infrastructure": the
+   second clause went to Deployment on "CI/CD pipelines" (and the card's
+   rollback row quoted it). A team or function that manages, maintains or
+   looks after something is Ownership (`section_rules`, 0.97; a tool such as
+   "Terraform manages ..." is not). "Please review the deployment pipeline,
+   monitoring dashboards, and unresolved recovery documentation before
+   taking ownership" went to Monitoring (to Ownership with Groq, printed as
+   escalation guidance): what to do before taking over is the Day-1
+   checklist (`BEFORE_TAKING_OVER_RX`). Danger and escalation rules keep
+   their ties.
+3. *Gaps (X164).* "... but the current RTO and RPO need confirmation" was no
+   stated gap: the follow-up list did not ask for RTO and RPO
+   (`dialogue._VALUE_TO_CONFIRM_RE`; not "changes need confirmation from the
+   CAB"). The clause before "but" still states DR testing
+   (`dialogue.stated_before_gap`). "A recurring issue is ..." was pointed to
+   as Open Responsibilities' recurring duties; "During production incidents,
+   contact the Platform Engineering team through PagerDuty" read "not
+   discussed: Escalation path" (`coverage_topics`; "Alerts page the on-call
+   through PagerDuty" still names the on-call tool, not a path).
+4. *Failures (X165).* One record per failure in the table the section had
+   (`knowledge_builder.failure_records`): the speaker's sentence word for
+   word in one cell (the failure said alone in Issue/Symptom; a sentence
+   that also says what to do in that step's cell; a separate check or fix
+   whole in its cell), and "How to Fix" always there, "Not stated in the
+   KT" when none was. A check is a first check, not a fix ("Check active
+   connections ... before restarting application pods"); a check followed
+   by an action is the fix (`_THEN_ACT_RE`). A failure with first checks
+   only is reported without a fix ("(first checks only)"); before, the
+   follow-up list asked only about the other failure. "If an alert occurs,
+   first check ..." is the first response to any alert, above the table.
+   One line says where incident escalation is (`_incident_contact_in`), and
+   the section's "Gaps to confirm" box no longer repeats the Fix cells.
+   Run-on speech with no sentence ends (a piece over 40 words, or one that
+   starts in lower case) is shown as said, as before (`as_said`): records
+   split such pieces across cells. With an LLM, its symptom is replaced by
+   the sentence that says it when exactly one does, and a sentence naming
+   two failures is neither record's.
+5. *Ownership (X166).* An owner's list keeps its last item ("Kubernetes,
+   CI/CD pipelines, and infrastructure" lost "and infrastructure"); a clause
+   of its own stays apart (matrix U05). Incident escalation is its own row,
+   as said. What was not stated is in the section's box and the follow-up
+   list, never filled in: named people (a name used as a person: "call
+   Maria", "Omar, the engineering manager"), a second escalation level, and
+   who approves an action said to need approval
+   (`knowledge_builder.ownership_details`).
+6. *Day-1 (X167).* An instruction over several things is the sentence as
+   said, then one checklist item per thing ("Review the deployment
+   pipeline", ...; `renderers/sections/day1.instruction_items`). Access to
+   request is derived from the tools the KT names, by role, in a table
+   titled as derived; it covers no coverage topic
+   (`enrich_day1_checklist`). The field populator no longer reads a list of
+   things to review as access to request (`field_populator._REVIEW_LIST_RE`),
+   which had marked the access topic covered.
+7. *Coverage (X168).* Three measures apart: fact retention, placement (how
+   each fact's section was decided: rule, classifier, LLM check; no answer
+   key is read here), and operational readiness: eight tasks a new owner
+   must be able to do, each Stated, Partly or Not stated with what is
+   missing (`operational_readiness`). A failure without a fix, a value to
+   confirm or an escalation with no named person is not "Stated". The
+   matrix is one row per status listing its sections (the rows are
+   unchanged for the web page and the scorers), and the follow-up list
+   names each section once.
+8. *Length (X169).* A technology list of 8 or more short rows is two
+   label/value pairs a row; the diagram comes before the architecture
+   sentences (it cannot break, and after them it left a third of a page
+   blank); a short document's cover shares page 1 with the Quick Reference
+   when that saves a page; a tighter spacing when that saves a page; a field
+   block whose values the sentences shown as said below it hold word for
+   word is left out (`pdf_rendering._repeats_said`: "Tools: Prometheus,
+   Grafana, CloudWatch, PagerDuty" and "Alert Routing: PagerDuty sends
+   incident notifications" above the two sentences that say them; a short
+   labelled value stays unless the sentence names its label, so "RTO: 4
+   hours" stays). Sections are not merged: the 17-section template stays.
+
+**Found on the way (X170).** The residual check took a polished item as a
+paraphrase of a sentence when it kept 60% of its words; an item that is
+itself a sentence as said ("Escalations should be directed to Laura
+Bennett, Housing Systems Manager.") hid another ("The system is owned by the
+housing systems team.", dev d09), which the completeness check then put
+under Additional Notes. Only a reworded item paraphrases now.
+
+**A regression on the way, and its fix.** The first version of the
+failure records, ownership rows and Day-1 checklist loosened the "already
+shown" check (an ownership table read as one string, a checklist heading
+as the speaker's words, "another issue" as a stop word), so the speaker's
+sentences stopped being printed: tuning 534 to 531, dev 551 to 548, noisy
+copies 1058 to 1053, matrix 7 must checks. Those loosenings were reverted
+and the structures hold the sentences as said instead.
+
+**The client's KT, before and after** (`kt_run.py`, scratch state):
+
+| | Before | After |
+|---|---|---|
+| Pages, with the client's Groq answers replayed | 11 | 10 (11 of 20 requests from the recording; 9 new prompts, rules only) |
+| Pages, live Groq (18 calls, 10.9k tokens) | 11 | 11 on the first live run; 10 after X171 (its answers replayed) |
+| Pages, rules only | 10 | 10 |
+| Facts in the document | 27/27 | 27/27 |
+| Diagram | 6 connections listed as stated (2 monitoring and 2 store lines no sentence states); the request path drawn through React, not in the table | 7 lines, each in the table with its basis (4 stated, 3 inferred, dashed); 7 components listed without a line (React, Amazon SQS, Prometheus, Grafana, GitHub Actions, Amazon ECR, PagerDuty) |
+| Stated gaps | 0 | 1 (RTO and RPO to confirm) |
+| Failures with no fix reported | 1 of 2 | 2 of 2 |
+
+**Measured** (label ec8 against pc2, gec8 against gpc2, on the final code
+after X171; no LLM except the recorded replay; blind4 not read: no
+placement changed):
+
+| Set | Before | After |
+|---|---|---|
+| Tuning, dev, holdouts, blind2, blind3, e2e | as §9abq | the same, fact for fact |
+| Noisy copies | 1058/1085 | the same, fact for fact |
+| Matrix | 127 cases, must 424/424, should 77/94 | 128 cases (R09 new; R03, R07, R08 read the follow-up wording: the Common Failures box they quoted is gone), must 451/451, should 77/94 |
+| Gates | all pass | all pass, both modes; new `unsupported_relations` 0; every other value the same |
+| e2e PDF pages, no LLM | 8, 9, 7, 7, 10, 8 (49) | 8, 8, 7, 7, 9, 8 (47) |
+| e2e PDF pages, recorded Groq | 9, 9, 8, 7, 10 (43) | 8, 9, 7, 7, 9 (40) |
+
+Tests: every file that reads the rendered sections, the coverage page, the
+diagram or the exports (architecture diagram, Ask, Atlassian, audit
+regressions, conflicts, coverage topics, dependencies, deployment steps,
+dialogue, dedup, dynamic schema, the e-commerce KT, evidence, exports, fact
+units, field populator, web page structure, golden KT, grounding, incident
+card and tables, job status and store, knowledge builders, observability,
+PDF export, rendering helpers and security, quality score, renderers,
+sign-off, runbooks, screen capture, section rules, session framing,
+sessions, speaker names and roles, staleness, validation, and the e2e KTs
+with the recorded replay): 976 passed, 1 skipped (X106) and 8 failed on the
+first run. One was a defect (the same transcript pasted three times gave
+three identical failure records; repeats are now one record); seven read
+the layout this batch changes on purpose (the connections table's rows,
+the follow-up wording, the summary's two new counts, a CSS class, a
+one-row grid the sentence below already holds), updated with the reason.
+All 9 pass again. Browser journey 19/19 (the QuickBite PDF 10 pages; three
+KTs at once 115 s). After X171, the files it touches and the e2e KTs again
+(card, knowledge builders, renderers, PDF export, polish integrity, prompts,
+dedup, audit regressions, exports, web page, runbooks, golden and
+e-commerce KTs, incident tables, evidence, conflicts, rendering helpers,
+fact units, e2e with the replay): 469 passed, 1 skipped (X106). Browser
+journey again 19/19 (J16, three KTs at once: 162 s, 115 s before X171 and
+103 s before this batch: a short document is now laid out up to six times,
+for the cover, spacing and diagram-order variants, keeping the shortest;
+worth trimming if it matters). Ruff (F, E9, B) against HEAD: nothing new.
+
+**The live run (X171).** The replay reused 11 of 20 requests (the 9 with
+new prompts ran rules-only), so with the user's approval the client's
+transcript ran once live through Groq: 18 calls, 9,757 input and 1,178
+output tokens, one 429 retried, nothing failed. It came out at 11 pages and
+showed what the replay could not: "**Rollback trigger:**\nNot specified"
+(the value on the line after its label) passed the polish's placeholder
+filter and reached the card; the card read the polished text across a
+blank line, so its rollback row began "Helm maintains application
+deployment configurations."; Day-1 printed the LLM's "First-day actions"
+field, the review instruction again; and the diagram, after the
+technology list, left most of page 3 blank. Fixed as general rules
+(`ai._PLACEHOLDER_LINE_RE`, `_qr_sentences` line by line without labels,
+Day-1 drops a field the instruction's words already hold, and
+`build_job_pdf` tries the architecture sentences before the diagram,
+`details_before_diagram`, keeping the shorter). The live run's 18 answers,
+replayed through the final code (all 18 reused, nothing sent): 10 pages,
+every page read.
+
+Not done: sections are not merged (the template's 17 sections stay).
+
 ## 9. Fix from this audit already worth doing next
 
 The §5.1 renderer/schema id mismatch (`first_30_day_plan` vs `first_30_day_ownership`) is a live, silent rendering bug on the branch currently being worked. Recommend fixing it in the same session as this audit, before moving on to any of Phases 4–26, since it directly undermines the very validation check this branch just introduced.

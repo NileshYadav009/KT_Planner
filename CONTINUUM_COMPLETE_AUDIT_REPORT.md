@@ -186,7 +186,8 @@ failure; Tribal Knowledge showing a cut-off question; a "thanks" to confirm.
 | Generic AI text? | None in rules-only mode; with Groq, polish is refused when it adds specifics or flips a negation |
 | Assumptions as facts? | No: hedges are "To confirm", a receiver's unconfirmed words are listed, not printed as facts |
 
-Recommendations, not yet done: move the Sources appendix and the full
+Recommendations, not yet done (done on 12 Nov with more of the same,
+`docs/REPOSITORY_AUDIT.md` §9abr): move the Sources appendix and the full
 coverage matrix to an appendix after Sign-off (they are reference, not
 reading); drop "Architecture Metadata" rows that are all "Not discussed" into
 the follow-up list. See `KT_RECEIVER_FEEDBACK.md`.

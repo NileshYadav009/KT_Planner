@@ -154,6 +154,16 @@ def _labels(graph: Dict[str, Any]) -> Dict[str, str]:
     return labels
 
 
+def _connection_problems(ko: Dict[str, Any]) -> List[str]:
+    from architecture_diagram import check_connections
+
+    section = next((s for s in ko.get("sections") or [] if s.get("id") == "architecture_reference"), None) or {}
+    graph = section.get("_architecture_graph")
+    if not graph or "entry_links" not in graph:
+        return []                              # a graph from before lines had a basis
+    return check_connections(graph, section.get("_architecture_connections") or [])
+
+
 def check_relations(ds: Dict[str, Any], ko: Dict[str, Any]) -> Dict[str, List[str]]:
     graph = _graph(ko)
     missing, wrong = [], []
@@ -315,6 +325,9 @@ def evaluate(ds: Dict[str, Any], result: Dict[str, Any], pdf_bytes: bytes, mode:
         "durations_not_in_transcript": invented_durations,
         "products_not_in_transcript": invented_products,
         "wrong_relations": relations["wrong"],
+        # Each diagram line against its sentence, and against the connections
+        # table the document prints (architecture_diagram.check_connections).
+        "connections_unsupported_or_unlisted": _connection_problems(ko),
         "session_framing_printed": framing,
         "false_signoff": signoff,
         "false_covered_sections": g["false_covered"],

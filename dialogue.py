@@ -60,6 +60,19 @@ _DOUBTED_SOURCE_RE = re.compile(
     r"\baccording\s+to\s+(?:the|our)\s+(?:old|previous|outdated|last|earlier)\s+"
     r"(?:document(?:ation)?|docs?|runbook|wiki|notes)\b", re.IGNORECASE)
 _UNCONFIRMED_RES.append(_DOUBTED_SOURCE_RE)
+# A value named as the subject: "Disaster recovery testing happens twice
+# annually, but the current RTO and RPO need confirmation." was no stated gap,
+# so the follow-up list did not ask for RTO and RPO and Disaster Recovery read
+# 4 of 5 topics covered (the client's e-commerce KT, 13 Nov). A stated gap; with
+# no value claimed it is not a doubted claim (is_unconfirmed). Not an approval
+# rule ("changes need confirmation from the CAB", "every schema change needs
+# verification by the DBA team").
+_VALUE_TO_CONFIRM_RE = re.compile(
+    r"\b(?:rto|rpo|slas?|slos?|targets?|values?|numbers?|figures?|limits?|thresholds?|estimates?|"
+    r"dates?|retention(?:\s+period)?|versions?|sizes?|settings?|timeouts?|windows?)\s+(?:still\s+|also\s+)?"
+    r"needs?\s+(?:to\s+be\s+)?(?:confirm(?:ed|ation)|verif(?:ied|ication)|validat(?:ed|ion)|"
+    r"clarif(?:ied|ication))\b(?!\s+(?:from|by|with)\b)", re.IGNORECASE)
+_UNCONFIRMED_RES.append(_VALUE_TO_CONFIRM_RE)
 # A caveat on a value, said as an instruction about the document: "Do not
 # describe the one-hour recovery estimate as a verified guarantee." Printed as
 # a Danger Zones "never" rule; it says the estimate is unconfirmed.
@@ -331,6 +344,19 @@ _GAP_LEAD_IN_RE = re.compile(
     r"|which\s+(?:is|has))\s*)?$", re.IGNORECASE)
 _RELATIVE_ANTECEDENT_RE = re.compile(
     r"\b(?:something|anything|nothing|everything|thing|things|one|part|area|bit|what|which|that|where)\s*$", re.IGNORECASE)
+
+
+def stated_before_gap(text: str) -> str:
+    """The clause before the contrast word when it states something on its
+    own ("Disaster recovery testing happens twice annually" in "..., but the
+    current RTO and RPO need confirmation"), else "". The coverage check
+    reads it as a statement of its section's topic: the whole sentence is a
+    stated gap, and DR testing read "stated as not documented" (the client's
+    e-commerce KT, 13 Nov)."""
+    match = _CONTRAST_RE.search(text or "")
+    if not match or not states_something_before_gap(text):
+        return ""
+    return text[:match.start()].split("?")[-1].strip().rstrip(",;")
 
 
 def states_something_before_gap(text: str) -> bool:

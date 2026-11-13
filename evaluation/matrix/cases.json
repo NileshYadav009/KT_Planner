@@ -2341,7 +2341,7 @@
         {"check": "absent_re", "pattern": "^you see that again", "level": "must"},
         {"check": "shows", "text": "Alerting (no first step stated)", "level": "must"},
         {"check": "coverage", "section": "common_failures", "not": ["Strong"], "level": "must"},
-        {"check": "shows", "text": "a fix for Database connection exhaustion on RDS", "level": "must"}
+        {"check": "shows", "text": "no fix stated for database connection exhaustion on RDS", "level": "must"}
       ]
     },
     {
@@ -2352,7 +2352,7 @@
       ],
       "expect": [
         {"check": "shows", "text": "Delayed order processing caused by Kafka consumer lag (during dinner peaks)", "level": "must"},
-        {"check": "shows", "text": "Redis memory saturation can also make courier locations appear stale No fix was stated", "level": "must"},
+        {"check": "shows", "text": "Redis memory saturation, which can make courier locations appear stale No fix was stated", "level": "must"},
         {"check": "shows", "text": "Do not deploy Avoid production deployments during major promotional campaigns", "level": "must"}
       ]
     },
@@ -2382,8 +2382,8 @@
       ]
     },
     {
-      "id": "R07", "category": "R e2e review", "title": "What a CTO reads first (the due-diligence review, P0-2): a safety rule quoted whole in Tribal Knowledge, no 'Not discussed' metadata filler, a failure said as a clause named as a noun after 'a fix for', no job id on the cover (the user's QuickBite KT)",
-      "regression": "tests/test_document_dedup.py::test_a_rule_in_the_digest_keeps_every_word; tests/test_renderer_sections.py::test_architecture_reference_with_nothing_stated_says_it_was_not_covered; tests/test_knowledge_builders.py::test_a_failure_said_as_a_clause_reads_as_a_noun_after_no_fix_stated_for",
+      "id": "R07", "category": "R e2e review", "title": "What a CTO reads first (the due-diligence review, P0-2): a safety rule never cut short (since 12 Nov it is not repeated in Tribal Knowledge at all), no 'Not discussed' metadata filler, a failure said as a clause named as a noun after 'a fix for', no job id on the cover (the user's QuickBite KT)",
+      "regression": "tests/test_document_dedup.py::test_a_digest_that_only_repeats_other_sections_is_left_out; tests/test_renderer_sections.py::test_architecture_reference_with_nothing_stated_says_it_was_not_covered; tests/test_knowledge_builders.py::test_a_failure_said_as_a_clause_reads_as_a_noun_after_no_fix_stated_for",
       "transcript": [
         "Today I'm handing over QuickBite, our food delivery platform on Amazon EKS. PostgreSQL on Amazon RDS stores order records, and Redis caches courier locations. During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag. Check consumer lag and the order service error rate before restarting consumers. Redis memory saturation can also make courier locations appear stale. Never delete messages from production queues during an incident without approval."
       ],
@@ -2391,9 +2391,27 @@
         {"check": "absent_re", "pattern": "queues during an…", "level": "must"},
         {"check": "verbatim", "text": "Never delete messages from production queues during an incident without approval.", "level": "must"},
         {"check": "absent_re", "pattern": "^(documentation link|last updated|verified by incoming owner) not discussed", "level": "must"},
-        {"check": "shows", "text": "a fix for Redis memory saturation, which can make courier locations appear stale", "level": "must"},
+        {"check": "shows", "text": "Redis memory saturation, which can make courier locations appear stale", "level": "must"},
         {"check": "absent_re", "pattern": "fix (stated )?for:? redis memory saturation can", "level": "must"},
         {"check": "pdf_absent", "text": "Job ID", "level": "must"}
+      ]
+    },
+    {
+      "id": "R08", "category": "R e2e review", "title": "The PDF clean-up (12 Nov): no section that only repeats another (Not Covered in This KT, a Tribal Knowledge row copying Danger Zones), no sign-off placeholder before a sign-off starts, no boilerplate after each gap, no page of counts, and the contents on the cover of a short KT (the user's QuickBite KT)",
+      "regression": "tests/test_pdf_export.py::test_sections_with_nothing_from_the_kt_are_left_out_of_the_body; tests/test_document_dedup.py::test_a_digest_that_only_repeats_other_sections_is_left_out; tests/test_renderer_sections.py::test_kt_coverage_shows_each_sections_status_and_leaves_the_detail_to_the_follow_up_list",
+      "transcript": [
+        "Today I'm handing over QuickBite, our food delivery platform on Amazon EKS. PostgreSQL on Amazon RDS stores order records, and Redis caches courier locations. During dinner peaks, the most common issue is delayed order processing caused by Kafka consumer lag. Check consumer lag and the order service error rate before restarting consumers. Redis memory saturation can also make courier locations appear stale. Never delete messages from production queues during an incident without approval."
+      ],
+      "expect": [
+        {"check": "verbatim", "text": "Never delete messages from production queues during an incident without approval.", "level": "must"},
+        {"check": "absent", "text": "Non-obvious operational knowledge", "level": "must"},
+        {"check": "pdf_absent", "text": "Not Covered in This KT", "level": "must"},
+        {"check": "pdf_absent", "text": "Not signed yet", "level": "must"},
+        {"check": "pdf_absent", "text": "before relying on this section", "level": "must"},
+        {"check": "pdf_absent", "text": "were checked against this document", "level": "must"},
+        {"check": "pdf_absent", "text": "Table of Contents", "level": "must"},
+        {"check": "shows", "text": "Redis memory saturation, which can make courier locations appear stale", "level": "must"},
+        {"check": "gaps_consistent", "level": "must"}
       ]
     },
     {
@@ -2597,6 +2615,32 @@
         {"check": "coverage", "section": "security_controls", "is": ["Missing"], "level": "should"},
         {"check": "coverage", "section": "ownership_escalation", "is": ["Missing"], "level": "should"},
         {"check": "coverage", "section": "cost_optimization", "is": ["Missing", "Not discussed"], "level": "should"},
+        {"check": "gaps_consistent", "level": "must"}
+      ]
+    },
+    {
+      "id": "R09", "category": "R e2e review", "title": "The client's review of the e-commerce KT (13 Nov): diagram lines only where a sentence states them (inferred ones marked, monitoring never assumed, the table listing every line), one record per failure with a missing fix said, ownership apart from escalation with missing contacts and approvers named, a Day-1 checklist from the handover instruction, and operational readiness apart from fact retention",
+      "regression": "tests/test_architecture_diagram.py::test_a_monitoring_tool_used_for_monitoring_draws_no_line; tests/test_architecture_diagram.py::test_the_request_path_is_stated_link_by_link_and_an_unplaced_frontend_stands_apart; tests/test_knowledge_builders.py::test_failure_records_say_when_no_fix_was_stated; tests/test_knowledge_builders.py::test_operational_readiness_is_apart_from_fact_retention; tests/test_renderer_sections.py::test_day1_checklist_splits_an_instruction_over_its_things",
+      "transcript": [
+        "Hi team, today I will be handing over our e-commerce platform infrastructure and DevOps operations. The application handles approximately 45,000 orders daily, with traffic increasing significantly during promotional campaigns. The frontend is built using React, while backend services run on Python FastAPI. Customer requests enter through CloudFront and an Application Load Balancer before reaching workloads hosted on Amazon EKS. PostgreSQL on Amazon RDS stores transactional data, and Redis handles caching. Amazon SQS manages asynchronous order notifications. Our CI/CD pipeline uses GitHub Actions to build and test application code. Docker images are pushed to Amazon ECR, and ArgoCD deploys them to Kubernetes. Terraform manages infrastructure provisioning, while Helm maintains application deployment configurations. For monitoring, we use Prometheus and Grafana. CloudWatch collects AWS infrastructure logs, and PagerDuty sends incident notifications. If an alert occurs, first check Grafana dashboards and application logs before restarting any service. A recurring issue is database connection exhaustion during peak traffic. Check active connections and connection-pool metrics before restarting application pods. Another issue is delayed order notifications when SQS messages accumulate. Never delete production queue messages without approval. Database backups run daily and are retained for 21 days. Disaster recovery testing happens twice annually, but the current RTO and RPO need confirmation. Developers own application code, while Platform Engineering manages Kubernetes, CI/CD pipelines, and infrastructure. During production incidents, contact the Platform Engineering team through PagerDuty. The rollback procedure uses ArgoCD to restore the previous stable application version. Please review the deployment pipeline, monitoring dashboards, and unresolved recovery documentation before taking ownership."
+      ],
+      "pdf": true,
+      "expect": [
+        {"check": "absent", "text": "Prometheus monitors", "level": "must"},
+        {"check": "absent", "text": "Grafana monitors", "level": "must"},
+        {"check": "shows", "text": "Inferred: the KT says what Amazon RDS does, not which service uses it", "level": "must"},
+        {"check": "shows", "text": "React (frontend)", "level": "must"},
+        {"check": "in_section", "text": "Platform Engineering manages Kubernetes, CI/CD pipelines, and infrastructure", "sections": ["ownership_escalation"], "level": "must"},
+        {"check": "shows", "text": "named people to contact (only teams or roles were named)", "level": "must"},
+        {"check": "shows", "text": "who approves", "level": "must"},
+        {"check": "in_section", "text": "Please review the deployment pipeline, monitoring dashboards, and unresolved recovery documentation before taking ownership", "sections": ["day1_survival_checklist"], "level": "must"},
+        {"check": "shows", "text": "Review unresolved recovery", "level": "must"},
+        {"check": "shows", "text": "no fix stated for database connection exhaustion (first checks only)", "level": "must"},
+        {"check": "shows", "text": "to confirm: RTO, RPO", "level": "must"},
+        {"check": "shows", "text": "Partly ready", "level": "must"},
+        {"check": "absent", "text": "Recurring duties, under Common Failures", "level": "must"},
+        {"check": "verbatim", "text": "Never delete production queue messages without approval.", "level": "must"},
+        {"check": "sourced", "level": "must"},
         {"check": "gaps_consistent", "level": "must"}
       ]
     }

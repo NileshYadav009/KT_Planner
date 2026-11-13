@@ -14,7 +14,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from architecture_diagram import build_architecture_graph, describe_connections, render_architecture_svg
+from architecture_diagram import (build_architecture_graph, check_connections, describe_connections,
+                                  describe_unconnected, render_architecture_svg)
 
 SNAPSHOTS = os.path.join(os.path.dirname(__file__), "snapshots")
 
@@ -104,14 +105,21 @@ def test_the_drawing_keeps_managed_services_outside_the_compute_box():
 
 def test_tripwise_connections_are_the_stated_ones_with_their_sentences():
     g = _tripwise()
+    # "Datadog is our monitoring tool" says nothing it monitors: no line (the
+    # client's review, 13 Nov), Datadog listed as named without a connection.
     assert _edges(g) == {
         ("central", "writes to", "dynamodb"), ("central", "calls", "stripe"), ("central", "calls", "sendgrid"),
-        ("github-actions", "deploys to", "central"), ("datadog", "monitors", "central"),
-        ("aws-secrets-manager", "supplies secrets to", "central"),
+        ("github-actions", "deploys to", "central"), ("aws-secrets-manager", "supplies secrets to", "central"),
     }
-    rows = {(r["From"], r["Connection"], r["To"]): r["Said in the KT"] for r in describe_connections(g)}
-    assert rows[("TripWise (Amazon ECS · Fargate)", "writes to", "DynamoDB")].startswith("Bookings are written to DynamoDB")
-    assert rows[("CloudFormation", "provisions", "AWS")] == "Infrastructure is defined in CloudFormation."
+    assert "Datadog (monitoring)" in describe_unconnected(g)
+    rows = {(r["From"], r["Connection"], r["To"]): r for r in describe_connections(g)}
+    written = rows[("TripWise (Amazon ECS · Fargate)", "writes to", "DynamoDB")]
+    assert written["Said in the KT"].startswith("Bookings are written to DynamoDB")
+    # Nobody is named as the writer: inferred, and the table says why.
+    assert written["Basis"] == "Inferred: the KT says what DynamoDB does, not which service uses it"
+    assert rows[("GitHub Actions", "deploys to", "TripWise (Amazon ECS · Fargate)")]["Basis"] == "Stated"
+    assert rows[("CloudFormation", "provisions", "AWS")]["Said in the KT"] == "Infrastructure is defined in CloudFormation."
+    assert check_connections(g) == []
 
 
 def test_the_source_of_a_flow_is_whoever_the_sentence_says_does_it():
@@ -232,8 +240,61 @@ def test_a_deploy_verb_belongs_to_the_tool_that_says_it():
     assert ("argocd", "deploys to", "central") in edges
     assert ("github-actions", "pushes images to", "amazon-ecr") in edges
     assert not any(e[0] == "github-actions" and e[2] == "central" for e in edges)
-    # Tools listed together share the verb.
-    assert {("prometheus", "monitors", "central"), ("grafana", "monitors", "central")} <= edges
+    # "Prometheus and Grafana cover monitoring" names nothing they monitor:
+    # no line (the client's review, 13 Nov).
+    assert not any(e[1] == "monitors" for e in edges)
+    # Said with what they watch, tools listed together share the verb.
+    g = build_architecture_graph(["Amazon EKS", "Prometheus", "Grafana"],
+                                 ["Prometheus and Grafana monitor service health."], {}, "Shopfront")
+    assert {("prometheus", "monitors", "central"), ("grafana", "monitors", "central")} <= _edges(g)
+    assert all(e["basis"] == "stated" for e in g["edges"])
+
+
+def test_a_monitoring_tool_used_for_monitoring_draws_no_line():
+    """The client's e-commerce KT (13 Nov): "For monitoring, we use
+    Prometheus and Grafana" and "first check Grafana dashboards and
+    application logs" drew both monitoring the workload."""
+    g = build_architecture_graph(
+        ["Amazon EKS", "Prometheus", "Grafana", "CloudWatch"],
+        ["For monitoring, we use Prometheus and Grafana.",
+         "If an alert occurs, first check Grafana dashboards and application logs before restarting any service."],
+        {}, "E-Commerce Platform")
+    assert not g["edges"]
+    assert describe_unconnected(g) == ["Prometheus and Grafana (monitoring)"]
+
+
+def test_the_request_path_is_stated_link_by_link_and_an_unplaced_frontend_stands_apart():
+    sentences = ["The frontend is built using React, while backend services run on Python FastAPI.",
+                 "Customer requests enter through CloudFront and an Application Load Balancer before reaching "
+                 "workloads hosted on Amazon EKS."]
+    g = build_architecture_graph(["React", "FastAPI", "CloudFront", "Application Load Balancer", "Amazon EKS"],
+                                 sentences, {}, "E-Commerce Platform")
+    assert [n["label"] for n in g["entry"]] == ["Users", "CloudFront", "Application Load Balancer"]
+    assert [n["label"] for n in g["unplaced"]] == ["React"]
+    assert [(lk["from"], lk["to"], lk["basis"]) for lk in g["entry_links"]] == [
+        ("users", "cloudfront", "stated"), ("cloudfront", "application-load-balancer", "stated"),
+        ("application-load-balancer", "central", "stated")]
+    assert "React (frontend)" in describe_unconnected(g)
+    # Every line is in the table, with its sentence.
+    rows = describe_connections(g)
+    assert [(r["From"], r["To"]) for r in rows][:3] == [
+        ("Users", "CloudFront"), ("CloudFront", "Application Load Balancer"),
+        ("Application Load Balancer", "E-Commerce Platform (Amazon EKS)")]
+    assert check_connections(g, rows) == []
+    # Named in different sentences: the order is assumed, and the line dashed.
+    g = build_architecture_graph(["CloudFront", "Application Load Balancer", "Amazon EKS"],
+                                 ["We use CloudFront.", "There is an Application Load Balancer."], {}, "X")
+    assert {lk["basis"] for lk in g["entry_links"]} == {"inferred"}
+    assert 'stroke-dasharray="4 3"' in render_architecture_svg(g)
+
+
+def test_the_connection_check_finds_a_line_its_sentence_does_not_bear_out():
+    g = build_architecture_graph(["Amazon EKS", "Amazon RDS"], ["Our services write orders to Amazon RDS."], {}, "X")
+    assert check_connections(g) == []
+    g["edges"][0]["quote"] = "We use Grafana."                 # a sentence that names neither end
+    assert check_connections(g)
+    g = build_architecture_graph(["Amazon EKS", "Amazon RDS"], ["Our services write orders to Amazon RDS."], {}, "X")
+    assert check_connections(g, rows=[]) == ["central writes to amazon-rds: drawn, but not in the connections table"]
 
 
 def test_a_worker_that_picks_jobs_off_a_queue_consumes_from_it():
@@ -272,9 +333,9 @@ def test_a_queue_fed_by_an_unnamed_sender_is_drawn_dashed_and_says_so():
     # A data store holding the system's own files keeps its solid line.
     assert not by_target["cloud-storage"].get("unstated_sender")
     publish = [r for r in describe_connections(g) if r["To"] == "Pub/Sub" and r["Connection"] == "publishes to"]
-    assert publish and publish[0]["From"].endswith("(sender not stated in the KT)")
+    assert publish and publish[0]["Basis"] == "Inferred: the KT does not say who sends to Pub/Sub"
     svg = render_architecture_svg(g)
-    assert 'stroke-dasharray="4 3"' in svg and "does not say who sends this" in svg
+    assert 'stroke-dasharray="4 3"' in svg and "Dashed line: inferred, not stated" in svg
 
 
 def test_a_named_sender_or_the_system_itself_keeps_a_solid_line():

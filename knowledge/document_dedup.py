@@ -9,10 +9,11 @@ three times printed it three times. This pass runs on the rendered document:
   appears is its home. A later copy is removed from narrative text (from
   the paragraph, not the whole paragraph). Tables and lists are never cut;
   their sentences only count as already shown.
-- Digests point instead of copying: a Tribal Knowledge row whose sentence
-  has a home elsewhere shows a short excerpt and where the full statement is.
-  A rule (safety-critical, or with a negation, obligation or condition) is
-  quoted whole, with where it is: an excerpt can drop its condition.
+- A digest keeps only what it alone says: a Tribal Knowledge row whose
+  sentence has a home elsewhere is left out (it was a pointer, then a
+  repeat of Danger Zones word for word on the QuickBite KT), and the digest
+  goes when nothing is left (the PDF clean-up, 12 Nov). A row said nowhere
+  else stays whole: it is that fact's home.
 - Text that quotes on purpose is left alone: the Quick Reference (the
   incident card), the coverage page, warnings, captions and the Connections
   evidence table.
@@ -28,12 +29,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 EXEMPT_SECTIONS = frozenset({"quick_reference", "kt_coverage"})
 DIGEST_SECTIONS = frozenset({"tribal_knowledge"})
 _QUOTING_BLOCK_TYPES = frozenset({"ImageBlock", "DiagramBlock", "CodeBlock"})
-_QUOTING_BLOCK_TITLES = frozenset({"Connections stated in the KT", "Mentioned elsewhere in the KT"})
+# The diagram's connections table (its title until 13 Nov, and since), and pointers.
+_QUOTING_BLOCK_TITLES = frozenset({"Connections stated in the KT", "Connections in the diagram",
+                                   "Mentioned elsewhere in the KT"})
 # Conflict warnings quote two statements from their section; Danger Zones'
 # own warning block is that section's content, not a quote.
 _QUOTING_WARNING_PREFIX = ("Possible conflict", "Unconfirmed change", "Questioned in the session",
                            "Disputed in the session")
-WHERE_COLUMN = "Where it is"
 
 _MIN_WORDS = 5
 _MIN_EXACT_WORDS = 3
@@ -141,41 +143,6 @@ def _without(paragraph: str, sentences: List[str]) -> str:
     return paragraph.strip()
 
 
-# A rule keeps every word in the digest: cut to its first words, "Never
-# delete messages from production queues during an incident without approval"
-# read "Never delete messages from production queues during an…", a stronger
-# rule than the one said (the due-diligence review, P0-2; invariant 3). Its
-# "Where it is" column still names the section that holds it.
-_RULE_RE = re.compile(r"\b(?:never|not|no|must|avoid|without|unless|only|except)\b|n't\b", re.IGNORECASE)
-_RULE_CLASSIFICATIONS = frozenset({"Safety-critical"})
-# An excerpt does not stop on a word that needs the next one ("is our…",
-# "during an…", "table by…").
-_FUNCTION_WORDS = frozenset(
-    "a an the our their its his her your my this that these those of to in on at by for from with during "
-    "before after into over under and or but so than as is are was were be been can will should may might "
-    "would could if when while because since until".split())
-
-
-def states_a_rule(text: str, classification: str = "") -> bool:
-    """A statement whose meaning depends on every word: a safety-critical
-    row, or one with a negation, an obligation or a condition."""
-    return classification in _RULE_CLASSIFICATIONS or bool(_RULE_RE.search(text or ""))
-
-
-def excerpt(text: str, words: int = 8) -> str:
-    """The start of a statement, for a digest row that points to it: always
-    cut inside the first sentence, so the pointer never repeats a sentence,
-    and never just after a word that needs the next one."""
-    sentences = _split(text)
-    parts = (sentences[0] if sentences else text).split()
-    if len(parts) <= 2:
-        return " ".join(parts).rstrip(",;:.") + "…"
-    keep = min(words, max(3, len(parts) - 2))
-    while keep < len(parts) - 1 and parts[keep - 1].lower().strip(",;:.") in _FUNCTION_WORDS:
-        keep += 1
-    return " ".join(parts[:keep]).rstrip(",;:.") + "…"
-
-
 def _quotes_on_purpose(block: Dict[str, Any]) -> bool:
     title = str(block.get("title") or "")
     return (block.get("type") in _QUOTING_BLOCK_TYPES or title in _QUOTING_BLOCK_TITLES
@@ -184,7 +151,8 @@ def _quotes_on_purpose(block: Dict[str, Any]) -> bool:
 
 def dedupe_rendered_sections(rendered_sections: List[Dict[str, Any]]) -> Dict[str, int]:
     """Give every fact one home in the rendered document (in place).
-    Returns counts: sentences removed and digest rows turned into pointers."""
+    Returns counts: sentences removed, and digest rows left out because
+    another section shows them."""
     facts = _Facts()
     stats = {"removed": 0, "referenced": 0}
 
@@ -252,24 +220,29 @@ def dedupe_rendered_sections(rendered_sections: List[Dict[str, Any]]) -> Dict[st
                             "paragraphs": [f"Everything said about this was already shown under {emptied_by}."]}]
         section["blocks"] = kept_blocks
 
+    emptied = []
     for section in rendered_sections or []:
         if section.get("section_id") not in DIGEST_SECTIONS:
             continue
+        blocks = []
         for block in section.get("blocks") or []:
             rows = block.get("rows")
             if not isinstance(rows, list) or not rows or "Knowledge" not in (block.get("columns") or []):
+                blocks.append(block)
                 continue
+            kept = []
             for row in rows:
                 text = str(row.get("Knowledge") or "")
-                sentences = _split(text) or [text]
-                homes = [facts.home_of(s) for s in sentences]
-                if all(homes):
-                    if not states_a_rule(text, str(row.get("Classification") or "")):
-                        row["Knowledge"] = excerpt(text)
-                    row[WHERE_COLUMN] = homes[0]
-                    stats["referenced"] += 1
+                if all(facts.home_of(s) for s in _split(text) or [text]):
+                    stats["referenced"] += 1               # shown in full in its own section
                 else:
-                    row[WHERE_COLUMN] = "Only here"
-            if WHERE_COLUMN not in block["columns"]:
-                block["columns"] = list(block["columns"]) + [WHERE_COLUMN]
+                    kept.append(row)
+            if kept:
+                block["rows"] = kept
+                blocks.append(block)
+        section["blocks"] = blocks
+        if not any(b.get("rows") for b in blocks):
+            emptied.append(section)
+    if emptied and isinstance(rendered_sections, list):
+        rendered_sections[:] = [s for s in rendered_sections if not any(s is e for e in emptied)]
     return stats

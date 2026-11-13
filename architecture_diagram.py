@@ -304,6 +304,50 @@ _PASSIVE_RE = re.compile(
     r"\b(?:is|are|was|were|gets?|got|be|been|being)\s+(?:\w+ly\s+)?(?:\w+ed|written|sent|kept|held|run|built|made|put|"
     r"stored|done)\b|\b(?:go|goes|flow|flows|land|lands|live|lives|sit|sits)\b|\b(?:is|are)\s+(?:in|on)\b", re.IGNORECASE)
 _CLAUSE_BREAK_RE = re.compile(r"[;:]|,\s*(?:and|but|while|so)\b|\.\s", re.IGNORECASE)
+# The system named anywhere in a sentence (the subject pattern above, not
+# anchored): a line's end the sentence states.
+_SYSTEM_WORDS_RE = re.compile(
+    r"\b(?:we|our\s+(?:\w+\s+)?(?:app|application|api|services?|backend|system|platform|workloads?|code)|"
+    r"the\s+(?:\w+\s+)?(?:app|application|api|services?|backend|system|platform|workloads?|workers?|pods?|code))\b",
+    re.IGNORECASE)
+# What a monitoring tool watches, named in its clause: "Prometheus and
+# Grafana monitor service health", "Grafana shows the service health",
+# "Datadog scrapes metrics from the pods". "For monitoring, we use Prometheus
+# and Grafana" names nothing it watches (the cluster, the cloud account or
+# the application): no line is drawn. From that sentence and from "first
+# check Grafana dashboards" the diagram drew Prometheus and Grafana
+# monitoring the workload (the client's e-commerce KT, 13 Nov).
+_MONITOR_TARGET_RE = re.compile(
+    r"\b(?:monitor\w*|watch\w*|track\w*|scrap\w*|observ\w*|show\w*|graph\w*|instrument\w*|alert\w*\s+on|"
+    r"collect\w*\s+(?:\w+\s+){0,3}?from)\s+(?:the\s+|our\s+|all\s+|each\s+|every\s+)?(?:[\w-]+\s+){0,2}?"
+    r"(?:services?|applications?|apps?|apis?|backend|frontend|cluster|pods?|workloads?|nodes?|containers?|"
+    r"endpoints?|health|performance|latency|uptime|errors?|requests?|kubernetes|k8s|openshift)\b", re.IGNORECASE)
+# Where a deployment tool deploys, named: "ArgoCD deploys them to EKS",
+# "Flux syncs the releases to AKS", "... deploys workloads to the cluster".
+_DEPLOY_TARGET_RE = re.compile(
+    r"\b(?:deploy\w*|release\w*|ship\w*|roll\w*\s+out|sync\w*|promot\w*)\s+(?:\w+\s+){0,3}?(?:to|into|onto|on)\s+"
+    r"(?:the\s+|our\s+)?(?:[\w-]+\s+){0,2}?(?:cluster|production|prod|staging|services?|apps?|applications?|"
+    r"workloads?|environments?|pods?|nodes?|servers?|kubernetes|k8s|openshift)\b", re.IGNORECASE)
+# Whose secrets: "Key Vault holds the secrets for the payment services".
+_SECRETS_TARGET_RE = re.compile(r"\b(?:for|to|used\s+by|of)\s+(?:the\s+|our\s+|all\s+)?(?:[\w-]+\s+){0,2}?"
+                                r"(?:services?|apps?|applications?|pods?|workloads?|backend|apis?)\b", re.IGNORECASE)
+# A sentence about the request path, not two components named together.
+_PATH_CUE_RE = re.compile(r"\b(?:through|via|behind|in\s+front\s+of|rout\w*|forward\w*|enter\w*|reach\w*|hits?|"
+                          r"serv(?:ed|es|ing)|go(?:es)?\s+to|pass\w*\s+(?:through|to)|terminat\w*|proxi\w*|"
+                          r"fronts?|fronted|points?\s+(?:to|at)|sends?\s+(?:requests|traffic)|access\w*)\b",
+                          re.IGNORECASE)
+# Who sends the requests at the head of the request path.
+_USERS_WORD_RE = re.compile(r"\b(?:users?|customers?|clients?|visitors?|requests?|traffic|students?|patients?|"
+                            r"members?|shoppers?|riders?|drivers?|consumers?|browsers?|callers?)\b", re.IGNORECASE)
+# Why a line is inferred, for the connections table (describe_connections).
+_INFERRED_WHY = {
+    "role": "the KT says what {to} does, not which service uses it",
+    "sender": "the KT does not say who sends to {to}",
+    "deploy": "the KT does not say where {from} deploys",
+    "secrets": "the KT does not say which service uses {from}",
+    "order": "the order is assumed from the kind of component",
+    "provision": "the KT says {from} provisions the infrastructure; the account is assumed",
+}
 
 
 # "Students access the React application", "Customers use the React
@@ -548,14 +592,61 @@ def build_architecture_graph(
         boundary = {"label": vendors.pop() if len(vendors) == 1 else ("Cloud platform" if vendors else "Platform"),
                     "subtitle": None}
 
+    # The request path, link by link: stated when one sentence names both
+    # ends ("Customer requests enter through CloudFront and an Application
+    # Load Balancer before reaching workloads hosted on Amazon EKS"),
+    # otherwise its order is assumed from the kind of component (dashed). A
+    # frontend no sentence places in the path ("The frontend is built using
+    # React") stands apart, unconnected: it was drawn first in the path with
+    # nothing saying it was there (the client's e-commerce KT, 13 Nov).
+    def said_together(a: str, b: str) -> Optional[str]:
+        for sentence in sentences:
+            if not _PATH_CUE_RE.search(sentence):
+                continue          # "The frontend is built using React, while backend services run on FastAPI"
+            ids = {nid for _, _, nid in _mentions(sentence, node_aliases)}
+            a_ok = bool(_USERS_WORD_RE.search(sentence)) if a == "users" else a in ids
+            if a_ok and b in ids:
+                return sentence
+        return None
+
+    unplaced: List[Dict[str, str]] = []
+    entry_links: List[Dict[str, Any]] = []
+    if entry:
+        chain = entry[1:]
+        others = [n["id"] for n in chain] + (["central"] if central is not None else [])
+        placed = []
+        for n in chain:
+            if node_layer.get(n["id"]) == "frontend" and not said_together("users", n["id"]) \
+                    and not any(said_together(n["id"], o) for o in others if o != n["id"]):
+                unplaced.append(n)
+            else:
+                placed.append(n)
+        entry = [entry[0]] + placed if placed else []
+        path = [n["id"] for n in entry] + (["central"] if entry and central is not None else [])
+        for a, b in zip(path, path[1:], strict=False):           # each link: a box and the next
+            quote = said_together(a, b) or (said_together(b, a) if a != "users" else None)
+            link = {"from": a, "to": b, "label": "request path to", "quote": quote or "",
+                    "basis": "stated" if quote else "inferred"}
+            if not quote:
+                link["inferred"] = "order"
+            entry_links.append(link)
+
     edges: List[Dict[str, str]] = []
     seen_edges = set()
 
-    def add_edge(src: str, dst: str, label: str, quote: str, kind: str, unstated_sender: bool = False) -> None:
+    def add_edge(src: str, dst: str, label: str, quote: str, kind: str, unstated_sender: bool = False,
+                 inferred: Optional[str] = None) -> None:
+        """`inferred`: why the line is not stated (a key of _INFERRED_WHY).
+        A stated line's sentence names both ends; an inferred one names one
+        end and what it does, and is drawn dashed (the client's review, 13
+        Nov: no line presented as confirmed without the sentence for it)."""
         if (src, dst) in seen_edges or src == dst:
             return
         seen_edges.add((src, dst))
-        edge = {"from": src, "to": dst, "label": label, "quote": quote, "kind": kind}
+        edge = {"from": src, "to": dst, "label": label, "quote": quote, "kind": kind,
+                "basis": "inferred" if inferred or unstated_sender else "stated"}
+        if inferred or unstated_sender:
+            edge["inferred"] = inferred or "sender"
         if unstated_sender:
             edge["unstated_sender"] = True
         edges.append(edge)
@@ -587,11 +678,13 @@ def build_architecture_graph(
                     continue
             label = None
             unstated = False
+            inferred = None
             if prev and _LIST_GAP_RE.match(sentence[prev[0]:start]) and not _has_cue(sentence[prev[0]:start]):
-                source, window, unstated = prev[1], prev[2], prev[3]
+                source, window, unstated, inferred = prev[1], prev[2], prev[3], prev[4]
                 label = _stated_label(layer, window, defining)
             if label is None:
                 source, window = None, None
+                inferred = None
                 for pstart, pend, pid in reversed(spots[:idx]):
                     segment = sentence[pend:start]
                     if pid == "central":
@@ -633,11 +726,19 @@ def build_architecture_graph(
                             prev = None
                             continue
                         unstated = True
+                    elif not (_SYSTEM_SUBJECT_RE.match(window)
+                              or (system_word and re.search(system_word, window.lower()))):
+                        # "PostgreSQL on Amazon RDS stores transactional
+                        # data", "Bookings are written to DynamoDB": what the
+                        # store holds, not which service writes it. The system
+                        # is the only candidate, so the line is drawn, dashed.
+                        inferred = "role"
                     source = "central"
                 label = _stated_label(layer, window, defining)
             if label:
-                add_edge(source, nid, label, sentence, "data" if layer != "external" else "external", unstated)
-                prev = (end, source, window, unstated)
+                add_edge(source, nid, label, sentence, "data" if layer != "external" else "external", unstated,
+                         inferred=None if unstated else inferred)
+                prev = (end, source, window, unstated, inferred)
             else:
                 prev = None
 
@@ -651,7 +752,13 @@ def build_architecture_graph(
     jobs = {"cicd": (_DEPLOY_RE, "deploys to", "delivery"), "gitops": (_DEPLOY_RE, "deploys to", "delivery"),
             "monitoring": (_MONITOR_RE, "monitors", "operations"),
             "secrets": (_SECRETS_RE, "supplies secrets to", "operations")}
-    best: Dict[str, Tuple[int, str]] = {}
+    # A sentence that names what the tool works on comes first: then the
+    # line is stated. Without one, a deployment or secrets tool still serves
+    # the system (dashed, inferred); a monitoring tool gets no line, since
+    # what it watches is not inferred.
+    target_res = {"cicd": _DEPLOY_TARGET_RE, "gitops": _DEPLOY_TARGET_RE, "monitoring": _MONITOR_TARGET_RE,
+                  "secrets": _SECRETS_TARGET_RE}
+    best: Dict[str, Tuple[int, int, str]] = {}
     for sentence in sentences:
         spots = _mentions(sentence, node_aliases)
         for start, end, nid in spots:
@@ -664,12 +771,25 @@ def build_architecture_graph(
             cues = [m for m in job[0].finditer(sentence) if nid in _cue_owners(m.start(), m.end(), peers, sentence)]
             if cues:
                 gap = min(min(abs(m.start() - end), abs(start - m.end())) for m in cues)
-                if nid not in best or gap < best[nid][0]:
-                    best[nid] = (gap, sentence)
-    for nid, (_, sentence) in best.items():
+                lo = max([b.end() for b in _CLAUSE_BREAK_RE.finditer(sentence) if b.end() <= start] or [0])
+                hi = min([b.start() for b in _CLAUSE_BREAK_RE.finditer(sentence) if b.start() >= end]
+                         or [len(sentence)])
+                clause = sentence[lo:hi]
+                named = any(p == "central" and lo <= s < hi for s, _, p in spots) \
+                    or bool(system_word and re.search(system_word, clause.lower())) \
+                    or bool(target_res[node_layer[nid]].search(clause))
+                rank = 0 if named else 1
+                if nid not in best or (rank, gap) < best[nid][:2]:
+                    best[nid] = (rank, gap, sentence)
+    for nid, (rank, _, sentence) in best.items():
         pattern, label, kind = jobs[node_layer[nid]]
-        if central is not None:
+        if central is None:
+            continue
+        if rank == 0:
             add_edge(nid, "central", label, sentence, kind)
+        elif node_layer[nid] != "monitoring":
+            add_edge(nid, "central", label, sentence, kind,
+                     inferred="secrets" if node_layer[nid] == "secrets" else "deploy")
     # "GitHub Actions builds the images, pushes them to ECR": the CI tool
     # publishes to the registry (listed under the connections; the drawing
     # keeps one line from the delivery lane).
@@ -711,23 +831,127 @@ def build_architecture_graph(
         ordered.extend(by_id[t] for t in outs if by_id[t] not in ordered)
     data = ordered + [n for n in data if n not in ordered]
 
+    # Named without a stated connection: drawn without a line, and listed so
+    # the reader asks how they connect (unresolved, not guessed).
+    linked = {e["from"] for e in edges} | {e["to"] for e in edges} | {lk["from"] for lk in entry_links} \
+        | {lk["to"] for lk in entry_links}
+    unconnected = [{"id": n["id"], "label": n["label"], "caption": n["caption"]}
+                   for n in unplaced + data + external + delivery + operations if n["id"] not in linked]
+
     return {"boundary": boundary, "central": central, "entry": entry, "data": data, "external": external,
-            "delivery": delivery, "operations": operations, "edges": edges}
+            "delivery": delivery, "operations": operations, "edges": edges, "entry_links": entry_links,
+            "unplaced": unplaced, "unconnected": unconnected,
+            # Each box's spellings, for check_connections.
+            "aliases": {nid: list(names) for nid, names in node_aliases.items()}}
+
+
+CONNECTION_COLUMNS = ["From", "Connection", "To", "Basis", "Said in the KT"]
+
+
+def _names(graph: Dict[str, Any]) -> Dict[str, str]:
+    names = {n["id"]: n["label"] for key in ("entry", "data", "external", "delivery", "operations", "unplaced")
+             for n in graph.get(key) or []}
+    central = graph["central"] or {"label": "the system"}
+    names["central"] = central["label"] + (f" ({central['header']})" if central.get("header") else "")
+    return names
+
+
+def basis_text(link: Dict[str, Any], names: Dict[str, str]) -> str:
+    """"Stated", or "Inferred: <why>" (_INFERRED_WHY)."""
+    if link.get("basis") != "inferred":
+        return "Stated"
+    why = _INFERRED_WHY.get(link.get("inferred") or "role", _INFERRED_WHY["role"])
+    return "Inferred: " + why.format(**{"from": names.get(link["from"], link["from"]),
+                                        "to": names.get(link["to"], link["to"])})
+
+
+def connection_lines(graph: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every line the diagram draws, in the table's order: the request path,
+    then the other connections."""
+    return list(graph.get("entry_links") or []) + list(graph["edges"])
 
 
 def describe_connections(graph: Dict[str, Any]) -> List[Dict[str, str]]:
-    """The stated connections as table rows, each with the KT sentence."""
-    names = {n["id"]: n["label"] for key in ("entry", "data", "external", "delivery", "operations") for n in graph[key]}
-    central = graph["central"] or {"label": "the system"}
-    names["central"] = central["label"] + (f" ({central['header']})" if central.get("header") else "")
-    rows = [{"From": names.get(e["from"], e["from"]) + (" (sender not stated in the KT)" if e.get("unstated_sender") else ""),
-             "Connection": e["label"], "To": names.get(e["to"], e["to"]), "Said in the KT": e["quote"]}
-            for e in graph["edges"]]
+    """Every line in the diagram as a table row, with its basis (stated, or
+    inferred and why) and the KT sentence: the diagram and this table list
+    the same lines (check_connections)."""
+    names = _names(graph)
+    rows = [{"From": names.get(e["from"], e["from"]) if e["from"] != "users" else "Users",
+             "Connection": e["label"], "To": names.get(e["to"], e["to"]), "Basis": basis_text(e, names),
+             "Said in the KT": e["quote"]}
+            for e in connection_lines(graph)]
     boundary = graph.get("boundary") or {}
     if boundary.get("subtitle"):
-        rows.append({"From": boundary["subtitle"].replace("Provisioned with ", ""), "Connection": "provisions",
-                     "To": boundary["label"], "Said in the KT": boundary.get("quote", "")})
+        tool = boundary["subtitle"].replace("Provisioned with ", "")
+        quote = boundary.get("quote", "")
+        account = re.escape(boundary["label"].split()[0]) if boundary.get("label") else None
+        said = bool(account and re.search(r"\b" + account + r"\b", quote, re.IGNORECASE))
+        rows.append({"From": tool, "Connection": "provisions", "To": boundary["label"],
+                     "Basis": "Stated" if said else "Inferred: " + _INFERRED_WHY["provision"].format(**{"from": tool}),
+                     "Said in the KT": quote})
     return rows
+
+
+def describe_unconnected(graph: Dict[str, Any]) -> List[str]:
+    """Components named without a stated connection: "Amazon SQS
+    (messaging)". Unresolved: shown without a line, never guessed."""
+    out: List[str] = []
+    by_caption: Dict[str, List[str]] = {}
+    for n in graph.get("unconnected") or []:
+        by_caption.setdefault(n.get("caption") or "", []).append(n["label"])
+    for caption, labels in by_caption.items():
+        joined = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        out.append(f"{joined} ({caption})" if caption else joined)
+    return out
+
+
+def check_connections(graph: Optional[Dict[str, Any]], rows: Optional[List[Dict[str, str]]] = None) -> List[str]:
+    """Each line of the diagram against its sentence, read again here: a
+    stated line's sentence names both ends, an inferred one's at least one
+    (an inferred request-path link has none: its order is assumed), a
+    monitoring line is never inferred, and `rows`, the connections table as
+    the document shows it, has one row per line, with the line's basis.
+    Returns what fails ([] when every line holds)."""
+    if not graph:
+        return []
+    aliases = graph.get("aliases") or {}
+    problems: List[str] = []
+
+    def named(nid: str, text: str) -> bool:
+        if nid == "users":
+            return bool(_USERS_WORD_RE.search(text))
+        if any(re.search(r"(?<![\w-])" + re.escape(a) + r"(?![\w-])", text, re.IGNORECASE) for a in aliases.get(nid, [])):
+            return True
+        return nid == "central" and bool(_SYSTEM_WORDS_RE.search(text) or _MONITOR_TARGET_RE.search(text)
+                                          or _DEPLOY_TARGET_RE.search(text) or _SECRETS_TARGET_RE.search(text))
+
+    for line in connection_lines(graph):
+        what = f"{line['from']} {line['label']} {line['to']}"
+        quote = line.get("quote") or ""
+        if line.get("basis") == "inferred":
+            if line.get("inferred") == "order":
+                continue
+            if not (named(line["from"], quote) or named(line["to"], quote)):
+                problems.append(f"{what}: inferred, but its sentence names neither end")
+            if line.get("label") == "monitors":
+                problems.append(f"{what}: a monitoring line drawn without the monitored component stated")
+        elif not (named(line["from"], quote) and named(line["to"], quote)):
+            problems.append(f"{what}: stated, but its sentence does not name both ends")
+    if rows is None:
+        rows = describe_connections(graph)
+    names = _names(graph)
+    listed = {(r.get("From"), r.get("To")): r for r in rows}
+    lines = connection_lines(graph)
+    for line in lines:
+        row = listed.get((names.get(line["from"], "Users"), names.get(line["to"], line["to"])))
+        if row is None:
+            problems.append(f"{line['from']} {line['label']} {line['to']}: drawn, but not in the connections table")
+        elif str(row.get("Basis") or "Stated").split(":")[0] != basis_text(line, names).split(":")[0]:
+            problems.append(f"{line['from']} {line['label']} {line['to']}: the table gives another basis")
+    extra = len(rows) - (1 if (graph.get("boundary") or {}).get("subtitle") else 0) - len(lines)
+    if extra > 0:
+        problems.append(f"{extra} row(s) in the connections table with no line in the diagram")
+    return problems
 
 
 # --------------------------------------------------------------------------
@@ -811,20 +1035,27 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
     c = _Canvas()
     y = 14
 
-    # Request path: Users -> CDN/WAF/load balancer -> the workload.
+    # Request path: Users -> CDN/WAF/load balancer -> the workload, each link
+    # dashed when its order is assumed; a frontend the KT does not place in
+    # the path follows it, unconnected.
     entry_bottom, entry_last_center = None, None
-    if graph["entry"]:
+    links = list(graph.get("entry_links") or [])
+    chain = list(graph["entry"])
+    row = chain + list(graph.get("unplaced") or [])
+    if row:
         gap = 30
-        ew = min(112, (W - 24 - (len(graph["entry"]) - 1) * gap) / len(graph["entry"]))
-        total = len(graph["entry"]) * ew + (len(graph["entry"]) - 1) * gap
+        ew = min(112, (W - 24 - (len(row) - 1) * gap) / len(row))
+        total = len(row) * ew + (len(row) - 1) * gap
         x = max(12, (W - total) / 2)
-        heights = [_node_height(n, ew) for n in graph["entry"]]
+        heights = [_node_height(n, ew) for n in row]
         row_h = max(heights)
-        for i, n in enumerate(graph["entry"]):
+        for i, n in enumerate(row):
             c.node(x, y, ew, n, "entry")
-            if i:
-                c.path([(x - gap, y + heights[i - 1] / 2), (x - 2, y + heights[i - 1] / 2)])
-            entry_last_center = x + ew / 2
+            if 0 < i < len(chain):
+                c.path([(x - gap, y + heights[i - 1] / 2), (x - 2, y + heights[i - 1] / 2)],
+                       dashed=i - 1 < len(links) and links[i - 1].get("basis") == "inferred")
+            if i == len(chain) - 1:
+                entry_last_center = x + ew / 2
             x += ew + gap
         entry_bottom = y + row_h
         y = entry_bottom + 30
@@ -901,10 +1132,11 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
             ny, nh = ext_pos[n["id"]]
             c.node(ext_x, ny, ext_w, n, "external")
 
-        if entry_bottom is not None:
+        if entry_bottom is not None and entry_last_center is not None and links and links[-1]["to"] == "central":
             top = box_y
             c.path([(entry_last_center, entry_bottom), (entry_last_center, (entry_bottom + top) / 2),
-                    (box_x + box_w / 2, (entry_bottom + top) / 2), (box_x + box_w / 2, top - 2)])
+                    (box_x + box_w / 2, (entry_bottom + top) / 2), (box_x + box_w / 2, top - 2)],
+                   dashed=links[-1].get("basis") == "inferred")
 
         def clamp(v):
             return min(max(v, box_y + 10), box_y + box_h - 10)
@@ -926,7 +1158,7 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                 ty, th = data_pos[e["to"]]
                 tcy = ty + th / 2
                 if e["from"] == "central":
-                    c.path([(box_x, clamp(tcy)), (data_x + data_w + 2, clamp(tcy))], dashed=e.get("unstated_sender", False))
+                    c.path([(box_x, clamp(tcy)), (data_x + data_w + 2, clamp(tcy))], dashed=e.get("basis") == "inferred")
                     c.label((box_x + data_x + data_w) / 2, clamp(tcy) - 5, e["label"])
                 elif e["from"] in data_pos:
                     fy, fh = data_pos[e["from"]]
@@ -939,7 +1171,7 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
             elif e["kind"] == "external":
                 ty, th = ext_pos[e["to"]]
                 tcy = clamp(ty + th / 2)
-                c.path([(box_x + box_w, tcy), (ext_x - 2, tcy)])
+                c.path([(box_x + box_w, tcy), (ext_x - 2, tcy)], dashed=e.get("basis") == "inferred")
                 c.label((box_x + box_w + ext_x) / 2 + 8, tcy - 5, e["label"])
 
     # Delivery and operations lanes below, joined to the workload by the
@@ -969,13 +1201,16 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                               f'fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>')
             c.text(lx + 12, lane_top + 17, title, size=10.5, weight="bold", fill="#475569", anchor="start")
             heights.append(lane_top + lh)
-            stated = sorted({e["label"] for e in graph["edges"] if e["kind"] == style and e["to"] == "central"})
+            lane_edges = [e for e in graph["edges"] if e["kind"] == style and e["to"] == "central"]
+            stated = sorted({e["label"] for e in lane_edges})
             if stated:
                 start_x = lx + lw / 2
                 target_x = box_x + (50 if style == "delivery" else box_w - 50)
                 target_y = box_y + box_h
+                # Solid when one of the lane's lines is stated ("ArgoCD
+                # deploys them to Kubernetes"), dashed when all are inferred.
                 c.path([(start_x, lane_top), (start_x, channel), (target_x, channel), (target_x, target_y + 2)],
-                       dashed=True)
+                       dashed=all(e.get("basis") == "inferred" for e in lane_edges))
                 # Each label beside its own lane's riser, below the shared
                 # channel: delivery's to the right, operations' to the left,
                 # so the two never meet (at the top they overlapped).
@@ -986,9 +1221,9 @@ def render_architecture_svg(graph: Dict[str, Any]) -> str:
                     c.label(start_x - 6, label_y, " · ".join(stated), anchor="end")
         bottom = max(heights)
 
-    if any(e.get("unstated_sender") for e in graph["edges"]):
+    if any(line.get("basis") == "inferred" for line in connection_lines(graph)):
         bottom += 18
-        c.text(18, bottom, "Dashed arrow: the KT does not say who sends this; the system is assumed.",
+        c.text(18, bottom, "Solid line: stated in the KT. Dashed line: inferred, not stated (see the connections list).",
                size=9.5, fill="#64748b", anchor="start")
     height = bottom + 14
     defs = ('<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '

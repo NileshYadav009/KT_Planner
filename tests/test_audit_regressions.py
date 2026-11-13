@@ -284,9 +284,10 @@ def test_residual_content_is_appended_when_a_renderer_drops_it():
         "For secrets, the platform uses HashiCorp Vault.",
         "Container images are stored in Amazon ECR.",
     ]
-    # The grid holds tool names, not the sentence.
-    grid = next(b for b in rendered["blocks"] if b["type"] == "TechnologyGrid")
-    assert grid["rows"][0]["value"] == "Trivy"
+    # The grid held "Trivy", which the sentence below says word for word: it
+    # is left out (the client's review, 13 Nov: no fact shown twice), and the
+    # sentence keeps it.
+    assert not [b for b in rendered["blocks"] if b["type"] == "TechnologyGrid"]
 
 
 def test_residual_does_not_duplicate_what_a_table_row_already_shows():
@@ -335,7 +336,7 @@ def test_document_coverage_check_recovers_sentences_missing_from_the_document():
     summary = result["_knowledge_coverage_summary"]
     assert summary == {"facts_identified": 2, "mapped": 1, "unmapped": 0, "recovered": 1, "lost": 0,
                        "verified_against_document": True, "stated_gaps": 0, "excluded": 0,
-                       "shown_in_own_section": 0, "shown_elsewhere_only": 0}
+                       "shown_in_own_section": 0, "shown_elsewhere_only": 0, "placed_by_rule": 0, "placed_by_llm": 0}
     notes = next(s for s in result["rendered_sections"] if s["section_id"] == "unmapped_findings")
     assert "Aurora backups are retained" in notes["blocks"][0]["paragraphs"][0]
 

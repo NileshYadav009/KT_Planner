@@ -93,6 +93,16 @@ ONBOARDING_MONTH_RX = (
 ONBOARDING_DAY_RX = (
     _ONBOARDING_LEAD + r"(?:" + _ONBOARDING_FIRST + r"(?:day|week|couple\s+of\s+days)\b|(?:on\s+)?day\s+(?:one|1)\b)"
     + _NOT_ONBOARDING_TAIL)
+# What the new owner is asked to do before the handover ends: "Please review
+# the deployment pipeline, monitoring dashboards, and unresolved recovery
+# documentation before taking ownership." went to Monitoring without an LLM
+# and to Ownership with one, where it was printed as escalation guidance (the
+# client's e-commerce KT, 13 Nov). The Day-1 checklist's own content, said
+# without the words "day one".
+BEFORE_TAKING_OVER_RX = (
+    r"\bbefore\s+(?:you\s+|they\s+|the\s+new\s+(?:owner|engineer|team)\s+)?(?:(?:tak(?:e|es|ing)|assum(?:e|es|ing))\s+"
+    r"(?:over|(?:full\s+)?ownership)|tak(?:e|es|ing)\s+on\s+(?:the\s+)?(?:on-?call|pager|rota)|"
+    r"(?:start|starting|go|going|join|joining)\s+(?:the\s+)?on-?call)\b")
 
 SECTION_RULES: List[Tuple[str, List[str], float]] = [
     (
@@ -164,6 +174,17 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
             # Any "<the X team> owns ..." statement, not only the two team
             # names a past transcript happened to use.
             r"\b(?:team|group|squad|engineers?)\s+(?:is\s+responsible\s+for|owns?)\b",
+            # A team or function that manages something, as the subject of
+            # its clause: "Developers own application code, while Platform
+            # Engineering manages Kubernetes, CI/CD pipelines, and
+            # infrastructure." The second clause went to Deployment on its
+            # "CI/CD pipelines" (the client's e-commerce KT, 13 Nov), and the
+            # card's rollback row quoted it. Not a tool ("Terraform manages
+            # infrastructure provisioning"): the subject must be a team.
+            r"(?:^|[,;]\s*(?:and\s+|while\s+|but\s+|whereas\s+)?)\W*(?:the\s+|our\s+)?(?:[\w&/-]+\s+){0,3}?"
+            r"(?:team|teams|engineering|engineers|developers|squad|group|department|operations|ops|sre|dbas?)\s+"
+            r"(?:(?:also|still|currently|now)\s+)?(?:manages?|maintains?|looks?\s+after|administers?|"
+            r"(?:is|are)\s+in\s+charge\s+of)\b",
             # "... and formal escalation contacts are still undocumented" went
             # to Handover Completion Check (a user's KT, 25 Oct).
             r"\bescalation\s+(?:path|chain|point|goes|matrix|contacts?|list|policy|procedure|process|rota)\b",
@@ -531,7 +552,7 @@ SECTION_RULES: List[Tuple[str, List[str], float]] = [
     ),
     # The new owner's time frame opening the sentence (ONBOARDING_MONTH_RX).
     ("first_30_day_ownership", [ONBOARDING_MONTH_RX], 0.97),
-    ("day1_survival_checklist", [ONBOARDING_DAY_RX], 0.97),
+    ("day1_survival_checklist", [ONBOARDING_DAY_RX, BEFORE_TAKING_OVER_RX], 0.97),
     (
         "handover_completion",
         [

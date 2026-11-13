@@ -39,11 +39,14 @@ BASELINE_PATH = os.path.join(GOLDEN_DIR, "baseline.json")
 TARGET_ACCURACY = 0.90
 
 _DIGESTS = {"quick_reference", "tribal_knowledge", "kt_coverage"}
-_QUOTING_TITLES = {"Connections stated in the KT", "Mentioned elsewhere in the KT"}
+_QUOTING_TITLES = {"Connections stated in the KT", "Connections in the diagram", "Mentioned elsewhere in the KT"}
 # Section status lines ("not covered", "mentioned elsewhere") are the same in
 # every section they apply to; they are not facts, so they are not repeats.
+# Status lines, the same wherever they apply: not facts, so not repeats. "Not
+# stated in the KT" is a failure record's Fix cell when no fix was given.
 _PLACEHOLDER = re.compile(r"not covered (?:in|during) the kt|flag it for follow|"
-                          r"not discussed as its own topic|confirm the rest with", re.IGNORECASE)
+                          r"not discussed as its own topic|confirm the rest with|^\W*not stated in the kt\W*$",
+                          re.IGNORECASE)
 
 
 def load_goldens() -> List[Dict[str, Any]]:

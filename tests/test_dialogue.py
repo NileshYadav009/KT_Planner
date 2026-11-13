@@ -478,3 +478,14 @@ def test_only_a_speaker_s_own_sentences_are_joined_before_roles_are_read():
     alone = "The RTO is 2 hours. That value needs confirmation."
     units = [s.text for s in segment_sentences([AudioSegment(text=alone, start=0.0, end=9.0, avg_logprob=-0.2)])]
     assert units == [alone]
+
+
+def test_a_value_said_to_need_confirmation_is_a_stated_gap():
+    from dialogue import is_gap_statement, stated_before_gap
+    # The client's e-commerce KT (13 Nov): no follow-up line asked for RTO and RPO.
+    said = "Disaster recovery testing happens twice annually, but the current RTO and RPO need confirmation."
+    assert is_gap_statement(said)
+    assert stated_before_gap(said) == "Disaster recovery testing happens twice annually"
+    # An approval rule is not a gap.
+    assert not is_gap_statement("Production changes need confirmation from the CAB.")
+    assert not is_gap_statement("Every schema change needs verification by the DBA team.")

@@ -225,3 +225,16 @@ def test_sentences_filed_where_they_fit_least_name_no_topic():
     # System Overview's technology from its fields: never stray there.
     assert not names_no_topic("architecture_reference", ["I run the tokenizer on each document."])
     assert not names_no_topic("system_overview", ["Hold on for a second."])
+
+
+def test_a_recurring_failure_is_not_a_recurring_duty():
+    # The client's e-commerce KT (13 Nov): pointed to as Open Responsibilities' recurring duties.
+    assert "Recurring duties" not in _discussed("open_responsibilities",
+                                                "A recurring issue is database connection exhaustion during peak traffic.")
+    assert "Recurring duties" in _discussed("open_responsibilities", "There is a recurring task to rotate certificates.")
+
+
+def test_who_to_contact_in_an_incident_is_an_escalation_path():
+    for said in ["During production incidents, contact the Platform Engineering team through PagerDuty.",
+                 "Call the platform team via Slack."]:
+        assert "Escalation path" in _discussed("ownership_escalation", said), said

@@ -14,7 +14,7 @@ from architecture_diagram import build_architecture_graph, describe_connections,
 from component_catalog import display_name
 from dialogue import (is_gap_statement, is_field_candidate, is_handover_announcement, is_hedged, is_question,
                       is_unclear, is_unconfirmed, says_nothing_specific, states_something,
-                      states_something_before_gap,
+                      stated_before_gap, states_something_before_gap,
                       without_label, without_session_framing)
 from coverage_topics import (AFTER_REVIEW_SECTIONS, GAPS_ARE_CONTENT_SECTIONS, assess_topics, names_no_topic,
                              topic_pattern)
@@ -1173,6 +1173,46 @@ def enrich_technology_summary(knowledge_object: Dict[str, Any]) -> Dict[str, Any
     return knowledge_object
 
 
+# The tools a new owner needs access to, by what the KT says they are for.
+_ACCESS_GROUPS = [
+    ("the deployment pipeline", ("cicd", "gitops", "registry")),
+    ("monitoring and logs", ("monitoring",)),
+    ("alerts and on-call", ("alerting",)),
+    ("secrets", ("secrets",)),
+]
+
+
+def enrich_day1_checklist(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+    """Access a new owner will need, derived from the tools the KT names by
+    what they are for ("Get access to the deployment pipeline: GitHub
+    Actions, Amazon ECR, ArgoCD"), for the Day-1 checklist when the KT did
+    not say what access to request (the client's review, 13 Nov: a checklist
+    from the whole transcript, not only from a sentence that says "day one").
+    Shown as derived; it covers no topic in the coverage matrix."""
+    from architecture_diagram import _classify
+    from coverage_topics import topic_pattern
+
+    day1 = _find_section(knowledge_object, "day1_survival_checklist")
+    if day1 is None:
+        return knowledge_object
+    access = topic_pattern("day1_survival_checklist", "Access and tools to request")
+    if access is not None and any(access.search(t) for t in _section_sentences_text(day1)):
+        return knowledge_object                  # the KT said what access to get
+    arch = _find_section(knowledge_object, "architecture_reference")
+    tools = [str(c) for c in (arch or {}).get("_architecture_components") or []]
+    techs = _field_value(_find_section(knowledge_object, "system_overview"), "key_technologies")
+    tools += [t.strip() for t in str(techs or "").split(",") if t.strip()]
+    groups: Dict[str, List[str]] = {}
+    for tool in tools:
+        layer = _classify(tool)
+        for label, layers in _ACCESS_GROUPS:
+            if layer in layers and tool.lower() not in {t.lower() for t in groups.get(label, [])}:
+                groups.setdefault(label, []).append(tool)
+    day1["_derived_access"] = [{"Get access to": label, "Tools the KT names": ", ".join(groups[label])}
+                               for label, _ in _ACCESS_GROUPS if groups.get(label)]
+    return knowledge_object
+
+
 # A transcript very commonly says a service's full/branded name once
 # ("Amazon RDS", "Azure Key Vault") and its bare acronym on every later
 # mention ("RDS", "Key Vault") — both forms are separately valid
@@ -1568,6 +1608,161 @@ KT_COVERAGE_SECTION_ID = "kt_coverage"
 KT_COVERAGE_TITLE = "KT Coverage & Knowledge Gaps"
 
 
+# Who owns what and who to call, as stated, and what was not (the client's
+# review, 13 Nov: named contacts and approval paths reported as missing,
+# never invented). A person is recognised by how a name is used: called or
+# asked ("call Maria"), given a role ("Omar, the engineering manager"), or
+# owning something ("Priya owns the billing jobs"). A team ("Platform
+# Engineering") or a tool ("PagerDuty") is not a person.
+_NAME = r"[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?"
+_PERSON_USE_RE = re.compile(
+    r"\b(?:call|contact|ask|page|ping|email|message|escalate\s+to|reach|talk\s+to|go\s+to)\s+(?P<a>" + _NAME + r")\b"
+    r"|\b(?P<b>" + _NAME + r"),\s+(?:the|our|who\s+is\s+(?:the|our))\s+(?:[\w-]+\s+){0,3}?(?:manager|lead|engineer|"
+    r"owner|head|director|architect|admin\w*|dba|expert)\b"
+    r"|\b(?P<c>" + _NAME + r")\s+(?:owns|leads|approves|knows|looks\s+after|is\s+responsible|is\s+(?:the|our)\s+"
+    r"(?:[\w-]+\s+){0,2}?(?:manager|lead|owner|contact|approver|expert))\b")
+_TEAM_WORDS = frozenset("team teams engineering engineers developers developer ops operations platform data security "
+                        "support infrastructure sre dba network product business application applications devops "
+                        "cloud oncall on-call service services group squad department".split())
+_SECOND_LEVEL_RE = re.compile(
+    r"\bif\s+(?:they|he|she|nobody|no\s+one|no-one|the\s+(?:on-?call|primary)(?:\s+(?:engineer|person))?)\b[^.]{0,40}?"
+    r"\b(?:answer|respond|reply|pick\s+up|acknowledge)|\bthen\s+(?:escalate|call|page|contact)\b|"
+    r"\bescalate\s+(?:further|again|to\s+the\s+next)\b|\b(?:second(?:ary)?|backup|third)\s+(?:line|level|tier|contact|"
+    r"on-?call|escalation)\b", re.IGNORECASE)
+_NEEDS_APPROVAL_RE = re.compile(r"\b(?:without|requires?|needs?|with|after|pending|gets?|getting|only\s+with)\s+"
+                                r"(?:an?\s+|prior\s+|explicit\s+|written\s+|formal\s+)?(?:approval|sign-?off|permission)\b",
+                                re.IGNORECASE)
+_APPROVER_NAMED_RE = re.compile(r"\b(?:approval|sign-?off|permission)\s+(?:from|of|by)\b|\bapproved\s+by\b|"
+                                r"\b(?:must|has\s+to|have\s+to|needs?\s+to|should|can|will)\s+approve\b|\bapprovers?\b|"
+                                r"\b\w+\s+approves\b", re.IGNORECASE)
+
+
+def _contested_names(knowledge_object: Dict[str, Any], names: List[str], texts: List[str]) -> set:
+    """The names said only inside a disputed, questioned or conflicting
+    statement, or replaced by a correction."""
+    quotes = [_qr_key(c[k]) for c in knowledge_object.get("_conflicts") or [] for k in ("a", "b") if c.get(k)]
+    out = {str(t.get("old")) for t in knowledge_object.get("_superseded_tools") or []
+           if isinstance(t, dict) and t.get("old")}
+    for name in names:
+        rx = re.compile(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", re.IGNORECASE)
+        said = [_qr_key(t) for t in texts if rx.search(t)]
+        if said and all(any(s in q or q in s for q in quotes) for s in said):
+            out.add(name)
+    return {n for n in names if n in out or n.lower() in {o.lower() for o in out}}
+
+
+# Components named for their job (CI/CD, a registry, alerting, infrastructure
+# as code): no follow-up asks how they connect.
+_NOT_ASKED_CAPTIONS = frozenset({"CI/CD", "image registry", "GitOps", "infrastructure as code", "alerting"})
+
+
+# What a new owner must be able to do, and the topics that say how. Read from
+# the coverage topics (coverage_topics.py) of the fixed schema's sections.
+READINESS_CHECKS = [
+    ("Recognise and fix the known failures", "common_failures", ("Known failures", "Fixes or workarounds")),
+    ("Roll back a bad release", "deployment_and_rollback", ("Rollback procedure", "Rollback time and approval")),
+    ("Recover from data loss or an outage", "disaster_recovery",
+     ("Backups", "RTO", "RPO", "Failover / standby", "DR testing")),
+    ("Know who to contact in an incident", "ownership_escalation", ("Escalation path", "On-call tool")),
+    ("See whether the system is healthy", "monitoring_observability",
+     ("Monitoring tools", "Key alerts and dashboards", "Paging and alert routing")),
+    ("Deploy a change", "deployment_and_rollback", ("Deployment process", "Trigger and approvals", "Deployment window")),
+    ("Know what not to touch", "danger_zones", ("Never-do rules",)),
+    ("Get access on day one", "day1_survival_checklist", ("Access and tools to request",)),
+]
+READINESS_STATUS = ("Stated", "Partly", "Not stated")
+
+
+def operational_readiness(knowledge_object: Dict[str, Any], topic_info: Dict[str, Dict[str, List[str]]]
+                          ) -> Dict[str, Any]:
+    """{"checks": [{"capability", "status", "detail"}], "summary"}: for each
+    thing a new owner must be able to do, whether the KT says how in full,
+    partly or not at all, and what is missing. A failure without a fix, a
+    value said to need confirmation and an escalation with no named person
+    are not "stated"."""
+    checks = []
+    for capability, section_id, topics in READINESS_CHECKS:
+        info = topic_info.get(section_id) or {"covered": [], "unknown": []}
+        to_confirm = [t for t in topics if t in info["unknown"]]
+        stated = [t for t in topics if t in info["covered"] and t not in to_confirm]
+        missing = [t for t in topics if t not in stated and t not in to_confirm]
+        extra: List[str] = []
+        section = _find_section(knowledge_object, section_id)
+        if section_id == "common_failures" and section is not None and "Known failures" in stated:
+            unfixed = unfixed_failures(section, failure_records(section))
+            if unfixed:
+                # How many, not which: the follow-up list names them.
+                extra.append(f"a fix for {len(unfixed)} of the known failures")
+        if section_id == "ownership_escalation" and section is not None and "Escalation path" in stated:
+            details = section.get("_ownership_details") or ownership_details(knowledge_object)
+            if not details["people"]:
+                extra.append("named people")
+            if not details["second_level"]:
+                extra.append("a second escalation level")
+        if not stated and not to_confirm:
+            status = "Not stated"
+        elif missing or to_confirm or extra:
+            status = "Partly"
+        else:
+            status = "Stated"
+        parts = []
+        if to_confirm:
+            parts.append("to confirm: " + ", ".join(to_confirm))
+        if status == "Not stated":
+            parts = ["nothing in the KT"]           # its topics are in the follow-up list
+        elif missing or extra:
+            parts.append("not stated: " + ", ".join(missing + extra))
+        checks.append({"capability": capability, "status": status, "detail": "; ".join(parts) or "—"})
+    counts = {s: sum(1 for c in checks if c["status"] == s) for s in READINESS_STATUS}
+    verdict = "Ready" if counts["Stated"] == len(checks) else (
+        "Not ready" if counts["Not stated"] == len(checks) else "Partly ready")
+    summary = (f"{verdict}: {counts['Stated']} of {len(checks)} operational tasks are fully described, "
+               f"{counts['Partly']} partly, {counts['Not stated']} not at all.")
+    return {"checks": checks, "summary": summary, "verdict": verdict}
+
+
+def ownership_details(knowledge_object: Dict[str, Any]) -> Dict[str, Any]:
+    """What the KT says about people to contact and approvals, read over
+    every section: {"people": names used as people, "second_level": a
+    second escalation level stated, "approvals": sentences that require an
+    approval without naming who gives it}."""
+    not_names = {str(c).lower() for s in knowledge_object.get("sections") or []
+                 for c in s.get("_architecture_components") or []}
+    overview = _find_section(knowledge_object, "system_overview")
+    techs = _field_value(overview, "key_technologies")
+    not_names |= {t.strip().lower() for t in str(techs or "").split(",") if t.strip()}
+    people: List[str] = []
+    second_level = False
+    approvals: List[str] = []
+    for section in knowledge_object.get("sections") or []:
+        if section.get("section_type") == "digest":
+            continue
+        for text in _section_sentences_text(section):
+            for match in _PERSON_USE_RE.finditer(text):
+                name = next(g for g in match.groups() if g)
+                words = name.lower().split()
+                if any(w in _TEAM_WORDS for w in words) or name.lower() in not_names or words[0] in not_names:
+                    continue
+                if name not in people:
+                    people.append(name)
+            if section.get("id") == "ownership_escalation" and _SECOND_LEVEL_RE.search(text):
+                second_level = True
+            if _NEEDS_APPROVAL_RE.search(text) and not _APPROVER_NAMED_RE.search(text) and text not in approvals:
+                approvals.append(text)
+    return {"people": people, "second_level": second_level, "approvals": approvals}
+
+
+def _section_sentences_text(section: Dict[str, Any]) -> List[str]:
+    """A section's sentences as said (its source sentences, else its content)."""
+    source = [s for s in section.get("_source_sentences") or [] if isinstance(s, str) and s.strip()]
+    if source:
+        return source
+    content = section.get("coverage_content") or []
+    if isinstance(content, str):
+        content = [content]
+    return [s for c in content if isinstance(c, str) for s in re.split(r"(?<=[.!?])\s+", c) if s.strip()]
+
+
 def _leaf_field_specs(fields_schema: Optional[List[Dict[str, Any]]]) -> List[tuple]:
     """(field_id, label) for schema fields that land as their own,
     independently-checkable field_objects entry — i.e. everything except
@@ -1628,6 +1823,14 @@ def append_coverage_matrix_section(
     rows: List[Dict[str, str]] = []
     row_ids: List[str] = []
     gaps: List[str] = []
+    # Sections the session said nothing about. The document renders them as
+    # not covered (pdf_rendering.build_rendered_sections): a value their
+    # fields borrowed from another section's sentence ("Terraform Workspace /
+    # State Location: The Data Engineering team owns database restoration
+    # ...", a user's KT, U05) showed under a section the matrix and the cover
+    # call not covered, a copy of a fact shown in its own section.
+    not_covered_sections: List[str] = []
+    knowledge_object["_not_covered_sections"] = not_covered_sections
     mapped_sentence_total = 0
     titles = {s.get("id"): (s.get("title") or s.get("id")) for s in dynamic_schema}
     all_texts = [(sid, s.get("text", "")) for sid, c in (coverage or {}).items()
@@ -1638,6 +1841,7 @@ def append_coverage_matrix_section(
         return [(sid, t) for sid, t in all_texts if sid != section_id]
 
     mentioned_elsewhere: Dict[str, List[Dict[str, str]]] = {}
+    topic_info: Dict[str, Dict[str, List[str]]] = {}
 
     def elsewhere_quote(section_id, topic_label):
         """(section, sentence) for the most direct statement of the topic
@@ -1704,6 +1908,11 @@ def append_coverage_matrix_section(
         # states a difference between environments; a user's KT, 23 Oct).
         own_facts += [s for t in own_texts for s in re.split(r"(?<=[.!])\s+", t)
                       if s not in own_facts and (gaps_are_content or not is_gap_statement(s))]
+        # What a gap sentence states before its "but": "Disaster recovery
+        # testing happens twice annually, but the current RTO and RPO need
+        # confirmation" states DR testing (the fact splitter keeps it whole).
+        own_facts += [h for t in own_texts for s in re.split(r"(?<=[.!])\s+", t)
+                      if is_gap_statement(s) and (h := stated_before_gap(s)) and h not in own_facts]
         topic_states = assess_topics(section_id, field_objects, own_facts, other_texts_for(section_id), structured)
         gap_topic = GAPS_ARE_CONTENT_SECTIONS.get(section_id)
         if gap_topic and topic_states and any(is_gap_statement(t) for t in own_texts):
@@ -1775,11 +1984,14 @@ def append_coverage_matrix_section(
                 assessment = (f"Not covered in the KT session; {len(covered)} of {total} topics came up only in "
                               f"passing under {', '.join(where)}.")
                 gaps.append(title)
+                not_covered_sections.append(section_id)
             elif not covered and (not (texts or sentence_count) or strays_only):
                 bucket = "Missing"
                 assessment = (f"Not covered in the KT session; the {len(own_texts)} statement(s) filed here name "
                               f"none of its topics." if strays_only else "Not covered in the KT session.")
                 gaps.append(title)
+                if not strays_only:                 # its statements stay where they were filed
+                    not_covered_sections.append(section_id)
             else:
                 # A section with its own statements is at least Partial, even
                 # when none of its expected topics matched as a topic (a stated
@@ -1840,19 +2052,31 @@ def append_coverage_matrix_section(
                 # one: "Fixes or workarounds" counted as covered and the
                 # section as covered well, with nothing said about the other
                 # (delayed video processing, the user's online learning KT).
-                unfixed = [failure_as_noun_phrase(s) for s, fix in _known_failures(section_obj) if fix == _NO_FIX_STATED] \
-                    if section_id == "common_failures" and section_obj and "Fixes or workarounds" not in missing else []
+                # A failure with only first checks has no fix either ("Check
+                # active connections ... before restarting application pods":
+                # the client's e-commerce KT, 13 Nov; the list asked only
+                # about the other failure).
+                found = failure_records(section_obj) \
+                    if section_id == "common_failures" and section_obj and "Fixes or workarounds" not in missing \
+                    else {"records": []}
+                unfixed = unfixed_failures(section_obj, found)
                 if unfixed:
                     bucket = "Partial" if bucket == "Strong" else bucket
                     assessment = assessment.rstrip(".") + f"; no fix stated for: {'; '.join(unfixed)}."
                     gaps.append(f"{title}: no fix stated for {'; '.join(unfixed)}")
-                    knowledge_object.setdefault("_not_stated", {}).setdefault(section_id, []).append(
-                        f"a fix for {'; '.join(unfixed)}")
+                    if found.get("as_said"):
+                        # No records table to say it: the section's box does.
+                        knowledge_object.setdefault("_not_stated", {}).setdefault(section_id, []).append(
+                            f"a fix for {'; '.join(unfixed)}")
+                    # Otherwise not in a "Gaps to confirm" box too: each failure
+                    # record's Fix cell says "Not stated in the KT" (the client's
+                    # review, 13 Nov: one record per failure, nothing scattered).
         else:
             if not (texts or sentence_count):
                 bucket = "Missing"
                 assessment = "Not covered in the KT session."
                 gaps.append(title)
+                not_covered_sections.append(section_id)
             else:
                 bucket = "Partial"
                 assessment = f"{len(texts) or sentence_count} statement(s) captured."
@@ -1869,6 +2093,48 @@ def append_coverage_matrix_section(
 
         rows.append({"Domain": title, "Coverage": bucket, "Assessment": assessment})
         row_ids.append(section_id)
+        if topic_states:
+            missing_topics = [label for label, state, _ in topic_states if state == "missing"]
+            topic_info[section_id] = {
+                "covered": [label for label, state, _ in topic_states if state != "missing"],
+                # Named in a stated gap ("the current RTO and RPO need confirmation"): to confirm.
+                "unknown": [m for m in missing_topics if _named_in(m, stated_gaps)
+                            or ((rx := topic_pattern(section_id, m)) and any(rx.search(g) for g in stated_gaps))],
+            }
+        if section_id == "architecture_reference" and section_obj is not None:
+            # Unresolved, not guessed: components the diagram shows without a
+            # line, for the receiver to ask about (the client's review, 13
+            # Nov). Delivery and alerting tools are named for their job and
+            # are not asked about.
+            graph = section_obj.get("_architecture_graph") or {}
+            if graph.get("unconnected"):
+                # Not a component named only in a disputed or replaced
+                # statement ("No, it is running on DynamoDB", matrix W01): the
+                # caption would name it alone, as if it were in use.
+                contested = _contested_names(knowledge_object, [n["label"] for n in graph["unconnected"]],
+                                             [t for _, t in all_texts])
+                graph["unconnected"] = [n for n in graph["unconnected"] if n["label"] not in contested]
+            open_ = [n["label"] for n in graph.get("unconnected") or []
+                     if n.get("caption") not in _NOT_ASKED_CAPTIONS]
+            if open_:
+                gaps.append(f"{title}: how {', '.join(open_[:-1]) + ' and ' + open_[-1] if len(open_) > 1 else open_[0]}"
+                            f" connect to the rest of the system (named without a stated connection)")
+        if section_id == "ownership_escalation" and section_obj is not None:
+            details = ownership_details(knowledge_object)
+            section_obj["_ownership_details"] = details
+            if bucket != "Missing":
+                escalation_said = any(label == "Escalation path" and state != "missing"
+                                      for label, state, _ in (topic_states or []))
+                missing_details = []
+                if not details["people"]:
+                    missing_details.append("named people to contact (only teams or roles were named)")
+                if escalation_said and not details["second_level"]:
+                    missing_details.append("who to escalate to if the first contact does not respond")
+                missing_details += [f"who approves (“{_short_quote(a)}”; the approver is not named)"
+                                    for a in details["approvals"]]
+                gaps.extend(f"{title}: {m}" for m in missing_details)
+                # Also in the section's own "Gaps to confirm" box.
+                knowledge_object.setdefault("_not_stated", {}).setdefault(section_id, []).extend(missing_details)
 
     present = {s.get("id") for s in dynamic_schema}
     order = [s.get("id") for s in full_schema or []]
@@ -1951,6 +2217,10 @@ def append_coverage_matrix_section(
         "relationships": [],
         "fields": {},
         "_coverage_rows": rows,
+        # What the new owner can do from this document, apart from how many
+        # facts it holds (the client's review, 13 Nov: complete knowledge
+        # coverage is not operational readiness).
+        "_readiness": operational_readiness(knowledge_object, topic_info),
         # Distinct from open_responsibilities' actual assigned tasks — these
         # are areas the KT session never covered at all, not work items
         # someone agreed to do. Keeping the two concepts visually separate
@@ -2226,13 +2496,22 @@ def _qr_sentences(section: Optional[Dict[str, Any]], skip=None) -> List[str]:
     # A polished bullet list ("- Danger zones include ...\n- The danger
     # zones are ...") is split into its items, without the bullet marks.
     for item in split_bullet_blob([str(c) for c in content if str(c).strip()]) or []:
-        item = _QR_BULLET_RE.sub("", str(item).strip())
-        for sentence in _QR_SENTENCE_RE.split(item):
-            sentence = sentence.strip()
-            if sentence and not sentence.endswith("?") and not is_gap_statement(sentence) \
-                    and not (skip and skip(sentence)):
-                out.append(sentence)
+        # Polished text is read line by line, without its "**Action:**"
+        # labels: "Helm maintains application deployment configurations.\n\n
+        # **Action:**\nThe rollback procedure uses ArgoCD ..." was one
+        # "sentence", and the card's rollback row began with Helm (the
+        # client's e-commerce KT with Groq, 13 Nov).
+        for line in re.split(r"\n+", str(item)):
+            line = _QR_BULLET_RE.sub("", _QR_LABEL_RE.sub("", line.strip()).strip())
+            for sentence in _QR_SENTENCE_RE.split(line):
+                sentence = sentence.strip()
+                if sentence and not sentence.endswith("?") and not is_gap_statement(sentence) \
+                        and not (skip and skip(sentence)):
+                    out.append(sentence)
     return out
+
+
+_QR_LABEL_RE = re.compile(r"^(?:[-*•]\s*)?\*\*[^*\n]{1,60}:\*\*\s*")
 
 
 _QR_BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
@@ -2319,55 +2598,7 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
                 pairs.append((str(item["symptom"]).strip(), fix or _NO_FIX_STATED))
         return pairs[:_QR_MAX_FAILURES]
 
-    items: List[Dict[str, Any]] = []
-    for sentence in _qr_sentences(section, skip):
-        bare = _QR_LEAD_RE.sub("", sentence).rstrip(".")
-        if _NOT_A_FAILURE_RE.search(bare):
-            continue                      # "Another non-issue is ...": said not to be a problem
-        counted = _counted_failures(bare)
-        if counted:
-            items.extend({"what": what, "parts": []} for what in counted)
-            continue
-        when = _FAILURE_WHEN_RE.match(bare)
-        if when and (_FAILURE_INTRO_RE.match(when.group("rest")) or _FAILURE_NAMED_RE.match(when.group("rest"))):
-            bare = when.group("rest")
-        else:
-            when = None
-        named = _FAILURE_NAMED_RE.match(bare)
-        intro = None if named else _FAILURE_INTRO_RE.match(bare)
-        if intro and _FAILURE_WORD_ONLY_RE.match(intro.group("what")):
-            intro = None                  # "X is another common issue" read backwards
-        if when and (named or intro):
-            match = named or intro
-            items.append({"what": f"{match.group('what').rstrip('.')} ({when.group('when')[0].lower()}"
-                                  f"{when.group('when')[1:]})",
-                          "parts": [match.group("rest")] if intro and match.group("rest") else []})
-            continue
-        past = _PAST_INCIDENT_RE.match(bare) or _HAD_INCIDENT_RE.match(bare)
-        runbook = _RUNBOOK_RE.match(bare)
-        if named:
-            # Its "because ..." is why it matters, not what to do about it.
-            items.append({"what": named.group("what"), "parts": []})
-        elif intro:
-            items.append({"what": intro.group("what"), "parts": [intro.group("rest")] if intro.group("rest") else []})
-        elif past:
-            items.append({"what": past.group("what"), "parts": []})
-        elif runbook and not (items and not items[-1]["parts"]) \
-                and not _ANAPHORIC_SYMPTOM_RE.search(runbook.group("symptom")):
-            items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
-        elif _FAILURE_EFFECT_RE.match(bare) and not _FIX_CUE_RE.search(bare):
-            items.append({"what": bare, "parts": []})
-        elif (_FAILURE_VERB_RE.search(bare) or _FAILURE_SUBJECT_RE.match(bare)) and not _FIX_CUE_RE.search(bare)                 and not (items and items[-1]["what"] and not items[-1]["parts"]):
-            items.append({"what": bare, "parts": []})
-        elif items and items[-1]["what"] and not items[-1]["parts"] and not _FIX_CUE_RE.search(bare):
-            # Before its fix, a sentence says more about the failure ("The
-            # queue backs up and hauliers see stale slots."): the situation.
-            items[-1].setdefault("detail", []).append(bare)
-        elif items and not (_FAILURE_WORD_RE.search(bare) and not _FIX_CUE_RE.search(bare)):
-            # A sentence that brings up another problem is not this one's fix.
-            items[-1]["parts"].append(sentence)
-        elif _FIX_CUE_RE.search(sentence):
-            items.append({"what": None, "parts": [sentence]})
+    items = _failure_items(section, skip)
     pairs = []
     for item in items:
         action = " ".join(_clause(p).rstrip(".") + "." for p in item["parts"] if p and p.strip())
@@ -2385,6 +2616,240 @@ def _known_failures(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]
             situation = "Known failure"
         pairs.append((situation, action or _NO_FIX_STATED))
     return pairs[:_QR_MAX_FAILURES]
+
+
+def _failure_items(section: Optional[Dict[str, Any]], skip=None) -> List[Dict[str, Any]]:
+    """The speaker's sentences in Common Failures grouped into one item per
+    failure they introduced: {"what": the failure (None for steps with no
+    failure named), "parts": what to do, "detail": more about the failure,
+    "said": the sentence that introduced it}."""
+    items: List[Dict[str, Any]] = []
+    for sentence in _qr_sentences(section, skip):
+        before = len(items)
+        _group_failure_sentence(sentence, items)
+        for item in items[before:]:
+            item.setdefault("said", sentence)
+    return items
+
+
+def _group_failure_sentence(sentence: str, items: List[Dict[str, Any]]) -> None:
+    """One sentence of Common Failures added to `items` (_failure_items)."""
+    bare = _QR_LEAD_RE.sub("", sentence).rstrip(".")
+    if _NOT_A_FAILURE_RE.search(bare):
+        return                      # "Another non-issue is ...": said not to be a problem
+    counted = _counted_failures(bare)
+    if counted:
+        items.extend({"what": what, "parts": []} for what in counted)
+        return
+    when = _FAILURE_WHEN_RE.match(bare)
+    if when and (_FAILURE_INTRO_RE.match(when.group("rest")) or _FAILURE_NAMED_RE.match(when.group("rest"))):
+        bare = when.group("rest")
+    else:
+        when = None
+    named = _FAILURE_NAMED_RE.match(bare)
+    intro = None if named else _FAILURE_INTRO_RE.match(bare)
+    if intro and _FAILURE_WORD_ONLY_RE.match(intro.group("what")):
+        intro = None                  # "X is another common issue" read backwards
+    if when and (named or intro):
+        match = named or intro
+        items.append({"what": f"{match.group('what').rstrip('.')} ({when.group('when')[0].lower()}"
+                              f"{when.group('when')[1:]})",
+                      "parts": [match.group("rest")] if intro and match.group("rest") else []})
+        return
+    past = _PAST_INCIDENT_RE.match(bare) or _HAD_INCIDENT_RE.match(bare)
+    runbook = _RUNBOOK_RE.match(bare)
+    if named:
+        # Its "because ..." is why it matters, not what to do about it.
+        items.append({"what": named.group("what"), "parts": []})
+    elif intro:
+        items.append({"what": intro.group("what"), "parts": [intro.group("rest")] if intro.group("rest") else []})
+    elif past:
+        items.append({"what": past.group("what"), "parts": []})
+    elif runbook and not (items and not items[-1]["parts"]) \
+            and not _ANAPHORIC_SYMPTOM_RE.search(runbook.group("symptom")):
+        items.append({"what": runbook.group("symptom"), "parts": [runbook.group("action")]})
+    elif _FAILURE_EFFECT_RE.match(bare) and not _FIX_CUE_RE.search(bare):
+        items.append({"what": bare, "parts": []})
+    elif (_FAILURE_VERB_RE.search(bare) or _FAILURE_SUBJECT_RE.match(bare)) and not _FIX_CUE_RE.search(bare)                 and not (items and items[-1]["what"] and not items[-1]["parts"]):
+        items.append({"what": bare, "parts": []})
+    elif items and items[-1]["what"] and not items[-1]["parts"] and not _FIX_CUE_RE.search(bare):
+        # Before its fix, a sentence says more about the failure ("The
+        # queue backs up and hauliers see stale slots."): the situation.
+        items[-1].setdefault("detail", []).append(bare)
+    elif items and not (_FAILURE_WORD_RE.search(bare) and not _FIX_CUE_RE.search(bare)):
+        # A sentence that brings up another problem is not this one's fix.
+        items[-1]["parts"].append(sentence)
+    elif _FIX_CUE_RE.search(sentence):
+        items.append({"what": None, "parts": [sentence]})
+
+
+# One record per failure (the client's review, 13 Nov: symptom, trigger,
+# first checks, resolution and escalation in one place, a fix that was stated
+# kept apart from one that was not). A step that only looks at something is a
+# first check, not the fix: "Check active connections and connection-pool
+# metrics before restarting application pods" left the failure with no fix,
+# and the follow-up list did not say so.
+_CHECK_STEP_RE = re.compile(r"^\W*(?:(?:first|then|also|and|so)[\s,]+)*(?:check|look\s+(?:at|for|in|into)|verify|"
+                            r"inspect|review|confirm|watch|monitor|see\s+(?:if|whether)|start\s+(?:with|by\s+checking))\b",
+                            re.IGNORECASE)
+_FAILURE_CONDITION_RE = re.compile(r"^(?P<what>.{6,}?)\s+(?P<when>(?:during|when|whenever|after|while|once|under|"
+                                   r"if)\s+.+)$", re.IGNORECASE)
+_FAILURE_FREQUENCY_RE = re.compile(r"\b(?:recurring|frequent(?:ly)?|often|regularly|occasional(?:ly)?|rarely|"
+                                   r"every\s+(?:day|week|month|night|morning)|daily|weekly|monthly|"
+                                   r"(?:once|twice)\s+a\s+(?:day|week|month|year))\b", re.IGNORECASE)
+# A check followed by what to do: "check whether the PDF worker pods are
+# running and restart them" states a fix. "Check ... before restarting
+# application pods" orders the checks before a step; it does not say to take it.
+_THEN_ACT_RE = re.compile(r"\b(?:and|then|,\s*then)\s+(?:\w+\s+)?(?:restart|redeploy|roll\s*back|rollback|scale|clear|flush|"
+                          r"delete|re-?run|reset|increase|kill|fail\s*over|purge|replay|reprocess|resubmit|bump|raise|"
+                          r"fix|patch|rotate|recreate|reboot|drain|remove)\w*\b", re.IGNORECASE)
+# Longer than this, a "sentence" of Common Failures is a piece of a run of
+# speech with no sentence ends (fact_units.even_pieces), not a sentence.
+_RUN_ON_WORDS = 40
+# A piece that starts in lower case continues the one before it ("and
+# re-trigger the parse for that file ..."): speech cut where no sentence ended.
+_CONTINUES_RE = re.compile(r"^\W*[a-z]")
+_ANY_ALERT_RE = re.compile(r"^\W*(?:an?\s+|any\s+|the\s+)?alerts?\b", re.IGNORECASE)
+FIX_NOT_STATED = "Not stated in the KT"
+
+
+def _capital(text: str) -> str:
+    text = (text or "").strip()
+    return text[:1].upper() + text[1:]
+
+
+def unfixed_failures(section: Optional[Dict[str, Any]], found: Dict[str, Any]) -> List[str]:
+    """The failures with no fix stated, by name: from the records, or, for a
+    section shown as said (run-on speech), from the incident card's grouping
+    as before."""
+    if found.get("as_said"):
+        return [failure_as_noun_phrase(s) for s, fix in _known_failures(section) if fix == _NO_FIX_STATED]
+    return [r["name"] + (" (first checks only)" if r["first_checks"] else "")
+            for r in found.get("records") or [] if r["fix"] == FIX_NOT_STATED]
+
+
+def failure_records(section: Optional[Dict[str, Any]], skip=None) -> Dict[str, List[Any]]:
+    """{"records": one dict per failure (failure, when, first_checks, fix,
+    cause, frequency, ticket), "triage": what to do for any alert, as said}.
+
+    From the LLM's structured list when there is one, its first checks given
+    as the sentence that says them when one does (it shortened "Check active
+    connections and connection-pool metrics before restarting application
+    pods" to "active connections; connection-pool metrics"); otherwise from
+    the speaker's sentences (_failure_items). A failure with no fix stated
+    says so in its Fix cell (FIX_NOT_STATED)."""
+    items = _failure_items(section, skip) if section else []
+    triage: List[str] = []
+    records: List[Dict[str, str]] = []
+    structured_list = (section.get("_structured") or {}).get("failures") if section else None
+    said_pieces = [s for s in (section or {}).get("_source_sentences") or [] if isinstance(s, str) and s.strip()]
+    if not structured_list and (any(len(s.split()) > _RUN_ON_WORDS for s in _qr_sentences(section, skip))
+                                or any(_CONTINUES_RE.match(s) for s in said_pieces)):
+        # Speech to text with no sentence ends: the pieces a run was cut into
+        # are not sentences, and a record cell holding one split what was
+        # said across cells (the noisy copies of d01 and d10). Shown as said,
+        # as before; `as_said` tells the coverage check to read it so too.
+        return {"records": [], "triage": [], "as_said": True}
+    # Every record shows the speaker's sentences as said, each in one cell:
+    # the failure said on its own in the Issue cell; a sentence that also
+    # says what to do ("When invoices get stuck, check whether the PDF
+    # worker pods ...") whole in that step's cell; a check or a fix said as
+    # its own sentence whole in its cell. Restated as parts, sentences the
+    # scorers quote were no longer in the document (dev d11, tuning g02).
+    # A failure said again, word for word, is one record (a KT pasted twice
+    # printed the same row three times).
+    unique, keys = [], set()
+    for item in items:
+        key = (_qr_key(item.get("what") or ""), _qr_key(item.get("said") or ""))
+        if key not in keys:
+            keys.add(key)
+            unique.append(item)
+    items = unique
+    shared = {}
+    for item in items:
+        shared[item.get("said")] = shared.get(item.get("said"), 0) + 1
+    for item in items:
+        if not item.get("what"):
+            continue              # steps with no failure named: shown as said by the section
+        if _ANY_ALERT_RE.match(item["what"]):
+            if item.get("said") and item.get("parts"):
+                triage.append(_tidy(item["said"]))         # "If an alert occurs, first check ..."
+            continue
+        said = (item.get("said") or "").strip()
+        own_sentence = bool(said) and shared.get(item.get("said")) == 1
+        parts = [p for p in item.get("parts") or [] if p and p.strip()]
+        inside = [p for p in parts if own_sentence and p.strip() != said and _qr_key(p) in _qr_key(said)]
+        checks: List[str] = []
+        fixes: List[str] = []
+        for part in parts:
+            whole = said if part in inside else part           # a step said in the failure's own sentence
+            check_only = _CHECK_STEP_RE.match(_QR_LEAD_RE.sub("", part)) and not _THEN_ACT_RE.search(part)
+            (checks if check_only else fixes).append(_tidy(whole))
+        what = re.sub(r"\s+", " ", item["what"]).strip().rstrip(".")       # as said: named mid-sentence elsewhere
+        name = what
+        when = frequency = ""
+        match = re.match(r"^(?P<what>.+?)\s+\((?P<when>[^)]+)\)$", what) or _FAILURE_CONDITION_RE.match(what)
+        if match:
+            name = match.group("what")
+        if own_sentence and not inside:
+            failure = _tidy(said)                              # the failure said on its own: the sentence
+        else:
+            failure, when = _capital(failure_as_noun_phrase(name)), (match.group("when") if match else "")
+            found = _FAILURE_FREQUENCY_RE.search(said)
+            frequency = found.group(0).lower() if found and not inside else ""
+        for more in item.get("detail") or []:
+            failure = f"{failure.rstrip('.')}. {_tidy(more)}"
+        records.append({"failure": failure, "name": failure_as_noun_phrase(name), "when": when,
+                        "first_checks": " ".join(dict.fromkeys(checks)),
+                        "fix": " ".join(dict.fromkeys(fixes)) or FIX_NOT_STATED,
+                        "cause": "", "frequency": frequency, "ticket": ""})
+
+    structured = (section.get("_structured") or {}).get("failures") if section else None
+    if isinstance(structured, list) and any(isinstance(i, dict) and str(i.get("symptom") or "").strip()
+                                            for i in structured):
+        sentences = _qr_sentences(section, skip)
+        records = []
+        for item in structured:
+            if not (isinstance(item, dict) and str(item.get("symptom") or "").strip()):
+                continue
+            checks = item.get("first_checks")
+            if isinstance(checks, list):
+                checks = "; ".join(str(c).strip() for c in checks if str(c).strip())
+            checks = str(checks or "").strip()
+            if checks:
+                words = set(_content_words(checks))
+                said = [s for s in sentences if _CHECK_STEP_RE.match(_QR_LEAD_RE.sub("", s))
+                        and words and words <= set(_content_words(s))]
+                if said:
+                    checks = _tidy(said[0])
+            symptom = str(item["symptom"]).strip()
+            when = str(item.get("condition") or "").strip()
+            frequency = str(item.get("frequency") or "").strip()
+            # The failure as said, when one sentence says it (and its
+            # condition): "Another issue is delayed order notifications when
+            # SQS messages accumulate." The LLM's parts of it were printed
+            # again below the table under "Additional details".
+            words = set(_content_words(f"{symptom} {when}"))
+            said = [s for s in sentences if words and words <= set(_content_words(s))
+                    and not _CHECK_STEP_RE.match(_QR_LEAD_RE.sub("", s)) and _qr_key(s) != _qr_key(checks)]
+            records.append({"failure": _capital(symptom), "name": symptom, "when": when, "first_checks": checks,
+                            "fix": str(item.get("fix") or "").strip() or FIX_NOT_STATED,
+                            "cause": str(item.get("cause") or "").strip(),
+                            "frequency": frequency,
+                            "ticket": str(item.get("ticket") or "").strip(),
+                            "_said": said[0] if len(said) == 1 else None})
+        # A sentence naming two failures ("The two incidents you will see
+        # most are A and B.") is neither record's: given to both, it was
+        # printed twice (the e2e KTs from the recorded answers).
+        uses: Dict[str, int] = {}
+        for r in records:
+            if r["_said"]:
+                uses[r["_said"]] = uses.get(r["_said"], 0) + 1
+        for r in records:
+            said_once = r.pop("_said")
+            if said_once and uses[said_once] == 1:
+                r.update(failure=_tidy(said_once), when="", frequency="")
+    return {"records": records[:_QR_MAX_FAILURES * 2], "triage": list(dict.fromkeys(triage))}
 
 
 def _runbook_steps(section: Optional[Dict[str, Any]], skip=None) -> List[tuple]:
@@ -2477,7 +2942,10 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
     failures = _find_section(knowledge_object, "common_failures")
     known = _known_failures(failures, stale)
     for symptom, fix in known:
-        add(symptom, fix, failures, "Common Failures")
+        # A failure said as a clause reads as a situation, as the follow-up
+        # list words it: "Redis memory saturation, which can make courier
+        # locations appear stale" (the PDF clean-up, 12 Nov).
+        add(failure_as_noun_phrase(symptom), fix, failures, "Common Failures")
     for section in real_sections:
         if section.get("id") in ("common_failures", "deployment_and_rollback") or len(known) >= _QR_MAX_FAILURES:
             continue
@@ -2511,6 +2979,10 @@ def append_quick_reference_section(knowledge_object: Dict[str, Any]) -> Dict[str
                 ownership = section
                 break
     add("Who to page or escalate to", escalation, ownership, "Ownership & Escalation")
+    if failures is not None:
+        # Each failure record points to the incident contact, without
+        # repeating it (renderers/sections/common_failures.py).
+        failures["_incident_contact_in"] = title_of(ownership, "Ownership & Escalation") if escalation else None
 
     danger = _find_section(knowledge_object, "danger_zones")
     cautions = []
@@ -2819,6 +3291,10 @@ def verify_document_coverage(
         "shown_in_own_section": sum(1 for e in facts if e.get("in_own_section")),
         "shown_elsewhere_only": sum(1 for e in facts
                                     if e.get("status") == "mapped" and e.get("section") and not e.get("in_own_section")),
+        # How each fact's section was decided: a routing rule, the
+        # classifier's best match, or the LLM's check of a close call.
+        "placed_by_rule": sum(1 for e in facts if str(e.get("decided_by") or "").startswith(("rule", "continuation"))),
+        "placed_by_llm": sum(1 for e in facts if str(e.get("decided_by") or "").startswith("llm")),
     }
     knowledge_object["_facts_ledger"] = ledger
     coverage_section = _find_section(knowledge_object, KT_COVERAGE_SECTION_ID)

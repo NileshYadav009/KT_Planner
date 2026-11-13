@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, List
 from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.narrative import build_block as build_narrative_block
@@ -108,10 +109,57 @@ def _coverage_rows(section: Dict[str, Any]) -> List[Dict[str, str]]:
     return rows
 
 
+# One record per failure (the client's review, 13 Nov): what it is, when it
+# happens, the first checks as said, the fix or "Not stated in the KT", and
+# where the incident contact is. The Fix column is kept when no failure has a
+# fix: an empty column was dropped, and the table no longer showed that none
+# was stated.
+RECORD_COLUMNS = STRUCTURED_COLUMNS
+RECORDS_TITLE = "Failure symptoms and remediation"
+FIX_COLUMN = "How to Fix"
+# A record that says who to call ("if it doesn't come back, call the network team").
+_ESCALATES_RE = re.compile(r"\b(?:escalat\w*|call|page|contact|ring|notify|raise\s+(?:it\s+)?with)\b", re.IGNORECASE)
+TRIAGE_TITLE = "First response to any alert"
+
+
+def _record_blocks(section: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from knowledge.knowledge_builder import failure_records
+
+    found = failure_records(section)
+    blocks: List[Dict[str, Any]] = []
+    if found["triage"]:
+        blocks.append(build_narrative_block(TRIAGE_TITLE, found["triage"]))
+    records = found["records"]
+    if not records:
+        return blocks
+    rows = [{"Issue/Symptom": r["failure"], "When it happens": r["when"], "Likely Cause": r["cause"],
+             "First Checks": r["first_checks"], FIX_COLUMN: r["fix"], "Frequency": r["frequency"],
+             "KEDB / Ticket Link": r["ticket"]} for r in records]
+    table = build_decision_table(RECORDS_TITLE, RECORD_COLUMNS, rows)
+    if FIX_COLUMN not in table["columns"]:
+        table["columns"].insert(min(3, len(table["columns"])), FIX_COLUMN)
+    blocks.append(table)
+    contact = section.get("_incident_contact_in")
+    own_escalation = any(_ESCALATES_RE.search(f"{r['first_checks']} {r['fix']}") for r in records)
+    if "_incident_contact_in" in section and not own_escalation:
+        note = build_narrative_block(section.get("title", "Common Failures"), [      # no heading of its own
+            f"No escalation was stated for a particular failure; who to contact in an incident is under {contact}."
+            if contact else "No escalation was stated in the KT, for these failures or any incident."])
+        note["document_note"] = True
+        blocks.append(note)
+    return blocks
+
+
 def render(section: Dict[str, Any]) -> Dict[str, Any]:
     title = section.get("title", "Common Failures")
-    structured_rows = _structured_rows(section)
+    blocks = _record_blocks(section)
+    if any(b.get("title") == RECORDS_TITLE for b in blocks):
+        historical_rows = _historical_rows(section)
+        if historical_rows:
+            blocks.append(build_decision_table("Historical incident record", HISTORICAL_COLUMNS, historical_rows))
+        return {"section_id": section.get("id"), "section_title": title, "blocks": blocks}
     blocks = []
+    structured_rows = _structured_rows(section)
 
     if structured_rows:
         blocks.append(build_decision_table("Failure symptoms and remediation", STRUCTURED_COLUMNS, structured_rows))

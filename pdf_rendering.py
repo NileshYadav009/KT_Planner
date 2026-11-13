@@ -39,12 +39,13 @@ def html_escape(value: str) -> str:
     )
 
 
-# Cover + contents + up to 7 pages of content: no contents page.
-SHORT_DOCUMENT_PAGES = 9
-NOT_COVERED_SECTION_ID = "not_covered"
-NOT_COVERED_SECTION_TITLE = "Not Covered in This KT"
-# The combined list goes after the content sections, before these.
-_DIGEST_SECTIONS = ("unmapped_findings", "tribal_knowledge", "kt_coverage", "signoff")
+CONNECTIONS_APPENDIX_ID = "diagram-connections"
+# Up to this many pages a document may share its cover page (build_job_pdf).
+_COMPACT_COVER_MAX_PAGES = 15
+# The table keeps its name: its rows print sentence numbers by it. A KT
+# stored before 13 Nov has the table under its old title.
+CONNECTIONS_APPENDIX_TITLE = CONNECTIONS_TABLE_TITLE
+_CONNECTIONS_TITLES = frozenset({CONNECTIONS_TABLE_TITLE, "Connections stated in the KT"})
 
 
 def _only_not_covered(section: dict) -> bool:
@@ -57,7 +58,6 @@ def _only_not_covered(section: dict) -> bool:
 
 # Recorded when the document is reviewed, not in the KT session: never a gap.
 _AFTER_REVIEW_SECTION_IDS = ("signoff",)
-SIGNOFF_PENDING = "Not signed yet. The sign-off is recorded when this document is reviewed and signed."
 
 
 def missing_sections(knowledge_object: dict):
@@ -71,48 +71,51 @@ def missing_sections(knowledge_object: dict):
 
 
 def collapse_not_covered_sections(rendered_sections: list, missing: list = None) -> list:
-    """Sections with nothing from the KT, listed once. Each used to take a
-    heading and a "not covered" paragraph: six of them in a 112-word KT.
+    """The document without the sections that have nothing from the KT.
+    Each used to take a heading and a "not covered" paragraph (six of them
+    in a 112-word KT), then they were listed in a section of their own; the
+    coverage matrix reports each as Missing, the cover counts them and the
+    follow-up list names them, so that list said it a fourth time (the PDF
+    clean-up, 12 Nov). A sign-off not yet started is left out too: it is
+    recorded at review, and once started its section shows the record.
 
-    With `missing` (missing_sections()) the list names exactly what the
-    coverage matrix reports as not covered, so the list, the matrix and the
-    cover agree. It used to list Sign-off (recorded at review) and leave out
-    a section the document omits when empty (Handover Completion Check). A
-    sign-off not yet started says so instead of being listed as a gap."""
-    sections = [
-        {**s, "blocks": [{"type": "NarrativeBlock", "title": s.get("section_title") or "Sign-off",
-                          "paragraphs": [SIGNOFF_PENDING]}]}
-        if s.get("section_id") in _AFTER_REVIEW_SECTION_IDS and _only_not_covered(s) else s
-        for s in rendered_sections]
+    With `missing` (missing_sections()) only what the coverage matrix calls
+    not covered is left out, so the body, the matrix and the cover agree; a
+    section the matrix does not call not covered keeps its place."""
+    sections = [s for s in rendered_sections
+                if not (s.get("section_id") in _AFTER_REVIEW_SECTION_IDS and _only_not_covered(s))]
     empty = [s for s in sections if _only_not_covered(s)]
-    items = [s.get("section_title") or s.get("section_id") for s in empty]
     if missing is not None:
-        # A section the matrix does not call not covered keeps its place.
         listed = {str(m).lower() for m in missing}
         empty = [s for s in empty if str(s.get("section_title") or s.get("section_id")).lower() in listed]
-        items = list(missing)
-    if not items:
-        return sections
-    kept = [s for s in sections if not any(s is e for e in empty)]
-    combined = {
-        "section_id": NOT_COVERED_SECTION_ID,
-        "section_title": NOT_COVERED_SECTION_TITLE,
-        "blocks": [
-            {"type": "NarrativeBlock", "title": NOT_COVERED_SECTION_TITLE,
-             "paragraphs": ["Nothing in the KT session covered these sections. Confirm them with the outgoing "
-                            "owner before relying on this handover."]},
-            {"type": "ChecklistBlock", "title": NOT_COVERED_SECTION_TITLE, "items": items},
-        ],
-    }
-    at = next((i for i, s in enumerate(kept) if s.get("section_id") in _DIGEST_SECTIONS), len(kept))
-    return kept[:at] + [combined] + kept[at:]
+    return [s for s in sections if not any(s is e for e in empty)]
 
 
 def not_covered_titles(rendered_sections: list, knowledge_object: dict) -> list:
-    """The section titles the PDF lists under "Not Covered in This KT"."""
-    out = collapse_not_covered_sections(list(rendered_sections or []), missing_sections(knowledge_object))
-    sec = next((s for s in out if s.get("section_id") == NOT_COVERED_SECTION_ID), None)
-    return [str(i) for b in (sec or {}).get("blocks") or [] for i in b.get("items") or []]
+    """The sections the coverage matrix reports as not covered that the
+    document leaves out. Equal to missing_sections() when the body, the
+    matrix and the cover agree: a section the matrix calls not covered but
+    still shown in the body is not in it."""
+    missing = missing_sections(knowledge_object) or []
+    shown = {str(s.get("section_title") or s.get("section_id")).lower()
+             for s in collapse_not_covered_sections(list(rendered_sections or []), missing)}
+    return [str(m) for m in missing if str(m).lower() not in shown]
+
+
+def take_connections_table(rendered_sections: list):
+    """The sections without the diagram's "Connections stated in the KT"
+    table, and the table: evidence for the diagram's lines, so the PDF lists
+    it at the end beside the Sources instead of between the diagram and the
+    next section (the PDF clean-up, 12 Nov). The sections are copies."""
+    table, out = None, []
+    for section in rendered_sections:
+        blocks = section.get("blocks") or []
+        found = [b for b in blocks if b.get("title") in _CONNECTIONS_TITLES and b.get("rows")]
+        if found and table is None:
+            table = found[0]
+            section = {**section, "blocks": [b for b in blocks if b is not table]}
+        out.append(section)
+    return out, table
 
 
 def build_toc_sections(rendered_sections: list) -> list:
@@ -410,6 +413,8 @@ def render_sources_appendix(sources: list) -> str:
 
 _COVERAGE_STATUS = {"Strong": "strong", "Partial": "partial", "Missing": "missing", "After review": "after-review",
                     "Not discussed": "not-discussed"}
+# The operational readiness table's statuses, in the same colours.
+_READINESS_STATUS = {"Stated": "strong", "Partly": "partial", "Not stated": "missing"}
 _MARKDOWN_STRUCTURE_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s|\*\*|#")
 
 
@@ -445,9 +450,11 @@ def render_section_blocks(rendered_sections: list) -> str:
         section_title = html_escape(raw_section_title)
         section_id = section.get("section_id") or raw_section_title.lower().replace(" ", "-")
         html.append(f"<section class=\"section-block\" id=\"{html_escape(section_id)}\">")
+        # An appendix (marker "&#167;", as the Sources) is not numbered.
+        number = section.get("marker") or f"{idx:02d}"
         html.append(
             f"<h2 class=\"section-title\">"
-            f"<span class=\"section-number\">{idx:02d}</span>{section_title}</h2>"
+            f"<span class=\"section-number\">{number}</span>{section_title}</h2>"
         )
         for block in section.get("blocks", []):
             raw_block_title = block.get("title") or block.get("type", "Block")
@@ -482,12 +489,26 @@ def render_section_blocks(rendered_sections: list) -> str:
                 for i, warning in enumerate(block.get("warnings", [])):
                     html.append(f"<p><strong>{_render_inline_text(warning)}</strong>{_refs(block, i)}</p>")
             elif block_type == "TechnologyGrid":
-                html.append("<div class=\"table-wrapper\"><table class=\"kv-table\">")
-                for i, row in enumerate(block.get("rows", [])):
-                    html.append(
-                        f"<tr><td>{_render_inline_text(row.get('label',''))}</td>"
-                        f"<td>{_render_inline_text(row.get('value',''))}{_refs(block, i)}</td></tr>"
-                    )
+                grid_rows = block.get("rows", [])
+                # A long list of short values in two pairs of columns: a
+                # 13-row technology summary was half a page, and pushed the
+                # architecture diagram to the next page with a third of a page
+                # left blank (the client's e-commerce KT, 13 Nov).
+                paired = len(grid_rows) >= 8 and all(len(str(r.get("value", ""))) <= 60 for r in grid_rows)
+                html.append(f"<div class=\"table-wrapper\"><table class=\"kv-table{' kv-two' if paired else ''}\">")
+                order = list(range(len(grid_rows)))
+                if paired:
+                    half = (len(grid_rows) + 1) // 2
+                    pairs = [(i, i + half if i + half < len(grid_rows) else None) for i in range(half)]
+                else:
+                    pairs = [(i, None) for i in order]
+                for i, j in pairs:
+                    cells = [f"<td>{_render_inline_text(grid_rows[k].get('label',''))}</td>"
+                             f"<td>{_render_inline_text(grid_rows[k].get('value',''))}{_refs(block, k)}</td>"
+                             for k in (i, j) if k is not None]
+                    if paired and j is None:
+                        cells.append("<td></td><td></td>")
+                    html.append("<tr>" + "".join(cells) + "</tr>")
                 html.append("</table></div>")
             elif block_type == "DeploymentTimeline":
                 html.append("<ol>")
@@ -513,8 +534,9 @@ def render_section_blocks(rendered_sections: list) -> str:
                 # The connections table repeated each KT sentence in a narrow
                 # column (5-8 lines a row, over two pages for a short KT):
                 # the sentence number, linked to Sources, says the same.
-                by_number = raw_block_title == CONNECTIONS_TABLE_TITLE
+                by_number = raw_block_title in _CONNECTIONS_TITLES
                 extra = " connections-table" if by_number else ""
+                extra += " two-col" if len(columns) == 2 else ""
                 html.append(f"<div class=\"table-wrapper\"><table class=\"grid-table{wide}{extra}\">")
                 html.append("<thead><tr>")
                 for col in columns:
@@ -529,14 +551,19 @@ def render_section_blocks(rendered_sections: list) -> str:
                         if by_number and c == len(columns) - 1 and _source_ids(block, i):
                             links = ", ".join(f"<a href=\"#src-{n}\">{n}</a>" for n in _source_ids(block, i))
                             html.append(f"<td class=\"sentence-ref\">sentence {links}</td>")
-                        elif col == "Coverage" and str(cell_value).strip() in _COVERAGE_STATUS:
+                        elif by_number and c == len(columns) - 1 and not str(cell_value or "").strip():
+                            # A link whose order is assumed: no sentence says it.
+                            html.append("<td class=\"sentence-ref\">none</td>")
+                        elif (col == "Coverage" and str(cell_value).strip() in _COVERAGE_STATUS) or \
+                                (col == "Readiness" and str(cell_value).strip() in _READINESS_STATUS):
                             # Strong / Partial / Missing as a coloured badge, so
                             # the gaps stand out in the coverage matrix.
                             status = str(cell_value).strip()
-                            html.append(f"<td><span class=\"status status-{_COVERAGE_STATUS[status]}\">"
+                            badge = (_COVERAGE_STATUS if col == "Coverage" else _READINESS_STATUS)[status]
+                            html.append(f"<td><span class=\"status status-{badge}\">"
                                         f"{html_escape(status)}</span>{refs}</td>")
                         elif isinstance(cell_value, str) and cell_value.strip():
-                            html.append(f"<td>{_render_inline_text(cell_value)}{refs}</td>")
+                            html.append(f"<td>{_render_inline_text(cell_value).replace(chr(10), '<br>')}{refs}</td>")
                         else:
                             has_empty_cell = True
                             html.append(f"<td class=\"cell-not-covered\">{NOT_COVERED_CELL}{refs}</td>")
@@ -576,7 +603,8 @@ def load_template_environment():
 
 def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: dict, date_str: str,
                     warnings: list = None, notices: list = None, sources: list = None,
-                    show_toc: bool = True, glance: dict = None, not_covered: list = None) -> str:
+                    show_toc: bool = True, glance: dict = None, not_covered: list = None,
+                    compact_cover: bool = False, dense: bool = False) -> str:
     """`warnings` (stage failures, failed LLM calls) are printed on the cover so a
     degraded document never looks like a complete one; `notices` are
     informational (e.g. built without an LLM). `sources` are the transcript
@@ -587,8 +615,19 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
     env = load_template_environment()
     template = env.get_template("kt_document.html")
     rendered_sections = collapse_not_covered_sections(rendered_sections, not_covered)
+    rendered_sections, connections = take_connections_table(rendered_sections)
     toc_sections = build_toc_sections(rendered_sections)
     content_html = render_section_blocks(rendered_sections)
+    if connections:
+        content_html += "\n" + render_section_blocks([{
+            "section_id": CONNECTIONS_APPENDIX_ID, "section_title": CONNECTIONS_APPENDIX_TITLE, "marker": "&#167;",
+            "blocks": [{"type": "NarrativeBlock", "title": CONNECTIONS_APPENDIX_TITLE, "paragraphs": [
+                "Each line in the architecture diagram, with what it rests on: stated (a sentence of the KT "
+                "names both ends) or inferred (and why), and the sentence."
+                if "Basis" in (connections.get("columns") or []) else
+                "Each line in the architecture diagram is a connection the KT stated, with the sentence that "
+                "says it."]}, connections]}])
+        toc_sections.append({"title": CONNECTIONS_APPENDIX_TITLE, "anchor": CONNECTIONS_APPENDIX_ID})
     if sources:
         content_html += "\n" + render_sources_appendix(sources)
         toc_sections.append({"title": "Sources", "anchor": "sources"})
@@ -605,6 +644,8 @@ def render_pdf_html(title: str, job_id: str, rendered_sections: list, coverage: 
         date_str=date_str,
         toc_sections=toc_sections,
         show_toc=show_toc,
+        compact_cover=compact_cover and not show_toc,
+        dense=dense,
         glance=glance,
         section_ids={s.get("section_id") for s in rendered_sections},
         content_html=content_html,
@@ -827,9 +868,14 @@ def append_residual_content(section: dict, rendered: dict) -> dict:
     source = [s for s in (section.get("_source_sentences") or []) if isinstance(s, str) and s.strip()]
     paraphrase_norms = []
     if source:
+        # Only a reworded item paraphrases: one that is itself a sentence as
+        # said is not another sentence's paraphrase ("Escalations should be
+        # directed to Laura Bennett, Housing Systems Manager." hid "The system
+        # is owned by the housing systems team.", dev d09, sharing 3 words).
+        said = {_norm_for_match(s) for s in source}
         for polished in items:
             polished = _MD_LABEL_RE.sub(" ", str(polished)).strip()
-            if polished and _is_represented(polished, rendered_norms):
+            if polished and _norm_for_match(polished) not in said and _is_represented(polished, rendered_norms):
                 paraphrase_norms.append(_norm_for_match(polished))
         items = source
     from dialogue import without_session_framing
@@ -868,20 +914,89 @@ def append_residual_content(section: dict, rendered: dict) -> dict:
     if not residual:
         return rendered
     # A placeholder claiming the section was not covered must not sit next
-    # to content proving it was.
+    # to content proving it was. A block whose values the sentences shown as
+    # said below already hold, word for word, is left out (_repeats_said).
+    said_norms = [_norm_for_match(r) for r in residual]
     rendered["blocks"] = [
         b for b in blocks
         if not (b.get("type") == "NarrativeBlock"
                 and [p for p in b.get("paragraphs", []) if str(p).strip()] == [NOT_COVERED_MESSAGE])
+        and not _repeats_said(b, said_norms)
     ]
     rendered["blocks"].append({"type": "NarrativeBlock", "title": RESIDUAL_BLOCK_TITLE, "paragraphs": residual})
     return rendered
 
 
+# A value read as a "Label: value" line ("DR testing frequency: twice annually").
+_LABELLED_RE = re.compile(r"^\s*(?P<label>[^:]{2,40}):\s+(?P<value>.+)$")
+_NAME_PART_RE = re.compile(r"^[A-Z][\w./+-]*(?:\s+[A-Z0-9][\w./+-]*)*$")
+_GENERIC_LABEL_WORDS = frozenset("tools tool value values name names type types details detail list frequency".split())
+_INVENTORY_TITLES = frozenset({"Technology summary"})
+
+
+def _repeats_said(block: dict, said_norms: list) -> bool:
+    """A block of field values each found, word for word, in one of the
+    sentences shown as said in the same section: "Tools: Prometheus, Grafana,
+    CloudWatch, PagerDuty" and "Alert Routing: PagerDuty sends incident
+    notifications" above "For monitoring, we use Prometheus and Grafana." and
+    "CloudWatch collects AWS infrastructure logs, and PagerDuty sends incident
+    notifications." (the client's e-commerce KT with an LLM, 13 Nov: each
+    fact three times). A short value under a label must share a word of its
+    label with that sentence ("DR testing frequency: twice annually"), unless
+    it is a list of names: "RTO: 4 hours" stays beside "we restore within 4
+    hours"."""
+    kind = block.get("type")
+    if block.get("title") in _INVENTORY_TITLES:
+        return False                        # the system's inventory, gathered across the KT
+    if kind == "TechnologyGrid":
+        pairs = [(str(r.get("label") or ""), str(r.get("value") or "")) for r in block.get("rows") or []]
+    elif kind in ("NarrativeBlock", "ChecklistBlock") and block.get("title") != RESIDUAL_BLOCK_TITLE:
+        lines = [str(x) for x in (block.get("paragraphs") or block.get("items") or [])]
+        pairs = []
+        for line in lines:
+            m = _LABELLED_RE.match(line)
+            pairs.append((m.group("label"), m.group("value")) if m else (str(block.get("title") or ""), line))
+    else:
+        return False
+    if not pairs or not said_norms:
+        return False
+    for label, value in pairs:
+        parts = [p.strip(" .") for p in re.split(r",\s*(?:and\s+)?|;\s*|\s+and\s+", value) if p.strip(" .")]
+        if not parts:
+            return False
+        names = all(_NAME_PART_RE.match(p) for p in parts)
+        label_words = {_word_key(w) for w in _norm_for_match(label).split()
+                       if w not in _RESIDUAL_STOPWORDS and w not in _GENERIC_LABEL_WORDS}
+        for part in parts:
+            norm = _norm_for_match(part)
+            holders = [s for s in said_norms if norm and re.search(r"(?<![a-z0-9])" + re.escape(norm) + r"(?![a-z0-9])", s)]
+            if not holders:
+                return False
+            # A short value ("4 hours", "twice annually") says what it is by its
+            # label; a clause found word for word ("PagerDuty sends incident
+            # notifications") says it itself.
+            short = len(norm.split()) <= 2
+            if short and not names and label_words \
+                    and not any(label_words & {_word_key(w) for w in s.split()} for s in holders):
+                return False
+    return True
+
+
 def build_rendered_sections(knowledge_object: dict) -> list:
     rendered_sections = []
+    # Sections the coverage matrix found nothing said about: shown as not
+    # covered, not with values their fields borrowed from other sections'
+    # sentences (knowledge_builder: _not_covered_sections). Those sentences
+    # are in their own sections; verify_document_coverage checks it.
+    not_covered = set(knowledge_object.get("_not_covered_sections") or ())
     for section in knowledge_object.get("sections", []):
         section_id = section.get("id")
+        if section_id in not_covered:
+            if section.get("tier") != "conditional":
+                title = section.get("title") or section_id
+                rendered_sections.append({"section_id": section_id, "section_title": title, "blocks": [
+                    {"type": "NarrativeBlock", "title": title, "paragraphs": [NOT_COVERED_MESSAGE]}]})
+            continue
         renderer = get_renderer(section_id)
         rendered = None
         if renderer:
@@ -896,9 +1011,10 @@ def build_rendered_sections(knowledge_object: dict) -> list:
                 rendered.setdefault("blocks", []).append({
                     "type": "NarrativeBlock", "title": "Gaps to confirm",
                     # One sentence: the document-wide dedup drops a sentence
-                    # repeated in a second section.
-                    "paragraphs": [f"Not covered in the KT session: {'; '.join(not_stated)} (confirm with the "
-                                   "outgoing owner before relying on this section)."],
+                    # repeated in a second section. The block's title says to
+                    # confirm it; each box repeating "confirm with the outgoing
+                    # owner before relying on this section" was clutter.
+                    "paragraphs": [f"Not covered in the KT session: {'; '.join(not_stated)}."],
                 })
             rendered_sections.append(rendered)
             continue
@@ -927,6 +1043,31 @@ def build_rendered_sections(knowledge_object: dict) -> list:
             }],
         })
     return rendered_sections
+
+
+def _architecture_blocks(rendered_sections: list):
+    section = next((s for s in rendered_sections or [] if s.get("section_id") == "architecture_reference"), None)
+    blocks = (section or {}).get("blocks") or []
+    diagram = next((i for i, b in enumerate(blocks) if b.get("type") == "DiagramBlock"), None)
+    details = next((i for i, b in enumerate(blocks) if b.get("title") == "Architecture Details"), None)
+    return section, blocks, diagram, details
+
+
+def _has_diagram_and_details(rendered_sections: list) -> bool:
+    _, _, diagram, details = _architecture_blocks(rendered_sections)
+    return diagram is not None and details is not None
+
+
+def details_before_diagram(rendered_sections: list) -> list:
+    """The sections with the architecture sentences moved before the
+    diagram (copies; the stored order is the diagram first)."""
+    section, blocks, diagram, details = _architecture_blocks(rendered_sections)
+    if diagram is None or details is None or details < diagram:
+        return rendered_sections
+    reordered = list(blocks)
+    moved = reordered.pop(details)
+    reordered.insert(diagram, moved)
+    return [dict(s, blocks=reordered) if s is section else s for s in rendered_sections]
 
 
 def build_job_pdf(job_id: str, job: dict, created: float = None, layout: dict = None) -> bytes:
@@ -963,11 +1104,11 @@ def build_job_pdf(job_id: str, job: dict, created: float = None, layout: dict = 
     import signoff
     rendered_sections = signoff.apply_to_document(rendered_sections, job, int(job.get("document_version") or 1))
 
-    def _html(show_toc: bool) -> str:
+    def _html(show_toc: bool, compact: bool = False, dense: bool = False, details_first: bool = False) -> str:
         return render_pdf_html(
             title=title,
             job_id=job_id,
-            rendered_sections=rendered_sections,
+            rendered_sections=details_before_diagram(rendered_sections) if details_first else rendered_sections,
             coverage=job.get("coverage", {}),
             date_str=date_str,
             warnings=job.get("warnings"),
@@ -976,13 +1117,36 @@ def build_job_pdf(job_id: str, job: dict, created: float = None, layout: dict = 
             show_toc=show_toc,
             glance=handover_glance(knowledge_object),
             not_covered=missing_sections(knowledge_object),
+            compact_cover=compact,
+            dense=dense,
         )
 
-    # A contents page for a few pages of content is a page of its own for
-    # little: a short document lists its sections on the cover instead.
-    document = _layout(_html(True))
-    if len(document.pages) <= SHORT_DOCUMENT_PAGES:
-        document = _layout(_html(False))
+    # The sections are listed on the cover whenever that saves the contents
+    # page (it did only up to 9 pages): a page of its own for a dozen lines
+    # (the PDF clean-up, 12 Nov). A cover too full to hold them keeps the page.
+    document, choice = _layout(_html(True)), (True, False)
+    on_cover = _layout(_html(False))
+    if len(on_cover.pages) < len(document.pages):
+        document, choice = on_cover, (False, False)
+    # A short document's cover shares its page with the Quick Reference when
+    # that saves a page (the client's review, 13 Nov: 11 pages for a 260-word
+    # KT, the first mostly blank).
+    if len(document.pages) <= _COMPACT_COVER_MAX_PAGES:
+        compact = _layout(_html(False, compact=True))
+        if len(compact.pages) < len(document.pages):
+            document, choice = compact, (False, True)
+        # Tighter spacing, and the architecture sentences before the diagram
+        # instead of after it, each when that saves a page: the last page of a
+        # short document held five source lines, and a diagram that did not
+        # fit below the page's other content left most of it blank (the
+        # client's e-commerce KT, 13 Nov). The diagram cannot break across
+        # pages, so which order fits depends on what comes before it.
+        for dense, details_first in ((False, True), (True, False), (True, True)):
+            if details_first and not _has_diagram_and_details(rendered_sections):
+                continue
+            variant = _layout(_html(*choice, dense=dense, details_first=details_first))
+            if len(variant.pages) < len(document.pages):
+                document = variant
     overflows = layout_overflows(document)
     if overflows:
         logger.warning("KT document %s: %d box(es) past the page or their table cell, first: page %s %s %spt",

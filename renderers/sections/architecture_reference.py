@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+from architecture_diagram import CONNECTION_COLUMNS, describe_unconnected
 from renderers.blocks.narrative import build_block as build_narrative_block
 from renderers.blocks.technology_grid import build_block as build_technology_grid
 from renderers.blocks.diagram import build_block as build_diagram_block
@@ -9,7 +10,7 @@ from renderers.blocks.common import (
 )
 
 # The PDF prints this table's last column as sentence numbers (pdf_rendering).
-CONNECTIONS_TABLE_TITLE = "Connections stated in the KT"
+CONNECTIONS_TABLE_TITLE = "Connections in the diagram"
 
 # (field_id, display label) for the 3 template-defined administrative facts
 # this section's schema actually has. These are metadata about the
@@ -32,6 +33,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     fields = section.get("fields", {})
 
     blocks = []
+    details = None
 
     # Architecture Knowledge: the real components/services this system is
     # built on (knowledge_builder.enrich_architecture_knowledge), detected
@@ -54,7 +56,7 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
         # that. Verbatim transcript text, never paraphrased/generated.
         sentences = section.get("_architecture_sentences") or []
         if sentences:
-            blocks.append(build_narrative_block("Architecture Details", sentences))
+            details = build_narrative_block("Architecture Details", sentences)
     else:
         fallback = _coverage_paragraphs(section)
         if fallback:
@@ -65,16 +67,31 @@ def render(section: Dict[str, Any]) -> Dict[str, Any]:
     # each stated connection listed next to the sentence that says it.
     svg = section.get("_architecture_svg")
     if svg:
-        blocks.append(build_diagram_block(
-            "High-Level Architecture", svg,
-            "Lines show only connections stated in the KT. A component named without a stated connection has "
-            "no line. Managed services sit outside the compute platform; third-party services sit outside "
-            "the cloud account.",
-        ))
+        # What each line rests on (the client's review, 13 Nov: confirmed,
+        # inferred and unresolved apart). The connections table lists every
+        # line with its basis and sentence (architecture_diagram.check_connections).
+        graph = section.get("_architecture_graph") or {}
+        # The drawing's own legend explains dashed lines when there are any.
+        inferred = any(line.get("basis") == "inferred"
+                       for line in list(graph.get("entry_links") or []) + list(graph.get("edges") or []))
+        caption = ("" if inferred or not graph else "Every line is a connection a sentence of the KT states. ") + (
+            "Managed services sit outside the compute platform; third-party services sit outside the cloud account.")
+        unconnected = describe_unconnected(graph) if graph else []
+        if unconnected:
+            caption += (" Named without a stated connection, so drawn without a line: " + "; ".join(unconnected)
+                        + ". Ask the outgoing owner how they connect.")
+        blocks.append(build_diagram_block("High-Level Architecture", svg, caption))
         connections = section.get("_architecture_connections") or []
         if connections:
-            blocks.append(build_table_block(CONNECTIONS_TABLE_TITLE,
-                                            ["From", "Connection", "To", "Said in the KT"], connections))
+            columns = CONNECTION_COLUMNS if any("Basis" in row for row in connections) else \
+                ["From", "Connection", "To", "Said in the KT"]
+            blocks.append(build_table_block(CONNECTIONS_TABLE_TITLE, columns, connections))
+
+    # The sentences after the picture: the diagram cannot break across pages,
+    # and placed after the sentences it left a third of a page blank above
+    # it whenever it did not fit below them (the client's e-commerce KT).
+    if details is not None:
+        blocks.append(details)
 
     # Architecture Metadata: only what the KT stated. Rows reading "Not
     # discussed" for all three were filler a reader had to skip (the

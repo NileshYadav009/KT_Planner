@@ -2,8 +2,8 @@ from typing import Any, Dict
 from renderers.blocks.table import build_block as build_decision_table
 from renderers.blocks.common import no_coverage_block
 
-# Classification says why it matters. A "Where it is" column is added when
-# rows point to the section holding the full statement (document_dedup.py).
+# Classification says why it matters. A row another section already shows
+# is left out (document_dedup.py), so the digest holds only what it alone says.
 COLUMNS = ["Knowledge", "Classification"]
 
 

@@ -36,6 +36,7 @@ from knowledge import (
     append_unmapped_findings_section,
     enrich_operational_calendar,
     enrich_technology_summary,
+    enrich_day1_checklist,
     enrich_architecture_knowledge,
     append_tribal_knowledge_section,
     append_coverage_matrix_section,
@@ -703,6 +704,13 @@ def run_kt_pipeline(job_id: str, transcript: str, segments: Optional[List[dict]]
             knowledge_object = enrich_technology_summary(knowledge_object)
         except Exception as exc:
             _stage_failed(stage_errors, "Technology summary", exc, "The technology summary may be incomplete.")
+
+        # Access the new owner will need, derived from the tools named
+        # (the Day-1 checklist; marked as derived).
+        try:
+            knowledge_object = enrich_day1_checklist(knowledge_object)
+        except Exception as exc:
+            _stage_failed(stage_errors, "Day-1 checklist", exc, None)
 
         # Corrections and contradictions the speaker made: replaced tools are
         # swapped for the current ones, and contradictory rules are kept for

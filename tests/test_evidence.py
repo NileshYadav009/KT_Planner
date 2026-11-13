@@ -384,3 +384,11 @@ def test_the_documents_own_note_in_a_cell_does_not_hide_what_was_said():
              section_id="quick_reference")
     assert attach_evidence(ko, sentences)["unsourced"] == 0
     assert list(dict(evidence_pairs(ko)).values()) == [["Rolling back is usually quick."]]
+
+
+def test_a_note_of_the_document_is_not_a_fact_to_source():
+    from knowledge.evidence import block_units
+    note = {"type": "NarrativeBlock", "title": "Common Failures", "document_note": True,
+            "paragraphs": ["No escalation was stated for a particular failure; who to contact in an incident is "
+                           "under Ownership & Escalation."]}
+    assert block_units(note) is None

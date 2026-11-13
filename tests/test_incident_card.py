@@ -345,6 +345,12 @@ def test_a_failure_after_its_time_and_one_said_by_its_effect_are_named():
          "Check consumer lag and the Order Service error rate before restarting consumers."),
         ("Redis memory saturation can also make courier locations appear stale",
          "No fix was stated in the KT. Ask the outgoing owner.")]
+    # On the card the clause reads as a situation, as on the follow-up list
+    # (the PDF clean-up, 12 Nov); a failure already a noun phrase stays.
+    card = [(r["Situation"], r["What to do"]) for r in _card(_section("common_failures", "Common Failures & Fixes", said))]
+    assert ("Redis memory saturation, which can make courier locations appear stale",
+            "No fix was stated in the KT. Ask the outgoing owner.") in card
+    assert card[0][0] == "Delayed order processing caused by Kafka consumer lag (during dinner peaks)"
     rows = _card(_section("known_bad_days", "Operational Calendar",
                           ["Avoid production deployments during major promotional campaigns."]))
     assert ("Do not deploy", "Avoid production deployments during major promotional campaigns.") in [
@@ -379,3 +385,14 @@ def test_owning_the_on_call_rotation_is_not_who_to_page():
     rows = _card(_section("ownership_escalation", "Ownership",
                           ["If production is down, call Maria, the engineering manager."]))
     assert rows[0]["Situation"] == "Who to page or escalate to"
+
+
+def test_polished_text_is_read_line_by_line_without_its_labels():
+    # The card's rollback row began "Helm maintains application deployment
+    # configurations." (the client's e-commerce KT with Groq, 13 Nov).
+    from knowledge.knowledge_builder import _qr_sentences
+    polished = ("3. Helm maintains application deployment configurations.\n\n**Action:**\n"
+                "The rollback procedure uses ArgoCD to restore the previous stable application version.")
+    assert _qr_sentences({"coverage_content": [polished]}) == [
+        "Helm maintains application deployment configurations.",
+        "The rollback procedure uses ArgoCD to restore the previous stable application version."]

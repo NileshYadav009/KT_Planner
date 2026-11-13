@@ -140,10 +140,9 @@ def test_kt_coverage_renders_knowledge_gaps_as_distinct_checklist():
         "_knowledge_gaps": ["SIGN-OFF"],
     }
     result = render_kt_coverage(section)
-    # Matrix, then the follow-up checklist. (The engineering "completeness
-    # invariant" paragraph that sat between them is no longer printed.)
-    assert len(result["blocks"]) == 2
-    assert result["blocks"][0]["type"] == "DecisionTable"
+    # Coverage by section, then the follow-up list. (The engineering
+    # "completeness invariant" paragraph is no longer printed.)
+    assert [b["type"] for b in result["blocks"]] == ["DecisionTable", "ChecklistBlock"]
     gaps_block = result["blocks"][1]
     assert gaps_block["type"] == "ChecklistBlock"
     assert gaps_block["items"] == ["SIGN-OFF"]
@@ -190,6 +189,61 @@ def test_kt_coverage_omits_knowledge_coverage_summary_block_when_absent():
     }
     result = render_kt_coverage(section)
     assert not any(b.get("title") == "Knowledge coverage" for b in result["blocks"])
+
+
+def test_kt_coverage_shows_each_sections_status_and_leaves_the_detail_to_the_follow_up_list():
+    # The PDF clean-up (12 Nov): the matrix's Assessment column repeated the
+    # follow-up list line for line, the Sign-off row said "recorded at review"
+    # on every KT, and the knowledge coverage paragraph was a page of counts.
+    section = {
+        "id": "kt_coverage", "title": "KT Coverage & Knowledge Gaps",
+        "_coverage_rows": [
+            {"Domain": "System Overview", "Coverage": "Partial",
+             "Assessment": "4 of 5 topics covered; not discussed: Business criticality and impact."},
+            {"Domain": "Disaster Recovery", "Coverage": "Partial",
+             "Assessment": "2 of 5 topics covered; stated as not documented: RTO, RPO; not discussed: Failover / "
+                           "standby. Stated gap: \u201cthe RTO and RPO have not been documented.\u201d"},
+            {"Domain": "Common Failures & Fixes", "Coverage": "Partial",
+             "Assessment": "All 2 topics covered; no fix stated for: Redis memory saturation, which can make courier "
+                           "locations appear stale."},
+            {"Domain": "Environments", "Coverage": "Not discussed", "Assessment": "Optional; not discussed in the KT session."},
+            {"Domain": "Security", "Coverage": "Missing", "Assessment": "Not covered in the KT session."},
+            {"Domain": "Sign-off", "Coverage": "After review",
+             "Assessment": "Recorded when the document is reviewed and signed, not during the KT session."},
+        ],
+        "_knowledge_gaps": ["System Overview: Business criticality and impact", "Disaster Recovery: Failover / standby",
+                            "Security"],
+        "_knowledge_coverage_summary": {"verified_against_document": True, "facts_identified": 30, "mapped": 30,
+                                        "unmapped": 0, "stated_gaps": 2, "excluded": 1},
+    }
+    result = render_kt_coverage(section)
+    measures = next(b for b in result["blocks"] if b["title"] == "How complete this handover is")
+    assert measures["rows"][0] == {"Measure": "Fact retention", "Result": (
+        "All 30 facts from the transcript are in this document; 2 say something is missing or undecided (in the "
+        "follow-up list); 1 remark with no content was left out.")}
+    # One row per status (the client's review, 13 Nov), each with its sections.
+    matrix = next(b for b in result["blocks"] if b["title"] == "Coverage by section")
+    assert matrix["rows"] == [
+        {"Coverage": "Partial", "Sections": "System Overview (4 of 5 topics covered)\nDisaster Recovery (2 of 5 topics "
+                                            "covered)\nCommon Failures & Fixes (All 2 topics covered; not every failure "
+                                            "has a fix)"},
+        {"Coverage": "Missing", "Sections": "Security"},
+        {"Coverage": "Not discussed", "Sections": "Environments"}]
+    # The detail is in the follow-up list, and the rows keep it for the web
+    # page and the scorers.
+    items = next(b for b in result["blocks"] if b["type"] == "ChecklistBlock")["items"]
+    assert "System Overview: Business criticality and impact" in items
+    assert section["_coverage_rows"][0]["Assessment"].endswith("Business criticality and impact.")
+
+
+def test_knowledge_coverage_says_how_many_facts_are_not_shown_when_any_are_not():
+    from renderers.sections.kt_coverage import knowledge_coverage_line
+
+    assert knowledge_coverage_line({"facts_identified": 10, "mapped": 8, "unmapped": 1}) == \
+        "9 of 10 facts from the transcript are in this document, 1 of them under Additional Notes."
+    assert knowledge_coverage_line({"facts_identified": 10, "mapped": 7, "unmapped": 3, "recovered": 2}) == (
+        "All 10 facts from the transcript are in this document, 3 of them under Additional Notes (2 placed there "
+        "by the final completeness check).")
 
 
 def test_open_responsibilities_prefers_structured_rows_over_raw_table_fallback():
@@ -456,9 +510,11 @@ def test_architecture_reference_renders_details_and_diagram_blocks_when_present(
     diagram_block = next(b for b in result["blocks"] if b["title"] == "High-Level Architecture")
     assert diagram_block["type"] == "DiagramBlock"
     assert diagram_block["svg_uri"].startswith("data:image/svg+xml;base64,")
-    connections = next(b for b in result["blocks"] if b["title"] == "Connections stated in the KT")
-    assert connections["columns"] == ["From", "Connection", "To", "Said in the KT"]
+    connections = next(b for b in result["blocks"] if b["title"] == "Connections in the diagram")
+    assert connections["columns"] == ["From", "Connection", "To", "Said in the KT"]     # a graph without a basis
     assert connections["rows"][0]["To"] == "Amazon RDS"
+    # The picture first, then the sentences (a diagram cannot break across pages).
+    assert titles.index("High-Level Architecture") < titles.index("Architecture Details")
 
 
 def test_architecture_reference_omits_details_and_diagram_blocks_when_absent():
@@ -965,3 +1021,74 @@ def test_failure_table_keeps_the_triggering_condition():
     assert row["Issue/Symptom"] == "Azure SQL connection exhaustion"
     assert row["When it happens"] == "During high traffic"
     assert "Active Connections" in row["First Checks"]
+
+
+# --------------------------------------------------------------------------
+# The client's review of the e-commerce KT (13 Nov)
+# --------------------------------------------------------------------------
+
+def test_day1_checklist_splits_an_instruction_over_its_things():
+    from renderers.sections.day1 import DERIVED_ACCESS_TITLE, instruction_items, render as render_day1
+
+    said = ("Please review the deployment pipeline, monitoring dashboards, and unresolved recovery documentation "
+            "before taking ownership.")
+    assert instruction_items(said) == (["Review the deployment pipeline", "Review monitoring dashboards",
+                                        "Review unresolved recovery documentation"], "before taking ownership")
+    # Not a list of things: the sentence as said.
+    assert instruction_items("Never restart the brokers.") == (["Never restart the brokers."], "")
+    out = render_day1({"id": "day1_survival_checklist", "title": "Day-1 Survival Checklist", "coverage_content": [said],
+                       # The populator read the three as access to request: not shown beside the checklist.
+                       "fields": {"required_access": {"value": "the deployment pipeline\nmonitoring dashboards"}},
+                       "_derived_access": [{"Get access to": "alerts and on-call", "Tools the KT names": "PagerDuty"}]})
+    titles = [b["title"] for b in out["blocks"]]
+    # The sentence as said under its heading, then the checklist (no heading of its own).
+    assert titles == ["Before taking ownership", "Day-1 Survival Checklist", DERIVED_ACCESS_TITLE]
+    assert out["blocks"][0]["paragraphs"] == [said]
+    assert out["blocks"][1]["items"][2] == "Review unresolved recovery documentation"
+
+
+def test_ownership_keeps_who_owns_what_apart_from_incident_escalation():
+    from renderers.sections.ownership_escalation import render as render_ownership
+
+    out = render_ownership({"id": "ownership_escalation", "title": "Ownership & Escalation", "fields": {},
+                            "coverage_content": [
+                                "Developers own application code, while Platform Engineering manages Kubernetes, "
+                                "CI/CD pipelines, and infrastructure.",
+                                "During production incidents, contact the Platform Engineering team through "
+                                "PagerDuty."]})
+    rows = [(r["role"], r["team"]) for r in out["blocks"][0]["rows"]]
+    assert rows == [("Application code", "Developers"),
+                    ("Kubernetes, CI/CD pipelines, and infrastructure", "Platform Engineering"),
+                    ("Incident escalation", "During production incidents, contact the Platform Engineering team "
+                                            "through PagerDuty.")]
+
+
+def test_a_failure_record_always_says_whether_a_fix_was_stated():
+    from knowledge.knowledge_builder import FIX_NOT_STATED
+
+    out = render_common_failures({"id": "common_failures", "title": "Common Failures & Fixes", "coverage_content": [
+        "A recurring issue is database connection exhaustion during peak traffic.",
+        "Check active connections and connection-pool metrics before restarting application pods."],
+        "_incident_contact_in": "Ownership & Escalation"})
+    table = next(b for b in out["blocks"] if b["type"] == "DecisionTable")
+    assert "How to Fix" in table["columns"]
+    assert table["rows"][0]["How to Fix"] == FIX_NOT_STATED
+    assert table["rows"][0]["First Checks"].startswith("Check active connections")
+    note = out["blocks"][-1]
+    assert note.get("document_note") and "under Ownership & Escalation" in note["paragraphs"][0]
+
+
+
+def test_day1_leaves_out_a_field_that_restates_the_instruction():
+    from renderers.sections.day1 import render as render_day1
+
+    said = ("Please review the deployment pipeline, monitoring dashboards, and unresolved recovery documentation "
+            "before taking ownership.")
+    out = render_day1({"id": "day1_survival_checklist", "title": "Day-1 Survival Checklist", "coverage_content": [said],
+                       "fields": {"first_safe_actions": {"value": "Review the deployment pipeline, monitoring "
+                                                                  "dashboards, and unresolved recovery documentation"}}})
+    assert "First-day actions" not in [b["title"] for b in out["blocks"]]
+    # One that says something else stays.
+    out = render_day1({"id": "day1_survival_checklist", "title": "Day-1 Survival Checklist", "coverage_content": [said],
+                       "fields": {"first_safe_actions": {"value": "Shadow the on-call engineer for a week"}}})
+    assert "First-day actions" in [b["title"] for b in out["blocks"]]

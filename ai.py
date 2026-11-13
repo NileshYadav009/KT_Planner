@@ -141,8 +141,11 @@ def _extract_json_response(text: str):
 # specified", "**Window:** N/A", "- **Target time:** not mentioned". The
 # coverage page already lists what was not discussed; in the section it is
 # filler. Only a label line whose whole value is a placeholder.
+# The value can be on the line after its label ("**Rollback trigger:**\nNot
+# specified"): the client's e-commerce KT with Groq (13 Nov), printed on the
+# incident card as "Rollback trigger: Not specified".
 _PLACEHOLDER_LINE_RE = re.compile(
-    r"^[ \t]*(?:[-*•][ \t]*)?\*\*[^*\n]{1,60}:\*\*[ \t]*(?:n/?a|none|unknown|not[ \t]+(?:specified|mentioned"
+    r"^[ \t]*(?:[-*•][ \t]*)?\*\*[^*\n]{1,60}:\*\*[ \t]*(?:\n[ \t]*)?(?:n/?a|none|unknown|not[ \t]+(?:specified|mentioned"
     r"|provided|stated|discussed|given|available))[ \t]*\.?[ \t]*$\n?", re.IGNORECASE | re.MULTILINE)
 
 

@@ -108,6 +108,31 @@ h1 {
   font-size: 9pt;
 }
 
+/* A short document's cover shares page 1 with the Quick Reference (the client's
+   review, 13 Nov: a page mostly blank). Chosen by build_job_pdf only when it
+   saves a page. */
+.cover-page.cover-compact {
+  page-break-after: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 8mm 16mm 4mm;
+  background: #ffffff;
+}
+.cover-compact .cover-content { max-width: none; }
+.cover-compact h1 { font-size: 32px; margin-bottom: 0.8rem; }
+.cover-compact .eyebrow { margin-bottom: 0.6rem; }
+.cover-compact .cover-contents { margin-top: 1rem; }
+/* Tighter spacing, chosen by build_job_pdf only when it saves a page: a
+   short document's last page held five source lines (the client's
+   e-commerce KT, 13 Nov). */
+.document-body.dense .section-block { margin-bottom: 0.9rem; }
+.document-body.dense .section-title { margin-bottom: 0.55rem; padding-bottom: 0.4rem; }
+.document-body.dense .block-card { margin-bottom: 0.55rem; padding: 0.45rem 0.8rem; }
+.document-body.dense .block-title { margin: 0.6rem 0 0.35rem; }
+.document-body.dense table, .document-body.dense .table-wrapper { margin-bottom: 0.6rem; }
+.document-body.dense .sources-list li { padding: 1.5pt 0; }
+.cover-compact .cover-footer { margin-top: 0.8rem; padding-bottom: 6mm; border-bottom: 1px solid #e5e7eb; }
+
 .toc-page {
   background: #ffffff;
 }
@@ -244,16 +269,21 @@ table.wide-table th, table.wide-table td {
 #kt_coverage .grid-table th:nth-child(2), #kt_coverage .grid-table td:nth-child(2) { width: 14%; }
 #kt_coverage .grid-table th:nth-child(3), #kt_coverage .grid-table td:nth-child(3) { width: 55%; }
 #kt_coverage .grid-table th, #kt_coverage .grid-table td { padding: 4px 8px; font-size: 0.9em; line-height: 1.35; }
+/* The measures table: what is measured, and the result (two columns). */
+#kt_coverage .grid-table.two-col th:nth-child(1), #kt_coverage .grid-table.two-col td:nth-child(1) { width: 21%; }
+#kt_coverage .grid-table.two-col th:nth-child(2), #kt_coverage .grid-table.two-col td:nth-child(2) { width: 72%; }
 
 /* Connections: the last column is a sentence number, not the sentence, so
    the names get the room ("Streamline (Google Kubernetes Engine)"). */
 /* The widths are content widths, so with cell padding 100% ran the table
    18pt past the page edge (25 Oct). Like the tables above, they leave
    room for the padding; the sentence numbers may wrap. */
-table.connections-table th:nth-child(1), table.connections-table td:nth-child(1) { width: 27%; }
-table.connections-table th:nth-child(2), table.connections-table td:nth-child(2) { width: 16%; }
-table.connections-table th:nth-child(3), table.connections-table td:nth-child(3) { width: 27%; }
-table.connections-table th:nth-child(4), table.connections-table td:nth-child(4) { width: 17%; }
+/* From, connection, to, basis (stated, or inferred and why), sentence. */
+table.connections-table th:nth-child(1), table.connections-table td:nth-child(1) { width: 19%; }
+table.connections-table th:nth-child(2), table.connections-table td:nth-child(2) { width: 11%; }
+table.connections-table th:nth-child(3), table.connections-table td:nth-child(3) { width: 19%; }
+table.connections-table th:nth-child(4), table.connections-table td:nth-child(4) { width: 27%; }
+table.connections-table th:nth-child(5), table.connections-table td:nth-child(5) { width: 11%; }
 table.connections-table th, table.connections-table td { padding: 5px 8px; }
 table.connections-table td.sentence-ref { font-size: 0.85em; color: #6b7280; }
 
@@ -318,6 +348,11 @@ th {
   white-space: normal;
   width: 35%;
 }
+/* A long technology list as two label/value pairs per row (pdf_rendering). */
+.block-card table.kv-table.kv-two td:nth-child(1), .block-card table.kv-table.kv-two td:nth-child(3) {
+  width: 18%; font-weight: 600; color: #374151;
+}
+.block-card table.kv-table.kv-two td:nth-child(2), .block-card table.kv-table.kv-two td:nth-child(4) { width: 26%; }
 
 /* A DecisionTable cell whose source field genuinely had no supporting
    transcript content: a dash, never blank, explained once by the note under
